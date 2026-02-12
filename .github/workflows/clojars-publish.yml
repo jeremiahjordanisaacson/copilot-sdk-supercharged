@@ -29,16 +29,10 @@ jobs:
         with:
           cli: latest
 
-      - name: Set version from tag
+      - name: Build and deploy to Clojars
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          echo "{:version \"$VERSION\"}" > version.edn
-
-      - name: Build JAR
-        run: clj -T:build jar
-
-      - name: Publish to Clojars
-        run: clj -T:build deploy
+          VERSION=$VERSION clj -T:build deploy
         env:
           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}

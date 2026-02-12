@@ -11,4 +11,9 @@
    :extra-deps  {nrepl/nrepl {:mvn/version "1.1.1"}}}
 
   :example
-  {:main-opts ["-m" "basic-example"]}}}
+  {:main-opts ["-m" "basic-example"]}
+
+  :build
+  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}
+          slipset/deps-deploy           {:mvn/version "0.2.2"}}
+   :ns-default build}}}
