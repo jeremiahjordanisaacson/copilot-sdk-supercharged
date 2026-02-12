@@ -45,18 +45,18 @@
 </Project>]]>
             </_VersionPropsContent>
         </PropertyGroup>
-        <WriteLinesToFile File="$(MSBuildThisFileDirectory)build\GitHub.Copilot.SDK.props" Lines="$(_VersionPropsContent)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+        <WriteLinesToFile File="$(MSBuildThisFileDirectory)build\CopilotSDK.Supercharged.props" Lines="$(_VersionPropsContent)" Overwrite="true" WriteOnlyWhenDifferent="true" />
         <!-- Explicitly add props file to package content after generation -->
         <ItemGroup>
-            <None Include="build\GitHub.Copilot.SDK.props" Pack="true" PackagePath="build\" />
+            <None Include="build\CopilotSDK.Supercharged.props" Pack="true" PackagePath="build\" />
         </ItemGroup>
     </Target>
 
     <!-- Include .targets file in package (props is added dynamically by _GenerateVersionProps) -->
     <!-- Also import the .targets for local dev (same logic consumers get) -->
     <ItemGroup>
-        <None Include="build\GitHub.Copilot.SDK.targets" Pack="true" PackagePath="build\" CopyToOutputDirectory="Never" />
+        <None Include="build\CopilotSDK.Supercharged.targets" Pack="true" PackagePath="build\" CopyToOutputDirectory="Never" />
     </ItemGroup>
-    <Import Project="build\GitHub.Copilot.SDK.targets" />
+    <Import Project="build\CopilotSDK.Supercharged.targets" />
 
 </Project>

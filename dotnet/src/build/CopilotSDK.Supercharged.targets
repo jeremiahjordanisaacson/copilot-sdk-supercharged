@@ -1,7 +1,7 @@
 <Project>
   <!-- These targets run in consuming projects when they build -->
-  <!-- CopilotCliVersion is imported from GitHub.Copilot.SDK.props (generated at SDK build time, packaged alongside) -->
-  <Import Project="$(MSBuildThisFileDirectory)GitHub.Copilot.SDK.props" Condition="'$(CopilotCliVersion)' == '' And Exists('$(MSBuildThisFileDirectory)GitHub.Copilot.SDK.props')" />
+  <!-- CopilotCliVersion is imported from CopilotSDK.Supercharged.props (generated at SDK build time, packaged alongside) -->
+  <Import Project="$(MSBuildThisFileDirectory)CopilotSDK.Supercharged.props" Condition="'$(CopilotCliVersion)' == '' And Exists('$(MSBuildThisFileDirectory)CopilotSDK.Supercharged.props')" />
 
   <!-- Resolve RID: use explicit RuntimeIdentifier, or infer from current machine -->
   <PropertyGroup>
@@ -28,7 +28,7 @@
 
   <!-- Download and extract CLI binary -->
   <Target Name="_DownloadCopilotCli" BeforeTargets="BeforeBuild" Condition="'$(_CopilotPlatform)' != ''">
-    <Error Condition="'$(CopilotCliVersion)' == ''" Text="CopilotCliVersion is not set. The GitHub.Copilot.SDK.props file may be missing from the NuGet package." />
+    <Error Condition="'$(CopilotCliVersion)' == ''" Text="CopilotCliVersion is not set. The CopilotSDK.Supercharged.props file may be missing from the NuGet package." />
 
     <!-- Compute paths using version (now available) -->
     <PropertyGroup>
