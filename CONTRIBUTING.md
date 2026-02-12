@@ -1,7 +1,7 @@
 ## Contributing
 
-[fork]: https://github.com/github/copilot-sdk/fork
-[pr]: https://github.com/github/copilot-sdk/compare
+[fork]: https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/fork
+[pr]: https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/compare
 
 Hi there! We're thrilled that you'd like to contribute to this project. Your help is essential for keeping it great.
 
@@ -19,7 +19,7 @@ We'd love your help with:
 
 If you have ideas for entirely new features, please post an issue or start a discussion. We're very open to new features but need to make sure they align with the direction of the underlying Copilot CLI and can be maintained in sync across all our supported languages.
 
-Currently **we are not looking to add SDKs for other languages**. If you want to create a Copilot SDK for another language, we'd love to hear from you, and we may offer to link to your SDK from our repo. However we do not plan to add further language-specific SDKs to this repo in the short term, since we need to retain our maintenance capacity for moving forwards quickly with the existing language set. So, for any other languages, please consider running your own external project.
+**Want an SDK for a language we don't support yet?** Open an issue and request it! We currently support 21 languages and are always looking to expand. Community requests are how we prioritize which languages to add next.
 
 ## Prerequisites for running and testing code
 
