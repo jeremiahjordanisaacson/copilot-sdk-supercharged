@@ -5,6 +5,7 @@
 [![npm](https://img.shields.io/npm/v/copilot-sdk-supercharged?logo=npm&label=npm&color=CB3837)](https://www.npmjs.com/package/copilot-sdk-supercharged)
 [![PyPI](https://img.shields.io/pypi/v/copilot-sdk-supercharged?logo=python&label=PyPI&color=3775A9)](https://pypi.org/project/copilot-sdk-supercharged/)
 [![crates.io](https://img.shields.io/crates/v/copilot-sdk-supercharged?logo=rust&label=crates.io&color=dea584)](https://crates.io/crates/copilot-sdk-supercharged)
+[![NuGet](https://img.shields.io/nuget/v/CopilotSDK.Supercharged?logo=nuget&label=NuGet&color=004880)](https://www.nuget.org/packages/CopilotSDK.Supercharged)
 [![Gem](https://img.shields.io/gem/v/copilot-sdk-supercharged?logo=rubygems&label=RubyGems&color=E9573F)](https://rubygems.org/gems/copilot-sdk-supercharged)
 [![Hex](https://img.shields.io/hexpm/v/copilot_sdk_supercharged?logo=elixir&label=Hex&color=6e4a7e)](https://hex.pm/packages/copilot_sdk_supercharged)
 [![LuaRocks](https://img.shields.io/badge/LuaRocks-1.0.6-2C2D72?logo=lua)](https://luarocks.org/modules/jeremiahisaacson/copilot-sdk-supercharged)
@@ -22,7 +23,7 @@ Embed Copilot's agentic workflows in your application. A production-tested agent
 | **Node.js / TypeScript** | [`nodejs/`](./nodejs/README.md) | `npm install copilot-sdk-supercharged` | npm |
 | **Python** | [`python/`](./python/README.md) | `pip install copilot-sdk-supercharged` | pip |
 | **Go** | [`go/`](./go/README.md) | `go get github.com/github/copilot-sdk/go` | Go modules |
-| **.NET / C#** | [`dotnet/`](./dotnet/README.md) | `dotnet add package GitHub.Copilot.SDK` | NuGet |
+| **.NET / C#** | [`dotnet/`](./dotnet/README.md) | `dotnet add package CopilotSDK.Supercharged` | NuGet |
 | **Java** | [`java/`](./java/README.md) | Maven / Gradle | Maven |
 | **Rust** | [`rust/`](./rust/README.md) | `cargo add copilot-sdk-supercharged` | Cargo |
 | **Ruby** | [`ruby/`](./ruby/README.md) | `gem install copilot-sdk-supercharged` | RubyGems |

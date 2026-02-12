@@ -5,15 +5,17 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-        <Version>0.1.0</Version>
-        <Description>SDK for programmatic control of GitHub Copilot CLI</Description>
-        <Authors>GitHub</Authors>
-        <Company>GitHub</Company>
-        <Copyright>Copyright (c) Microsoft Corporation. All rights reserved.</Copyright>
+        <PackageId>CopilotSDK.Supercharged</PackageId>
+        <Version>1.0.0</Version>
+        <Description>GitHub Copilot SDK Supercharged - .NET SDK for programmatic control of GitHub Copilot CLI. Supports 21 languages.</Description>
+        <Authors>jeremiahjordanisaacson</Authors>
+        <Company>copilot-sdk-supercharged</Company>
+        <Copyright>MIT</Copyright>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <PackageReadmeFile>README.md</PackageReadmeFile>
-        <RepositoryUrl>https://github.com/github/copilot-sdk</RepositoryUrl>
-        <PackageTags>github;copilot;sdk;jsonrpc;agent</PackageTags>
+        <RepositoryUrl>https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged</RepositoryUrl>
+        <PackageTags>github;copilot;sdk;jsonrpc;agent;supercharged;ai;llm</PackageTags>
+        <PackageProjectUrl>https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged</PackageProjectUrl>
         <IsAotCompatible>true</IsAotCompatible>
     </PropertyGroup>
 
