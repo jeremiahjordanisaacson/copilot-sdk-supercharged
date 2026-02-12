@@ -8,8 +8,10 @@
 [![NuGet](https://img.shields.io/nuget/v/CopilotSDK.Supercharged?logo=nuget&label=NuGet&color=004880)](https://www.nuget.org/packages/CopilotSDK.Supercharged)
 [![Gem](https://img.shields.io/gem/v/copilot-sdk-supercharged?logo=rubygems&label=RubyGems&color=E9573F)](https://rubygems.org/gems/copilot-sdk-supercharged)
 [![Hex](https://img.shields.io/hexpm/v/copilot_sdk_supercharged?logo=elixir&label=Hex&color=6e4a7e)](https://hex.pm/packages/copilot_sdk_supercharged)
-[![LuaRocks](https://img.shields.io/badge/LuaRocks-1.0.6-2C2D72?logo=lua)](https://luarocks.org/modules/jeremiahisaacson/copilot-sdk-supercharged)
+[![Clojars](https://img.shields.io/clojars/v/net.clojars.jeremiahisaacson/copilot-sdk-supercharged?logo=clojure&label=Clojars&color=63B132)](https://clojars.org/net.clojars.jeremiahisaacson/copilot-sdk-supercharged)
+[![LuaRocks](https://img.shields.io/badge/LuaRocks-latest-2C2D72?logo=lua)](https://luarocks.org/modules/jeremiahisaacson/copilot-sdk-supercharged)
 [![GitHub Stars](https://img.shields.io/github/stars/jeremiahjordanisaacson/copilot-sdk-supercharged?style=flat&logo=github&color=238636)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged)
+[![Registries](https://img.shields.io/badge/registries-8-f0883e?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
 [![Languages](https://img.shields.io/badge/languages-21-58a6ff?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
 
 **21 languages. One SDK.** Agents for every app.
@@ -40,7 +42,7 @@ Embed Copilot's agentic workflows in your application. A production-tested agent
 | **Shell / Bash** | [`shell/`](./shell/README.md) | Source | N/A |
 | **Elixir** | [`elixir/`](./elixir/README.md) | `{:copilot_sdk_supercharged, "~> 1.0"}` | Hex |
 | **Haskell** | [`haskell/`](./haskell/README.md) | Cabal | Cabal |
-| **Clojure** | [`clojure/`](./clojure/README.md) | deps.edn | deps.edn |
+| **Clojure** | [`clojure/`](./clojure/README.md) | `net.clojars.jeremiahisaacson/copilot-sdk-supercharged` | Clojars |
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
