@@ -8,20 +8,43 @@
 
 Agents for every app.
 
-Embed Copilot's agentic workflows in your application—now available in Technical preview as a programmable SDK for Python, TypeScript, Go, and .NET.
+Embed Copilot's agentic workflows in your application—now available as a programmable SDK for **20 languages**.
 
 The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-tested agent runtime you can invoke programmatically. No need to build your own orchestration—you define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
 
 ## Available SDKs
 
+### Official SDKs
+
 | SDK                      | Location                                          | Installation                              |
 | ------------------------ | ------------------------------------------------- | ----------------------------------------- |
-| **Node.js / TypeScript** | [`cookbook/nodejs/`](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/nodejs/README.md) | `npm install @github/copilot-sdk`         |
-| **Python**               | [`cookbook/python/`](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/python/README.md) | `pip install github-copilot-sdk`          |
-| **Go**                   | [`cookbook/go/`](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/go/README.md)         | `go get github.com/github/copilot-sdk/go` |
-| **.NET**                 | [`cookbook/dotnet/`](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/dotnet/README.md) | `dotnet add package GitHub.Copilot.SDK`   |
+| **Node.js / TypeScript** | [`nodejs/`](./nodejs/README.md) | `npm install @github/copilot-sdk`         |
+| **Python**               | [`python/`](./python/README.md) | `pip install github-copilot-sdk`          |
+| **Go**                   | [`go/`](./go/README.md)         | `go get github.com/github/copilot-sdk/go` |
+| **.NET / C#**            | [`dotnet/`](./dotnet/README.md) | `dotnet add package GitHub.Copilot.SDK`   |
 
-See the individual SDK READMEs for installation, usage examples, and API reference.
+### Community SDKs (included in this repo)
+
+| SDK | Location | Language Version | Build System |
+|-----|----------|-----------------|--------------|
+| **Java** | [`java/`](./java/README.md) | Java 17+ | Maven |
+| **Rust** | [`rust/`](./rust/README.md) | Rust 2021 edition | Cargo |
+| **Ruby** | [`ruby/`](./ruby/README.md) | Ruby 3.1+ | RubyGems |
+| **PHP** | [`php/`](./php/README.md) | PHP 8.1+ | Composer |
+| **Swift** | [`swift/`](./swift/README.md) | Swift 5.9+ | Swift Package Manager |
+| **Kotlin** | [`kotlin/`](./kotlin/README.md) | Kotlin 1.9+ | Gradle |
+| **C++** | [`cpp/`](./cpp/README.md) | C++17 | CMake |
+| **C** | [`c/`](./c/README.md) | C11 | CMake |
+| **Dart** | [`dart/`](./dart/README.md) | Dart 3.0+ | pub |
+| **Scala** | [`scala/`](./scala/README.md) | Scala 3.4+ | sbt |
+| **R** | [`r/`](./r/README.md) | R 4.0+ | CRAN |
+| **Perl** | [`perl/`](./perl/README.md) | Perl 5.32+ | CPAN |
+| **Lua** | [`lua/`](./lua/README.md) | Lua 5.1+ | LuaRocks |
+| **Shell / Bash** | [`shell/`](./shell/README.md) | Bash 4+ | N/A (source) |
+| **Elixir** | [`elixir/`](./elixir/README.md) | Elixir 1.15+ | Mix |
+| **Haskell** | [`haskell/`](./haskell/README.md) | GHC 9.4+ | Cabal |
+
+See the individual SDK READMEs for installation, usage examples, and API reference. For details on the multi-language expansion, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
 ## Getting Started
 
@@ -112,20 +135,12 @@ Please use the [GitHub Issues](https://github.com/github/copilot-sdk/issues) pag
 - **[Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk)** – Practical recipes for common tasks across all languages
 - **[More Resources](https://github.com/github/awesome-copilot/blob/main/collections/copilot-sdk.md)** – Additional examples, tutorials, and community resources
 
-## Unofficial, Community-maintained SDKs
-
-⚠️ Disclaimer: These are unofficial, community-driven SDKs and they are not supported by GitHub. Use at your own risk.
+## Other Community-maintained SDKs
 
 | SDK           | Location                                           |
 | --------------| -------------------------------------------------- |
-| **Java**      | [copilot-community-sdk/copilot-sdk-java][sdk-java] |
-| **Rust**      | [copilot-community-sdk/copilot-sdk-rust][sdk-rust] |
-| **C++**       | [0xeb/copilot-sdk-cpp][sdk-cpp]                    |
 | **Clojure**   | [krukow/copilot-sdk-clojure][sdk-clojure]          |
 
-[sdk-java]: https://github.com/copilot-community-sdk/copilot-sdk-java
-[sdk-rust]: https://github.com/copilot-community-sdk/copilot-sdk-rust
-[sdk-cpp]: https://github.com/0xeb/copilot-sdk-cpp
 [sdk-clojure]: https://github.com/krukow/copilot-sdk-clojure
 
 ## Contributing
