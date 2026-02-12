@@ -26,7 +26,7 @@ This is the default authentication method when running the Copilot CLI interacti
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 // Default: uses logged-in user credentials
 const client = new CopilotClient();
@@ -92,7 +92,7 @@ Use an OAuth GitHub App to authenticate users through your application and pass 
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient({
     githubToken: userAccessToken,  // Token from OAuth flow
@@ -182,7 +182,7 @@ No code changes needed—the SDK automatically detects environment variables:
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 // Token is read from environment variable automatically
 const client = new CopilotClient();

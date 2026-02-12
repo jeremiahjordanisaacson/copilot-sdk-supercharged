@@ -2,50 +2,40 @@
 
 ![GitHub Copilot SDK SUPERCHARGED](./assets/SUPERCHARGED!!!.gif)
 
-[![NPM Downloads](https://img.shields.io/npm/dm/%40github%2Fcopilot-sdk?label=npm)](https://www.npmjs.com/package/@github/copilot-sdk)
-[![PyPI - Downloads](https://img.shields.io/pypi/dm/github-copilot-sdk?label=PyPI)](https://pypi.org/project/github-copilot-sdk/)
-[![NuGet Downloads](https://img.shields.io/nuget/dt/GitHub.Copilot.SDK?label=NuGet)](https://www.nuget.org/packages/GitHub.Copilot.SDK)
+[![npm](https://img.shields.io/npm/dm/copilot-sdk-supercharged?label=npm)](https://www.npmjs.com/package/copilot-sdk-supercharged)
+[![GitHub Stars](https://img.shields.io/github/stars/jeremiahjordanisaacson/copilot-sdk-supercharged)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged)
 
-Agents for every app.
+**21 languages. One SDK.** Agents for every app.
 
-Embed Copilot's agentic workflows in your application—now available as a programmable SDK for **20 languages**.
-
-The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-tested agent runtime you can invoke programmatically. No need to build your own orchestration—you define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
+Embed Copilot's agentic workflows in your application — a production-tested agent runtime you can invoke programmatically in any major language. You define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
 
 ## Available SDKs
 
-### Official SDKs
+| SDK | Location | Installation | Build System |
+|-----|----------|-------------|--------------|
+| **Node.js / TypeScript** | [`nodejs/`](./nodejs/README.md) | `npm install copilot-sdk-supercharged` | npm |
+| **Python** | [`python/`](./python/README.md) | `pip install github-copilot-sdk` | pip |
+| **Go** | [`go/`](./go/README.md) | `go get github.com/github/copilot-sdk/go` | Go modules |
+| **.NET / C#** | [`dotnet/`](./dotnet/README.md) | `dotnet add package GitHub.Copilot.SDK` | NuGet |
+| **Java** | [`java/`](./java/README.md) | Maven / Gradle | Maven |
+| **Rust** | [`rust/`](./rust/README.md) | Cargo | Cargo |
+| **Ruby** | [`ruby/`](./ruby/README.md) | `gem install copilot-sdk-supercharged` | RubyGems |
+| **PHP** | [`php/`](./php/README.md) | Composer | Composer |
+| **Swift** | [`swift/`](./swift/README.md) | Swift Package Manager | SPM |
+| **Kotlin** | [`kotlin/`](./kotlin/README.md) | Gradle | Gradle |
+| **C++** | [`cpp/`](./cpp/README.md) | CMake | CMake |
+| **C** | [`c/`](./c/README.md) | CMake | CMake |
+| **Dart** | [`dart/`](./dart/README.md) | pub | pub |
+| **Scala** | [`scala/`](./scala/README.md) | sbt | sbt |
+| **R** | [`r/`](./r/README.md) | CRAN | CRAN |
+| **Perl** | [`perl/`](./perl/README.md) | CPAN | CPAN |
+| **Lua** | [`lua/`](./lua/README.md) | LuaRocks | LuaRocks |
+| **Shell / Bash** | [`shell/`](./shell/README.md) | Source | N/A |
+| **Elixir** | [`elixir/`](./elixir/README.md) | Mix | Mix |
+| **Haskell** | [`haskell/`](./haskell/README.md) | Cabal | Cabal |
+| **Clojure** | [`clojure/`](./clojure/README.md) | deps.edn | deps.edn |
 
-| SDK                      | Location                                          | Installation                              |
-| ------------------------ | ------------------------------------------------- | ----------------------------------------- |
-| **Node.js / TypeScript** | [`nodejs/`](./nodejs/README.md) | `npm install @github/copilot-sdk`         |
-| **Python**               | [`python/`](./python/README.md) | `pip install github-copilot-sdk`          |
-| **Go**                   | [`go/`](./go/README.md)         | `go get github.com/github/copilot-sdk/go` |
-| **.NET / C#**            | [`dotnet/`](./dotnet/README.md) | `dotnet add package GitHub.Copilot.SDK`   |
-
-### Community SDKs (included in this repo)
-
-| SDK | Location | Language Version | Build System |
-|-----|----------|-----------------|--------------|
-| **Java** | [`java/`](./java/README.md) | Java 17+ | Maven |
-| **Rust** | [`rust/`](./rust/README.md) | Rust 2021 edition | Cargo |
-| **Ruby** | [`ruby/`](./ruby/README.md) | Ruby 3.1+ | RubyGems |
-| **PHP** | [`php/`](./php/README.md) | PHP 8.1+ | Composer |
-| **Swift** | [`swift/`](./swift/README.md) | Swift 5.9+ | Swift Package Manager |
-| **Kotlin** | [`kotlin/`](./kotlin/README.md) | Kotlin 1.9+ | Gradle |
-| **C++** | [`cpp/`](./cpp/README.md) | C++17 | CMake |
-| **C** | [`c/`](./c/README.md) | C11 | CMake |
-| **Dart** | [`dart/`](./dart/README.md) | Dart 3.0+ | pub |
-| **Scala** | [`scala/`](./scala/README.md) | Scala 3.4+ | sbt |
-| **R** | [`r/`](./r/README.md) | R 4.0+ | CRAN |
-| **Perl** | [`perl/`](./perl/README.md) | Perl 5.32+ | CPAN |
-| **Lua** | [`lua/`](./lua/README.md) | Lua 5.1+ | LuaRocks |
-| **Shell / Bash** | [`shell/`](./shell/README.md) | Bash 4+ | N/A (source) |
-| **Elixir** | [`elixir/`](./elixir/README.md) | Elixir 1.15+ | Mix |
-| **Haskell** | [`haskell/`](./haskell/README.md) | GHC 9.4+ | Cabal |
-| **Clojure** | [`clojure/`](./clojure/README.md) | Clojure 1.12+ | deps.edn |
-
-See the individual SDK READMEs for installation, usage examples, and API reference. For details on the multi-language expansion, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
+See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
 ## Getting Started
 

@@ -26,7 +26,7 @@ The key to resumable sessions is providing your own `session_id`. Without one, t
 ### TypeScript
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient();
 

@@ -28,7 +28,7 @@ The SDK supports two types of MCP servers:
 ### Node.js / TypeScript
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient();
 const session = await client.createSession({
@@ -165,7 +165,7 @@ await using var session = await client.CreateSessionAsync(new SessionConfig
 Here's a complete working example using the official [`@modelcontextprotocol/server-filesystem`](https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem) MCP server:
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 async function main() {
     const client = new CopilotClient();

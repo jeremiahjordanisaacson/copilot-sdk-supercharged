@@ -79,7 +79,7 @@ function toJsonSchema(parameters: Tool["parameters"]): Record<string, unknown> |
  *
  * @example
  * ```typescript
- * import { CopilotClient } from "@github/copilot-sdk";
+ * import { CopilotClient } from "copilot-sdk-supercharged";
  *
  * // Create a client with default options (spawns CLI server)
  * const client = new CopilotClient();

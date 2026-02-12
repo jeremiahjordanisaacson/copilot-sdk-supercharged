@@ -130,7 +130,7 @@ All guides assume you have:
 
 - **Copilot CLI** installed ([Installation guide](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli))
 - **One of the SDKs** installed (official SDKs):
-  - Node.js: `npm install @github/copilot-sdk`
+  - Node.js: `npm install copilot-sdk-supercharged`
   - Python: `pip install github-copilot-sdk`
   - Go: `go get github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/go`
   - .NET: `dotnet add package GitHub.Copilot.SDK`

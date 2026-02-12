@@ -90,7 +90,7 @@ Restart=always
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient({
     cliUrl: "localhost:4321",
@@ -262,7 +262,7 @@ flowchart TB
 
 ```typescript
 import express from "express";
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const app = express();
 app.use(express.json());
@@ -299,7 +299,7 @@ app.listen(3000);
 ### Background Worker
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient({
     cliUrl: process.env.CLI_URL || "localhost:4321",

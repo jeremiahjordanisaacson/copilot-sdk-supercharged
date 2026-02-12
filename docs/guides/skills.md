@@ -23,7 +23,7 @@ Specify directories containing skills when creating a session:
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient();
 const session = await client.createSession({

@@ -2,22 +2,22 @@
 
 ## Overview
 
-This document records the expansion of the GitHub Copilot SDK from 4 officially supported languages to 20 languages, adding full SDK implementations for 16 additional programming languages in a single session.
+This document records the expansion of the GitHub Copilot SDK Supercharged from 4 languages to 21 languages, adding full SDK implementations for 17 additional programming languages.
 
-## Original SDKs (4 languages)
+## Base SDKs (4 languages)
 
-The repository originally shipped with SDKs for:
+The repository started with SDKs for:
 
 | Language | Directory | Package |
 |----------|-----------|---------|
-| Node.js / TypeScript | `nodejs/` | `@github/copilot-sdk` |
+| Node.js / TypeScript | `nodejs/` | `copilot-sdk-supercharged` |
 | Python | `python/` | `github-copilot-sdk` |
 | Go | `go/` | `github.com/github/copilot-sdk/go` |
 | .NET / C# | `dotnet/` | `GitHub.Copilot.SDK` |
 
-## Added SDKs (16 languages)
+## Added SDKs (17 languages)
 
-All 16 SDKs were built to match the existing SDK architecture exactly, implementing the same JSON-RPC 2.0 protocol, the same CLI spawn pattern, and the same core API surface.
+All 17 SDKs were built to match the existing SDK architecture exactly, implementing the same JSON-RPC 2.0 protocol, the same CLI spawn pattern, and the same core API surface.
 
 | # | Language | Directory | Files | Lines | Key Technologies | Commit |
 |---|----------|-----------|-------|-------|------------------|--------|

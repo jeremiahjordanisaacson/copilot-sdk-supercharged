@@ -7,13 +7,13 @@ TypeScript SDK for programmatic control of GitHub Copilot CLI via JSON-RPC.
 ## Installation
 
 ```bash
-npm install @github/copilot-sdk
+npm install copilot-sdk-supercharged
 ```
 
 ## Quick Start
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 // Create and start client
 const client = new CopilotClient();
@@ -352,7 +352,7 @@ You can let the CLI call back into your process when the model needs capabilitie
 
 ```ts
 import { z } from "zod";
-import { CopilotClient, defineTool } from "@github/copilot-sdk";
+import { CopilotClient, defineTool } from "copilot-sdk-supercharged";
 
 const session = await client.createSession({
     model: "gpt-5",

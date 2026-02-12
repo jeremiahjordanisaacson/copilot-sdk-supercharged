@@ -15,7 +15,7 @@ import * as semver from "semver";
 async function getLatestVersion(tag) {
     try {
         const result = execSync(
-            `npm view @github/copilot-sdk@${tag} version --registry=https://registry.npmjs.org`,
+            `npm view copilot-sdk-supercharged@${tag} version --registry=https://registry.npmjs.org`,
             { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
         );
         const version = result.trim();

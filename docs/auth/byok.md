@@ -65,7 +65,7 @@ asyncio.run(main())
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const FOUNDRY_MODEL_URL = "https://your-resource.openai.azure.com/openai/v1/";
 

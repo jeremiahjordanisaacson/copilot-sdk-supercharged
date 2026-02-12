@@ -64,7 +64,7 @@ async function validateTypeScript(): Promise<ValidationResult[]> {
       resolveJsonModule: true,
       types: ["node"],
       paths: {
-        "@github/copilot-sdk": [path.join(ROOT_DIR, "nodejs/src/index.ts")],
+        "copilot-sdk-supercharged": [path.join(ROOT_DIR, "nodejs/src/index.ts")],
       },
     },
     include: ["./**/*.ts"],

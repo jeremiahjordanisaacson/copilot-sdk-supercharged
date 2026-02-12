@@ -2,7 +2,7 @@
 
 In this tutorial, you'll use the Copilot SDK to build a command-line assistant. You'll start with the basics, add streaming responses, then add custom tools - giving Copilot the ability to call your code.
 
-The Copilot SDK Supercharged supports **20 languages**. This guide covers the 4 official SDKs in detail, with links to the 16 community SDKs for other languages.
+The Copilot SDK Supercharged supports **21 languages**. This guide covers the core SDKs in detail, with links to all language SDKs.
 
 **What you'll build:**
 
@@ -22,8 +22,7 @@ Before you begin, make sure you have:
 
 - **GitHub Copilot CLI** installed and authenticated ([Installation guide](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli))
 - Your preferred language runtime:
-  - **Official SDKs:** Node.js 18+ / Python 3.8+ / Go 1.21+ / .NET 8.0+
-  - **Community SDKs:** Java 17+ / Rust / Ruby 3.1+ / PHP 8.1+ / Swift 5.9+ / Kotlin 1.9+ / C++17 / C11 / Dart 3.0+ / Scala 3.4+ / R 4.0+ / Perl 5.32+ / Lua 5.1+ / Bash 4+ / Elixir 1.15+ / Haskell (GHC 9.4+) / Clojure 1.12+
+  - Node.js 18+ / Python 3.8+ / Go 1.21+ / .NET 8.0+ / Java 17+ / Rust / Ruby 3.1+ / PHP 8.1+ / Swift 5.9+ / Kotlin 1.9+ / C++17 / C11 / Dart 3.0+ / Scala 3.4+ / R 4.0+ / Perl 5.32+ / Lua 5.1+ / Bash 4+ / Elixir 1.15+ / Haskell (GHC 9.4+) / Clojure 1.12+
 
 Verify the CLI is working:
 
@@ -46,7 +45,7 @@ npm init -y --init-type module
 Then install the SDK and TypeScript runner:
 
 ```bash
-npm install @github/copilot-sdk tsx
+npm install copilot-sdk-supercharged tsx
 ```
 
 </details>
@@ -203,7 +202,7 @@ Create a new file and add the following code. This is the simplest way to use th
 Create `index.ts`:
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient();
 const session = await client.createSession({ model: "gpt-4.1" });
@@ -343,7 +342,7 @@ Right now, you wait for the complete response before seeing anything. Let's make
 Update `index.ts`:
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient();
 const session = await client.createSession({
@@ -610,7 +609,7 @@ Now for the powerful part. Let's give Copilot the ability to call your code by d
 Update `index.ts`:
 
 ```typescript
-import { CopilotClient, defineTool } from "@github/copilot-sdk";
+import { CopilotClient, defineTool } from "copilot-sdk-supercharged";
 
 // Define a tool that Copilot can call
 const getWeather = defineTool("get_weather", {
@@ -864,7 +863,7 @@ Let's put it all together into a useful interactive assistant:
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient, defineTool } from "@github/copilot-sdk";
+import { CopilotClient, defineTool } from "copilot-sdk-supercharged";
 import * as readline from "readline";
 
 const getWeather = defineTool("get_weather", {
@@ -1294,7 +1293,7 @@ Once the CLI is running in server mode, configure your SDK client to connect to 
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient({
     cliUrl: "localhost:4321"
@@ -1373,17 +1372,10 @@ await using var session = await client.CreateSessionAsync();
 
 ## Learn More
 
-### Official SDK References
-- [Node.js SDK Reference](../nodejs/README.md)
-- [Python SDK Reference](../python/README.md)
-- [Go SDK Reference](../go/README.md)
-- [.NET SDK Reference](../dotnet/README.md)
-
-### Community SDK References (Supercharged)
-- [Java SDK](../java/README.md) | [Rust SDK](../rust/README.md) | [Ruby SDK](../ruby/README.md) | [PHP SDK](../php/README.md)
-- [Swift SDK](../swift/README.md) | [Kotlin SDK](../kotlin/README.md) | [C++ SDK](../cpp/README.md) | [C SDK](../c/README.md)
-- [Dart SDK](../dart/README.md) | [Scala SDK](../scala/README.md) | [R SDK](../r/README.md) | [Perl SDK](../perl/README.md)
-- [Lua SDK](../lua/README.md) | [Shell/Bash SDK](../shell/README.md) | [Elixir SDK](../elixir/README.md) | [Haskell SDK](../haskell/README.md) | [Clojure SDK](../clojure/README.md)
+### All SDK References
+- [Node.js](../nodejs/README.md) | [Python](../python/README.md) | [Go](../go/README.md) | [.NET](../dotnet/README.md) | [Java](../java/README.md) | [Rust](../rust/README.md) | [Ruby](../ruby/README.md)
+- [PHP](../php/README.md) | [Swift](../swift/README.md) | [Kotlin](../kotlin/README.md) | [C++](../cpp/README.md) | [C](../c/README.md) | [Dart](../dart/README.md) | [Scala](../scala/README.md)
+- [R](../r/README.md) | [Perl](../perl/README.md) | [Lua](../lua/README.md) | [Shell/Bash](../shell/README.md) | [Elixir](../elixir/README.md) | [Haskell](../haskell/README.md) | [Clojure](../clojure/README.md)
 
 ### Guides
 - [Authentication Guide](./auth/index.md) - GitHub OAuth, environment variables, and BYOK

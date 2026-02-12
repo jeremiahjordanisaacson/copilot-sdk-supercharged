@@ -119,7 +119,7 @@ Create a SDK client for each authenticated user, passing their token:
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 // Create a client for an authenticated user
 function createClientForUser(userToken: string): CopilotClient {

@@ -34,7 +34,7 @@ The default configuration requires no options at all:
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient();
 const session = await client.createSession({ model: "gpt-4.1" });
