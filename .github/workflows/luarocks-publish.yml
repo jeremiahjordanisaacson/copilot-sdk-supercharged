@@ -26,6 +26,9 @@ jobs:
       - name: Setup LuaRocks
         uses: leafo/gh-actions-luarocks@v4
 
+      - name: Install JSON library
+        run: luarocks install dkjson
+
       - name: Set version and publish
         run: |
           VERSION=${GITHUB_REF_NAME#v}
