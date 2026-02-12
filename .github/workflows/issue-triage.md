@@ -21,7 +21,7 @@ safe-outputs:
   add-comment:
     max: 2
   add-labels:
-    allowed: [bug, enhancement, question, documentation, sdk/dotnet, sdk/go, sdk/nodejs, sdk/python, priority/high, priority/low, testing, security, needs-info, duplicate]
+    allowed: [bug, enhancement, question, documentation, sdk/dotnet, sdk/go, sdk/nodejs, sdk/python, sdk/java, sdk/rust, sdk/ruby, sdk/php, sdk/swift, sdk/kotlin, sdk/cpp, sdk/c, sdk/dart, sdk/scala, sdk/r, sdk/perl, sdk/lua, sdk/shell, sdk/elixir, sdk/haskell, sdk/clojure, priority/high, priority/low, testing, security, needs-info, duplicate]
     max: 10
     target: triggering
   update-issue:
@@ -33,7 +33,7 @@ timeout-minutes: 10
 
 # Issue Triage Agent
 
-You are an AI agent that triages newly opened issues in the copilot-sdk repository — a multi-language SDK with implementations in .NET, Go, Node.js, and Python.
+You are an AI agent that triages newly opened issues in the copilot-sdk repository — a multi-language SDK with implementations in 21 languages: Node.js, Python, Go, .NET, Java, Rust, Ruby, PHP, Swift, Kotlin, C++, C, Dart, Scala, R, Perl, Lua, Shell/Bash, Elixir, Haskell, and Clojure.
 
 ## Your Task
 
@@ -47,10 +47,27 @@ When a new issue is opened, analyze it and perform the following actions:
 ## Available Labels
 
 ### SDK/Language Labels (apply one or more if the issue relates to specific SDKs):
-- `sdk/dotnet` — .NET SDK issues
-- `sdk/go` — Go SDK issues  
-- `sdk/nodejs` — Node.js SDK issues
+- `sdk/nodejs` — Node.js/TypeScript SDK issues
 - `sdk/python` — Python SDK issues
+- `sdk/go` — Go SDK issues
+- `sdk/dotnet` — .NET SDK issues
+- `sdk/java` — Java SDK issues
+- `sdk/rust` — Rust SDK issues
+- `sdk/ruby` — Ruby SDK issues
+- `sdk/php` — PHP SDK issues
+- `sdk/swift` — Swift SDK issues
+- `sdk/kotlin` — Kotlin SDK issues
+- `sdk/cpp` — C++ SDK issues
+- `sdk/c` — C SDK issues
+- `sdk/dart` — Dart SDK issues
+- `sdk/scala` — Scala SDK issues
+- `sdk/r` — R SDK issues
+- `sdk/perl` — Perl SDK issues
+- `sdk/lua` — Lua SDK issues
+- `sdk/shell` — Shell/Bash SDK issues
+- `sdk/elixir` — Elixir SDK issues
+- `sdk/haskell` — Haskell SDK issues
+- `sdk/clojure` — Clojure SDK issues
 
 ### Type Labels (apply exactly one):
 - `bug` — Something isn't working correctly

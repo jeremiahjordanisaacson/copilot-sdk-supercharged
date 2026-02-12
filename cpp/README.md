@@ -58,7 +58,7 @@ int main() {
 
 ## Architecture
 
-The SDK mirrors the architecture of the official Node.js, Python, Go, and .NET SDKs:
+The SDK mirrors the architecture of all other SDKs in this repository (21 languages supported):
 
 ```
 CopilotClient

@@ -7,7 +7,7 @@
 
 **21 languages. One SDK.** Agents for every app.
 
-Embed Copilot's agentic workflows in your application — a production-tested agent runtime you can invoke programmatically in any major language. You define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
+Embed Copilot's agentic workflows in your application. A production-tested agent runtime you can invoke programmatically in any major language. You define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
 
 ## Available SDKs
 
@@ -63,7 +63,7 @@ Your Application
   Copilot CLI (server mode)
 ```
 
-The SDK manages the CLI process lifecycle automatically. You can also connect to an external CLI server—see the [Getting Started Guide](./docs/getting-started.md#connecting-to-an-external-cli-server) for details on running the CLI in server mode.
+The SDK manages the CLI process lifecycle automatically. You can also connect to an external CLI server. See the [Getting Started Guide](./docs/getting-started.md#connecting-to-an-external-cli-server) for details on running the CLI in server mode.
 
 ## FAQ
 

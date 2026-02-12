@@ -2,7 +2,7 @@
 
 A Rust client library for programmatic control of GitHub Copilot CLI via JSON-RPC 2.0.
 
-This SDK communicates with the Copilot CLI server using JSON-RPC 2.0 over stdio or TCP, with Content-Length header framing (LSP protocol style). It follows the same architecture as the official Node.js, Python, Go, and .NET SDKs.
+This SDK communicates with the Copilot CLI server using JSON-RPC 2.0 over stdio or TCP, with Content-Length header framing (LSP protocol style). It follows the same architecture as all other SDKs in this repository (see the [full list of 21 supported languages](../README.md#available-sdks)).
 
 ## Installation
 

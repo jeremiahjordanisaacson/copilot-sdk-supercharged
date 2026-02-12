@@ -4,13 +4,13 @@
 
 ## Big picture 🔧
 
-- The repo implements language SDKs (Node/TS, Python, Go, .NET) that speak to the **Copilot CLI** via **JSON‑RPC** (see `README.md` and `nodejs/src/client.ts`).
+- The repo implements language SDKs for **21 languages** (Node/TS, Python, Go, .NET, Java, Rust, Ruby, PHP, Swift, Kotlin, C++, C, Dart, Scala, R, Perl, Lua, Shell/Bash, Elixir, Haskell, Clojure) that speak to the **Copilot CLI** via **JSON-RPC** (see `README.md` and `nodejs/src/client.ts`).
 - Typical flow: your App → SDK client → JSON-RPC → Copilot CLI (server mode). The CLI must be installed or you can connect to an external CLI server via the `CLI URL option (language-specific casing)` (Node: `cliUrl`, Go: `CLIUrl`, .NET: `CliUrl`, Python: `cli_url`).
 
 ## Most important files to read first 📚
 
 - Top-level: `README.md` (architecture + quick start)
-- Language entry points: `nodejs/src/client.ts`, `python/README.md`, `go/README.md`, `dotnet/README.md`
+- Language entry points: `nodejs/src/client.ts`, `python/README.md`, `go/README.md`, `dotnet/README.md`, and 17 additional SDK READMEs (see `MULTI_LANGUAGE_SDKS.md` for the full list)
 - Test harness & E2E: `test/harness/*`, Python harness wrapper `python/e2e/testharness/proxy.py`
 - Schemas & type generation: `nodejs/scripts/generate-session-types.ts`
 - Session snapshots used by E2E: `test/snapshots/` (used by the replay proxy)
@@ -20,11 +20,29 @@
 - Monorepo helpers: use `just` tasks from repo root:
   - Install deps: `just install` (runs npm ci, uv pip install -e, go mod download, dotnet restore)
   - Format all: `just format` | Lint all: `just lint` | Test all: `just test`
-- Per-language:
+- Per-language (core SDKs):
   - Node: `cd nodejs && npm ci` → `npm test` (Vitest), `npm run generate:session-types` to regenerate session-event types
   - Python: `cd python && uv pip install -e ".[dev]"` → `uv run pytest` (E2E tests use the test harness)
   - Go: `cd go && go test ./...`
   - .NET: `cd dotnet && dotnet test test/GitHub.Copilot.SDK.Test.csproj`
+- Per-language (additional SDKs):
+  - Java: `cd java && mvn test`
+  - Rust: `cd rust && cargo test`
+  - Ruby: `cd ruby && bundle exec rake test`
+  - PHP: `cd php && composer test`
+  - Swift: `cd swift && swift test`
+  - Kotlin: `cd kotlin && ./gradlew test`
+  - C++: `cd cpp && cmake -B build && cmake --build build && ctest --test-dir build`
+  - C: `cd c && cmake -B build && cmake --build build && ctest --test-dir build`
+  - Dart: `cd dart && dart test`
+  - Scala: `cd scala && sbt test`
+  - R: `cd r && Rscript -e "devtools::test()"`
+  - Perl: `cd perl && prove -l t/`
+  - Lua: `cd lua && busted`
+  - Shell: `cd shell && bash -n lib/*.sh`
+  - Elixir: `cd elixir && mix test`
+  - Haskell: `cd haskell && cabal test`
+  - Clojure: `cd clojure && clj -M:test`
 
 ## Testing & E2E tips ⚙️
 
@@ -47,7 +65,7 @@
 
 ## Where to add new code or tests 🧭
 
-- SDK code: `nodejs/src`, `python/copilot`, `go`, `dotnet/src`
-- Unit tests: `nodejs/test`, `python/*`, `go/*`, `dotnet/test`
+- SDK code: `nodejs/src`, `python/copilot`, `go`, `dotnet/src`, and `{java,rust,ruby,php,swift,kotlin,cpp,c,dart,scala,r,perl,lua,shell,elixir,haskell,clojure}/` (see each SDK's README for directory layout)
+- Unit tests: `nodejs/test`, `python/*`, `go/*`, `dotnet/test`, and test directories within each of the 17 additional SDK directories
 - E2E tests: `*/e2e/` folders that use the shared replay proxy and `test/snapshots/`
 - Generated types: update schema in `@github/copilot` then run `cd nodejs && npm run generate:session-types` and commit generated files in `src/generated` or language generated location.

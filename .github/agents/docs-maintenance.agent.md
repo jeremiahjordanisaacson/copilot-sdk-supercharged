@@ -169,11 +169,28 @@ Every major SDK feature should be documented. Core features include:
 
 ### 2. Multi-Language Support
 
-All documentation must include examples for all four SDKs:
+All documentation must include examples for all 21 SDKs where applicable. At minimum, examples should cover the four core SDKs, with additional language examples encouraged:
 - **Node.js / TypeScript**
 - **Python**
 - **Go**
 - **.NET (C#)**
+- **Java**
+- **Rust**
+- **Ruby**
+- **PHP**
+- **Swift**
+- **Kotlin**
+- **C++**
+- **C**
+- **Dart**
+- **Scala**
+- **R**
+- **Perl**
+- **Lua**
+- **Shell / Bash**
+- **Elixir**
+- **Haskell**
+- **Clojure**
 
 Use collapsible `<details>` sections with the first language open by default.
 
@@ -209,7 +226,7 @@ When auditing documentation, check:
 
 ### Completeness
 - [ ] All major SDK features are documented
-- [ ] All four languages have examples
+- [ ] All 21 languages have examples (at minimum the four core SDKs)
 - [ ] API reference covers all public methods
 - [ ] Configuration options are documented
 - [ ] Error scenarios are explained

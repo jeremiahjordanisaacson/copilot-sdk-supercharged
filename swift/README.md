@@ -58,7 +58,7 @@ await client.stop()
 
 ## Architecture
 
-The SDK follows the same patterns as the official Node.js, Python, Go, and .NET SDKs:
+The SDK follows the same patterns as all other SDKs in this repository (21 languages supported):
 
 ```
 CopilotClient

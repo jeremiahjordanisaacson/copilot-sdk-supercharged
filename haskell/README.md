@@ -6,7 +6,7 @@ A Haskell SDK for interacting with the GitHub Copilot CLI server via JSON-RPC 2.
 
 This SDK enables Haskell applications to communicate with the Copilot CLI server, create and manage conversation sessions, register custom tools, handle permissions and user input, and subscribe to session events.
 
-The SDK follows the same patterns as the official Node.js, Python, Go, and .NET SDKs.
+The SDK follows the same patterns as all other SDKs in this repository (see the [full list of 21 supported languages](../README.md#available-sdks)).
 
 ## Architecture
 

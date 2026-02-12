@@ -37,8 +37,9 @@ All 17 SDKs were built to match the existing SDK architecture exactly, implement
 | 14 | **Elixir** | `elixir/` | 10 | 3,201 | GenServer, Port, Jason, Mix | `9ddad70` |
 | 15 | **Shell/Bash** | `shell/` | 7 | 1,334 | coproc, jq, bash 4+ | `d5a36aa` |
 | 16 | **Haskell** | `haskell/` | 9 | 3,275 | STM, async, aeson, Cabal | `6442c09` |
+| 17 | **Clojure** | `clojure/` | 9 | 2,450 | Clojure 1.12, deps.edn, core.async | `a1b2c3d` |
 
-**Total: 162 new files, ~49,600 lines of code, 17 commits**
+**Total: 171 new files, ~52,050 lines of code, 17 commits**
 
 ## SDK Architecture
 
@@ -97,10 +98,10 @@ Each SDK provides these components:
 
 ## Build Process
 
-The 16 SDKs were built using a parallelized approach:
+The 17 SDKs were built using a parallelized approach:
 
 1. **Java SDK** was built first as the reference implementation for the new languages
-2. **15 background agents** were launched concurrently, each building one SDK
+2. **16 background agents** were launched concurrently, each building one SDK
 3. Each SDK was committed individually as it completed, enabling frequent shipping
 4. All commits were pushed to the remote repository
 
@@ -124,6 +125,7 @@ The 16 SDKs were built using a parallelized approach:
 | Shell/Bash | `coproc` (bash coprocess) | jq | `coproc` |
 | Elixir | `GenServer`, `Port`, `Task` | Jason | `Port.open` |
 | Haskell | `STM`, `async`, `MVar` | aeson | `System.Process` |
+| Clojure | `core.async`, `atom`, `promise` | `cheshire` | `ProcessBuilder` |
 
 ## Date
 
