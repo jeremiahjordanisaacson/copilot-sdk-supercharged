@@ -1,0 +1,46 @@
+cabal-version:      3.0
+name:               copilot-sdk
+version:            0.1.0.0
+synopsis:           Haskell SDK for the GitHub Copilot CLI
+description:
+  A Haskell SDK for interacting with the GitHub Copilot CLI server
+  via JSON-RPC 2.0 over stdio. Provides session management, tool
+  registration, permission handling, hooks, and event subscriptions.
+license:            MIT
+license-file:       LICENSE
+author:             Microsoft Corporation
+copyright:          (c) Microsoft Corporation. All rights reserved.
+category:           Development
+build-type:         Simple
+
+library
+  exposed-modules:
+    Copilot.Client
+    Copilot.DefineTool
+    Copilot.JsonRpc
+    Copilot.SdkProtocolVersion
+    Copilot.Session
+    Copilot.Types
+  build-depends:
+    , aeson        >=2.0   && <2.3
+    , async        >=2.2   && <2.3
+    , base         >=4.14  && <5
+    , bytestring   >=0.10  && <0.13
+    , containers   >=0.6   && <0.8
+    , process      >=1.6   && <1.7
+    , stm          >=2.5   && <2.6
+    , text         >=1.2   && <2.2
+    , uuid         >=1.3   && <1.4
+  hs-source-dirs:   src
+  default-language: Haskell2010
+  ghc-options:      -Wall
+
+executable copilot-basic-example
+  main-is:          BasicExample.hs
+  build-depends:
+    , base        >=4.14 && <5
+    , copilot-sdk
+    , text
+  hs-source-dirs:   app
+  default-language: Haskell2010
+  ghc-options:      -Wall -threaded -rtsopts -with-rtsopts=-N
