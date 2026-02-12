@@ -138,6 +138,18 @@ session.on("assistant.message_delta", event -> {
 | `abort()` | Abort current processing |
 | `destroy()` | Destroy the session |
 
+## Image Generation
+
+Request image responses using `responseFormat` and `imageOptions`:
+
+```java
+SessionEvent response = session.sendAndWait(
+    new MessageOptions("Generate a sunset over mountains")
+        .responseFormat("image")
+        .imageOptions(new Types.ImageOptions("1024x1024", "hd", "natural"))
+);
+```
+
 ## License
 
 MIT

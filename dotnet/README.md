@@ -214,6 +214,24 @@ Dispose the session and free resources.
 
 ---
 
+## Image Generation
+
+Request image responses by setting `ResponseFormat` and `ImageOptions`:
+
+```csharp
+var response = await session.SendAndWaitAsync(new MessageOptions
+{
+    Prompt = "Generate a picture of a sunset over mountains",
+    ResponseFormat = ResponseFormat.Image,
+    ImageOptions = new ImageOptions
+    {
+        Size = "1024x1024",
+        Quality = "hd",
+        Style = "natural",
+    },
+});
+```
+
 ## Event Types
 
 Sessions emit various events during processing. Each event type is a class that inherits from `SessionEvent`:

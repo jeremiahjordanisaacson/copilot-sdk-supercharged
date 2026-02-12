@@ -329,6 +329,23 @@ All fallible operations return `Result<T, CopilotError>`. Error variants include
 - `CopilotError::NotConnected` - Client not connected
 - `CopilotError::ProcessSpawn` - Failed to start CLI process
 
+## Image Generation
+
+Request image responses using `response_format` and `image_options`:
+
+```rust
+let response = session.send_and_wait(MessageOptions {
+    prompt: "Generate a sunset over mountains".into(),
+    response_format: Some(ResponseFormat::Image),
+    image_options: Some(ImageOptions {
+        size: Some("1024x1024".into()),
+        quality: Some("hd".into()),
+        style: Some("natural".into()),
+    }),
+    ..Default::default()
+}, 60_000).await?;
+```
+
 ## License
 
 MIT - See [LICENSE](../LICENSE) for details.

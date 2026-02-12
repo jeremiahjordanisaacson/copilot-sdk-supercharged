@@ -389,6 +389,18 @@ cd swift
 swift run BasicExample
 ```
 
+## Image Generation
+
+Request image responses using `responseFormat` and `imageOptions`:
+
+```swift
+let response = try await session.sendAndWait(MessageOptions(
+    prompt: "Generate a sunset over mountains",
+    responseFormat: .image,
+    imageOptions: ImageOptions(size: "1024x1024", quality: "hd", style: "natural")
+))
+```
+
 ## License
 
 See the [LICENSE](../LICENSE) file in the repository root.

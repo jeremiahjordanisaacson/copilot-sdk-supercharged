@@ -253,6 +253,20 @@ Server-initiated notifications:
 
 See `examples/basic_example.pl` for a complete working example.
 
+## Image Generation
+
+Request image responses using `response_format` and `image_options`:
+
+```perl
+my $response = $session->send_and_wait(
+    GitHub::Copilot::Types::MessageOptions->new(
+        prompt          => 'Generate a sunset over mountains',
+        response_format => 'image',
+        image_options   => { size => '1024x1024', quality => 'hd', style => 'natural' },
+    )
+);
+```
+
 ## License
 
 MIT License. Copyright (c) Microsoft Corporation.

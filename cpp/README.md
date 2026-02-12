@@ -296,6 +296,18 @@ an error is thrown during `start()`.
 - macOS (Clang)
 - Windows (MSVC) - Uses Win32 `CreateProcess` and pipe APIs
 
+## Image Generation
+
+Request image responses using `responseFormat` and `imageOptions`:
+
+```cpp
+copilot::MessageOptions opts;
+opts.prompt = "Generate a sunset over mountains";
+opts.responseFormat = copilot::ResponseFormat::Image;
+opts.imageOptions = copilot::ImageOptions{"1024x1024", "hd", "natural"};
+auto response = session->sendAndWait(opts);
+```
+
 ## License
 
 See the LICENSE file in the repository root.

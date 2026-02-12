@@ -607,7 +607,7 @@ class ImageBlock:
     image: AssistantImageData
 
 
-ContentBlock = TextBlock | ImageBlock
+ContentBlock = Union[TextBlock, ImageBlock]
 
 
 # Options for sending a message to a session

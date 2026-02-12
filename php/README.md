@@ -422,6 +422,18 @@ php/
     basic_example.php        # Full working example
 ```
 
+## Image Generation
+
+Request image responses using `responseFormat` and `imageOptions`:
+
+```php
+$response = $session->sendAndWait(new MessageOptions(
+    prompt: 'Generate a sunset over mountains',
+    responseFormat: ResponseFormat::IMAGE,
+    imageOptions: new ImageOptions(size: '1024x1024', quality: 'hd', style: 'natural'),
+));
+```
+
 ## License
 
 MIT - Copyright (c) Microsoft Corporation. All rights reserved.

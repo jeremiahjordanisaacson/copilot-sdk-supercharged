@@ -80,7 +80,7 @@ Each SDK provides these components:
    - Message history retrieval
    - Abort and destroy lifecycle
 
-4. **Types** - All protocol types: ConnectionState, SessionEvent, ToolResult, ToolInvocation, PermissionRequest/Result, UserInputRequest/Response, SessionHooks (all 6 hook types), ProviderConfig, MCPServerConfig, CustomAgentConfig, InfiniteSessionConfig, ModelInfo, SessionMetadata, SessionLifecycleEvent, MessageOptions, etc.
+4. **Types** - All protocol types: ConnectionState, SessionEvent, ToolResult, ToolInvocation, PermissionRequest/Result, UserInputRequest/Response, SessionHooks (all 6 hook types), ProviderConfig, MCPServerConfig, CustomAgentConfig, InfiniteSessionConfig, ModelInfo, SessionMetadata, SessionLifecycleEvent, MessageOptions, ResponseFormat, ImageOptions, AssistantImageData, ContentBlock, etc.
 
 5. **SDK Protocol Version** - Constant (`2`) verified against the server via ping response on connect.
 
@@ -94,7 +94,8 @@ Each SDK provides these components:
 - **Framing**: LSP-style Content-Length headers
 - **Client-to-Server Methods**: `ping`, `status.get`, `auth.getStatus`, `models.list`, `session.create`, `session.resume`, `session.send`, `session.getMessages`, `session.destroy`, `session.abort`, `session.list`, `session.delete`, `session.getForeground`, `session.setForeground`, `session.getLastId`
 - **Server-to-Client Requests**: `tool.call`, `permission.request`, `userInput.request`, `hooks.invoke`
-- **Server-to-Client Notifications**: `session.event` (30+ event types), `session.lifecycle`
+- **Server-to-Client Notifications**: `session.event` (30+ event types including `assistant.image`, `assistant.image_delta`, `assistant.content`), `session.lifecycle`
+- **Image Generation**: All 21 SDKs support `responseFormat` ("text", "image", "json_object") and `imageOptions` (size, quality, style) in MessageOptions, with full type definitions for `AssistantImageData` and `ContentBlock`
 
 ## Build Process
 

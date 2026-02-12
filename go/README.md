@@ -537,6 +537,22 @@ Communicates with CLI via TCP socket. Useful for distributed scenarios.
 
 - `COPILOT_CLI_PATH` - Path to the Copilot CLI executable
 
+## Image Generation
+
+Request image responses by setting `ResponseFormat` and `ImageOptions`:
+
+```go
+response, err := session.SendAndWait(ctx, copilot.MessageOptions{
+    Prompt:         "Generate a picture of a sunset over mountains",
+    ResponseFormat: copilot.ResponseFormatImage,
+    ImageOptions: &copilot.ImageOptions{
+        Size:    "1024x1024",
+        Quality: "hd",
+        Style:   "natural",
+    },
+}, 60000)
+```
+
 ## License
 
 MIT

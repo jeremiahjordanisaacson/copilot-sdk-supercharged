@@ -181,6 +181,24 @@ session <- createSession client defaultSessionConfig
   }
 ```
 
+## Image Generation
+
+Request image responses using `moResponseFormat` and `moImageOptions`:
+
+```haskell
+response <- sendAndWait session MessageOptions
+    { moPrompt         = "Generate a sunset over mountains"
+    , moAttachments    = Nothing
+    , moMode           = Nothing
+    , moResponseFormat = Just ResponseFormatImage
+    , moImageOptions   = Just ImageOptions
+        { imageOptionsSize    = Just "1024x1024"
+        , imageOptionsQuality = Just "hd"
+        , imageOptionsStyle   = Just "natural"
+        }
+    } 60000
+```
+
 ## Event Handling
 
 Subscribe to specific event types:

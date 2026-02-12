@@ -101,6 +101,18 @@ It can return:
 - A `Copilot.Types.ToolResult` struct (for full control)
 - Any other term (JSON-encoded as a success result)
 
+## Image Generation
+
+Request image responses using `response_format` and `image_options`:
+
+```elixir
+response = Copilot.Session.send_and_wait(session, %Copilot.Types.MessageOptions{
+  prompt: "Generate a sunset over mountains",
+  response_format: :image,
+  image_options: %{size: "1024x1024", quality: "hd", style: "natural"}
+})
+```
+
 ## Event Subscriptions
 
 Subscribe to all events or specific event types:

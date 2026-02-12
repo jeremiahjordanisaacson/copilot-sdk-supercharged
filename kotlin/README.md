@@ -378,6 +378,18 @@ val session = client.createSession(SessionConfig(
 9. Server sends `hooks.invoke` requests for hook execution
 10. Server sends `session.lifecycle` notifications for session state changes
 
+## Image Generation
+
+Request image responses using `responseFormat` and `imageOptions`:
+
+```kotlin
+val response = session.sendAndWait(MessageOptions(
+    prompt = "Generate a sunset over mountains",
+    responseFormat = ResponseFormat.IMAGE,
+    imageOptions = ImageOptions(size = "1024x1024", quality = "hd", style = "natural")
+))
+```
+
 ## License
 
 MIT License. See [LICENSE](../LICENSE) for details.

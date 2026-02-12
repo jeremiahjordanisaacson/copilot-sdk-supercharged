@@ -242,6 +242,41 @@ Destroy the session and free resources.
 
 ---
 
+## Image Generation
+
+Request image responses by setting `responseFormat` and `imageOptions`:
+
+```typescript
+// Generate an image
+const response = await session.sendAndWait({
+    prompt: "Generate a picture of a sunset over mountains",
+    responseFormat: "image",
+    imageOptions: {
+        size: "1024x1024",
+        quality: "hd",
+        style: "natural",
+    },
+});
+
+// Handle image events
+session.on("assistant.image", (event) => {
+    const { format, base64, width, height, revisedPrompt } = event.data.image;
+    console.log(`Received ${width}x${height} ${format} image`);
+    // Decode base64 to save or display the image
+});
+
+// Handle mixed text+image responses
+session.on("assistant.content", (event) => {
+    for (const block of event.data.content) {
+        if (block.type === "text") {
+            console.log(block.text);
+        } else if (block.type === "image") {
+            console.log(`Image: ${block.image.width}x${block.image.height}`);
+        }
+    }
+});
+```
+
 ## Event Types
 
 Sessions emit various events during processing:

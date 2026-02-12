@@ -284,6 +284,18 @@ copilot --headless --no-auto-update --log-level info --stdio
 
 See `examples/basic_example.sh` for a complete working example that demonstrates all major SDK features.
 
+## Image Generation
+
+Request image responses using response format constants:
+
+```bash
+copilot_session_send_and_wait \
+    "Generate a sunset over mountains" \
+    "" 60 1 \
+    "$COPILOT_RESPONSE_FORMAT_IMAGE" \
+    '{"size":"1024x1024","quality":"hd","style":"natural"}'
+```
+
 ## License
 
 Copyright (c) Microsoft Corporation. All rights reserved.

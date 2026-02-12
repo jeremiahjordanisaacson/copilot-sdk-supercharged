@@ -472,6 +472,29 @@ session = await client.create_session({
 - `on_session_end` - Cleanup or logging when session ends.
 - `on_error_occurred` - Handle errors with retry/skip/abort strategies.
 
+## Image Generation
+
+Request image responses by setting `response_format` and `image_options`:
+
+```python
+# Generate an image
+response = await session.send_and_wait({
+    "prompt": "Generate a picture of a sunset over mountains",
+    "response_format": "image",
+    "image_options": {
+        "size": "1024x1024",
+        "quality": "hd",
+        "style": "natural",
+    },
+})
+
+# Check for image events
+session.on(lambda event: (
+    print(f"Image: {event.data.get('image', {}).get('width')}x{event.data.get('image', {}).get('height')}")
+    if event.type == "assistant.image" else None
+))
+```
+
 ## Requirements
 
 - Python 3.9+

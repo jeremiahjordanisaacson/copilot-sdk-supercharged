@@ -376,6 +376,18 @@ observe({
 })
 ```
 
+## Image Generation
+
+Request image responses using `response_format` and `image_options`:
+
+```r
+response <- session$send_and_wait(
+  prompt = "Generate a sunset over mountains",
+  response_format = "image",
+  image_options = image_options(size = "1024x1024", quality = "hd", style = "natural")
+)
+```
+
 ## Requirements
 
 - R 4.1+

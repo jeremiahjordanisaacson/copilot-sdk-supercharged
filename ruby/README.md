@@ -296,6 +296,20 @@ The SDK uses a background reader thread for the JSON-RPC connection. Event handl
 
 The `send_and_wait` method uses a `Mutex` + `ConditionVariable` to block the calling thread until the session becomes idle, which is the recommended pattern for synchronous usage.
 
+## Image Generation
+
+Request image responses using `response_format` and `image_options`:
+
+```ruby
+response = session.send_and_wait(
+  prompt: "Generate a sunset over mountains",
+  response_format: "image",
+  image_options: Copilot::ImageOptions.new(
+    size: "1024x1024", quality: "hd", style: "natural"
+  )
+)
+```
+
 ## License
 
 MIT - see [LICENSE](../LICENSE) for details.

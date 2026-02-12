@@ -272,6 +272,18 @@ cd copilot-sdk-supercharged/scala
 sbt "runMain BasicExample"
 ```
 
+## Image Generation
+
+Request image responses using `responseFormat` and `imageOptions`:
+
+```scala
+val response = session.sendAndWait(MessageOptions(
+  prompt = "Generate a sunset over mountains",
+  responseFormat = Some(ResponseFormat.Image),
+  imageOptions = Some(ImageOptions(size = Some("1024x1024"), quality = Some("hd"), style = Some("natural")))
+))
+```
+
 ## License
 
 See [LICENSE](../LICENSE) in the repository root.

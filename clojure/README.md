@@ -471,6 +471,18 @@ The SDK communicates with the Copilot CLI server via JSON-RPC 2.0:
 - Java >= 11
 - GitHub Copilot CLI installed and in PATH
 
+## Image Generation
+
+Request image responses using `:response-format` and `:image-options`:
+
+```clojure
+(let [opts (types/message-options "Generate a sunset over mountains"
+             :response-format :image
+             :image-options (types/image-options :size "1024x1024" :quality "hd" :style "natural"))
+      response (session/send-and-wait! session-atom opts)]
+  (println (:data @(:last-msg response))))
+```
+
 ## License
 
 MIT

@@ -328,6 +328,18 @@ The current SDK protocol version is **2** (matching `sdk-protocol-version.json`)
 | `abort()` | Abort current processing |
 | `destroy()` | Destroy the session |
 
+## Image Generation
+
+Request image responses using `responseFormat` and `imageOptions`:
+
+```dart
+final response = await session.sendAndWait(MessageOptions(
+  prompt: 'Generate a sunset over mountains',
+  responseFormat: ResponseFormat.image,
+  imageOptions: ImageOptions(size: '1024x1024', quality: 'hd', style: 'natural'),
+));
+```
+
 ## License
 
 See [LICENSE](../LICENSE) in the repository root.

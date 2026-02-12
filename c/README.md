@@ -275,6 +275,20 @@ if (err != COPILOT_OK) {
 }
 ```
 
+## Image Generation
+
+Request image responses using `response_format` and `image_options`:
+
+```c
+copilot_image_options_t img_opts = { .size = "1024x1024", .quality = "hd", .style = "natural" };
+copilot_message_options_t opts = {
+    .prompt = "Generate a sunset over mountains",
+    .response_format = COPILOT_RESPONSE_FORMAT_IMAGE,
+    .image_options = &img_opts,
+};
+copilot_session_send_and_wait(session, &opts, 60000, &content);
+```
+
 ## License
 
 See the [LICENSE](../LICENSE) file in the repository root.

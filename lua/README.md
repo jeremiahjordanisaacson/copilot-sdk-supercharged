@@ -325,6 +325,18 @@ The client automatically verifies protocol compatibility on startup via the `pin
 local tool = define_tool(name, { description, parameters, handler })
 ```
 
+## Image Generation
+
+Request image responses using `responseFormat` and `imageOptions`:
+
+```lua
+local response = session:send_and_wait({
+    prompt         = "Generate a sunset over mountains",
+    responseFormat = types.ResponseFormat.IMAGE,
+    imageOptions   = types.image_options({ size = "1024x1024", quality = "hd", style = "natural" }),
+})
+```
+
 ## License
 
 MIT
