@@ -1,0 +1,154 @@
+name: Create Release with SDK Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Package all SDKs
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          mkdir -p dist
+
+          # Package each SDK as a zip
+          for sdk in nodejs python go dotnet java rust ruby php swift kotlin cpp c dart scala r perl lua shell elixir haskell clojure; do
+            if [ -d "$sdk" ]; then
+              zip -r "dist/copilot-sdk-supercharged-${sdk}-v${VERSION}.zip" "$sdk/" \
+                -x "**/node_modules/*" "**/target/*" "**/.git/*" "**/dist/*" "**/build/*" "**/__pycache__/*" "**/.venv/*" "**/obj/*" "**/bin/*"
+              echo "Packaged: $sdk"
+            fi
+          done
+
+          # Also create a full source archive
+          zip -r "dist/copilot-sdk-supercharged-all-v${VERSION}.zip" \
+            nodejs/ python/ go/ dotnet/ java/ rust/ ruby/ php/ swift/ kotlin/ cpp/ c/ dart/ scala/ r/ perl/ lua/ shell/ elixir/ haskell/ clojure/ \
+            README.md MULTI_LANGUAGE_SDKS.md CONTRIBUTING.md LICENSE docs/ \
+            -x "**/node_modules/*" "**/target/*" "**/.git/*" "**/dist/*" "**/build/*" "**/__pycache__/*" "**/.venv/*" "**/obj/*" "**/bin/*"
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd dist
+          for f in *.zip; do
+            sha256sum "$f" > "${f}.sha256"
+            echo "$(cat ${f}.sha256)"
+          done
+
+          # Also generate a combined checksums file
+          sha256sum *.zip > SHA256SUMS.txt
+          echo ""
+          echo "=== SHA256SUMS.txt ==="
+          cat SHA256SUMS.txt
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          REPO="https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged"
+          DL="${REPO}/releases/download/v${VERSION}"
+
+          cat > release_notes.md << 'HEADER'
+          ## Copilot SDK Supercharged v${VERSION}
+
+          **21 languages. 8 package registries. One SDK.**
+
+          ### Install from Package Registries
+
+          | Registry | Install Command |
+          |----------|----------------|
+          | **npm** | `npm install copilot-sdk-supercharged` |
+          | **PyPI** | `pip install copilot-sdk-supercharged` |
+          | **crates.io** | `cargo add copilot-sdk-supercharged` |
+          | **NuGet** | `dotnet add package CopilotSDK.Supercharged` |
+          | **RubyGems** | `gem install copilot-sdk-supercharged` |
+          | **Hex** | `{:copilot_sdk_supercharged, "~> 1.0"}` |
+          | **Clojars** | `net.clojars.jeremiahisaacson/copilot-sdk-supercharged` |
+          | **LuaRocks** | `luarocks install copilot-sdk-supercharged` |
+
+          ### Download Individual SDK Packages
+
+          HEADER
+
+          # Build the download table
+          echo "| SDK | Download | SHA256 Checksum |" >> release_notes.md
+          echo "|-----|----------|-----------------|" >> release_notes.md
+
+          for sdk in nodejs python go dotnet java rust ruby php swift kotlin cpp c dart scala r perl lua shell elixir haskell clojure; do
+            FILE="copilot-sdk-supercharged-${sdk}-v${VERSION}.zip"
+            if [ -f "dist/${FILE}" ]; then
+              # Pretty name
+              case $sdk in
+                nodejs) NAME="Node.js / TypeScript" ;;
+                python) NAME="Python" ;;
+                go) NAME="Go" ;;
+                dotnet) NAME=".NET / C#" ;;
+                java) NAME="Java" ;;
+                rust) NAME="Rust" ;;
+                ruby) NAME="Ruby" ;;
+                php) NAME="PHP" ;;
+                swift) NAME="Swift" ;;
+                kotlin) NAME="Kotlin" ;;
+                cpp) NAME="C++" ;;
+                c) NAME="C" ;;
+                dart) NAME="Dart" ;;
+                scala) NAME="Scala" ;;
+                r) NAME="R" ;;
+                perl) NAME="Perl" ;;
+                lua) NAME="Lua" ;;
+                shell) NAME="Shell / Bash" ;;
+                elixir) NAME="Elixir" ;;
+                haskell) NAME="Haskell" ;;
+                clojure) NAME="Clojure" ;;
+                *) NAME="$sdk" ;;
+              esac
+              echo "| **${NAME}** | [Download](${DL}/${FILE}) | [SHA256](${DL}/${FILE}.sha256) |" >> release_notes.md
+            fi
+          done
+
+          # Add the full archive
+          ALLFILE="copilot-sdk-supercharged-all-v${VERSION}.zip"
+          echo "" >> release_notes.md
+          echo "### Full Archive" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "| Download | SHA256 Checksum |" >> release_notes.md
+          echo "|----------|-----------------|" >> release_notes.md
+          echo "| [All SDKs (${ALLFILE})](${DL}/${ALLFILE}) | [SHA256](${DL}/${ALLFILE}.sha256) |" >> release_notes.md
+          echo "| [SHA256SUMS.txt](${DL}/SHA256SUMS.txt) | Combined checksums for all files |" >> release_notes.md
+
+          echo "" >> release_notes.md
+          echo "### Verify Downloads" >> release_notes.md
+          echo "" >> release_notes.md
+          echo '```bash' >> release_notes.md
+          echo "# Verify a single file" >> release_notes.md
+          echo "sha256sum -c copilot-sdk-supercharged-nodejs-v${VERSION}.zip.sha256" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "# Or verify all files at once" >> release_notes.md
+          echo "sha256sum -c SHA256SUMS.txt" >> release_notes.md
+          echo '```' >> release_notes.md
+
+          # Replace the ${VERSION} placeholder
+          sed -i "s/\${VERSION}/${VERSION}/g" release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          files: |
+            dist/*.zip
+            dist/*.sha256
+            dist/SHA256SUMS.txt
+          draft: false
+          prerelease: false
