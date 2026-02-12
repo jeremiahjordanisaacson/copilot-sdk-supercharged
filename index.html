@@ -812,14 +812,29 @@
             <div class="code-tabs">
                 <button class="code-tab active" data-tab="nodejs">Node.js</button>
                 <button class="code-tab" data-tab="python">Python</button>
+                <button class="code-tab" data-tab="go">Go</button>
+                <button class="code-tab" data-tab="dotnet">.NET</button>
                 <button class="code-tab" data-tab="java">Java</button>
                 <button class="code-tab" data-tab="rust">Rust</button>
-                <button class="code-tab" data-tab="go">Go</button>
                 <button class="code-tab" data-tab="ruby">Ruby</button>
+                <button class="code-tab" data-tab="php">PHP</button>
+                <button class="code-tab" data-tab="swift">Swift</button>
+                <button class="code-tab" data-tab="kotlin">Kotlin</button>
+                <button class="code-tab" data-tab="cpp">C++</button>
+                <button class="code-tab" data-tab="c">C</button>
+                <button class="code-tab" data-tab="dart">Dart</button>
+                <button class="code-tab" data-tab="scala">Scala</button>
+                <button class="code-tab" data-tab="r">R</button>
+                <button class="code-tab" data-tab="perl">Perl</button>
+                <button class="code-tab" data-tab="lua">Lua</button>
+                <button class="code-tab" data-tab="shell">Shell</button>
+                <button class="code-tab" data-tab="elixir">Elixir</button>
+                <button class="code-tab" data-tab="haskell">Haskell</button>
+                <button class="code-tab" data-tab="clojure">Clojure</button>
             </div>
 
             <div class="code-panel active" data-tab="nodejs">
-<pre><span class="token-kw">import</span> { <span class="token-type">CopilotClient</span>, <span class="token-fn">defineTool</span> } <span class="token-kw">from</span> <span class="token-str">"@github/copilot-sdk"</span>;
+<pre><span class="token-kw">import</span> { <span class="token-type">CopilotClient</span> } <span class="token-kw">from</span> <span class="token-str">"@github/copilot-sdk"</span>;
 
 <span class="token-kw">const</span> client = <span class="token-kw">new</span> <span class="token-type">CopilotClient</span>();
 <span class="token-kw">const</span> session = <span class="token-kw">await</span> client.<span class="token-fn">createSession</span>();
@@ -848,6 +863,33 @@ console.<span class="token-fn">log</span>(response?.data.content);
     <span class="token-kw">await</span> client.<span class="token-fn">stop</span>()</pre>
             </div>
 
+            <div class="code-panel" data-tab="go">
+<pre>client := copilot.<span class="token-fn">NewClient</span>(<span class="token-kw">nil</span>)
+client.<span class="token-fn">Start</span>(ctx)
+
+session, _ := client.<span class="token-fn">CreateSession</span>(ctx, <span class="token-kw">nil</span>)
+response, _ := session.<span class="token-fn">SendAndWait</span>(ctx,
+    copilot.<span class="token-type">MessageOptions</span>{
+        Prompt: <span class="token-str">"What is 2 + 2?"</span>,
+    },
+)
+
+fmt.<span class="token-fn">Println</span>(*response.Data.Content)
+client.<span class="token-fn">Stop</span>()</pre>
+            </div>
+
+            <div class="code-panel" data-tab="dotnet">
+<pre><span class="token-kw">using</span> <span class="token-type">GitHub.Copilot.SDK</span>;
+
+<span class="token-kw">await using var</span> client = <span class="token-kw">new</span> <span class="token-type">CopilotClient</span>();
+<span class="token-kw">await using var</span> session = <span class="token-kw">await</span> client.<span class="token-fn">CreateSessionAsync</span>();
+
+<span class="token-kw">var</span> response = <span class="token-kw">await</span> session.<span class="token-fn">SendAndWaitAsync</span>(
+    <span class="token-kw">new</span> <span class="token-type">MessageOptions</span> { Prompt = <span class="token-str">"What is 2 + 2?"</span> }
+);
+<span class="token-type">Console</span>.<span class="token-fn">WriteLine</span>(response?.Data.Content);</pre>
+            </div>
+
             <div class="code-panel" data-tab="java">
 <pre><span class="token-type">CopilotClient</span> client = <span class="token-kw">new</span> <span class="token-type">CopilotClient</span>();
 <span class="token-type">CopilotSession</span> session = client.<span class="token-fn">createSession</span>();
@@ -869,26 +911,10 @@ client.<span class="token-fn">start</span>().<span class="token-kw">await</span>
     <span class="token-type">MessageOptions</span> {
         prompt: <span class="token-str">"What is 2 + 2?"</span>.<span class="token-fn">into</span>(),
         ..<span class="token-type">Default</span>::<span class="token-fn">default</span>()
-    },
-    <span class="token-type">None</span>
+    }, <span class="token-type">None</span>
 ).<span class="token-kw">await</span>?;
 
 client.<span class="token-fn">stop</span>().<span class="token-kw">await</span>?;</pre>
-            </div>
-
-            <div class="code-panel" data-tab="go">
-<pre>client := copilot.<span class="token-fn">NewClient</span>(<span class="token-kw">nil</span>)
-client.<span class="token-fn">Start</span>(ctx)
-
-session, _ := client.<span class="token-fn">CreateSession</span>(ctx, <span class="token-kw">nil</span>)
-response, _ := session.<span class="token-fn">SendAndWait</span>(ctx,
-    copilot.<span class="token-type">MessageOptions</span>{
-        Prompt: <span class="token-str">"What is 2 + 2?"</span>,
-    },
-)
-
-fmt.<span class="token-fn">Println</span>(*response.Data.Content)
-client.<span class="token-fn">Stop</span>()</pre>
             </div>
 
             <div class="code-panel" data-tab="ruby">
@@ -902,6 +928,212 @@ response = session.<span class="token-fn">send_and_wait!</span>(
 
 <span class="token-fn">puts</span> response.data[<span class="token-str">"content"</span>]
 client.<span class="token-fn">stop!</span></pre>
+            </div>
+
+            <div class="code-panel" data-tab="php">
+<pre><span class="token-kw">use</span> <span class="token-type">GitHub\Copilot\CopilotClient</span>;
+<span class="token-kw">use</span> <span class="token-type">GitHub\Copilot\Types\MessageOptions</span>;
+
+<span class="token-kw">$</span>client = <span class="token-kw">new</span> <span class="token-type">CopilotClient</span>();
+<span class="token-kw">$</span>client-><span class="token-fn">start</span>();
+
+<span class="token-kw">$</span>session = <span class="token-kw">$</span>client-><span class="token-fn">createSession</span>();
+<span class="token-kw">$</span>response = <span class="token-kw">$</span>session-><span class="token-fn">sendAndWait</span>(
+    <span class="token-kw">new</span> <span class="token-type">MessageOptions</span>(<span class="token-str">"What is 2 + 2?"</span>)
+);
+<span class="token-fn">echo</span> <span class="token-kw">$</span>response->data[<span class="token-str">'content'</span>];
+
+<span class="token-kw">$</span>client-><span class="token-fn">stop</span>();</pre>
+            </div>
+
+            <div class="code-panel" data-tab="swift">
+<pre><span class="token-kw">import</span> <span class="token-type">CopilotSDK</span>
+
+<span class="token-kw">let</span> client = <span class="token-type">CopilotClient</span>()
+<span class="token-kw">try await</span> client.<span class="token-fn">start</span>()
+
+<span class="token-kw">let</span> session = <span class="token-kw">try await</span> client.<span class="token-fn">createSession</span>()
+<span class="token-kw">let</span> response = <span class="token-kw">try await</span> session.<span class="token-fn">sendAndWait</span>(
+    <span class="token-type">MessageOptions</span>(prompt: <span class="token-str">"What is 2 + 2?"</span>)
+)
+<span class="token-fn">print</span>(response?.data[<span class="token-str">"content"</span>])
+
+<span class="token-kw">try await</span> client.<span class="token-fn">stop</span>()</pre>
+            </div>
+
+            <div class="code-panel" data-tab="kotlin">
+<pre><span class="token-kw">val</span> client = <span class="token-type">CopilotClient</span>()
+client.<span class="token-fn">start</span>()
+
+<span class="token-kw">val</span> session = client.<span class="token-fn">createSession</span>()
+<span class="token-kw">val</span> response = session.<span class="token-fn">sendAndWait</span>(
+    <span class="token-type">MessageOptions</span>(prompt = <span class="token-str">"What is 2 + 2?"</span>)
+)
+<span class="token-fn">println</span>(response?.data?.get(<span class="token-str">"content"</span>))
+
+client.<span class="token-fn">stop</span>()</pre>
+            </div>
+
+            <div class="code-panel" data-tab="cpp">
+<pre><span class="token-kw">#include</span> <span class="token-str">&lt;copilot/client.h&gt;</span>
+
+<span class="token-kw">auto</span> client = copilot::<span class="token-type">CopilotClient</span>();
+client.<span class="token-fn">start</span>();
+
+<span class="token-kw">auto</span> session = client.<span class="token-fn">createSession</span>();
+<span class="token-kw">auto</span> response = session-><span class="token-fn">sendAndWait</span>(
+    copilot::<span class="token-type">MessageOptions</span>{.<span class="token-str">prompt</span> = <span class="token-str">"What is 2 + 2?"</span>}
+);
+std::cout &lt;&lt; response.data[<span class="token-str">"content"</span>];
+
+client.<span class="token-fn">stop</span>();</pre>
+            </div>
+
+            <div class="code-panel" data-tab="c">
+<pre><span class="token-kw">#include</span> <span class="token-str">&lt;copilot/copilot.h&gt;</span>
+
+<span class="token-type">copilot_client_t</span>* client = <span class="token-fn">copilot_client_create</span>(<span class="token-type">NULL</span>);
+<span class="token-fn">copilot_client_start</span>(client);
+
+<span class="token-type">copilot_session_t</span>* session;
+<span class="token-fn">copilot_client_create_session</span>(client, <span class="token-type">NULL</span>, &amp;session);
+
+<span class="token-kw">const char</span>* response;
+<span class="token-fn">copilot_session_send_and_wait</span>(session,
+    <span class="token-str">"What is 2 + 2?"</span>, &amp;response);
+<span class="token-fn">printf</span>(<span class="token-str">"%s\n"</span>, response);
+
+<span class="token-fn">copilot_client_stop</span>(client);
+<span class="token-fn">copilot_client_free</span>(client);</pre>
+            </div>
+
+            <div class="code-panel" data-tab="dart">
+<pre><span class="token-kw">import</span> <span class="token-str">'package:copilot_sdk_supercharged/copilot_sdk.dart'</span>;
+
+<span class="token-kw">final</span> client = <span class="token-type">CopilotClient</span>();
+<span class="token-kw">await</span> client.<span class="token-fn">start</span>();
+
+<span class="token-kw">final</span> session = <span class="token-kw">await</span> client.<span class="token-fn">createSession</span>();
+<span class="token-kw">final</span> response = <span class="token-kw">await</span> session.<span class="token-fn">sendAndWait</span>(
+    <span class="token-type">MessageOptions</span>(prompt: <span class="token-str">'What is 2 + 2?'</span>),
+);
+<span class="token-fn">print</span>(response?.data[<span class="token-str">'content'</span>]);
+
+<span class="token-kw">await</span> client.<span class="token-fn">stop</span>();</pre>
+            </div>
+
+            <div class="code-panel" data-tab="scala">
+<pre><span class="token-kw">val</span> client = <span class="token-kw">new</span> <span class="token-type">CopilotClient</span>()
+client.<span class="token-fn">start</span>()
+
+<span class="token-kw">val</span> session = <span class="token-type">Await</span>.<span class="token-fn">result</span>(
+    client.<span class="token-fn">createSession</span>(), <span class="token-num">30</span>.seconds)
+<span class="token-kw">val</span> response = <span class="token-type">Await</span>.<span class="token-fn">result</span>(
+    session.<span class="token-fn">sendAndWait</span>(
+        <span class="token-type">MessageOptions</span>(<span class="token-str">"What is 2 + 2?"</span>)
+    ), <span class="token-num">60</span>.seconds)
+
+<span class="token-fn">println</span>(response.data(<span class="token-str">"content"</span>))
+client.<span class="token-fn">stop</span>()</pre>
+            </div>
+
+            <div class="code-panel" data-tab="r">
+<pre><span class="token-fn">library</span>(copilot.sdk.supercharged)
+
+client <span class="token-kw">&lt;-</span> <span class="token-type">CopilotClient</span><span class="token-kw">$</span><span class="token-fn">new</span>()
+client<span class="token-kw">$</span><span class="token-fn">start</span>()
+
+session <span class="token-kw">&lt;-</span> client<span class="token-kw">$</span><span class="token-fn">create_session</span>()
+response <span class="token-kw">&lt;-</span> session<span class="token-kw">$</span><span class="token-fn">send_and_wait</span>(
+    <span class="token-str">"What is 2 + 2?"</span>
+)
+<span class="token-fn">cat</span>(response<span class="token-kw">$</span>data<span class="token-kw">$</span>content)
+
+client<span class="token-kw">$</span><span class="token-fn">stop</span>()</pre>
+            </div>
+
+            <div class="code-panel" data-tab="perl">
+<pre><span class="token-kw">use</span> <span class="token-type">GitHub::Copilot::Client</span>;
+
+<span class="token-kw">my</span> <span class="token-kw">$</span>client = <span class="token-type">GitHub::Copilot::Client</span>-><span class="token-fn">new</span>();
+<span class="token-kw">$</span>client-><span class="token-fn">start</span>();
+
+<span class="token-kw">my</span> <span class="token-kw">$</span>session = <span class="token-kw">$</span>client-><span class="token-fn">create_session</span>();
+<span class="token-kw">my</span> <span class="token-kw">$</span>response = <span class="token-kw">$</span>session-><span class="token-fn">send_and_wait</span>(
+    <span class="token-str">"What is 2 + 2?"</span>
+);
+<span class="token-fn">say</span> <span class="token-kw">$</span>response->{data}{content};
+
+<span class="token-kw">$</span>client-><span class="token-fn">stop</span>();</pre>
+            </div>
+
+            <div class="code-panel" data-tab="lua">
+<pre><span class="token-kw">local</span> Client = <span class="token-fn">require</span>(<span class="token-str">"copilot.client"</span>)
+
+<span class="token-kw">local</span> client = Client:<span class="token-fn">new</span>()
+client:<span class="token-fn">start</span>()
+
+<span class="token-kw">local</span> session = client:<span class="token-fn">create_session</span>()
+<span class="token-kw">local</span> response = session:<span class="token-fn">send_and_wait</span>(
+    { prompt = <span class="token-str">"What is 2 + 2?"</span> }
+)
+<span class="token-fn">print</span>(response.data.content)
+
+client:<span class="token-fn">stop</span>()</pre>
+            </div>
+
+            <div class="code-panel" data-tab="shell">
+<pre><span class="token-fn">source</span> <span class="token-str">./lib/copilot_sdk.sh</span>
+
+<span class="token-fn">copilot_client_start</span>
+<span class="token-fn">copilot_client_create_session</span>
+
+<span class="token-fn">copilot_session_send_and_wait</span> <span class="token-str">"What is 2 + 2?"</span>
+<span class="token-fn">echo</span> <span class="token-str">"$COPILOT_SESSION_LAST_RESPONSE"</span>
+
+<span class="token-fn">copilot_session_destroy</span>
+<span class="token-fn">copilot_client_stop</span></pre>
+            </div>
+
+            <div class="code-panel" data-tab="elixir">
+<pre>{<span class="token-str">:ok</span>, client} = <span class="token-type">Copilot.Client</span>.<span class="token-fn">start_link</span>()
+<span class="token-type">Copilot.Client</span>.<span class="token-fn">start!</span>(client)
+
+{<span class="token-str">:ok</span>, session} = <span class="token-type">Copilot.Client</span>.<span class="token-fn">create_session</span>(client)
+{<span class="token-str">:ok</span>, response} = <span class="token-type">Copilot.Session</span>.<span class="token-fn">send_and_wait</span>(
+    session, <span class="token-str">"What is 2 + 2?"</span>
+)
+<span class="token-type">IO</span>.<span class="token-fn">puts</span>(response.data[<span class="token-str">"content"</span>])
+
+<span class="token-type">Copilot.Client</span>.<span class="token-fn">stop</span>(client)</pre>
+            </div>
+
+            <div class="code-panel" data-tab="haskell">
+<pre><span class="token-kw">import</span> <span class="token-type">Copilot.Client</span>
+<span class="token-kw">import</span> <span class="token-type">Copilot.Session</span>
+
+main :: <span class="token-type">IO</span> ()
+main = <span class="token-kw">do</span>
+    client <span class="token-kw">&lt;-</span> <span class="token-fn">startClient</span> <span class="token-fn">defaultClientOptions</span>
+    session <span class="token-kw">&lt;-</span> <span class="token-fn">createSession</span> client <span class="token-type">Nothing</span>
+    response <span class="token-kw">&lt;-</span> <span class="token-fn">sendAndWait</span> session
+        <span class="token-str">"What is 2 + 2?"</span> <span class="token-type">Nothing</span>
+    <span class="token-fn">putStrLn</span> (content response)
+    <span class="token-fn">stopClient</span> client</pre>
+            </div>
+
+            <div class="code-panel" data-tab="clojure">
+<pre>(<span class="token-kw">require</span> '[copilot.client <span class="token-str">:as</span> client])
+(<span class="token-kw">require</span> '[copilot.session <span class="token-str">:as</span> session])
+
+(<span class="token-kw">let</span> [c (client/<span class="token-fn">create-client</span>)]
+  (client/<span class="token-fn">start!</span> c)
+  (<span class="token-kw">let</span> [s (client/<span class="token-fn">create-session!</span> c)]
+    (<span class="token-kw">let</span> [resp (session/<span class="token-fn">send-and-wait!</span> s
+               <span class="token-str">"What is 2 + 2?"</span>)]
+      (<span class="token-fn">println</span> (<span class="token-str">:content</span> (<span class="token-str">:data</span> resp))))
+    (session/<span class="token-fn">destroy!</span> s))
+  (client/<span class="token-fn">stop!</span> c))</pre>
             </div>
         </div>
     </div>
