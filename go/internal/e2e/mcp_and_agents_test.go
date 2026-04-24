@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,16 +18,16 @@ func TestMCPServers(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		mcpServers := map[string]copilot.MCPServerConfig{
-			"test-server": {
-				"type":    "local",
-				"command": "echo",
-				"args":    []string{"hello"},
-				"tools":   []string{"*"},
+			"test-server": copilot.MCPStdioServerConfig{
+				Command: "echo",
+				Args:    []string{"hello"},
+				Tools:   []string{"*"},
 			},
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			MCPServers: mcpServers,
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			MCPServers:          mcpServers,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -49,18 +50,18 @@ func TestMCPServers(t *testing.T) {
 			t.Fatalf("Failed to get final message: %v", err)
 		}
 
-		if message.Data.Content == nil || !strings.Contains(*message.Data.Content, "4") {
-			t.Errorf("Expected message to contain '4', got: %v", message.Data.Content)
+		if md, ok := message.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(md.Content, "4") {
+			t.Errorf("Expected message to contain '4', got: %v", message.Data)
 		}
 
-		session.Destroy()
+		session.Disconnect()
 	})
 
 	t.Run("accept MCP server config on resume", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create a session first
-		session1, err := client.CreateSession(t.Context(), nil)
+		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -73,16 +74,16 @@ func TestMCPServers(t *testing.T) {
 
 		// Resume with MCP servers
 		mcpServers := map[string]copilot.MCPServerConfig{
-			"test-server": {
-				"type":    "local",
-				"command": "echo",
-				"args":    []string{"hello"},
-				"tools":   []string{"*"},
+			"test-server": copilot.MCPStdioServerConfig{
+				Command: "echo",
+				Args:    []string{"hello"},
+				Tools:   []string{"*"},
 			},
 		}
 
 		session2, err := client.ResumeSessionWithOptions(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			MCPServers: mcpServers,
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			MCPServers:          mcpServers,
 		})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
@@ -97,33 +98,35 @@ func TestMCPServers(t *testing.T) {
 			t.Fatalf("Failed to send message: %v", err)
 		}
 
-		if message.Data.Content == nil || !strings.Contains(*message.Data.Content, "6") {
-			t.Errorf("Expected message to contain '6', got: %v", message.Data.Content)
+		if md, ok := message.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(md.Content, "6") {
+			t.Errorf("Expected message to contain '6', got: %v", message.Data)
 		}
 
-		session2.Destroy()
+		session2.Disconnect()
 	})
 
-	t.Run("handle multiple MCP servers", func(t *testing.T) {
+	t.Run("should pass literal env values to MCP server subprocess", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
+		mcpServerPath, err := filepath.Abs("../../../test/harness/test-mcp-server.mjs")
+		if err != nil {
+			t.Fatalf("Failed to resolve test-mcp-server path: %v", err)
+		}
+		mcpServerDir := filepath.Dir(mcpServerPath)
+
 		mcpServers := map[string]copilot.MCPServerConfig{
-			"server1": {
-				"type":    "local",
-				"command": "echo",
-				"args":    []string{"server1"},
-				"tools":   []string{"*"},
-			},
-			"server2": {
-				"type":    "local",
-				"command": "echo",
-				"args":    []string{"server2"},
-				"tools":   []string{"*"},
+			"env-echo": copilot.MCPStdioServerConfig{
+				Command: "node",
+				Args:    []string{mcpServerPath},
+				Tools:   []string{"*"},
+				Env:     map[string]string{"TEST_SECRET": "hunter2"},
+				Cwd:     mcpServerDir,
 			},
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			MCPServers: mcpServers,
+			MCPServers:          mcpServers,
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -133,7 +136,49 @@ func TestMCPServers(t *testing.T) {
 			t.Error("Expected non-empty session ID")
 		}
 
-		session.Destroy()
+		message, err := session.SendAndWait(t.Context(), copilot.MessageOptions{
+			Prompt: "Use the env-echo/get_env tool to read the TEST_SECRET environment variable. Reply with just the value, nothing else.",
+		})
+		if err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		if md, ok := message.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(md.Content, "hunter2") {
+			t.Errorf("Expected message to contain 'hunter2', got: %v", message.Data)
+		}
+
+		session.Disconnect()
+	})
+
+	t.Run("handle multiple MCP servers", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+
+		mcpServers := map[string]copilot.MCPServerConfig{
+			"server1": copilot.MCPStdioServerConfig{
+				Command: "echo",
+				Args:    []string{"server1"},
+				Tools:   []string{"*"},
+			},
+			"server2": copilot.MCPStdioServerConfig{
+				Command: "echo",
+				Args:    []string{"server2"},
+				Tools:   []string{"*"},
+			},
+		}
+
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			MCPServers:          mcpServers,
+		})
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		if session.SessionID == "" {
+			t.Error("Expected non-empty session ID")
+		}
+
+		session.Disconnect()
 	})
 }
 
@@ -157,7 +202,8 @@ func TestCustomAgents(t *testing.T) {
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			CustomAgents: customAgents,
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			CustomAgents:        customAgents,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -180,18 +226,18 @@ func TestCustomAgents(t *testing.T) {
 			t.Fatalf("Failed to get final message: %v", err)
 		}
 
-		if message.Data.Content == nil || !strings.Contains(*message.Data.Content, "10") {
-			t.Errorf("Expected message to contain '10', got: %v", message.Data.Content)
+		if md, ok := message.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(md.Content, "10") {
+			t.Errorf("Expected message to contain '10', got: %v", message.Data)
 		}
 
-		session.Destroy()
+		session.Disconnect()
 	})
 
 	t.Run("accept custom agent config on resume", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create a session first
-		session1, err := client.CreateSession(t.Context(), nil)
+		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -213,7 +259,8 @@ func TestCustomAgents(t *testing.T) {
 		}
 
 		session2, err := client.ResumeSessionWithOptions(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			CustomAgents: customAgents,
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			CustomAgents:        customAgents,
 		})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
@@ -228,11 +275,11 @@ func TestCustomAgents(t *testing.T) {
 			t.Fatalf("Failed to send message: %v", err)
 		}
 
-		if message.Data.Content == nil || !strings.Contains(*message.Data.Content, "12") {
-			t.Errorf("Expected message to contain '12', got: %v", message.Data.Content)
+		if md, ok := message.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(md.Content, "12") {
+			t.Errorf("Expected message to contain '12', got: %v", message.Data)
 		}
 
-		session2.Destroy()
+		session2.Disconnect()
 	})
 
 	t.Run("handle custom agent with tools", func(t *testing.T) {
@@ -251,7 +298,8 @@ func TestCustomAgents(t *testing.T) {
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			CustomAgents: customAgents,
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			CustomAgents:        customAgents,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -261,7 +309,7 @@ func TestCustomAgents(t *testing.T) {
 			t.Error("Expected non-empty session ID")
 		}
 
-		session.Destroy()
+		session.Disconnect()
 	})
 
 	t.Run("handle custom agent with MCP servers", func(t *testing.T) {
@@ -274,18 +322,18 @@ func TestCustomAgents(t *testing.T) {
 				Description: "An agent with its own MCP servers",
 				Prompt:      "You are an agent with MCP servers.",
 				MCPServers: map[string]copilot.MCPServerConfig{
-					"agent-server": {
-						"type":    "local",
-						"command": "echo",
-						"args":    []string{"agent-mcp"},
-						"tools":   []string{"*"},
+					"agent-server": copilot.MCPStdioServerConfig{
+						Command: "echo",
+						Args:    []string{"agent-mcp"},
+						Tools:   []string{"*"},
 					},
 				},
 			},
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			CustomAgents: customAgents,
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			CustomAgents:        customAgents,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -295,7 +343,7 @@ func TestCustomAgents(t *testing.T) {
 			t.Error("Expected non-empty session ID")
 		}
 
-		session.Destroy()
+		session.Disconnect()
 	})
 
 	t.Run("handle multiple custom agents", func(t *testing.T) {
@@ -321,7 +369,8 @@ func TestCustomAgents(t *testing.T) {
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			CustomAgents: customAgents,
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			CustomAgents:        customAgents,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -331,7 +380,7 @@ func TestCustomAgents(t *testing.T) {
 			t.Error("Expected non-empty session ID")
 		}
 
-		session.Destroy()
+		session.Disconnect()
 	})
 }
 
@@ -344,11 +393,10 @@ func TestCombinedConfiguration(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		mcpServers := map[string]copilot.MCPServerConfig{
-			"shared-server": {
-				"type":    "local",
-				"command": "echo",
-				"args":    []string{"shared"},
-				"tools":   []string{"*"},
+			"shared-server": copilot.MCPStdioServerConfig{
+				Command: "echo",
+				Args:    []string{"shared"},
+				Tools:   []string{"*"},
 			},
 		}
 
@@ -362,8 +410,9 @@ func TestCombinedConfiguration(t *testing.T) {
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			MCPServers:   mcpServers,
-			CustomAgents: customAgents,
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			MCPServers:          mcpServers,
+			CustomAgents:        customAgents,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -385,10 +434,10 @@ func TestCombinedConfiguration(t *testing.T) {
 			t.Fatalf("Failed to get final message: %v", err)
 		}
 
-		if message.Data.Content == nil || !strings.Contains(*message.Data.Content, "14") {
-			t.Errorf("Expected message to contain '14', got: %v", message.Data.Content)
+		if md, ok := message.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(md.Content, "14") {
+			t.Errorf("Expected message to contain '14', got: %v", message.Data)
 		}
 
-		session.Destroy()
+		session.Disconnect()
 	})
 }

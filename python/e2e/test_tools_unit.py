@@ -5,8 +5,13 @@ import json
 import pytest
 from pydantic import BaseModel, Field
 
-from copilot import ToolInvocation, define_tool
-from copilot.tools import _normalize_result
+from copilot import define_tool
+from copilot.tools import (
+    ToolInvocation,
+    ToolResult,
+    _normalize_result,
+    convert_mcp_call_tool_result,
+)
 
 
 class TestDefineTool:
@@ -62,12 +67,12 @@ class TestDefineTool:
             received_params = params
             return "ok"
 
-        invocation: ToolInvocation = {
-            "session_id": "session-1",
-            "tool_call_id": "call-1",
-            "tool_name": "test",
-            "arguments": {"name": "Alice", "count": 42},
-        }
+        invocation = ToolInvocation(
+            session_id="session-1",
+            tool_call_id="call-1",
+            tool_name="test",
+            arguments={"name": "Alice", "count": 42},
+        )
 
         await test_tool.handler(invocation)
 
@@ -87,17 +92,17 @@ class TestDefineTool:
             received_inv = invocation
             return "ok"
 
-        invocation: ToolInvocation = {
-            "session_id": "session-123",
-            "tool_call_id": "call-456",
-            "tool_name": "test",
-            "arguments": {},
-        }
+        invocation = ToolInvocation(
+            session_id="session-123",
+            tool_call_id="call-456",
+            tool_name="test",
+            arguments={},
+        )
 
         await test_tool.handler(invocation)
 
-        assert received_inv["session_id"] == "session-123"
-        assert received_inv["tool_call_id"] == "call-456"
+        assert received_inv.session_id == "session-123"
+        assert received_inv.tool_call_id == "call-456"
 
     async def test_zero_param_handler(self):
         """Handler with no parameters: def handler() -> str"""
@@ -109,17 +114,17 @@ class TestDefineTool:
             called = True
             return "ok"
 
-        invocation: ToolInvocation = {
-            "session_id": "s1",
-            "tool_call_id": "c1",
-            "tool_name": "test",
-            "arguments": {},
-        }
+        invocation = ToolInvocation(
+            session_id="s1",
+            tool_call_id="c1",
+            tool_name="test",
+            arguments={},
+        )
 
         result = await test_tool.handler(invocation)
 
         assert called
-        assert result["textResultForLlm"] == "ok"
+        assert result.text_result_for_llm == "ok"
 
     async def test_invocation_only_handler(self):
         """Handler with only invocation: def handler(invocation) -> str"""
@@ -131,17 +136,17 @@ class TestDefineTool:
             received_inv = invocation
             return "ok"
 
-        invocation: ToolInvocation = {
-            "session_id": "s1",
-            "tool_call_id": "c1",
-            "tool_name": "test",
-            "arguments": {},
-        }
+        invocation = ToolInvocation(
+            session_id="s1",
+            tool_call_id="c1",
+            tool_name="test",
+            arguments={},
+        )
 
         await test_tool.handler(invocation)
 
         assert received_inv is not None
-        assert received_inv["session_id"] == "s1"
+        assert received_inv.session_id == "s1"
 
     async def test_params_only_handler(self):
         """Handler with only params: def handler(params) -> str"""
@@ -157,12 +162,12 @@ class TestDefineTool:
             received_params = params
             return "ok"
 
-        invocation: ToolInvocation = {
-            "session_id": "s1",
-            "tool_call_id": "c1",
-            "tool_name": "test",
-            "arguments": {"value": "hello"},
-        }
+        invocation = ToolInvocation(
+            session_id="s1",
+            tool_call_id="c1",
+            tool_name="test",
+            arguments={"value": "hello"},
+        )
 
         await test_tool.handler(invocation)
 
@@ -177,20 +182,20 @@ class TestDefineTool:
         def failing_tool(params: Params, invocation: ToolInvocation) -> str:
             raise ValueError("secret error message")
 
-        invocation: ToolInvocation = {
-            "session_id": "s1",
-            "tool_call_id": "c1",
-            "tool_name": "failing",
-            "arguments": {},
-        }
+        invocation = ToolInvocation(
+            session_id="s1",
+            tool_call_id="c1",
+            tool_name="failing",
+            arguments={},
+        )
 
         result = await failing_tool.handler(invocation)
 
-        assert result["resultType"] == "failure"
-        assert "secret error message" not in result["textResultForLlm"]
-        assert "error" in result["textResultForLlm"].lower()
+        assert result.result_type == "failure"
+        assert "secret error message" not in result.text_result_for_llm
+        assert "error" in result.text_result_for_llm.lower()
         # But the actual error is stored internally
-        assert result["error"] == "secret error message"
+        assert result.error == "secret error message"
 
     async def test_function_style_api(self):
         class Params(BaseModel):
@@ -207,14 +212,14 @@ class TestDefineTool:
         assert tool.description == "My tool"
 
         result = await tool.handler(
-            {
-                "session_id": "s",
-                "tool_call_id": "c",
-                "tool_name": "my_tool",
-                "arguments": {"value": "hello"},
-            }
+            ToolInvocation(
+                session_id="s",
+                tool_call_id="c",
+                tool_name="my_tool",
+                arguments={"value": "hello"},
+            )
         )
-        assert result["textResultForLlm"] == "HELLO"
+        assert result.text_result_for_llm == "HELLO"
 
     def test_function_style_requires_name(self):
         class Params(BaseModel):
@@ -231,34 +236,34 @@ class TestDefineTool:
 class TestNormalizeResult:
     def test_none_returns_empty_success(self):
         result = _normalize_result(None)
-        assert result["textResultForLlm"] == ""
-        assert result["resultType"] == "success"
+        assert result.text_result_for_llm == ""
+        assert result.result_type == "success"
 
     def test_string_passes_through(self):
         result = _normalize_result("hello world")
-        assert result["textResultForLlm"] == "hello world"
-        assert result["resultType"] == "success"
+        assert result.text_result_for_llm == "hello world"
+        assert result.result_type == "success"
 
-    def test_dict_with_result_type_passes_through(self):
-        input_result = {
-            "textResultForLlm": "custom",
-            "resultType": "failure",
-            "error": "some error",
-        }
+    def test_tool_result_passes_through(self):
+        input_result = ToolResult(
+            text_result_for_llm="custom",
+            result_type="failure",
+            error="some error",
+        )
         result = _normalize_result(input_result)
-        assert result["textResultForLlm"] == "custom"
-        assert result["resultType"] == "failure"
+        assert result.text_result_for_llm == "custom"
+        assert result.result_type == "failure"
 
     def test_dict_is_json_serialized(self):
         result = _normalize_result({"key": "value", "num": 42})
-        parsed = json.loads(result["textResultForLlm"])
+        parsed = json.loads(result.text_result_for_llm)
         assert parsed == {"key": "value", "num": 42}
-        assert result["resultType"] == "success"
+        assert result.result_type == "success"
 
     def test_list_is_json_serialized(self):
         result = _normalize_result(["a", "b", "c"])
-        assert result["textResultForLlm"] == '["a", "b", "c"]'
-        assert result["resultType"] == "success"
+        assert result.text_result_for_llm == '["a", "b", "c"]'
+        assert result.result_type == "success"
 
     def test_pydantic_model_is_serialized(self):
         class Response(BaseModel):
@@ -266,7 +271,7 @@ class TestNormalizeResult:
             count: int
 
         result = _normalize_result(Response(status="ok", count=5))
-        parsed = json.loads(result["textResultForLlm"])
+        parsed = json.loads(result.text_result_for_llm)
         assert parsed == {"status": "ok", "count": 5}
 
     def test_list_of_pydantic_models_is_serialized(self):
@@ -276,11 +281,107 @@ class TestNormalizeResult:
 
         items = [Item(name="a", value=1), Item(name="b", value=2)]
         result = _normalize_result(items)
-        parsed = json.loads(result["textResultForLlm"])
+        parsed = json.loads(result.text_result_for_llm)
         assert parsed == [{"name": "a", "value": 1}, {"name": "b", "value": 2}]
-        assert result["resultType"] == "success"
+        assert result.result_type == "success"
 
     def test_raises_for_unserializable_value(self):
         # Functions cannot be JSON serialized
         with pytest.raises(TypeError, match="Failed to serialize"):
             _normalize_result(lambda x: x)
+
+
+class TestConvertMcpCallToolResult:
+    def test_text_only_call_tool_result(self):
+        result = convert_mcp_call_tool_result(
+            {
+                "content": [{"type": "text", "text": "hello"}],
+            }
+        )
+        assert result.text_result_for_llm == "hello"
+        assert result.result_type == "success"
+
+    def test_multiple_text_blocks(self):
+        result = convert_mcp_call_tool_result(
+            {
+                "content": [
+                    {"type": "text", "text": "line 1"},
+                    {"type": "text", "text": "line 2"},
+                ],
+            }
+        )
+        assert result.text_result_for_llm == "line 1\nline 2"
+
+    def test_is_error_maps_to_failure(self):
+        result = convert_mcp_call_tool_result(
+            {
+                "content": [{"type": "text", "text": "oops"}],
+                "isError": True,
+            }
+        )
+        assert result.result_type == "failure"
+
+    def test_is_error_false_maps_to_success(self):
+        result = convert_mcp_call_tool_result(
+            {
+                "content": [{"type": "text", "text": "ok"}],
+                "isError": False,
+            }
+        )
+        assert result.result_type == "success"
+
+    def test_image_content_to_binary(self):
+        result = convert_mcp_call_tool_result(
+            {
+                "content": [{"type": "image", "data": "base64data", "mimeType": "image/png"}],
+            }
+        )
+        assert result.binary_results_for_llm is not None
+        assert len(result.binary_results_for_llm) == 1
+        assert result.binary_results_for_llm[0].data == "base64data"
+        assert result.binary_results_for_llm[0].mime_type == "image/png"
+        assert result.binary_results_for_llm[0].type == "image"
+
+    def test_resource_text_to_text_result(self):
+        result = convert_mcp_call_tool_result(
+            {
+                "content": [
+                    {
+                        "type": "resource",
+                        "resource": {"uri": "file:///data.txt", "text": "file contents"},
+                    },
+                ],
+            }
+        )
+        assert result.text_result_for_llm == "file contents"
+
+    def test_resource_blob_to_binary(self):
+        result = convert_mcp_call_tool_result(
+            {
+                "content": [
+                    {
+                        "type": "resource",
+                        "resource": {
+                            "uri": "file:///img.png",
+                            "blob": "blobdata",
+                            "mimeType": "image/png",
+                        },
+                    },
+                ],
+            }
+        )
+        assert result.binary_results_for_llm is not None
+        assert len(result.binary_results_for_llm) == 1
+        assert result.binary_results_for_llm[0].data == "blobdata"
+        assert result.binary_results_for_llm[0].description == "file:///img.png"
+
+    def test_empty_content_array(self):
+        result = convert_mcp_call_tool_result({"content": []})
+        assert result.text_result_for_llm == ""
+        assert result.result_type == "success"
+
+    def test_call_tool_result_dict_is_json_serialized_by_normalize(self):
+        """_normalize_result does NOT auto-detect MCP results; it JSON-serializes them."""
+        result = _normalize_result({"content": [{"type": "text", "text": "hello"}]})
+        parsed = json.loads(result.text_result_for_llm)
+        assert parsed == {"content": [{"type": "text", "text": "hello"}]}

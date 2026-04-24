@@ -1,48 +1,98 @@
-# Copilot Python SDK
+# Copilot Python SDK — Supercharged Edition
 
 Python SDK for programmatic control of GitHub Copilot CLI via JSON-RPC.
 
-> **Note:** This SDK is in technical preview and may change in breaking ways.
+> **Note:** This SDK is in public preview and may change in breaking ways.
+
+> This is the **copilot-sdk-supercharged** fork, which extends the official Copilot SDK with support for 17 additional language SDKs and extra features. See the [top-level README](../README.md) for the full multi-language overview.
 
 ## Installation
 
 ```bash
-pip install -e ".[dev]"
+pip install copilot-sdk-supercharged
+# or for development
+pip install -e ".[telemetry,dev]"
 # or
-uv pip install -e ".[dev]"
+uv pip install -e ".[telemetry,dev]"
+```
+
+## Run the Sample
+
+Try the interactive chat sample (from the repo root):
+
+```bash
+cd python/samples
+python chat.py
 ```
 
 ## Quick Start
 
 ```python
 import asyncio
+
 from copilot import CopilotClient
+from copilot.generated.session_events import AssistantMessageData, SessionIdleData
 
 async def main():
-    # Create and start client
+    # Client automatically starts on enter and cleans up on exit
+    async with CopilotClient() as client:
+        # Create a session with automatic cleanup
+        async with await client.create_session(model="gpt-5") as session:
+            # Wait for response using session.idle event
+            done = asyncio.Event()
+
+            def on_event(event):
+                match event.data:
+                    case AssistantMessageData() as data:
+                        print(data.content)
+                    case SessionIdleData():
+                        done.set()
+
+            session.on(on_event)
+
+            # Send a message and wait for completion
+            await session.send("What is 2+2?")
+            await done.wait()
+
+asyncio.run(main())
+```
+
+### Manual Resource Management
+
+If you need more control over the lifecycle, you can call `start()`, `stop()`, and `disconnect()` manually:
+
+```python
+import asyncio
+
+from copilot import CopilotClient
+from copilot.generated.session_events import AssistantMessageData, SessionIdleData
+from copilot.session import PermissionHandler
+
+async def main():
     client = CopilotClient()
     await client.start()
 
-    # Create a session
-    session = await client.create_session({"model": "gpt-5"})
+    # Create a session (on_permission_request is required)
+    session = await client.create_session(
+        on_permission_request=PermissionHandler.approve_all,
+        model="gpt-5",
+    )
 
-    # Wait for response using session.idle event
     done = asyncio.Event()
 
     def on_event(event):
-        if event.type.value == "assistant.message":
-            print(event.data.content)
-        elif event.type.value == "session.idle":
-            done.set()
+        match event.data:
+            case AssistantMessageData() as data:
+                print(data.content)
+            case SessionIdleData():
+                done.set()
 
     session.on(on_event)
-
-    # Send a message and wait for completion
-    await session.send({"prompt": "What is 2+2?"})
+    await session.send("What is 2+2?")
     await done.wait()
 
-    # Clean up
-    await session.destroy()
+    # Clean up manually
+    await session.disconnect()
     await client.stop()
 
 asyncio.run(main())
@@ -56,60 +106,79 @@ asyncio.run(main())
 - ✅ Session history with `get_messages()`
 - ✅ Type hints throughout
 - ✅ Async/await native
+- ✅ Async context manager support for automatic resource cleanup
 
 ## API Reference
 
 ### CopilotClient
 
 ```python
-client = CopilotClient({
-    "cli_path": "copilot",  # Optional: path to CLI executable
-    "cli_url": None,        # Optional: URL of existing server (e.g., "localhost:8080")
-    "log_level": "info",    # Optional: log level (default: "info")
-    "auto_start": True,     # Optional: auto-start server (default: True)
-    "auto_restart": True,   # Optional: auto-restart on crash (default: True)
-})
-await client.start()
+from copilot import CopilotClient, SubprocessConfig
+from copilot.session import PermissionHandler
 
-session = await client.create_session({"model": "gpt-5"})
+async with CopilotClient() as client:
+    async with await client.create_session(model="gpt-5") as session:
+        def on_event(event):
+            print(f"Event: {event.type}")
 
-def on_event(event):
-    print(f"Event: {event['type']}")
+        session.on(on_event)
+        await session.send("Hello!")
 
-session.on(on_event)
-await session.send({"prompt": "Hello!"})
-
-# ... wait for events ...
-
-await session.destroy()
-await client.stop()
+        # ... wait for events ...
 ```
 
-**CopilotClient Options:**
+> **Note:** For manual lifecycle management, see [Manual Resource Management](#manual-resource-management) above.
 
-- `cli_path` (str): Path to CLI executable (default: "copilot" or `COPILOT_CLI_PATH` env var)
-- `cli_url` (str): URL of existing CLI server (e.g., `"localhost:8080"`, `"http://127.0.0.1:9000"`, or just `"8080"`). When provided, the client will not spawn a CLI process.
-- `cwd` (str): Working directory for CLI process
-- `port` (int): Server port for TCP mode (default: 0 for random)
+```python
+from copilot import CopilotClient, ExternalServerConfig
+
+# Connect to an existing CLI server
+client = CopilotClient(ExternalServerConfig(url="localhost:3000"))
+```
+
+**CopilotClient Constructor:**
+
+```python
+CopilotClient(
+    config=None,        # SubprocessConfig | ExternalServerConfig | None
+    *,
+    auto_start=True,    # auto-start server on first use
+    on_list_models=None, # custom handler for list_models()
+)
+```
+
+**SubprocessConfig** — spawn a local CLI process:
+
+- `cli_path` (str | None): Path to CLI executable (default: `COPILOT_CLI_PATH` env var, or bundled binary)
+- `cli_args` (list[str]): Extra arguments for the CLI executable
+- `cwd` (str | None): Working directory for CLI process (default: current dir)
 - `use_stdio` (bool): Use stdio transport instead of TCP (default: True)
+- `port` (int): Server port for TCP mode (default: 0 for random)
 - `log_level` (str): Log level (default: "info")
-- `auto_start` (bool): Auto-start server on first use (default: True)
-- `auto_restart` (bool): Auto-restart on crash (default: True)
-- `github_token` (str): GitHub token for authentication. When provided, takes priority over other auth methods.
-- `use_logged_in_user` (bool): Whether to use logged-in user for authentication (default: True, but False when `github_token` is provided). Cannot be used with `cli_url`.
+- `env` (dict | None): Environment variables for the CLI process
+- `github_token` (str | None): GitHub token for authentication. When provided, takes priority over other auth methods.
+- `use_logged_in_user` (bool | None): Whether to use logged-in user for authentication (default: True, but False when `github_token` is provided).
+- `telemetry` (dict | None): OpenTelemetry configuration for the CLI process. Providing this enables telemetry — no separate flag needed. See [Telemetry](#telemetry) below.
 
-**SessionConfig Options (for `create_session`):**
+**ExternalServerConfig** — connect to an existing CLI server:
+
+- `url` (str): Server URL (e.g., `"localhost:8080"`, `"http://127.0.0.1:9000"`, or just `"8080"`).
+
+**`CopilotClient.create_session()`:**
+
+These are passed as keyword arguments to `create_session()`:
 
 - `model` (str): Model to use ("gpt-5", "claude-sonnet-4.5", etc.). **Required when using custom provider.**
 - `reasoning_effort` (str): Reasoning effort level for models that support it ("low", "medium", "high", "xhigh"). Use `list_models()` to check which models support this option.
 - `session_id` (str): Custom session ID
 - `tools` (list): Custom tools exposed to the CLI
-- `system_message` (dict): System message configuration
+- `system_message` (SystemMessageConfig): System message configuration
 - `streaming` (bool): Enable streaming delta events
-- `provider` (dict): Custom API provider configuration (BYOK). See [Custom Providers](#custom-providers) section.
-- `infinite_sessions` (dict): Automatic context compaction configuration
+- `provider` (ProviderConfig): Custom API provider configuration (BYOK). See [Custom Providers](#custom-providers) section.
+- `infinite_sessions` (InfiniteSessionConfig): Automatic context compaction configuration
+- `on_permission_request` (callable): **Required.** Handler called before each tool execution to approve or deny it. Use `PermissionHandler.approve_all` to allow everything, or provide a custom function for fine-grained control. See [Permission Handling](#permission-handling) section.
 - `on_user_input_request` (callable): Handler for user input requests from the agent (enables ask_user tool). See [User Input Requests](#user-input-requests) section.
-- `hooks` (dict): Hook handlers for session lifecycle events. See [Session Hooks](#session-hooks) section.
+- `hooks` (SessionHooks): Hook handlers for session lifecycle events. See [Session Hooks](#session-hooks) section.
 
 **Session Lifecycle Methods:**
 
@@ -134,6 +203,7 @@ unsubscribe()
 ```
 
 **Lifecycle Event Types:**
+
 - `session.created` - A new session was created
 - `session.deleted` - A session was deleted
 - `session.updated` - A session was updated
@@ -156,10 +226,12 @@ async def lookup_issue(params: LookupIssueParams) -> str:
     issue = await fetch_issue(params.id)
     return issue.summary
 
-session = await client.create_session({
-    "model": "gpt-5",
-    "tools": [lookup_issue],
-})
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    model="gpt-5",
+    tools=[lookup_issue],
+) as session:
+    ...
 ```
 
 > **Note:** When using `from __future__ import annotations`, define Pydantic models at module level (not inside functions).
@@ -169,20 +241,23 @@ session = await client.create_session({
 For users who prefer manual schema definition:
 
 ```python
-from copilot import CopilotClient, Tool
+from copilot import CopilotClient
+from copilot.tools import Tool, ToolInvocation, ToolResult
+from copilot.session import PermissionHandler
 
-async def lookup_issue(invocation):
-    issue_id = invocation["arguments"]["id"]
+async def lookup_issue(invocation: ToolInvocation) -> ToolResult:
+    issue_id = invocation.arguments["id"]
     issue = await fetch_issue(issue_id)
-    return {
-        "textResultForLlm": issue.summary,
-        "resultType": "success",
-        "sessionLog": f"Fetched issue {issue_id}",
-    }
+    return ToolResult(
+        text_result_for_llm=issue.summary,
+        result_type="success",
+        session_log=f"Fetched issue {issue_id}",
+    )
 
-session = await client.create_session({
-    "model": "gpt-5",
-    "tools": [
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    model="gpt-5",
+    tools=[
         Tool(
             name="lookup_issue",
             description="Fetch issue details from our tracker",
@@ -196,31 +271,69 @@ session = await client.create_session({
             handler=lookup_issue,
         )
     ],
-})
+) as session:
+    ...
 ```
 
 The SDK automatically handles `tool.call`, executes your handler (sync or async), and responds with the final result when the tool completes.
 
-## Image Support
+#### Overriding Built-in Tools
 
-The SDK supports image attachments via the `attachments` parameter. You can attach images by providing their file path:
+If you register a tool with the same name as a built-in CLI tool (e.g. `edit_file`, `read_file`), the SDK will throw an error unless you explicitly opt in by setting `overrides_built_in_tool=True`. This flag signals that you intend to replace the built-in tool with your custom implementation.
 
 ```python
-await session.send({
-    "prompt": "What's in this image?",
-    "attachments": [
+class EditFileParams(BaseModel):
+    path: str = Field(description="File path")
+    content: str = Field(description="New file content")
+
+@define_tool(name="edit_file", description="Custom file editor with project-specific validation", overrides_built_in_tool=True)
+async def edit_file(params: EditFileParams) -> str:
+    # your logic
+```
+
+#### Skipping Permission Prompts
+
+Set `skip_permission=True` on a tool definition to allow it to execute without triggering a permission prompt:
+
+```python
+@define_tool(name="safe_lookup", description="A read-only lookup that needs no confirmation", skip_permission=True)
+async def safe_lookup(params: LookupParams) -> str:
+    # your logic
+```
+
+## Image Support
+
+The SDK supports image attachments via the `attachments` parameter. You can attach images by providing their file path, or by passing base64-encoded data directly using a blob attachment:
+
+```python
+# File attachment — runtime reads from disk
+await session.send(
+    "What's in this image?",
+    attachments=[
         {
             "type": "file",
             "path": "/path/to/image.jpg",
         }
-    ]
-})
+    ],
+)
+
+# Blob attachment — provide base64 data directly
+await session.send(
+    "What's in this image?",
+    attachments=[
+        {
+            "type": "blob",
+            "data": base64_image_data,
+            "mimeType": "image/png",
+        }
+    ],
+)
 ```
 
 Supported image formats include JPG, PNG, GIF, and other common image types. The agent's `view` tool can also read images directly from the filesystem, so you can also ask questions like:
 
 ```python
-await session.send({"prompt": "What does the most recent jpg in this directory portray?"})
+await session.send("What does the most recent jpg in this directory portray?")
 ```
 
 ## Streaming
@@ -229,47 +342,52 @@ Enable streaming to receive assistant response chunks as they're generated:
 
 ```python
 import asyncio
+
 from copilot import CopilotClient
+from copilot.generated.session_events import (
+    AssistantMessageData,
+    AssistantMessageDeltaData,
+    AssistantReasoningData,
+    AssistantReasoningDeltaData,
+    SessionIdleData,
+)
+from copilot.session import PermissionHandler
 
 async def main():
-    client = CopilotClient()
-    await client.start()
+    async with CopilotClient() as client:
+        async with await client.create_session(
+            on_permission_request=PermissionHandler.approve_all,
+            model="gpt-5",
+            streaming=True,
+        ) as session:
+            # Use asyncio.Event to wait for completion
+            done = asyncio.Event()
 
-    session = await client.create_session({
-        "model": "gpt-5",
-        "streaming": True
-    })
+            def on_event(event):
+                match event.data:
+                    case AssistantMessageDeltaData() as data:
+                        # Streaming message chunk - print incrementally
+                        delta = data.delta_content or ""
+                        print(delta, end="", flush=True)
+                    case AssistantReasoningDeltaData() as data:
+                        # Streaming reasoning chunk (if model supports reasoning)
+                        delta = data.delta_content or ""
+                        print(delta, end="", flush=True)
+                    case AssistantMessageData() as data:
+                        # Final message - complete content
+                        print("\n--- Final message ---")
+                        print(data.content)
+                    case AssistantReasoningData() as data:
+                        # Final reasoning content (if model supports reasoning)
+                        print("--- Reasoning ---")
+                        print(data.content)
+                    case SessionIdleData():
+                        # Session finished processing
+                        done.set()
 
-    # Use asyncio.Event to wait for completion
-    done = asyncio.Event()
-
-    def on_event(event):
-        if event.type.value == "assistant.message_delta":
-            # Streaming message chunk - print incrementally
-            delta = event.data.delta_content or ""
-            print(delta, end="", flush=True)
-        elif event.type.value == "assistant.reasoning_delta":
-            # Streaming reasoning chunk (if model supports reasoning)
-            delta = event.data.delta_content or ""
-            print(delta, end="", flush=True)
-        elif event.type.value == "assistant.message":
-            # Final message - complete content
-            print("\n--- Final message ---")
-            print(event.data.content)
-        elif event.type.value == "assistant.reasoning":
-            # Final reasoning content (if model supports reasoning)
-            print("--- Reasoning ---")
-            print(event.data.content)
-        elif event.type.value == "session.idle":
-            # Session finished processing
-            done.set()
-
-    session.on(on_event)
-    await session.send({"prompt": "Tell me a short story"})
-    await done.wait()  # Wait for streaming to complete
-
-    await session.destroy()
-    await client.stop()
+            session.on(on_event)
+            await session.send("Tell me a short story")
+            await done.wait()  # Wait for streaming to complete
 
 asyncio.run(main())
 ```
@@ -289,27 +407,33 @@ By default, sessions use **infinite sessions** which automatically manage contex
 
 ```python
 # Default: infinite sessions enabled with default thresholds
-session = await client.create_session({"model": "gpt-5"})
-
-# Access the workspace path for checkpoints and files
-print(session.workspace_path)
-# => ~/.copilot/session-state/{session_id}/
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    model="gpt-5",
+) as session:
+    # Access the workspace path for checkpoints and files
+    print(session.workspace_path)
+    # => ~/.copilot/session-state/{session_id}/
 
 # Custom thresholds
-session = await client.create_session({
-    "model": "gpt-5",
-    "infinite_sessions": {
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    model="gpt-5",
+    infinite_sessions={
         "enabled": True,
         "background_compaction_threshold": 0.80,  # Start compacting at 80% context usage
         "buffer_exhaustion_threshold": 0.95,  # Block at 95% until compaction completes
     },
-})
+) as session:
+    ...
 
 # Disable infinite sessions
-session = await client.create_session({
-    "model": "gpt-5",
-    "infinite_sessions": {"enabled": False},
-})
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    model="gpt-5",
+    infinite_sessions={"enabled": False},
+) as session:
+    ...
 ```
 
 When enabled, sessions emit compaction events:
@@ -333,16 +457,16 @@ The SDK supports custom OpenAI-compatible API providers (BYOK - Bring Your Own K
 **Example with Ollama:**
 
 ```python
-session = await client.create_session({
-    "model": "deepseek-coder-v2:16b",  # Required when using custom provider
-    "provider": {
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    model="deepseek-coder-v2:16b",  # Required when using custom provider
+    provider={
         "type": "openai",
         "base_url": "http://localhost:11434/v1",  # Ollama endpoint
         # api_key not required for Ollama
     },
-})
-
-await session.send({"prompt": "Hello!"})
+) as session:
+    await session.send("Hello!")
 ```
 
 **Example with custom OpenAI-compatible API:**
@@ -350,14 +474,16 @@ await session.send({"prompt": "Hello!"})
 ```python
 import os
 
-session = await client.create_session({
-    "model": "gpt-4",
-    "provider": {
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    model="gpt-4",
+    provider={
         "type": "openai",
         "base_url": "https://my-api.example.com/v1",
         "api_key": os.environ["MY_API_KEY"],
     },
-})
+) as session:
+    ...
 ```
 
 **Example with Azure OpenAI:**
@@ -365,9 +491,10 @@ session = await client.create_session({
 ```python
 import os
 
-session = await client.create_session({
-    "model": "gpt-4",
-    "provider": {
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    model="gpt-4",
+    provider={
         "type": "azure",  # Must be "azure" for Azure endpoints, NOT "openai"
         "base_url": "https://my-resource.openai.azure.com",  # Just the host, no path
         "api_key": os.environ["AZURE_OPENAI_KEY"],
@@ -375,13 +502,133 @@ session = await client.create_session({
             "api_version": "2024-10-21",
         },
     },
-})
+) as session:
+    ...
 ```
 
 > **Important notes:**
+>
 > - When using a custom provider, the `model` parameter is **required**. The SDK will throw an error if no model is specified.
 > - For Azure OpenAI endpoints (`*.openai.azure.com`), you **must** use `type: "azure"`, not `type: "openai"`.
 > - The `base_url` should be just the host (e.g., `https://my-resource.openai.azure.com`). Do **not** include `/openai/v1` in the URL - the SDK handles path construction automatically.
+
+## Telemetry
+
+The SDK supports OpenTelemetry for distributed tracing. Provide a `telemetry` config to enable trace export and automatic W3C Trace Context propagation.
+
+```python
+from copilot import CopilotClient, SubprocessConfig
+
+client = CopilotClient(SubprocessConfig(
+    telemetry={
+        "otlp_endpoint": "http://localhost:4318",
+    },
+))
+```
+
+**TelemetryConfig options:**
+
+- `otlp_endpoint` (str): OTLP HTTP endpoint URL
+- `file_path` (str): File path for JSON-lines trace output
+- `exporter_type` (str): `"otlp-http"` or `"file"`
+- `source_name` (str): Instrumentation scope name
+- `capture_content` (bool): Whether to capture message content
+
+Trace context (`traceparent`/`tracestate`) is automatically propagated between the SDK and CLI on `create_session`, `resume_session`, and `send` calls, and inbound when the CLI invokes tool handlers.
+
+Install with telemetry extras: `pip install copilot-sdk[telemetry]` (provides `opentelemetry-api`)
+
+## Permission Handling
+
+An `on_permission_request` handler is **required** whenever you create or resume a session. The handler is called before the agent executes each tool (file writes, shell commands, custom tools, etc.) and must return a decision.
+
+### Approve All (simplest)
+
+Use the built-in `PermissionHandler.approve_all` helper to allow every tool call without any checks:
+
+```python
+from copilot import CopilotClient
+from copilot.session import PermissionHandler
+
+session = await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    model="gpt-5",
+)
+```
+
+### Custom Permission Handler
+
+Provide your own function to inspect each request and apply custom logic (sync or async):
+
+```python
+from copilot.session import PermissionRequestResult
+from copilot.generated.session_events import PermissionRequest
+
+def on_permission_request(
+    request: PermissionRequest, invocation: dict
+) -> PermissionRequestResult:
+    # request.kind — what type of operation is being requested:
+    #   "shell"       — executing a shell command
+    #   "write"       — writing or editing a file
+    #   "read"        — reading a file
+    #   "mcp"         — calling an MCP tool
+    #   "custom-tool" — calling one of your registered tools
+    #   "url"         — fetching a URL
+    #   "memory"      — accessing or updating session/workspace memory
+    #   "hook"        — invoking a registered hook
+    # request.tool_call_id  — the tool call that triggered this request
+    # request.tool_name     — name of the tool (for custom-tool / mcp)
+    # request.file_name     — file being written (for write)
+    # request.full_command_text — full shell command (for shell)
+
+    if request.kind.value == "shell":
+        # Deny shell commands
+        return PermissionRequestResult(kind="denied-interactively-by-user")
+
+    return PermissionRequestResult(kind="approved")
+
+session = await client.create_session(
+    on_permission_request=on_permission_request,
+    model="gpt-5",
+)
+```
+
+Async handlers are also supported:
+
+```python
+async def on_permission_request(
+    request: PermissionRequest, invocation: dict
+) -> PermissionRequestResult:
+    # Simulate an async approval check (e.g., prompting a user over a network)
+    await asyncio.sleep(0)
+    return PermissionRequestResult(kind="approved")
+```
+
+### Permission Result Kinds
+
+| `kind` value                                                | Meaning                                                                                  |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `"approved"`                                                | Allow the tool to run                                                                    |
+| `"denied-interactively-by-user"`                            | User explicitly denied the request                                                       |
+| `"denied-no-approval-rule-and-could-not-request-from-user"` | No approval rule matched and user could not be asked (default when no kind is specified) |
+| `"denied-by-rules"`                                         | Denied by a policy rule                                                                  |
+| `"denied-by-content-exclusion-policy"`                      | Denied due to a content exclusion policy                                                 |
+| `"no-result"`                                               | Leave the request unanswered (not allowed for protocol v2 permission requests)           |
+
+### Resuming Sessions
+
+Pass `on_permission_request` when resuming a session too — it is required:
+
+```python
+session = await client.resume_session(
+    "session-id",
+    on_permission_request=PermissionHandler.approve_all,
+)
+```
+
+### Per-Tool Skip Permission
+
+To let a specific custom tool bypass the permission prompt entirely, set `skip_permission=True` on the tool definition. See [Skipping Permission Prompts](#skipping-permission-prompts) under Tools.
 
 ## User Input Requests
 
@@ -392,21 +639,23 @@ async def handle_user_input(request, invocation):
     # request["question"] - The question to ask
     # request.get("choices") - Optional list of choices for multiple choice
     # request.get("allowFreeform", True) - Whether freeform input is allowed
-    
+
     print(f"Agent asks: {request['question']}")
     if request.get("choices"):
         print(f"Choices: {', '.join(request['choices'])}")
-    
+
     # Return the user's response
     return {
         "answer": "User's answer here",
         "wasFreeform": True,  # Whether the answer was freeform (not from choices)
     }
 
-session = await client.create_session({
-    "model": "gpt-5",
-    "on_user_input_request": handle_user_input,
-})
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    model="gpt-5",
+    on_user_input_request=handle_user_input,
+) as session:
+    ...
 ```
 
 ## Session Hooks
@@ -450,9 +699,10 @@ async def on_error_occurred(input, invocation):
         "errorHandling": "retry",  # "retry", "skip", or "abort"
     }
 
-session = await client.create_session({
-    "model": "gpt-5",
-    "hooks": {
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    model="gpt-5",
+    hooks={
         "on_pre_tool_use": on_pre_tool_use,
         "on_post_tool_use": on_post_tool_use,
         "on_user_prompt_submitted": on_user_prompt_submitted,
@@ -460,7 +710,8 @@ session = await client.create_session({
         "on_session_end": on_session_end,
         "on_error_occurred": on_error_occurred,
     },
-})
+) as session:
+    ...
 ```
 
 **Available hooks:**
@@ -472,30 +723,148 @@ session = await client.create_session({
 - `on_session_end` - Cleanup or logging when session ends.
 - `on_error_occurred` - Handle errors with retry/skip/abort strategies.
 
-## Image Generation
+## Commands
 
-Request image responses by setting `response_format` and `image_options`:
+Register slash commands that users can invoke from the CLI TUI. When the user types `/commandName`, the SDK dispatches the event to your handler.
 
 ```python
-# Generate an image
-response = await session.send_and_wait({
-    "prompt": "Generate a picture of a sunset over mountains",
-    "response_format": "image",
-    "image_options": {
-        "size": "1024x1024",
-        "quality": "hd",
-        "style": "natural",
+from copilot.session import CommandDefinition, CommandContext, PermissionHandler
+
+async def handle_deploy(ctx: CommandContext) -> None:
+    print(f"Deploying with args: {ctx.args}")
+    # ctx.session_id  — the session where the command was invoked
+    # ctx.command      — full command text (e.g. "/deploy production")
+    # ctx.command_name — command name without leading / (e.g. "deploy")
+    # ctx.args         — raw argument string (e.g. "production")
+
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    commands=[
+        CommandDefinition(
+            name="deploy",
+            description="Deploy the app",
+            handler=handle_deploy,
+        ),
+        CommandDefinition(
+            name="rollback",
+            description="Rollback to previous version",
+            handler=lambda ctx: print("Rolling back..."),
+        ),
+    ],
+) as session:
+    ...
+```
+
+Commands can also be provided when resuming a session via `resume_session(commands=[...])`.
+
+## UI Elicitation
+
+The `session.ui` API provides convenience methods for asking the user questions through interactive dialogs. These methods are only available when the CLI host supports elicitation — check `session.capabilities` before calling.
+
+### Capability Check
+
+```python
+ui_caps = session.capabilities.get("ui", {})
+if ui_caps.get("elicitation"):
+    # Safe to call session.ui methods
+    ...
+```
+
+### Confirm
+
+Shows a yes/no confirmation dialog:
+
+```python
+ok = await session.ui.confirm("Deploy to production?")
+if ok:
+    print("Deploying...")
+```
+
+### Select
+
+Shows a selection dialog with a list of options:
+
+```python
+env = await session.ui.select("Choose environment:", ["staging", "production", "dev"])
+if env:
+    print(f"Selected: {env}")
+```
+
+### Input
+
+Shows a text input dialog with optional constraints:
+
+```python
+name = await session.ui.input("Enter your name:")
+
+# With options
+email = await session.ui.input("Enter email:", {
+    "title": "Email Address",
+    "description": "We'll use this for notifications",
+    "format": "email",
+})
+```
+
+### Custom Elicitation
+
+For full control, use the `elicitation()` method with a custom JSON schema:
+
+```python
+result = await session.ui.elicitation({
+    "message": "Configure deployment",
+    "requestedSchema": {
+        "type": "object",
+        "properties": {
+            "region": {"type": "string", "enum": ["us-east-1", "eu-west-1"]},
+            "replicas": {"type": "number", "minimum": 1, "maximum": 10},
+        },
+        "required": ["region"],
     },
 })
 
-# Check for image events
-session.on(lambda event: (
-    print(f"Image: {event.data.get('image', {}).get('width')}x{event.data.get('image', {}).get('height')}")
-    if event.type == "assistant.image" else None
-))
+if result["action"] == "accept":
+    region = result["content"]["region"]
+    replicas = result["content"].get("replicas", 1)
 ```
+
+## Elicitation Request Handler
+
+When the server (or an MCP tool) needs to ask the end-user a question, it sends an `elicitation.requested` event. Provide an `on_elicitation_request` handler to respond:
+
+```python
+from copilot.session import ElicitationContext, ElicitationResult, PermissionHandler
+
+async def handle_elicitation(
+    context: ElicitationContext,
+) -> ElicitationResult:
+    # context["session_id"]           — the session ID
+    # context["message"]              — what the server is asking
+    # context.get("requestedSchema")  — optional JSON schema for form fields
+    # context.get("mode")             — "form" or "url"
+
+    print(f"Server asks: {context['message']}")
+
+    # Return the user's response
+    return {
+        "action": "accept",  # or "decline" or "cancel"
+        "content": {"answer": "yes"},
+    }
+
+async with await client.create_session(
+    on_permission_request=PermissionHandler.approve_all,
+    on_elicitation_request=handle_elicitation,
+) as session:
+    ...
+```
+
+When `on_elicitation_request` is provided, the SDK automatically:
+
+- Sends `requestElicitation: true` to the server during session creation/resumption
+- Reports the `elicitation` capability on the session
+- Dispatches `elicitation.requested` events to your handler
+- Auto-cancels if your handler throws an error (so the server doesn't hang)
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.11+
 - GitHub Copilot CLI installed and accessible

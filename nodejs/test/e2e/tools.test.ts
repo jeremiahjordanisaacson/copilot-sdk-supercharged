@@ -6,7 +6,8 @@ import { writeFile } from "fs/promises";
 import { join } from "path";
 import { assert, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineTool } from "../../src/index.js";
+import { defineTool, approveAll } from "../../src/index.js";
+import type { PermissionRequest } from "../../src/index.js";
 import { createSdkTestContext } from "./harness/sdkTestContext";
 
 describe("Custom tools", async () => {
@@ -15,7 +16,9 @@ describe("Custom tools", async () => {
     it("invokes built-in tools", async () => {
         await writeFile(join(workDir, "README.md"), "# ELIZA, the only chatbot you'll ever need");
 
-        const session = await client.createSession();
+        const session = await client.createSession({
+            onPermissionRequest: approveAll,
+        });
         const assistantMessage = await session.sendAndWait({
             prompt: "What's the first line of README.md in this directory?",
         });
@@ -24,6 +27,7 @@ describe("Custom tools", async () => {
 
     it("invokes custom tool", async () => {
         const session = await client.createSession({
+            onPermissionRequest: approveAll,
             tools: [
                 defineTool("encrypt_string", {
                     description: "Encrypts a string",
@@ -43,6 +47,7 @@ describe("Custom tools", async () => {
 
     it("handles tool calling errors", async () => {
         const session = await client.createSession({
+            onPermissionRequest: approveAll,
             tools: [
                 defineTool("get_user_location", {
                     description: "Gets the user's location",
@@ -83,6 +88,7 @@ describe("Custom tools", async () => {
 
     it("can receive and return complex types", async () => {
         const session = await client.createSession({
+            onPermissionRequest: approveAll,
             tools: [
                 defineTool("db_query", {
                     description: "Performs a database query",
@@ -121,5 +127,111 @@ describe("Custom tools", async () => {
         expect(responseContent).toContain("San Lorenzo");
         expect(responseContent.replace(/,/g, "")).toContain("135460");
         expect(responseContent.replace(/,/g, "")).toContain("204356");
+    });
+
+    it("invokes custom tool with permission handler", async () => {
+        const permissionRequests: PermissionRequest[] = [];
+
+        const session = await client.createSession({
+            tools: [
+                defineTool("encrypt_string", {
+                    description: "Encrypts a string",
+                    parameters: z.object({
+                        input: z.string().describe("String to encrypt"),
+                    }),
+                    handler: ({ input }) => input.toUpperCase(),
+                }),
+            ],
+            onPermissionRequest: (request) => {
+                permissionRequests.push(request);
+                return { kind: "approve-once" };
+            },
+        });
+
+        const assistantMessage = await session.sendAndWait({
+            prompt: "Use encrypt_string to encrypt this string: Hello",
+        });
+        expect(assistantMessage?.data.content).toContain("HELLO");
+
+        // Should have received a custom-tool permission request
+        const customToolRequests = permissionRequests.filter((req) => req.kind === "custom-tool");
+        expect(customToolRequests.length).toBeGreaterThan(0);
+        expect(customToolRequests[0].toolName).toBe("encrypt_string");
+    });
+
+    it("skipPermission sent in tool definition", async () => {
+        let didRunPermissionRequest = false;
+        const session = await client.createSession({
+            onPermissionRequest: () => {
+                didRunPermissionRequest = true;
+                return { kind: "no-result" };
+            },
+            tools: [
+                defineTool("safe_lookup", {
+                    description: "A safe lookup that skips permission",
+                    parameters: z.object({
+                        id: z.string().describe("ID to look up"),
+                    }),
+                    handler: ({ id }) => `RESULT: ${id}`,
+                    skipPermission: true,
+                }),
+            ],
+        });
+
+        const assistantMessage = await session.sendAndWait({
+            prompt: "Use safe_lookup to look up 'test123'",
+        });
+        expect(assistantMessage?.data.content).toContain("RESULT: test123");
+        expect(didRunPermissionRequest).toBe(false);
+    });
+
+    it("overrides built-in tool with custom tool", async () => {
+        const session = await client.createSession({
+            onPermissionRequest: approveAll,
+            tools: [
+                defineTool("grep", {
+                    description: "A custom grep implementation that overrides the built-in",
+                    parameters: z.object({
+                        query: z.string().describe("Search query"),
+                    }),
+                    handler: ({ query }) => `CUSTOM_GREP_RESULT: ${query}`,
+                    overridesBuiltInTool: true,
+                }),
+            ],
+        });
+
+        const assistantMessage = await session.sendAndWait({
+            prompt: "Use grep to search for the word 'hello'",
+        });
+        expect(assistantMessage?.data.content).toContain("CUSTOM_GREP_RESULT");
+    });
+
+    it("denies custom tool when permission denied", async () => {
+        let toolHandlerCalled = false;
+
+        const session = await client.createSession({
+            tools: [
+                defineTool("encrypt_string", {
+                    description: "Encrypts a string",
+                    parameters: z.object({
+                        input: z.string().describe("String to encrypt"),
+                    }),
+                    handler: ({ input }) => {
+                        toolHandlerCalled = true;
+                        return input.toUpperCase();
+                    },
+                }),
+            ],
+            onPermissionRequest: () => {
+                return { kind: "reject" };
+            },
+        });
+
+        await session.sendAndWait({
+            prompt: "Use encrypt_string to encrypt this string: Hello",
+        });
+
+        // The tool handler should NOT have been called since permission was denied
+        expect(toolHandlerCalled).toBe(false);
     });
 });

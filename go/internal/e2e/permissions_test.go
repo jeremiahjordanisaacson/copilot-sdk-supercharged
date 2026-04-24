@@ -31,7 +31,7 @@ func TestPermissions(t *testing.T) {
 				t.Error("Expected non-empty session ID in invocation")
 			}
 
-			return copilot.PermissionRequestResult{Kind: "approved"}, nil
+			return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
@@ -82,7 +82,7 @@ func TestPermissions(t *testing.T) {
 			permissionRequests = append(permissionRequests, request)
 			mu.Unlock()
 
-			return copilot.PermissionRequestResult{Kind: "approved"}, nil
+			return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
@@ -117,7 +117,7 @@ func TestPermissions(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		onPermissionRequest := func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-			return copilot.PermissionRequestResult{Kind: "denied-interactively-by-user"}, nil
+			return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindRejected}, nil
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
@@ -157,10 +157,105 @@ func TestPermissions(t *testing.T) {
 		}
 	})
 
-	t.Run("without permission handler", func(t *testing.T) {
+	t.Run("should deny tool operations when handler explicitly denies", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), nil)
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindUserNotAvailable}, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		var mu sync.Mutex
+		permissionDenied := false
+
+		session.On(func(event copilot.SessionEvent) {
+			if event.Type == copilot.SessionEventTypeToolExecutionComplete {
+				if d, ok := event.Data.(*copilot.ToolExecutionCompleteData); ok &&
+					!d.Success &&
+					d.Error != nil &&
+					strings.Contains(d.Error.Message, "Permission denied") {
+					mu.Lock()
+					permissionDenied = true
+					mu.Unlock()
+				}
+			}
+		})
+
+		if _, err = session.SendAndWait(t.Context(), copilot.MessageOptions{
+			Prompt: "Run 'node --version'",
+		}); err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		mu.Lock()
+		defer mu.Unlock()
+		if !permissionDenied {
+			t.Error("Expected a tool.execution_complete event with Permission denied result")
+		}
+	})
+
+	t.Run("should deny tool operations when handler explicitly denies after resume", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+
+		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		})
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+		sessionID := session1.SessionID
+		if _, err = session1.SendAndWait(t.Context(), copilot.MessageOptions{Prompt: "What is 1+1?"}); err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
+			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindUserNotAvailable}, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("Failed to resume session: %v", err)
+		}
+
+		var mu sync.Mutex
+		permissionDenied := false
+
+		session2.On(func(event copilot.SessionEvent) {
+			if event.Type == copilot.SessionEventTypeToolExecutionComplete {
+				if d, ok := event.Data.(*copilot.ToolExecutionCompleteData); ok &&
+					!d.Success &&
+					d.Error != nil &&
+					strings.Contains(d.Error.Message, "Permission denied") {
+					mu.Lock()
+					permissionDenied = true
+					mu.Unlock()
+				}
+			}
+		})
+
+		if _, err = session2.SendAndWait(t.Context(), copilot.MessageOptions{
+			Prompt: "Run 'node --version'",
+		}); err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		mu.Lock()
+		defer mu.Unlock()
+		if !permissionDenied {
+			t.Error("Expected a tool.execution_complete event with Permission denied result")
+		}
+	})
+
+	t.Run("should work with approve-all permission handler", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -175,8 +270,12 @@ func TestPermissions(t *testing.T) {
 			t.Fatalf("Failed to get final message: %v", err)
 		}
 
-		if message.Data.Content == nil || !strings.Contains(*message.Data.Content, "4") {
-			t.Errorf("Expected message to contain '4', got: %v", message.Data.Content)
+		if md, ok := message.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(md.Content, "4") {
+			var content string
+			if ok {
+				content = md.Content
+			}
+			t.Errorf("Expected message to contain '4', got: %v", content)
 		}
 	})
 }

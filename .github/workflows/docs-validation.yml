@@ -2,6 +2,7 @@ name: "Documentation Validation"
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'docs/**'
       - 'nodejs/src/**'
@@ -108,7 +109,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
 
       - name: Install validation dependencies
         working-directory: scripts/docs-validation

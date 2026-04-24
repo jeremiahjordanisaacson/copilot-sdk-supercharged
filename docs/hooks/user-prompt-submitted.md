@@ -12,7 +12,15 @@ The `onUserPromptSubmitted` hook is called when a user submits a message. Use it
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```ts
+import type { UserPromptSubmittedHookInput, HookInvocation, UserPromptSubmittedHookOutput } from "@github/copilot-sdk";
+type UserPromptSubmittedHandler = (
+  input: UserPromptSubmittedHookInput,
+  invocation: HookInvocation
+) => Promise<UserPromptSubmittedHookOutput | null | undefined>;
+```
+<!-- /docs-validate: hidden -->
 ```typescript
 type UserPromptSubmittedHandler = (
   input: UserPromptSubmittedHookInput,
@@ -25,10 +33,20 @@ type UserPromptSubmittedHandler = (
 <details>
 <summary><strong>Python</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```python
+from copilot.session import UserPromptSubmittedHookInput, UserPromptSubmittedHookOutput
+from typing import Callable, Awaitable
+
+UserPromptSubmittedHandler = Callable[
+    [UserPromptSubmittedHookInput, dict[str, str]],
+    Awaitable[UserPromptSubmittedHookOutput | None]
+]
+```
+<!-- /docs-validate: hidden -->
 ```python
 UserPromptSubmittedHandler = Callable[
-    [UserPromptSubmittedHookInput, HookInvocation],
+    [UserPromptSubmittedHookInput, dict[str, str]],
     Awaitable[UserPromptSubmittedHookOutput | None]
 ]
 ```
@@ -38,7 +56,20 @@ UserPromptSubmittedHandler = Callable[
 <details>
 <summary><strong>Go</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```go
+package main
+
+import copilot "github.com/github/copilot-sdk/go"
+
+type UserPromptSubmittedHandler func(
+    input copilot.UserPromptSubmittedHookInput,
+    invocation copilot.HookInvocation,
+) (*copilot.UserPromptSubmittedHookOutput, error)
+
+func main() {}
+```
+<!-- /docs-validate: hidden -->
 ```go
 type UserPromptSubmittedHandler func(
     input UserPromptSubmittedHookInput,
@@ -51,11 +82,30 @@ type UserPromptSubmittedHandler func(
 <details>
 <summary><strong>.NET</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```csharp
+using GitHub.Copilot.SDK;
+
+public delegate Task<UserPromptSubmittedHookOutput?> UserPromptSubmittedHandler(
+    UserPromptSubmittedHookInput input,
+    HookInvocation invocation);
+```
+<!-- /docs-validate: hidden -->
 ```csharp
 public delegate Task<UserPromptSubmittedHookOutput?> UserPromptSubmittedHandler(
     UserPromptSubmittedHookInput input,
     HookInvocation invocation);
+```
+
+</details>
+
+<details>
+<summary><strong>Java</strong></summary>
+
+```java
+import com.github.copilot.sdk.json.*;
+
+UserPromptSubmittedHandler userPromptSubmittedHandler;
 ```
 
 </details>
@@ -102,13 +152,13 @@ const session = await client.createSession({
 <summary><strong>Python</strong></summary>
 
 ```python
+from copilot.session import PermissionHandler
+
 async def on_user_prompt_submitted(input_data, invocation):
     print(f"[{invocation['session_id']}] User: {input_data['prompt']}")
     return None
 
-session = await client.create_session({
-    "hooks": {"on_user_prompt_submitted": on_user_prompt_submitted}
-})
+session = await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={"on_user_prompt_submitted": on_user_prompt_submitted})
 ```
 
 </details>
@@ -116,7 +166,31 @@ session = await client.create_session({
 <details>
 <summary><strong>Go</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	copilot "github.com/github/copilot-sdk/go"
+)
+
+func main() {
+	client := copilot.NewClient(nil)
+	session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
+		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		Hooks: &copilot.SessionHooks{
+			OnUserPromptSubmitted: func(input copilot.UserPromptSubmittedHookInput, inv copilot.HookInvocation) (*copilot.UserPromptSubmittedHookOutput, error) {
+				fmt.Printf("[%s] User: %s\n", inv.SessionID, input.Prompt)
+				return nil, nil
+			},
+		},
+	})
+	_ = session
+}
+```
+<!-- /docs-validate: hidden -->
 ```go
 session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
     Hooks: &copilot.SessionHooks{
@@ -133,7 +207,30 @@ session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
 <details>
 <summary><strong>.NET</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```csharp
+using GitHub.Copilot.SDK;
+
+public static class UserPromptSubmittedExample
+{
+    public static async Task Main()
+    {
+        await using var client = new CopilotClient();
+        var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Hooks = new SessionHooks
+            {
+                OnUserPromptSubmitted = (input, invocation) =>
+                {
+                    Console.WriteLine($"[{invocation.SessionId}] User: {input.Prompt}");
+                    return Task.FromResult<UserPromptSubmittedHookOutput?>(null);
+                },
+            },
+        });
+    }
+}
+```
+<!-- /docs-validate: hidden -->
 ```csharp
 var session = await client.CreateSessionAsync(new SessionConfig
 {
@@ -146,6 +243,29 @@ var session = await client.CreateSessionAsync(new SessionConfig
         },
     },
 });
+```
+
+</details>
+
+<details>
+<summary><strong>Java</strong></summary>
+
+```java
+import com.github.copilot.sdk.*;
+import com.github.copilot.sdk.json.*;
+import java.util.concurrent.CompletableFuture;
+
+var hooks = new SessionHooks()
+    .setOnUserPromptSubmitted((input, invocation) -> {
+        System.out.println("[" + invocation.getSessionId() + "] User: " + input.prompt());
+        return CompletableFuture.completedFuture(null);
+    });
+
+var session = client.createSession(
+    new SessionConfig()
+        .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
+        .setHooks(hooks)
+).get();
 ```
 
 </details>
@@ -360,6 +480,6 @@ const session = await client.createSession({
 
 ## See Also
 
-- [Hooks Overview](./overview.md)
+- [Hooks Overview](./index.md)
 - [Session Lifecycle Hooks](./session-lifecycle.md)
 - [Pre-Tool Use Hook](./pre-tool-use.md)

@@ -7,6 +7,8 @@ import shutil
 
 import pytest
 
+from copilot.session import CustomAgentConfig, PermissionHandler
+
 from .testharness import E2ETestContext
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -53,16 +55,18 @@ class TestSkillBehavior:
     async def test_should_load_and_apply_skill_from_skilldirectories(self, ctx: E2ETestContext):
         """Test that skills are loaded and applied from skillDirectories"""
         skills_dir = create_skill_dir(ctx.work_dir)
-        session = await ctx.client.create_session({"skill_directories": [skills_dir]})
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all, skill_directories=[skills_dir]
+        )
 
         assert session.session_id is not None
 
         # The skill instructs the model to include a marker - verify it appears
-        message = await session.send_and_wait({"prompt": "Say hello briefly using the test skill."})
+        message = await session.send_and_wait("Say hello briefly using the test skill.")
         assert message is not None
         assert SKILL_MARKER in message.data.content
 
-        await session.destroy()
+        await session.disconnect()
 
     async def test_should_not_apply_skill_when_disabled_via_disabledskills(
         self, ctx: E2ETestContext
@@ -70,17 +74,76 @@ class TestSkillBehavior:
         """Test that disabledSkills prevents skill from being applied"""
         skills_dir = create_skill_dir(ctx.work_dir)
         session = await ctx.client.create_session(
-            {"skill_directories": [skills_dir], "disabled_skills": ["test-skill"]}
+            on_permission_request=PermissionHandler.approve_all,
+            skill_directories=[skills_dir],
+            disabled_skills=["test-skill"],
         )
 
         assert session.session_id is not None
 
         # The skill is disabled, so the marker should NOT appear
-        message = await session.send_and_wait({"prompt": "Say hello briefly using the test skill."})
+        message = await session.send_and_wait("Say hello briefly using the test skill.")
         assert message is not None
         assert SKILL_MARKER not in message.data.content
 
-        await session.destroy()
+        await session.disconnect()
+
+    async def test_should_allow_agent_with_skills_to_invoke_skill(self, ctx: E2ETestContext):
+        """Test that an agent with skills gets skill content preloaded into context"""
+        skills_dir = create_skill_dir(ctx.work_dir)
+        custom_agents: list[CustomAgentConfig] = [
+            {
+                "name": "skill-agent",
+                "description": "An agent with access to test-skill",
+                "prompt": "You are a helpful test agent.",
+                "skills": ["test-skill"],
+            }
+        ]
+
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all,
+            skill_directories=[skills_dir],
+            custom_agents=custom_agents,
+            agent="skill-agent",
+        )
+
+        assert session.session_id is not None
+
+        # The agent has skills: ["test-skill"], so the skill content is preloaded into its context
+        message = await session.send_and_wait("Say hello briefly using the test skill.")
+        assert message is not None
+        assert SKILL_MARKER in message.data.content
+
+        await session.disconnect()
+
+    async def test_should_not_provide_skills_to_agent_without_skills_field(
+        self, ctx: E2ETestContext
+    ):
+        """Test that an agent without skills field gets no skill content (opt-in model)"""
+        skills_dir = create_skill_dir(ctx.work_dir)
+        custom_agents: list[CustomAgentConfig] = [
+            {
+                "name": "no-skill-agent",
+                "description": "An agent without skills access",
+                "prompt": "You are a helpful test agent.",
+            }
+        ]
+
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all,
+            skill_directories=[skills_dir],
+            custom_agents=custom_agents,
+            agent="no-skill-agent",
+        )
+
+        assert session.session_id is not None
+
+        # The agent has no skills field, so no skill content is injected
+        message = await session.send_and_wait("Say hello briefly using the test skill.")
+        assert message is not None
+        assert SKILL_MARKER not in message.data.content
+
+        await session.disconnect()
 
     @pytest.mark.skip(
         reason="See the big comment around the equivalent test in the Node SDK. "
@@ -93,22 +156,28 @@ class TestSkillBehavior:
         skills_dir = create_skill_dir(ctx.work_dir)
 
         # Create a session without skills first
-        session1 = await ctx.client.create_session()
+        session1 = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all
+        )
         session_id = session1.session_id
 
         # First message without skill - marker should not appear
-        message1 = await session1.send_and_wait({"prompt": "Say hi."})
+        message1 = await session1.send_and_wait("Say hi.")
         assert message1 is not None
         assert SKILL_MARKER not in message1.data.content
 
         # Resume with skillDirectories - skill should now be active
-        session2 = await ctx.client.resume_session(session_id, {"skill_directories": [skills_dir]})
+        session2 = await ctx.client.resume_session(
+            session_id,
+            on_permission_request=PermissionHandler.approve_all,
+            skill_directories=[skills_dir],
+        )
 
         assert session2.session_id == session_id
 
         # Now the skill should be applied
-        message2 = await session2.send_and_wait({"prompt": "Say hello again using the test skill."})
+        message2 = await session2.send_and_wait("Say hello again using the test skill.")
         assert message2 is not None
         assert SKILL_MARKER in message2.data.content
 
-        await session2.destroy()
+        await session2.disconnect()

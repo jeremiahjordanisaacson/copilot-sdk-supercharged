@@ -52,7 +52,7 @@ IMPORTANT: You MUST include the exact text ""{SkillMarker}"" somewhere in EVERY 
     public async Task Should_Load_And_Apply_Skill_From_SkillDirectories()
     {
         var skillsDir = CreateSkillDir();
-        var session = await Client.CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new SessionConfig
         {
             SkillDirectories = [skillsDir]
         });
@@ -71,7 +71,7 @@ IMPORTANT: You MUST include the exact text ""{SkillMarker}"" somewhere in EVERY 
     public async Task Should_Not_Apply_Skill_When_Disabled_Via_DisabledSkills()
     {
         var skillsDir = CreateSkillDir();
-        var session = await Client.CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new SessionConfig
         {
             SkillDirectories = [skillsDir],
             DisabledSkills = ["test-skill"]
@@ -87,13 +87,76 @@ IMPORTANT: You MUST include the exact text ""{SkillMarker}"" somewhere in EVERY 
         await session.DisposeAsync();
     }
 
+    [Fact]
+    public async Task Should_Allow_Agent_With_Skills_To_Invoke_Skill()
+    {
+        var skillsDir = CreateSkillDir();
+        var customAgents = new List<CustomAgentConfig>
+        {
+            new CustomAgentConfig
+            {
+                Name = "skill-agent",
+                Description = "An agent with access to test-skill",
+                Prompt = "You are a helpful test agent.",
+                Skills = ["test-skill"]
+            }
+        };
+
+        var session = await CreateSessionAsync(new SessionConfig
+        {
+            SkillDirectories = [skillsDir],
+            CustomAgents = customAgents,
+            Agent = "skill-agent"
+        });
+
+        Assert.Matches(@"^[a-f0-9-]+$", session.SessionId);
+
+        // The agent has Skills = ["test-skill"], so the skill content is preloaded into its context
+        var message = await session.SendAndWaitAsync(new MessageOptions { Prompt = "Say hello briefly using the test skill." });
+        Assert.NotNull(message);
+        Assert.Contains(SkillMarker, message!.Data.Content);
+
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Should_Not_Provide_Skills_To_Agent_Without_Skills_Field()
+    {
+        var skillsDir = CreateSkillDir();
+        var customAgents = new List<CustomAgentConfig>
+        {
+            new CustomAgentConfig
+            {
+                Name = "no-skill-agent",
+                Description = "An agent without skills access",
+                Prompt = "You are a helpful test agent."
+            }
+        };
+
+        var session = await CreateSessionAsync(new SessionConfig
+        {
+            SkillDirectories = [skillsDir],
+            CustomAgents = customAgents,
+            Agent = "no-skill-agent"
+        });
+
+        Assert.Matches(@"^[a-f0-9-]+$", session.SessionId);
+
+        // The agent has no Skills field, so no skill content is injected
+        var message = await session.SendAndWaitAsync(new MessageOptions { Prompt = "Say hello briefly using the test skill." });
+        Assert.NotNull(message);
+        Assert.DoesNotContain(SkillMarker, message!.Data.Content);
+
+        await session.DisposeAsync();
+    }
+
     [Fact(Skip = "See the big comment around the equivalent test in the Node SDK. Skipped because the feature doesn't work correctly yet.")]
     public async Task Should_Apply_Skill_On_Session_Resume_With_SkillDirectories()
     {
         var skillsDir = CreateSkillDir();
 
         // Create a session without skills first
-        var session1 = await Client.CreateSessionAsync();
+        var session1 = await CreateSessionAsync();
         var sessionId = session1.SessionId;
 
         // First message without skill - marker should not appear
@@ -102,7 +165,7 @@ IMPORTANT: You MUST include the exact text ""{SkillMarker}"" somewhere in EVERY 
         Assert.DoesNotContain(SkillMarker, message1!.Data.Content);
 
         // Resume with skillDirectories - skill should now be active
-        var session2 = await Client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
             SkillDirectories = [skillsDir]
         });

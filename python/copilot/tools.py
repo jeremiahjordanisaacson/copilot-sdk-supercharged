@@ -9,11 +9,60 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Any, Callable, TypeVar, get_type_hints, overload
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Any, Literal, TypeVar, get_type_hints, overload
 
 from pydantic import BaseModel
 
-from .types import Tool, ToolInvocation, ToolResult
+ToolResultType = Literal["success", "failure", "rejected", "denied", "timeout"]
+
+
+@dataclass
+class ToolBinaryResult:
+    """Binary content returned by a tool."""
+
+    data: str = ""
+    mime_type: str = ""
+    type: str = ""
+    description: str = ""
+
+
+@dataclass
+class ToolResult:
+    """Result of a tool invocation."""
+
+    text_result_for_llm: str = ""
+    result_type: ToolResultType = "success"
+    error: str | None = None
+    binary_results_for_llm: list[ToolBinaryResult] | None = None
+    session_log: str | None = None
+    tool_telemetry: dict[str, Any] | None = None
+    _from_exception: bool = field(default=False, repr=False)
+
+
+@dataclass
+class ToolInvocation:
+    """Context passed to a tool handler when invoked."""
+
+    session_id: str = ""
+    tool_call_id: str = ""
+    tool_name: str = ""
+    arguments: Any = None
+
+
+ToolHandler = Callable[[ToolInvocation], ToolResult | Awaitable[ToolResult]]
+
+
+@dataclass
+class Tool:
+    name: str
+    description: str
+    handler: ToolHandler
+    parameters: dict[str, Any] | None = None
+    overrides_built_in_tool: bool = False
+    skip_permission: bool = False
+
 
 T = TypeVar("T", bound=BaseModel)
 R = TypeVar("R")
@@ -24,6 +73,8 @@ def define_tool(
     name: str | None = None,
     *,
     description: str | None = None,
+    overrides_built_in_tool: bool = False,
+    skip_permission: bool = False,
 ) -> Callable[[Callable[..., Any]], Tool]: ...
 
 
@@ -34,6 +85,8 @@ def define_tool(
     description: str | None = None,
     handler: Callable[[T, ToolInvocation], R],
     params_type: type[T],
+    overrides_built_in_tool: bool = False,
+    skip_permission: bool = False,
 ) -> Tool: ...
 
 
@@ -43,6 +96,8 @@ def define_tool(
     description: str | None = None,
     handler: Callable[[Any, ToolInvocation], Any] | None = None,
     params_type: type[BaseModel] | None = None,
+    overrides_built_in_tool: bool = False,
+    skip_permission: bool = False,
 ) -> Tool | Callable[[Callable[[Any, ToolInvocation], Any]], Tool]:
     """
     Define a tool with automatic JSON schema generation from Pydantic models.
@@ -75,6 +130,10 @@ def define_tool(
         handler: Optional handler function (if not using as decorator)
         params_type: Optional Pydantic model type for parameters (inferred from
                     type hints when using as decorator)
+        overrides_built_in_tool: When True, explicitly indicates this tool is intended
+                    to override a built-in tool of the same name. If not set and the
+                    name clashes with a built-in tool, the runtime will return an error.
+        skip_permission: When True, the tool can execute without a permission prompt.
 
     Returns:
         A Tool instance
@@ -118,7 +177,7 @@ def define_tool(
                 # Build args based on detected signature
                 call_args = []
                 if takes_params:
-                    args = invocation["arguments"] or {}
+                    args = invocation.arguments or {}
                     if ptype is not None and _is_pydantic_model(ptype):
                         call_args.append(ptype.model_validate(args))
                     else:
@@ -137,11 +196,14 @@ def define_tool(
                 # Don't expose detailed error information to the LLM for security reasons.
                 # The actual error is stored in the 'error' field for debugging.
                 return ToolResult(
-                    textResultForLlm="Invoking this tool produced an error. "
-                    "Detailed information is not available.",
-                    resultType="failure",
+                    text_result_for_llm=(
+                        "Invoking this tool produced an error. "
+                        "Detailed information is not available."
+                    ),
+                    result_type="failure",
                     error=str(exc),
-                    toolTelemetry={},
+                    tool_telemetry={},
+                    _from_exception=True,
                 )
 
         return Tool(
@@ -149,6 +211,8 @@ def define_tool(
             description=description or "",
             parameters=schema,
             handler=wrapped_handler,
+            overrides_built_in_tool=overrides_built_in_tool,
+            skip_permission=skip_permission,
         )
 
     # If handler is provided, call decorator immediately
@@ -180,19 +244,19 @@ def _normalize_result(result: Any) -> ToolResult:
     """
     if result is None:
         return ToolResult(
-            textResultForLlm="",
-            resultType="success",
+            text_result_for_llm="",
+            result_type="success",
         )
 
-    # ToolResult passes through directly
-    if isinstance(result, dict) and "resultType" in result and "textResultForLlm" in result:
+    # ToolResult dataclass passes through directly
+    if isinstance(result, ToolResult):
         return result
 
     # Strings pass through directly
     if isinstance(result, str):
         return ToolResult(
-            textResultForLlm=result,
-            resultType="success",
+            text_result_for_llm=result,
+            result_type="success",
         )
 
     # Everything else gets JSON-serialized (with Pydantic model support)
@@ -207,6 +271,57 @@ def _normalize_result(result: Any) -> ToolResult:
         raise TypeError(f"Failed to serialize tool result: {exc}") from exc
 
     return ToolResult(
-        textResultForLlm=json_str,
-        resultType="success",
+        text_result_for_llm=json_str,
+        result_type="success",
+    )
+
+
+def convert_mcp_call_tool_result(call_result: dict[str, Any]) -> ToolResult:
+    """Convert an MCP CallToolResult dict into a ToolResult."""
+    text_parts: list[str] = []
+    binary_results: list[ToolBinaryResult] = []
+
+    for block in call_result["content"]:
+        block_type = block.get("type")
+        if block_type == "text":
+            text = block.get("text", "")
+            if isinstance(text, str):
+                text_parts.append(text)
+        elif block_type == "image":
+            data = block.get("data", "")
+            mime_type = block.get("mimeType", "")
+            if isinstance(data, str) and data and isinstance(mime_type, str):
+                binary_results.append(
+                    ToolBinaryResult(
+                        data=data,
+                        mime_type=mime_type,
+                        type="image",
+                    )
+                )
+        elif block_type == "resource":
+            resource = block.get("resource", {})
+            if not isinstance(resource, dict):
+                continue
+            text = resource.get("text")
+            if isinstance(text, str) and text:
+                text_parts.append(text)
+            blob = resource.get("blob")
+            if isinstance(blob, str) and blob:
+                mime_type = resource.get("mimeType", "application/octet-stream")
+                uri = resource.get("uri", "")
+                binary_results.append(
+                    ToolBinaryResult(
+                        data=blob,
+                        mime_type=mime_type
+                        if isinstance(mime_type, str)
+                        else "application/octet-stream",
+                        type="resource",
+                        description=uri if isinstance(uri, str) else "",
+                    )
+                )
+
+    return ToolResult(
+        text_result_for_llm="\n".join(text_parts),
+        result_type="failure" if call_result.get("isError") is True else "success",
+        binary_results_for_llm=binary_results if binary_results else None,
     )

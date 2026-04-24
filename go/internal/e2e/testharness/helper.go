@@ -9,33 +9,32 @@ import (
 )
 
 // GetFinalAssistantMessage waits for and returns the final assistant message from a session turn.
-func GetFinalAssistantMessage(ctx context.Context, session *copilot.Session) (*copilot.SessionEvent, error) {
+// If alreadyIdle is true, skip waiting for session.idle (useful for resumed sessions where the
+// idle event was ephemeral and not persisted in the event history).
+func GetFinalAssistantMessage(ctx context.Context, session *copilot.Session, alreadyIdle ...bool) (*copilot.SessionEvent, error) {
 	result := make(chan *copilot.SessionEvent, 1)
 	errCh := make(chan error, 1)
 
 	// Subscribe to future events
 	var finalAssistantMessage *copilot.SessionEvent
 	unsubscribe := session.On(func(event copilot.SessionEvent) {
-		switch event.Type {
-		case "assistant.message":
+		switch d := event.Data.(type) {
+		case *copilot.AssistantMessageData:
 			finalAssistantMessage = &event
-		case "session.idle":
+		case *copilot.SessionIdleData:
 			if finalAssistantMessage != nil {
 				result <- finalAssistantMessage
 			}
-		case "session.error":
-			msg := "session error"
-			if event.Data.Message != nil {
-				msg = *event.Data.Message
-			}
-			errCh <- errors.New(msg)
+		case *copilot.SessionErrorData:
+			errCh <- errors.New(d.Message)
 		}
 	})
 	defer unsubscribe()
 
 	// Also check existing messages in case the response already arrived
+	isAlreadyIdle := len(alreadyIdle) > 0 && alreadyIdle[0]
 	go func() {
-		existing, err := getExistingFinalResponse(ctx, session)
+		existing, err := getExistingFinalResponse(ctx, session, isAlreadyIdle)
 		if err != nil {
 			errCh <- err
 			return
@@ -67,10 +66,10 @@ func GetNextEventOfType(session *copilot.Session, eventType copilot.SessionEvent
 			case result <- &event:
 			default:
 			}
-		case copilot.SessionError:
+		case copilot.SessionEventTypeSessionError:
 			msg := "session error"
-			if event.Data.Message != nil {
-				msg = *event.Data.Message
+			if d, ok := event.Data.(*copilot.SessionErrorData); ok {
+				msg = d.Message
 			}
 			select {
 			case errCh <- errors.New(msg):
@@ -90,7 +89,7 @@ func GetNextEventOfType(session *copilot.Session, eventType copilot.SessionEvent
 	}
 }
 
-func getExistingFinalResponse(ctx context.Context, session *copilot.Session) (*copilot.SessionEvent, error) {
+func getExistingFinalResponse(ctx context.Context, session *copilot.Session, alreadyIdle bool) (*copilot.SessionEvent, error) {
 	messages, err := session.GetMessages(ctx)
 	if err != nil {
 		return nil, err
@@ -116,8 +115,8 @@ func getExistingFinalResponse(ctx context.Context, session *copilot.Session) (*c
 	for _, msg := range currentTurnMessages {
 		if msg.Type == "session.error" {
 			errMsg := "session error"
-			if msg.Data.Message != nil {
-				errMsg = *msg.Data.Message
+			if d, ok := msg.Data.(*copilot.SessionErrorData); ok {
+				errMsg = d.Message
 			}
 			return nil, errors.New(errMsg)
 		}
@@ -125,10 +124,14 @@ func getExistingFinalResponse(ctx context.Context, session *copilot.Session) (*c
 
 	// Find session.idle and get last assistant message before it
 	sessionIdleIndex := -1
-	for i, msg := range currentTurnMessages {
-		if msg.Type == "session.idle" {
-			sessionIdleIndex = i
-			break
+	if alreadyIdle {
+		sessionIdleIndex = len(currentTurnMessages)
+	} else {
+		for i, msg := range currentTurnMessages {
+			if msg.Type == "session.idle" {
+				sessionIdleIndex = i
+				break
+			}
 		}
 	}
 

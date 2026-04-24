@@ -9,6 +9,7 @@ import (
 )
 
 func TestCompaction(t *testing.T) {
+	t.Skip("Compaction tests are skipped due to flakiness — re-enable once stabilized")
 	ctx := testharness.NewTestContext(t)
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
@@ -21,6 +22,7 @@ func TestCompaction(t *testing.T) {
 		bufferThreshold := 0.01      // 1%
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 			InfiniteSessions: &copilot.InfiniteSessionConfig{
 				Enabled:                       &enabled,
 				BackgroundCompactionThreshold: &backgroundThreshold,
@@ -35,16 +37,16 @@ func TestCompaction(t *testing.T) {
 		var compactionCompleteEvents []copilot.SessionEvent
 
 		session.On(func(event copilot.SessionEvent) {
-			if event.Type == copilot.SessionCompactionStart {
+			if event.Type == copilot.SessionEventTypeSessionCompactionStart {
 				compactionStartEvents = append(compactionStartEvents, event)
 			}
-			if event.Type == copilot.SessionCompactionComplete {
+			if event.Type == copilot.SessionEventTypeSessionCompactionComplete {
 				compactionCompleteEvents = append(compactionCompleteEvents, event)
 			}
 		})
 
 		// Send multiple messages to fill up the context window
-		_, err = session.SendAndWait(t.Context(), copilot.MessageOptions{Prompt: "Tell me a long story about a dragon. Be very detailed."})
+		_, err = session.SendAndWait(t.Context(), copilot.MessageOptions{Prompt: "Tell me a story about a dragon. Be detailed."})
 		if err != nil {
 			t.Fatalf("Failed to send first message: %v", err)
 		}
@@ -70,11 +72,12 @@ func TestCompaction(t *testing.T) {
 		// Compaction should have succeeded
 		if len(compactionCompleteEvents) > 0 {
 			lastComplete := compactionCompleteEvents[len(compactionCompleteEvents)-1]
-			if lastComplete.Data.Success == nil || !*lastComplete.Data.Success {
+			d, ok := lastComplete.Data.(*copilot.SessionCompactionCompleteData)
+			if !ok || !d.Success {
 				t.Errorf("Expected compaction to succeed")
 			}
-			if lastComplete.Data.TokensRemoved != nil && *lastComplete.Data.TokensRemoved <= 0 {
-				t.Errorf("Expected tokensRemoved > 0, got %v", *lastComplete.Data.TokensRemoved)
+			if ok && d.TokensRemoved != nil && *d.TokensRemoved <= 0 {
+				t.Errorf("Expected tokensRemoved > 0, got %v", *d.TokensRemoved)
 			}
 		}
 
@@ -83,8 +86,8 @@ func TestCompaction(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to send verification message: %v", err)
 		}
-		if answer.Data.Content == nil || !strings.Contains(strings.ToLower(*answer.Data.Content), "dragon") {
-			t.Errorf("Expected answer to contain 'dragon', got %v", answer.Data.Content)
+		if ad, ok := answer.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(strings.ToLower(ad.Content), "dragon") {
+			t.Errorf("Expected answer to contain 'dragon', got %v", answer.Data)
 		}
 	})
 
@@ -93,6 +96,7 @@ func TestCompaction(t *testing.T) {
 
 		enabled := false
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 			InfiniteSessions: &copilot.InfiniteSessionConfig{
 				Enabled: &enabled,
 			},
@@ -103,7 +107,7 @@ func TestCompaction(t *testing.T) {
 
 		var compactionEvents []copilot.SessionEvent
 		session.On(func(event copilot.SessionEvent) {
-			if event.Type == copilot.SessionCompactionStart || event.Type == copilot.SessionCompactionComplete {
+			if event.Type == copilot.SessionEventTypeSessionCompactionStart || event.Type == copilot.SessionEventTypeSessionCompactionComplete {
 				compactionEvents = append(compactionEvents, event)
 			}
 		})

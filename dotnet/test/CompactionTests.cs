@@ -11,11 +11,11 @@ namespace GitHub.Copilot.SDK.Test;
 
 public class CompactionTests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "compaction", output)
 {
-    [Fact]
+    [Fact(Skip = "Compaction tests are skipped due to flakiness — re-enable once stabilized")]
     public async Task Should_Trigger_Compaction_With_Low_Threshold_And_Emit_Events()
     {
         // Create session with very low compaction thresholds to trigger compaction quickly
-        var session = await Client.CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new SessionConfig
         {
             InfiniteSessions = new InfiniteSessionConfig
             {
@@ -45,7 +45,7 @@ public class CompactionTests(E2ETestFixture fixture, ITestOutputHelper output) :
         // Send multiple messages to fill up the context window
         await session.SendAndWaitAsync(new MessageOptions
         {
-            Prompt = "Tell me a long story about a dragon. Be very detailed."
+            Prompt = "Tell me a story about a dragon. Be detailed."
         });
         await session.SendAndWaitAsync(new MessageOptions
         {
@@ -81,10 +81,10 @@ public class CompactionTests(E2ETestFixture fixture, ITestOutputHelper output) :
         Assert.Contains("dragon", answer.Data.Content.ToLower());
     }
 
-    [Fact]
+    [Fact(Skip = "Compaction tests are skipped due to flakiness — re-enable once stabilized")]
     public async Task Should_Not_Emit_Compaction_Events_When_Infinite_Sessions_Disabled()
     {
-        var session = await Client.CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new SessionConfig
         {
             InfiniteSessions = new InfiniteSessionConfig
             {

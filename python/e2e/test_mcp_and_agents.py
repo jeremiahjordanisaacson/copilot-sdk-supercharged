@@ -2,11 +2,18 @@
 Tests for MCP servers and custom agents functionality
 """
 
+from pathlib import Path
+
 import pytest
 
-from copilot import CustomAgentConfig, MCPServerConfig
+from copilot.session import CustomAgentConfig, MCPServerConfig, PermissionHandler
 
 from .testharness import E2ETestContext, get_final_assistant_message
+
+TEST_MCP_SERVER = str(
+    (Path(__file__).parents[2] / "test" / "harness" / "test-mcp-server.mjs").resolve()
+)
+TEST_HARNESS_DIR = str((Path(__file__).parents[2] / "test" / "harness").resolve())
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -18,52 +25,87 @@ class TestMCPServers:
         """Test that MCP server configuration is accepted on session create"""
         mcp_servers: dict[str, MCPServerConfig] = {
             "test-server": {
-                "type": "local",
                 "command": "echo",
                 "args": ["hello"],
                 "tools": ["*"],
             }
         }
 
-        session = await ctx.client.create_session({"mcp_servers": mcp_servers})
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all, mcp_servers=mcp_servers
+        )
 
         assert session.session_id is not None
 
         # Simple interaction to verify session works
-        message = await session.send_and_wait({"prompt": "What is 2+2?"})
+        message = await session.send_and_wait("What is 2+2?")
         assert message is not None
         assert "4" in message.data.content
 
-        await session.destroy()
+        await session.disconnect()
 
     async def test_should_accept_mcp_server_configuration_on_session_resume(
         self, ctx: E2ETestContext
     ):
         """Test that MCP server configuration is accepted on session resume"""
         # Create a session first
-        session1 = await ctx.client.create_session()
+        session1 = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all
+        )
         session_id = session1.session_id
-        await session1.send_and_wait({"prompt": "What is 1+1?"})
+        await session1.send_and_wait("What is 1+1?")
 
         # Resume with MCP servers
         mcp_servers: dict[str, MCPServerConfig] = {
             "test-server": {
-                "type": "local",
                 "command": "echo",
                 "args": ["hello"],
                 "tools": ["*"],
             }
         }
 
-        session2 = await ctx.client.resume_session(session_id, {"mcp_servers": mcp_servers})
+        session2 = await ctx.client.resume_session(
+            session_id,
+            on_permission_request=PermissionHandler.approve_all,
+            mcp_servers=mcp_servers,
+        )
 
         assert session2.session_id == session_id
 
-        message = await session2.send_and_wait({"prompt": "What is 3+3?"})
+        message = await session2.send_and_wait("What is 3+3?")
         assert message is not None
         assert "6" in message.data.content
 
-        await session2.destroy()
+        await session2.disconnect()
+
+    async def test_should_pass_literal_env_values_to_mcp_server_subprocess(
+        self, ctx: E2ETestContext
+    ):
+        """Test that env values are passed as literals to MCP server subprocess"""
+        mcp_servers: dict[str, MCPServerConfig] = {
+            "env-echo": {
+                "command": "node",
+                "args": [TEST_MCP_SERVER],
+                "tools": ["*"],
+                "env": {"TEST_SECRET": "hunter2"},
+                "cwd": TEST_HARNESS_DIR,
+            }
+        }
+
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all, mcp_servers=mcp_servers
+        )
+
+        assert session.session_id is not None
+
+        message = await session.send_and_wait(
+            "Use the env-echo/get_env tool to read the TEST_SECRET "
+            "environment variable. Reply with just the value, nothing else."
+        )
+        assert message is not None
+        assert "hunter2" in message.data.content
+
+        await session.disconnect()
 
 
 class TestCustomAgents:
@@ -81,25 +123,29 @@ class TestCustomAgents:
             }
         ]
 
-        session = await ctx.client.create_session({"custom_agents": custom_agents})
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all, custom_agents=custom_agents
+        )
 
         assert session.session_id is not None
 
         # Simple interaction to verify session works
-        message = await session.send_and_wait({"prompt": "What is 5+5?"})
+        message = await session.send_and_wait("What is 5+5?")
         assert message is not None
         assert "10" in message.data.content
 
-        await session.destroy()
+        await session.disconnect()
 
     async def test_should_accept_custom_agent_configuration_on_session_resume(
         self, ctx: E2ETestContext
     ):
         """Test that custom agent configuration is accepted on session resume"""
         # Create a session first
-        session1 = await ctx.client.create_session()
+        session1 = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all
+        )
         session_id = session1.session_id
-        await session1.send_and_wait({"prompt": "What is 1+1?"})
+        await session1.send_and_wait("What is 1+1?")
 
         # Resume with custom agents
         custom_agents: list[CustomAgentConfig] = [
@@ -111,15 +157,19 @@ class TestCustomAgents:
             }
         ]
 
-        session2 = await ctx.client.resume_session(session_id, {"custom_agents": custom_agents})
+        session2 = await ctx.client.resume_session(
+            session_id,
+            on_permission_request=PermissionHandler.approve_all,
+            custom_agents=custom_agents,
+        )
 
         assert session2.session_id == session_id
 
-        message = await session2.send_and_wait({"prompt": "What is 6+6?"})
+        message = await session2.send_and_wait("What is 6+6?")
         assert message is not None
         assert "12" in message.data.content
 
-        await session2.destroy()
+        await session2.disconnect()
 
 
 class TestCombinedConfiguration:
@@ -127,7 +177,6 @@ class TestCombinedConfiguration:
         """Test that both MCP servers and custom agents can be configured together"""
         mcp_servers: dict[str, MCPServerConfig] = {
             "shared-server": {
-                "type": "local",
                 "command": "echo",
                 "args": ["shared"],
                 "tools": ["*"],
@@ -144,13 +193,15 @@ class TestCombinedConfiguration:
         ]
 
         session = await ctx.client.create_session(
-            {"mcp_servers": mcp_servers, "custom_agents": custom_agents}
+            on_permission_request=PermissionHandler.approve_all,
+            mcp_servers=mcp_servers,
+            custom_agents=custom_agents,
         )
 
         assert session.session_id is not None
 
-        await session.send({"prompt": "What is 7+7?"})
+        await session.send("What is 7+7?")
         message = await get_final_assistant_message(session)
         assert "14" in message.data.content
 
-        await session.destroy()
+        await session.disconnect()

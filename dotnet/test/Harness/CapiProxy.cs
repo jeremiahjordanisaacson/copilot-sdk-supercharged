@@ -12,7 +12,7 @@ using System.Text.RegularExpressions;
 
 namespace GitHub.Copilot.SDK.Test.Harness;
 
-public partial class CapiProxy : IAsyncDisposable
+public sealed partial class CapiProxy : IAsyncDisposable
 {
     private Process? _process;
     private Task<string>? _startupTask;
@@ -129,10 +129,23 @@ public partial class CapiProxy : IAsyncDisposable
 
         using var client = new HttpClient();
         return await client.GetFromJsonAsync($"{url}/exchanges", CapiProxyJsonContext.Default.ListParsedHttpExchange)
-               ?? new List<ParsedHttpExchange>();
+               ?? [];
     }
 
-    public async ValueTask DisposeAsync() => await StopAsync();
+    public async Task SetCopilotUserByTokenAsync(string token, CopilotUserConfig response)
+    {
+        var url = await (_startupTask ?? throw new InvalidOperationException("Proxy not started"));
+
+        using var client = new HttpClient();
+        var payload = new CopilotUserByTokenRequest(token, response);
+        var resp = await client.PostAsJsonAsync($"{url}/copilot-user-config", payload, CapiProxyJsonContext.Default.CopilotUserByTokenRequest);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync();
+    }
 
     private static string FindRepoRoot()
     {
@@ -149,8 +162,19 @@ public partial class CapiProxy : IAsyncDisposable
     [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
     [JsonSerializable(typeof(ConfigureRequest))]
     [JsonSerializable(typeof(List<ParsedHttpExchange>))]
+    [JsonSerializable(typeof(CopilotUserByTokenRequest))]
     private partial class CapiProxyJsonContext : JsonSerializerContext;
 }
+
+public record CopilotUserByTokenRequest(string Token, CopilotUserConfig Response);
+
+public record CopilotUserConfig(
+    string Login,
+    string CopilotPlan,
+    CopilotUserEndpoints Endpoints,
+    string AnalyticsTrackingId);
+
+public record CopilotUserEndpoints(string Api, string Telemetry);
 
 public record ParsedHttpExchange(ChatCompletionRequest Request, ChatCompletionResponse? Response);
 
@@ -161,9 +185,16 @@ public record ChatCompletionRequest(
 
 public record ChatCompletionMessage(
     string Role,
-    string? Content,
+    JsonElement? Content,
     [property: JsonPropertyName("tool_call_id")] string? ToolCallId,
-    [property: JsonPropertyName("tool_calls")] List<ChatCompletionToolCall>? ToolCalls);
+    [property: JsonPropertyName("tool_calls")] List<ChatCompletionToolCall>? ToolCalls)
+{
+    /// <summary>
+    /// Returns Content as a string when the JSON value is a string, or null otherwise.
+    /// </summary>
+    [JsonIgnore]
+    public string? StringContent => Content is { ValueKind: JsonValueKind.String } c ? c.GetString() : null;
+}
 
 public record ChatCompletionToolCall(string Id, string Type, ChatCompletionToolCallFunction Function);
 

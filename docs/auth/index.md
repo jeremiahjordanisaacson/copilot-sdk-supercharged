@@ -50,7 +50,20 @@ await client.start()
 <details>
 <summary><strong>Go</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```go
+package main
+
+import copilot "github.com/github/copilot-sdk/go"
+
+func main() {
+	// Default: uses logged-in user credentials
+	client := copilot.NewClient(nil)
+	_ = client
+}
+```
+<!-- /docs-validate: hidden -->
+
 ```go
 import copilot "github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/go"
 
@@ -72,6 +85,19 @@ await using var client = new CopilotClient();
 
 </details>
 
+<details>
+<summary><strong>Java</strong></summary>
+
+```java
+import com.github.copilot.sdk.CopilotClient;
+
+// Default: uses logged-in user credentials
+var client = new CopilotClient();
+client.start().get();
+```
+
+</details>
+
 **When to use:**
 - Desktop applications where users interact directly
 - Development and testing environments
@@ -84,7 +110,7 @@ Use an OAuth GitHub App to authenticate users through your application and pass 
 **How it works:**
 1. User authorizes your OAuth GitHub App
 2. Your app receives a user access token (`gho_` or `ghu_` prefix)
-3. Pass the token to the SDK via `githubToken` option
+3. Pass the token to the SDK via `gitHubToken` option
 
 **SDK Configuration:**
 
@@ -95,7 +121,7 @@ Use an OAuth GitHub App to authenticate users through your application and pass 
 import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient({
-    githubToken: userAccessToken,  // Token from OAuth flow
+    gitHubToken: userAccessToken,  // Token from OAuth flow
     useLoggedInUser: false,        // Don't use stored CLI credentials
 });
 ```
@@ -120,7 +146,23 @@ await client.start()
 <details>
 <summary><strong>Go</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```go
+package main
+
+import copilot "github.com/github/copilot-sdk/go"
+
+func main() {
+	userAccessToken := "token"
+	client := copilot.NewClient(&copilot.ClientOptions{
+		GitHubToken:     userAccessToken,
+		UseLoggedInUser: copilot.Bool(false),
+	})
+	_ = client
+}
+```
+<!-- /docs-validate: hidden -->
+
 ```go
 import copilot "github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/go"
 
@@ -135,7 +177,19 @@ client := copilot.NewClient(&copilot.ClientOptions{
 <details>
 <summary><strong>.NET</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```csharp
+using GitHub.Copilot.SDK;
+
+var userAccessToken = "token";
+await using var client = new CopilotClient(new CopilotClientOptions
+{
+    GithubToken = userAccessToken,
+    UseLoggedInUser = false,
+});
+```
+<!-- /docs-validate: hidden -->
+
 ```csharp
 using GitHub.Copilot.SDK;
 
@@ -144,6 +198,22 @@ await using var client = new CopilotClient(new CopilotClientOptions
     GithubToken = userAccessToken,     // Token from OAuth flow
     UseLoggedInUser = false,           // Don't use stored CLI credentials
 });
+```
+
+</details>
+
+<details>
+<summary><strong>Java</strong></summary>
+
+```java
+import com.github.copilot.sdk.CopilotClient;
+import com.github.copilot.sdk.json.*;
+
+var client = new CopilotClient(new CopilotClientOptions()
+    .setGitHubToken(userAccessToken)  // Token from OAuth flow
+    .setUseLoggedInUser(false)        // Don't use stored CLI credentials
+);
+client.start().get();
 ```
 
 </details>
@@ -229,7 +299,7 @@ BYOK allows you to use your own API keys from model providers like Azure AI Foun
 
 When multiple authentication methods are available, the SDK uses them in this priority order:
 
-1. **Explicit `githubToken`** - Token passed directly to SDK constructor
+1. **Explicit `gitHubToken`** - Token passed directly to SDK constructor
 2. **HMAC key** - `CAPI_HMAC_KEY` or `COPILOT_HMAC_KEY` environment variables
 3. **Direct API token** - `GITHUB_COPILOT_API_TOKEN` with `COPILOT_API_URL`
 4. **Environment variable tokens** - `COPILOT_GITHUB_TOKEN` → `GH_TOKEN` → `GITHUB_TOKEN`
@@ -254,7 +324,16 @@ const client = new CopilotClient({
 <details>
 <summary><strong>Python</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```python
+from copilot import CopilotClient
+
+client = CopilotClient({
+    "use_logged_in_user": False,
+})
+```
+<!-- /docs-validate: hidden -->
+
 ```python
 client = CopilotClient({
     "use_logged_in_user": False,  # Only use explicit tokens
@@ -266,7 +345,21 @@ client = CopilotClient({
 <details>
 <summary><strong>Go</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```go
+package main
+
+import copilot "github.com/github/copilot-sdk/go"
+
+func main() {
+	client := copilot.NewClient(&copilot.ClientOptions{
+		UseLoggedInUser: copilot.Bool(false),
+	})
+	_ = client
+}
+```
+<!-- /docs-validate: hidden -->
+
 ```go
 client := copilot.NewClient(&copilot.ClientOptions{
     UseLoggedInUser: copilot.Bool(false),  // Only use explicit tokens
@@ -287,8 +380,23 @@ await using var client = new CopilotClient(new CopilotClientOptions
 
 </details>
 
+<details>
+<summary><strong>Java</strong></summary>
+
+```java
+import com.github.copilot.sdk.CopilotClient;
+import com.github.copilot.sdk.json.*;
+
+var client = new CopilotClient(new CopilotClientOptions()
+    .setUseLoggedInUser(false)  // Only use explicit tokens
+);
+client.start().get();
+```
+
+</details>
+
 ## Next Steps
 
 - [BYOK Documentation](./byok.md) - Learn how to use your own API keys
 - [Getting Started Guide](../getting-started.md) - Build your first Copilot-powered app
-- [MCP Servers](../mcp) - Connect to external tools
+- [MCP Servers](../features/mcp.md) - Connect to external tools

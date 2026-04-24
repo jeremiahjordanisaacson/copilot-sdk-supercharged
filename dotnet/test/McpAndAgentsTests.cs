@@ -13,18 +13,17 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
     [Fact]
     public async Task Should_Accept_MCP_Server_Configuration_On_Session_Create()
     {
-        var mcpServers = new Dictionary<string, object>
+        var mcpServers = new Dictionary<string, McpServerConfig>
         {
-            ["test-server"] = new McpLocalServerConfig
+            ["test-server"] = new McpStdioServerConfig
             {
-                Type = "local",
                 Command = "echo",
                 Args = ["hello"],
                 Tools = ["*"]
             }
         };
 
-        var session = await Client.CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new SessionConfig
         {
             McpServers = mcpServers
         });
@@ -45,23 +44,22 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
     public async Task Should_Accept_MCP_Server_Configuration_On_Session_Resume()
     {
         // Create a session first
-        var session1 = await Client.CreateSessionAsync();
+        var session1 = await CreateSessionAsync();
         var sessionId = session1.SessionId;
         await session1.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
 
         // Resume with MCP servers
-        var mcpServers = new Dictionary<string, object>
+        var mcpServers = new Dictionary<string, McpServerConfig>
         {
-            ["test-server"] = new McpLocalServerConfig
+            ["test-server"] = new McpStdioServerConfig
             {
-                Type = "local",
                 Command = "echo",
                 Args = ["hello"],
                 Tools = ["*"]
             }
         };
 
-        var session2 = await Client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
             McpServers = mcpServers
         });
@@ -78,25 +76,23 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
     [Fact]
     public async Task Should_Handle_Multiple_MCP_Servers()
     {
-        var mcpServers = new Dictionary<string, object>
+        var mcpServers = new Dictionary<string, McpServerConfig>
         {
-            ["server1"] = new McpLocalServerConfig
+            ["server1"] = new McpStdioServerConfig
             {
-                Type = "local",
                 Command = "echo",
                 Args = ["server1"],
                 Tools = ["*"]
             },
-            ["server2"] = new McpLocalServerConfig
+            ["server2"] = new McpStdioServerConfig
             {
-                Type = "local",
                 Command = "echo",
                 Args = ["server2"],
                 Tools = ["*"]
             }
         };
 
-        var session = await Client.CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new SessionConfig
         {
             McpServers = mcpServers
         });
@@ -120,7 +116,7 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
             }
         };
 
-        var session = await Client.CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new SessionConfig
         {
             CustomAgents = customAgents
         });
@@ -141,7 +137,7 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
     public async Task Should_Accept_Custom_Agent_Configuration_On_Session_Resume()
     {
         // Create a session first
-        var session1 = await Client.CreateSessionAsync();
+        var session1 = await CreateSessionAsync();
         var sessionId = session1.SessionId;
         await session1.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
 
@@ -157,7 +153,7 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
             }
         };
 
-        var session2 = await Client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
             CustomAgents = customAgents
         });
@@ -187,7 +183,7 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
             }
         };
 
-        var session = await Client.CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new SessionConfig
         {
             CustomAgents = customAgents
         });
@@ -207,11 +203,10 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
                 DisplayName = "MCP Agent",
                 Description = "An agent with its own MCP servers",
                 Prompt = "You are an agent with MCP servers.",
-                McpServers = new Dictionary<string, object>
+                McpServers = new Dictionary<string, McpServerConfig>
                 {
-                    ["agent-server"] = new McpLocalServerConfig
+                    ["agent-server"] = new McpStdioServerConfig
                     {
-                        Type = "local",
                         Command = "echo",
                         Args = ["agent-mcp"],
                         Tools = ["*"]
@@ -220,7 +215,7 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
             }
         };
 
-        var session = await Client.CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new SessionConfig
         {
             CustomAgents = customAgents
         });
@@ -251,7 +246,7 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
             }
         };
 
-        var session = await Client.CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new SessionConfig
         {
             CustomAgents = customAgents
         });
@@ -261,13 +256,47 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task Should_Pass_Literal_Env_Values_To_Mcp_Server_Subprocess()
+    {
+        var testHarnessDir = FindTestHarnessDir();
+        var mcpServers = new Dictionary<string, McpServerConfig>
+        {
+            ["env-echo"] = new McpStdioServerConfig
+            {
+                Command = "node",
+                Args = [Path.Combine(testHarnessDir, "test-mcp-server.mjs")],
+                Env = new Dictionary<string, string> { ["TEST_SECRET"] = "hunter2" },
+                Cwd = testHarnessDir,
+                Tools = ["*"]
+            }
+        };
+
+        var session = await CreateSessionAsync(new SessionConfig
+        {
+            McpServers = mcpServers,
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+        });
+
+        Assert.Matches(@"^[a-f0-9-]+$", session.SessionId);
+
+        var message = await session.SendAndWaitAsync(new MessageOptions
+        {
+            Prompt = "Use the env-echo/get_env tool to read the TEST_SECRET environment variable. Reply with just the value, nothing else."
+        });
+
+        Assert.NotNull(message);
+        Assert.Contains("hunter2", message!.Data.Content);
+
+        await session.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Should_Accept_Both_MCP_Servers_And_Custom_Agents()
     {
-        var mcpServers = new Dictionary<string, object>
+        var mcpServers = new Dictionary<string, McpServerConfig>
         {
-            ["shared-server"] = new McpLocalServerConfig
+            ["shared-server"] = new McpStdioServerConfig
             {
-                Type = "local",
                 Command = "echo",
                 Args = ["shared"],
                 Tools = ["*"]
@@ -285,7 +314,7 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
             }
         };
 
-        var session = await Client.CreateSessionAsync(new SessionConfig
+        var session = await CreateSessionAsync(new SessionConfig
         {
             McpServers = mcpServers,
             CustomAgents = customAgents
@@ -300,5 +329,18 @@ public class McpAndAgentsTests(E2ETestFixture fixture, ITestOutputHelper output)
         Assert.Contains("14", message!.Data.Content);
 
         await session.DisposeAsync();
+    }
+
+    private static string FindTestHarnessDir()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null)
+        {
+            var candidate = Path.Combine(dir.FullName, "test", "harness", "test-mcp-server.mjs");
+            if (File.Exists(candidate))
+                return Path.GetDirectoryName(candidate)!;
+            dir = dir.Parent;
+        }
+        throw new InvalidOperationException("Could not find test/harness/test-mcp-server.mjs");
     }
 }

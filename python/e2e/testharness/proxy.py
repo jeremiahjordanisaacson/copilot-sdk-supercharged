@@ -9,7 +9,7 @@ import os
 import platform
 import re
 import subprocess
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -18,8 +18,8 @@ class CapiProxy:
     """Manages a replaying proxy server for E2E tests."""
 
     def __init__(self):
-        self._process: Optional[subprocess.Popen] = None
-        self._proxy_url: Optional[str] = None
+        self._process: subprocess.Popen | None = None
+        self._proxy_url: str | None = None
 
     async def start(self) -> str:
         """Launch the proxy server and return its URL."""
@@ -106,7 +106,19 @@ class CapiProxy:
             resp = await client.get(f"{self._proxy_url}/exchanges")
             return resp.json()
 
+    async def set_copilot_user_by_token(self, token: str, response: dict[str, Any]) -> None:
+        """Register a per-token response for /copilot_internal/user."""
+        if not self._proxy_url:
+            raise RuntimeError("Proxy not started")
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self._proxy_url}/copilot-user-config",
+                json={"token": token, "response": response},
+            )
+            assert resp.status_code == 200
+
     @property
-    def url(self) -> Optional[str]:
+    def url(self) -> str | None:
         """Return the proxy URL, or None if not started."""
         return self._proxy_url

@@ -1,13 +1,18 @@
 package e2e
 
 import (
+	"encoding/base64"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	copilot "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	"github.com/github/copilot-sdk/go/rpc"
 )
 
 func TestSession(t *testing.T) {
@@ -15,10 +20,10 @@ func TestSession(t *testing.T) {
 	client := ctx.NewClient()
 	t.Cleanup(func() { client.ForceStop() })
 
-	t.Run("should create and destroy sessions", func(t *testing.T) {
+	t.Run("should create and disconnect sessions", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{Model: "fake-test-model"})
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll, Model: "claude-sonnet-4.5"})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -37,28 +42,29 @@ func TestSession(t *testing.T) {
 			t.Fatalf("Expected first message to be session.start, got %v", messages)
 		}
 
-		if messages[0].Data.SessionID == nil || *messages[0].Data.SessionID != session.SessionID {
+		startData, startOk := messages[0].Data.(*copilot.SessionStartData)
+		if !startOk || startData.SessionID != session.SessionID {
 			t.Errorf("Expected session.start sessionId to match")
 		}
 
-		if messages[0].Data.SelectedModel == nil || *messages[0].Data.SelectedModel != "fake-test-model" {
-			t.Errorf("Expected selectedModel to be 'fake-test-model', got %v", messages[0].Data.SelectedModel)
+		if !startOk || startData.SelectedModel == nil || *startData.SelectedModel != "claude-sonnet-4.5" {
+			t.Errorf("Expected selectedModel to be 'claude-sonnet-4.5', got %v", startData)
 		}
 
-		if err := session.Destroy(); err != nil {
-			t.Fatalf("Failed to destroy session: %v", err)
+		if err := session.Disconnect(); err != nil {
+			t.Fatalf("Failed to disconnect session: %v", err)
 		}
 
 		_, err = session.GetMessages(t.Context())
 		if err == nil || !strings.Contains(err.Error(), "not found") {
-			t.Errorf("Expected GetMessages to fail with 'not found' after destroy, got %v", err)
+			t.Errorf("Expected GetMessages to fail with 'not found' after disconnect, got %v", err)
 		}
 	})
 
 	t.Run("should have stateful conversation", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), nil)
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -68,8 +74,8 @@ func TestSession(t *testing.T) {
 			t.Fatalf("Failed to send message: %v", err)
 		}
 
-		if assistantMessage.Data.Content == nil || !strings.Contains(*assistantMessage.Data.Content, "2") {
-			t.Errorf("Expected assistant message to contain '2', got %v", assistantMessage.Data.Content)
+		if ad, ok := assistantMessage.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "2") {
+			t.Errorf("Expected assistant message to contain '2', got %v", assistantMessage.Data)
 		}
 
 		secondMessage, err := session.SendAndWait(t.Context(), copilot.MessageOptions{Prompt: "Now if you double that, what do you get?"})
@@ -77,8 +83,8 @@ func TestSession(t *testing.T) {
 			t.Fatalf("Failed to send second message: %v", err)
 		}
 
-		if secondMessage.Data.Content == nil || !strings.Contains(*secondMessage.Data.Content, "4") {
-			t.Errorf("Expected second message to contain '4', got %v", secondMessage.Data.Content)
+		if ad, ok := secondMessage.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "4") {
+			t.Errorf("Expected second message to contain '4', got %v", secondMessage.Data)
 		}
 	})
 
@@ -87,6 +93,7 @@ func TestSession(t *testing.T) {
 
 		systemMessageSuffix := "End each response with the phrase 'Have a nice day!'"
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 			SystemMessage: &copilot.SystemMessageConfig{
 				Mode:    "append",
 				Content: systemMessageSuffix,
@@ -102,8 +109,10 @@ func TestSession(t *testing.T) {
 		}
 
 		content := ""
-		if assistantMessage != nil && assistantMessage.Data.Content != nil {
-			content = *assistantMessage.Data.Content
+		if assistantMessage != nil {
+			if ad, ok := assistantMessage.Data.(*copilot.AssistantMessageData); ok {
+				content = ad.Content
+			}
 		}
 
 		if !strings.Contains(content, "GitHub") {
@@ -135,6 +144,7 @@ func TestSession(t *testing.T) {
 
 		testSystemMessage := "You are an assistant called Testy McTestface. Reply succinctly."
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 			SystemMessage: &copilot.SystemMessageConfig{
 				Mode:    "replace",
 				Content: testSystemMessage,
@@ -155,8 +165,8 @@ func TestSession(t *testing.T) {
 		}
 
 		content := ""
-		if assistantMessage.Data.Content != nil {
-			content = *assistantMessage.Data.Content
+		if ad, ok := assistantMessage.Data.(*copilot.AssistantMessageData); ok {
+			content = ad.Content
 		}
 
 		if strings.Contains(content, "GitHub") {
@@ -180,11 +190,57 @@ func TestSession(t *testing.T) {
 		}
 	})
 
+	t.Run("should create a session with customized systemMessage config", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+
+		customTone := "Respond in a warm, professional tone. Be thorough in explanations."
+		appendedContent := "Always mention quarterly earnings."
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			SystemMessage: &copilot.SystemMessageConfig{
+				Mode: "customize",
+				Sections: map[string]copilot.SectionOverride{
+					copilot.SectionTone:            {Action: "replace", Content: customTone},
+					copilot.SectionCodeChangeRules: {Action: "remove"},
+				},
+				Content: appendedContent,
+			},
+		})
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		_, err = session.SendAndWait(t.Context(), copilot.MessageOptions{Prompt: "Who are you?"})
+		if err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		// Validate the system message sent to the model
+		traffic, err := ctx.GetExchanges()
+		if err != nil {
+			t.Fatalf("Failed to get exchanges: %v", err)
+		}
+		if len(traffic) == 0 {
+			t.Fatal("Expected at least one exchange")
+		}
+		systemMessage := getSystemMessage(traffic[0])
+		if !strings.Contains(systemMessage, customTone) {
+			t.Errorf("Expected system message to contain custom tone, got %q", systemMessage)
+		}
+		if !strings.Contains(systemMessage, appendedContent) {
+			t.Errorf("Expected system message to contain appended content, got %q", systemMessage)
+		}
+		if strings.Contains(systemMessage, "<code_change_instructions>") {
+			t.Error("Expected system message to NOT contain code_change_instructions (it was removed)")
+		}
+	})
+
 	t.Run("should create a session with availableTools", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			AvailableTools: []string{"view", "edit"},
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			AvailableTools:      []string{"view", "edit"},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -222,7 +278,8 @@ func TestSession(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			ExcludedTools: []string{"view"},
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			ExcludedTools:       []string{"view"},
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
@@ -256,10 +313,62 @@ func TestSession(t *testing.T) {
 		}
 	})
 
+	t.Run("should create a session with defaultAgent excludedTools", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			Tools: []copilot.Tool{
+				{
+					Name:        "secret_tool",
+					Description: "A secret tool hidden from the default agent",
+					Parameters: map[string]any{
+						"type":       "object",
+						"properties": map[string]any{"input": map[string]any{"type": "string"}},
+					},
+					Handler: func(invocation copilot.ToolInvocation) (copilot.ToolResult, error) {
+						return copilot.ToolResult{TextResultForLLM: "SECRET", ResultType: "success"}, nil
+					},
+				},
+			},
+			DefaultAgent: &copilot.DefaultAgentConfig{
+				ExcludedTools: []string{"secret_tool"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		_, err = session.Send(t.Context(), copilot.MessageOptions{Prompt: "What is 1+1?"})
+		if err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		_, err = testharness.GetFinalAssistantMessage(t.Context(), session)
+		if err != nil {
+			t.Fatalf("Failed to get assistant message: %v", err)
+		}
+
+		// The real assertion: verify the runtime excluded the tool from the CAPI request
+		traffic, err := ctx.GetExchanges()
+		if err != nil {
+			t.Fatalf("Failed to get exchanges: %v", err)
+		}
+		if len(traffic) == 0 {
+			t.Fatal("Expected at least one exchange")
+		}
+
+		toolNames := getToolNames(traffic[0])
+		if contains(toolNames, "secret_tool") {
+			t.Errorf("Expected 'secret_tool' to be excluded from default agent, got %v", toolNames)
+		}
+	})
+
 	t.Run("should create session with custom tool", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 			Tools: []copilot.Tool{
 				{
 					Name:        "get_secret_number",
@@ -306,8 +415,8 @@ func TestSession(t *testing.T) {
 		}
 
 		content := ""
-		if assistantMessage.Data.Content != nil {
-			content = *assistantMessage.Data.Content
+		if ad, ok := assistantMessage.Data.(*copilot.AssistantMessageData); ok {
+			content = ad.Content
 		}
 
 		if !strings.Contains(content, "54321") {
@@ -323,7 +432,7 @@ func TestSession(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create initial session
-		session1, err := client.CreateSession(t.Context(), nil)
+		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -339,12 +448,14 @@ func TestSession(t *testing.T) {
 			t.Fatalf("Failed to get assistant message: %v", err)
 		}
 
-		if answer.Data.Content == nil || !strings.Contains(*answer.Data.Content, "2") {
-			t.Errorf("Expected answer to contain '2', got %v", answer.Data.Content)
+		if ad, ok := answer.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "2") {
+			t.Errorf("Expected answer to contain '2', got %v", answer.Data)
 		}
 
 		// Resume using the same client
-		session2, err := client.ResumeSession(t.Context(), sessionID)
+		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -353,13 +464,24 @@ func TestSession(t *testing.T) {
 			t.Errorf("Expected resumed session ID to match, got %q vs %q", session2.SessionID, sessionID)
 		}
 
-		answer2, err := testharness.GetFinalAssistantMessage(t.Context(), session2)
+		answer2, err := testharness.GetFinalAssistantMessage(t.Context(), session2, true)
 		if err != nil {
 			t.Fatalf("Failed to get assistant message from resumed session: %v", err)
 		}
 
-		if answer2.Data.Content == nil || !strings.Contains(*answer2.Data.Content, "2") {
-			t.Errorf("Expected resumed session answer to contain '2', got %v", answer2.Data.Content)
+		if ad, ok := answer2.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "2") {
+			t.Errorf("Expected resumed session answer to contain '2', got %v", answer2.Data)
+		}
+
+		// Can continue the conversation statefully
+		answer3, err := session2.SendAndWait(t.Context(), copilot.MessageOptions{Prompt: "Now if you double that, what do you get?"})
+		if err != nil {
+			t.Fatalf("Failed to send follow-up message: %v", err)
+		}
+		if answer3 == nil {
+			t.Errorf("Expected follow-up answer to contain '4', got nil")
+		} else if ad, ok := answer3.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "4") {
+			t.Errorf("Expected follow-up answer to contain '4', got %v", answer3)
 		}
 	})
 
@@ -367,7 +489,7 @@ func TestSession(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create initial session
-		session1, err := client.CreateSession(t.Context(), nil)
+		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -383,15 +505,17 @@ func TestSession(t *testing.T) {
 			t.Fatalf("Failed to get assistant message: %v", err)
 		}
 
-		if answer.Data.Content == nil || !strings.Contains(*answer.Data.Content, "2") {
-			t.Errorf("Expected answer to contain '2', got %v", answer.Data.Content)
+		if ad, ok := answer.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "2") {
+			t.Errorf("Expected answer to contain '2', got %v", answer.Data)
 		}
 
 		// Resume using a new client
 		newClient := ctx.NewClient()
 		defer newClient.ForceStop()
 
-		session2, err := newClient.ResumeSession(t.Context(), sessionID)
+		session2, err := newClient.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		})
 		if err != nil {
 			t.Fatalf("Failed to resume session: %v", err)
 		}
@@ -423,12 +547,25 @@ func TestSession(t *testing.T) {
 		if !hasSessionResume {
 			t.Error("Expected messages to contain 'session.resume'")
 		}
+
+		// Can continue the conversation statefully
+		answer3, err := session2.SendAndWait(t.Context(), copilot.MessageOptions{Prompt: "Now if you double that, what do you get?"})
+		if err != nil {
+			t.Fatalf("Failed to send follow-up message: %v", err)
+		}
+		if answer3 == nil {
+			t.Errorf("Expected follow-up answer to contain '4', got nil")
+		} else if ad, ok := answer3.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "4") {
+			t.Errorf("Expected follow-up answer to contain '4', got %v", answer3)
+		}
 	})
 
 	t.Run("should throw error when resuming non-existent session", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		_, err := client.ResumeSession(t.Context(), "non-existent-session-id")
+		_, err := client.ResumeSession(t.Context(), "non-existent-session-id", &copilot.ResumeSessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		})
 		if err == nil {
 			t.Error("Expected error when resuming non-existent session")
 		}
@@ -437,7 +574,7 @@ func TestSession(t *testing.T) {
 	t.Run("should resume session with a custom provider", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), nil)
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -445,6 +582,7 @@ func TestSession(t *testing.T) {
 
 		// Resume the session with a provider
 		session2, err := client.ResumeSessionWithOptions(t.Context(), sessionID, &copilot.ResumeSessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 			Provider: &copilot.ProviderConfig{
 				Type:    "openai",
 				BaseURL: "https://api.openai.com/v1",
@@ -463,7 +601,9 @@ func TestSession(t *testing.T) {
 	t.Run("should abort a session", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), nil)
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -472,7 +612,7 @@ func TestSession(t *testing.T) {
 		toolStartCh := make(chan *copilot.SessionEvent, 1)
 		toolStartErrCh := make(chan error, 1)
 		go func() {
-			evt, err := testharness.GetNextEventOfType(session, copilot.ToolExecutionStart, 60*time.Second)
+			evt, err := testharness.GetNextEventOfType(session, copilot.SessionEventTypeToolExecutionStart, 60*time.Second)
 			if err != nil {
 				toolStartErrCh <- err
 			} else {
@@ -483,7 +623,7 @@ func TestSession(t *testing.T) {
 		sessionIdleCh := make(chan *copilot.SessionEvent, 1)
 		sessionIdleErrCh := make(chan error, 1)
 		go func() {
-			evt, err := testharness.GetNextEventOfType(session, copilot.SessionIdle, 60*time.Second)
+			evt, err := testharness.GetNextEventOfType(session, copilot.SessionEventTypeSessionIdle, 60*time.Second)
 			if err != nil {
 				sessionIdleErrCh <- err
 			} else {
@@ -531,7 +671,7 @@ func TestSession(t *testing.T) {
 		// Verify messages contain an abort event
 		hasAbortEvent := false
 		for _, msg := range messages {
-			if msg.Type == copilot.Abort {
+			if msg.Type == copilot.SessionEventTypeAbort {
 				hasAbortEvent = true
 				break
 			}
@@ -546,108 +686,37 @@ func TestSession(t *testing.T) {
 			t.Fatalf("Failed to send message after abort: %v", err)
 		}
 
-		if answer.Data.Content == nil || !strings.Contains(*answer.Data.Content, "4") {
-			t.Errorf("Expected answer to contain '4', got %v", answer.Data.Content)
-		}
-	})
-
-	t.Run("should receive streaming delta events when streaming is enabled", func(t *testing.T) {
-		ctx.ConfigureForTest(t)
-
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Streaming: true,
-		})
-		if err != nil {
-			t.Fatalf("Failed to create session with streaming: %v", err)
-		}
-
-		var deltaContents []string
-		done := make(chan bool)
-
-		session.On(func(event copilot.SessionEvent) {
-			switch event.Type {
-			case "assistant.message_delta":
-				if event.Data.DeltaContent != nil {
-					deltaContents = append(deltaContents, *event.Data.DeltaContent)
-				}
-			case "session.idle":
-				close(done)
-			}
-		})
-
-		_, err = session.Send(t.Context(), copilot.MessageOptions{Prompt: "What is 2+2?"})
-		if err != nil {
-			t.Fatalf("Failed to send message: %v", err)
-		}
-
-		// Wait for completion
-		select {
-		case <-done:
-		case <-time.After(60 * time.Second):
-			t.Fatal("Timed out waiting for session.idle")
-		}
-
-		// Should have received delta events
-		if len(deltaContents) == 0 {
-			t.Error("Expected to receive delta events, got none")
-		}
-
-		// Get the final message to compare
-		assistantMessage, err := testharness.GetFinalAssistantMessage(t.Context(), session)
-		if err != nil {
-			t.Fatalf("Failed to get assistant message: %v", err)
-		}
-
-		// Accumulated deltas should equal the final message
-		accumulated := strings.Join(deltaContents, "")
-		if assistantMessage.Data.Content != nil && accumulated != *assistantMessage.Data.Content {
-			t.Errorf("Accumulated deltas don't match final message.\nAccumulated: %q\nFinal: %q", accumulated, *assistantMessage.Data.Content)
-		}
-
-		// Final message should contain the answer
-		if assistantMessage.Data.Content == nil || !strings.Contains(*assistantMessage.Data.Content, "4") {
-			t.Errorf("Expected assistant message to contain '4', got %v", assistantMessage.Data.Content)
-		}
-	})
-
-	t.Run("should pass streaming option to session creation", func(t *testing.T) {
-		ctx.ConfigureForTest(t)
-
-		// Verify that the streaming option is accepted without errors
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			Streaming: true,
-		})
-		if err != nil {
-			t.Fatalf("Failed to create session with streaming: %v", err)
-		}
-
-		matched, _ := regexp.MatchString(`^[a-f0-9-]+$`, session.SessionID)
-		if !matched {
-			t.Errorf("Expected session ID to match UUID pattern, got %q", session.SessionID)
-		}
-
-		// Session should still work normally
-		_, err = session.Send(t.Context(), copilot.MessageOptions{Prompt: "What is 1+1?"})
-		if err != nil {
-			t.Fatalf("Failed to send message: %v", err)
-		}
-
-		assistantMessage, err := testharness.GetFinalAssistantMessage(t.Context(), session)
-		if err != nil {
-			t.Fatalf("Failed to get assistant message: %v", err)
-		}
-
-		if assistantMessage.Data.Content == nil || !strings.Contains(*assistantMessage.Data.Content, "2") {
-			t.Errorf("Expected assistant message to contain '2', got %v", assistantMessage.Data.Content)
+		if ad, ok := answer.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "4") {
+			t.Errorf("Expected answer to contain '4', got %v", answer.Data)
 		}
 	})
 
 	t.Run("should receive session events", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), nil)
+		// Use OnEvent to capture events dispatched during session creation.
+		// session.start is emitted during the session.create RPC; with channel-based
+		// dispatch it may not have been delivered by the time CreateSession returns.
+		sessionStartCh := make(chan bool, 1)
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			OnEvent: func(event copilot.SessionEvent) {
+				if event.Type == "session.start" {
+					select {
+					case sessionStartCh <- true:
+					default:
+					}
+				}
+			},
+		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		select {
+		case <-sessionStartCh:
+		case <-time.After(5 * time.Second):
+			t.Error("Expected session.start event via OnEvent during creation")
 		}
 
 		var receivedEvents []copilot.SessionEvent
@@ -705,13 +774,15 @@ func TestSession(t *testing.T) {
 			t.Error("Expected to receive session.idle event")
 		}
 
-		// Verify the assistant response contains the expected answer
-		assistantMessage, err := testharness.GetFinalAssistantMessage(t.Context(), session)
+		// Verify the assistant response contains the expected answer.
+		// session.idle is ephemeral and not in GetMessages(), but we already
+		// confirmed idle via the live event handler above.
+		assistantMessage, err := testharness.GetFinalAssistantMessage(t.Context(), session, true)
 		if err != nil {
 			t.Fatalf("Failed to get assistant message: %v", err)
 		}
-		if assistantMessage.Data.Content == nil || !strings.Contains(*assistantMessage.Data.Content, "300") {
-			t.Errorf("Expected assistant message to contain '300', got %v", assistantMessage.Data.Content)
+		if ad, ok := assistantMessage.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "300") {
+			t.Errorf("Expected assistant message to contain '300', got %v", assistantMessage.Data)
 		}
 	})
 
@@ -720,7 +791,8 @@ func TestSession(t *testing.T) {
 
 		customConfigDir := ctx.HomeDir + "/custom-config"
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			ConfigDir: customConfigDir,
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			ConfigDir:           customConfigDir,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session with custom config dir: %v", err)
@@ -742,8 +814,8 @@ func TestSession(t *testing.T) {
 			t.Fatalf("Failed to get assistant message: %v", err)
 		}
 
-		if assistantMessage.Data.Content == nil || !strings.Contains(*assistantMessage.Data.Content, "2") {
-			t.Errorf("Expected assistant message to contain '2', got %v", assistantMessage.Data.Content)
+		if ad, ok := assistantMessage.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "2") {
+			t.Errorf("Expected assistant message to contain '2', got %v", assistantMessage.Data)
 		}
 	})
 
@@ -751,7 +823,7 @@ func TestSession(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create a couple of sessions and send messages to persist them
-		session1, err := client.CreateSession(t.Context(), nil)
+		session1, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
 		if err != nil {
 			t.Fatalf("Failed to create session1: %v", err)
 		}
@@ -761,7 +833,7 @@ func TestSession(t *testing.T) {
 			t.Fatalf("Failed to send message to session1: %v", err)
 		}
 
-		session2, err := client.CreateSession(t.Context(), nil)
+		session2, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
 		if err != nil {
 			t.Fatalf("Failed to create session2: %v", err)
 		}
@@ -775,7 +847,7 @@ func TestSession(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 
 		// List sessions and verify they're included
-		sessions, err := client.ListSessions(t.Context())
+		sessions, err := client.ListSessions(t.Context(), nil)
 		if err != nil {
 			t.Fatalf("Failed to list sessions: %v", err)
 		}
@@ -793,10 +865,10 @@ func TestSession(t *testing.T) {
 
 		// Verify both sessions are in the list
 		if !contains(sessionIDs, session1.SessionID) {
-			t.Errorf("Expected session1 ID %s to be in sessions list", session1.SessionID)
+			t.Errorf("Expected session1 ID %s to be in sessions list %v", session1.SessionID, sessionIDs)
 		}
 		if !contains(sessionIDs, session2.SessionID) {
-			t.Errorf("Expected session2 ID %s to be in sessions list", session2.SessionID)
+			t.Errorf("Expected session2 ID %s to be in sessions list %v", session2.SessionID, sessionIDs)
 		}
 
 		// Verify session metadata structure
@@ -812,13 +884,22 @@ func TestSession(t *testing.T) {
 			}
 			// isRemote is a boolean, so it's always set
 		}
+
+		// Verify context field is present on sessions
+		for _, s := range sessions {
+			if s.Context != nil {
+				if s.Context.Cwd == "" {
+					t.Error("Expected context.Cwd to be non-empty when context is present")
+				}
+			}
+		}
 	})
 
 	t.Run("should delete session", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		// Create a session and send a message to persist it
-		session, err := client.CreateSession(t.Context(), nil)
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -834,7 +915,7 @@ func TestSession(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 
 		// Verify session exists in the list
-		sessions, err := client.ListSessions(t.Context())
+		sessions, err := client.ListSessions(t.Context(), nil)
 		if err != nil {
 			t.Fatalf("Failed to list sessions: %v", err)
 		}
@@ -855,7 +936,7 @@ func TestSession(t *testing.T) {
 		}
 
 		// Verify session no longer exists in the list
-		sessionsAfter, err := client.ListSessions(t.Context())
+		sessionsAfter, err := client.ListSessions(t.Context(), nil)
 		if err != nil {
 			t.Fatalf("Failed to list sessions after delete: %v", err)
 		}
@@ -870,9 +951,100 @@ func TestSession(t *testing.T) {
 		}
 
 		// Verify we cannot resume the deleted session
-		_, err = client.ResumeSession(t.Context(), sessionID)
+		_, err = client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		})
 		if err == nil {
 			t.Error("Expected error when resuming deleted session")
+		}
+	})
+	t.Run("should get session metadata", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+
+		// Create a session and send a message to persist it
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		_, err = session.SendAndWait(t.Context(), copilot.MessageOptions{Prompt: "Say hello"})
+		if err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		// Small delay to ensure session file is written to disk
+		time.Sleep(200 * time.Millisecond)
+
+		// Get metadata for the session we just created
+		metadata, err := client.GetSessionMetadata(t.Context(), session.SessionID)
+		if err != nil {
+			t.Fatalf("Failed to get session metadata: %v", err)
+		}
+
+		if metadata == nil {
+			t.Fatal("Expected metadata to be non-nil")
+		}
+
+		if metadata.SessionID != session.SessionID {
+			t.Errorf("Expected sessionId %s, got %s", session.SessionID, metadata.SessionID)
+		}
+
+		if metadata.StartTime == "" {
+			t.Error("Expected startTime to be non-empty")
+		}
+
+		if metadata.ModifiedTime == "" {
+			t.Error("Expected modifiedTime to be non-empty")
+		}
+
+		// Verify context field
+		if metadata.Context != nil {
+			if metadata.Context.Cwd == "" {
+				t.Error("Expected context.Cwd to be non-empty when context is present")
+			}
+		}
+
+		// Verify non-existent session returns nil
+		notFound, err := client.GetSessionMetadata(t.Context(), "non-existent-session-id")
+		if err != nil {
+			t.Fatalf("Expected no error for non-existent session, got: %v", err)
+		}
+		if notFound != nil {
+			t.Error("Expected nil metadata for non-existent session")
+		}
+	})
+	t.Run("should get last session id", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+
+		// Create a session and send a message to persist it
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll})
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		_, err = session.SendAndWait(t.Context(), copilot.MessageOptions{Prompt: "Say hello"})
+		if err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		// Small delay to ensure session data is flushed to disk
+		time.Sleep(500 * time.Millisecond)
+
+		lastSessionID, err := client.GetLastSessionID(t.Context())
+		if err != nil {
+			t.Fatalf("Failed to get last session ID: %v", err)
+		}
+
+		if lastSessionID == nil {
+			t.Fatal("Expected last session ID to be non-nil")
+		}
+
+		if *lastSessionID != session.SessionID {
+			t.Errorf("Expected last session ID to be %s, got %s", session.SessionID, *lastSessionID)
+		}
+
+		if err := session.Disconnect(); err != nil {
+			t.Fatalf("Failed to destroy session: %v", err)
 		}
 	})
 }
@@ -884,6 +1056,97 @@ func getSystemMessage(exchange testharness.ParsedHttpExchange) string {
 		}
 	}
 	return ""
+}
+
+func TestSetModelWithReasoningEffort(t *testing.T) {
+	ctx := testharness.NewTestContext(t)
+	client := ctx.NewClient()
+	t.Cleanup(func() { client.ForceStop() })
+
+	if err := client.Start(t.Context()); err != nil {
+		t.Fatalf("Failed to start client: %v", err)
+	}
+
+	session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	modelChanged := make(chan copilot.SessionEvent, 1)
+	session.On(func(event copilot.SessionEvent) {
+		if event.Type == copilot.SessionEventTypeSessionModelChange {
+			select {
+			case modelChanged <- event:
+			default:
+			}
+		}
+	})
+
+	if err := session.SetModel(t.Context(), "gpt-4.1", &copilot.SetModelOptions{ReasoningEffort: copilot.String("high")}); err != nil {
+		t.Fatalf("SetModel returned error: %v", err)
+	}
+
+	select {
+	case evt := <-modelChanged:
+		md, mdOk := evt.Data.(*copilot.SessionModelChangeData)
+		if !mdOk || md.NewModel != "gpt-4.1" {
+			t.Errorf("Expected newModel 'gpt-4.1', got %v", evt.Data)
+		}
+		if !mdOk || md.ReasoningEffort == nil || *md.ReasoningEffort != "high" {
+			t.Errorf("Expected reasoningEffort 'high', got %v", evt.Data)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Timed out waiting for session.model_change event")
+	}
+}
+
+func TestSessionBlobAttachment(t *testing.T) {
+	ctx := testharness.NewTestContext(t)
+	client := ctx.NewClient()
+	t.Cleanup(func() { client.ForceStop() })
+
+	if err := client.Start(t.Context()); err != nil {
+		t.Fatalf("Failed to start client: %v", err)
+	}
+
+	t.Run("should accept blob attachments", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+
+		// Write the image to disk so the model can view it
+		data := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+		pngBytes, _ := base64.StdEncoding.DecodeString(data)
+		if err := os.WriteFile(filepath.Join(ctx.WorkDir, "test-pixel.png"), pngBytes, 0644); err != nil {
+			t.Fatalf("Failed to write test image: %v", err)
+		}
+
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		})
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		mimeType := "image/png"
+		displayName := "test-pixel.png"
+		_, err = session.SendAndWait(t.Context(), copilot.MessageOptions{
+			Prompt: "Describe this image",
+			Attachments: []copilot.Attachment{
+				{
+					Type:        copilot.AttachmentTypeBlob,
+					Data:        &data,
+					MIMEType:    &mimeType,
+					DisplayName: &displayName,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Send with blob attachment failed: %v", err)
+		}
+
+		session.Disconnect()
+	})
 }
 
 func getToolNames(exchange testharness.ParsedHttpExchange) []string {
@@ -901,4 +1164,124 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func TestSessionLog(t *testing.T) {
+	ctx := testharness.NewTestContext(t)
+	client := ctx.NewClient()
+	t.Cleanup(func() { client.ForceStop() })
+
+	if err := client.Start(t.Context()); err != nil {
+		t.Fatalf("Failed to start client: %v", err)
+	}
+
+	session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	// Collect events
+	var events []copilot.SessionEvent
+	var mu sync.Mutex
+	unsubscribe := session.On(func(event copilot.SessionEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, event)
+	})
+	defer unsubscribe()
+
+	t.Run("should log info message (default level)", func(t *testing.T) {
+		if err := session.Log(t.Context(), "Info message", nil); err != nil {
+			t.Fatalf("Log failed: %v", err)
+		}
+
+		evt := waitForEvent(t, &mu, &events, copilot.SessionEventTypeSessionInfo, "Info message", 5*time.Second)
+		id, idOk := evt.Data.(*copilot.SessionInfoData)
+		if !idOk || id.InfoType != "notification" {
+			t.Errorf("Expected infoType 'notification', got %v", evt.Data)
+		}
+		if !idOk || id.Message != "Info message" {
+			t.Errorf("Expected message 'Info message', got %v", evt.Data)
+		}
+	})
+
+	t.Run("should log warning message", func(t *testing.T) {
+		if err := session.Log(t.Context(), "Warning message", &copilot.LogOptions{Level: rpc.SessionLogLevelWarning}); err != nil {
+			t.Fatalf("Log failed: %v", err)
+		}
+
+		evt := waitForEvent(t, &mu, &events, copilot.SessionEventTypeSessionWarning, "Warning message", 5*time.Second)
+		wd, wdOk := evt.Data.(*copilot.SessionWarningData)
+		if !wdOk || wd.WarningType != "notification" {
+			t.Errorf("Expected warningType 'notification', got %v", evt.Data)
+		}
+		if !wdOk || wd.Message != "Warning message" {
+			t.Errorf("Expected message 'Warning message', got %v", evt.Data)
+		}
+	})
+
+	t.Run("should log error message", func(t *testing.T) {
+		if err := session.Log(t.Context(), "Error message", &copilot.LogOptions{Level: rpc.SessionLogLevelError}); err != nil {
+			t.Fatalf("Log failed: %v", err)
+		}
+
+		evt := waitForEvent(t, &mu, &events, copilot.SessionEventTypeSessionError, "Error message", 5*time.Second)
+		ed, edOk := evt.Data.(*copilot.SessionErrorData)
+		if !edOk || ed.ErrorType != "notification" {
+			t.Errorf("Expected errorType 'notification', got %v", evt.Data)
+		}
+		if !edOk || ed.Message != "Error message" {
+			t.Errorf("Expected message 'Error message', got %v", evt.Data)
+		}
+	})
+
+	t.Run("should log ephemeral message", func(t *testing.T) {
+		if err := session.Log(t.Context(), "Ephemeral message", &copilot.LogOptions{Ephemeral: copilot.Bool(true)}); err != nil {
+			t.Fatalf("Log failed: %v", err)
+		}
+
+		evt := waitForEvent(t, &mu, &events, copilot.SessionEventTypeSessionInfo, "Ephemeral message", 5*time.Second)
+		id2, id2Ok := evt.Data.(*copilot.SessionInfoData)
+		if !id2Ok || id2.InfoType != "notification" {
+			t.Errorf("Expected infoType 'notification', got %v", evt.Data)
+		}
+		if !id2Ok || id2.Message != "Ephemeral message" {
+			t.Errorf("Expected message 'Ephemeral message', got %v", evt.Data)
+		}
+	})
+}
+
+// waitForEvent polls the collected events for a matching event type and message.
+func waitForEvent(t *testing.T, mu *sync.Mutex, events *[]copilot.SessionEvent, eventType copilot.SessionEventType, message string, timeout time.Duration) copilot.SessionEvent {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		for _, evt := range *events {
+			if evt.Type == eventType && getEventMessage(evt) == message {
+				mu.Unlock()
+				return evt
+			}
+		}
+		mu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("Timed out waiting for %s event with message %q", eventType, message)
+	return copilot.SessionEvent{} // unreachable
+}
+
+// getEventMessage extracts the Message field from session info/warning/error event data.
+func getEventMessage(evt copilot.SessionEvent) string {
+	switch d := evt.Data.(type) {
+	case *copilot.SessionInfoData:
+		return d.Message
+	case *copilot.SessionWarningData:
+		return d.Message
+	case *copilot.SessionErrorData:
+		return d.Message
+	default:
+		return ""
+	}
 }

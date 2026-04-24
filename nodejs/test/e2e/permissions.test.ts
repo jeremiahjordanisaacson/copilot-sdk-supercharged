@@ -6,6 +6,7 @@ import { readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
 import type { PermissionRequest, PermissionRequestResult } from "../../src/index.js";
+import { approveAll } from "../../src/index.js";
 import { createSdkTestContext } from "./harness/sdkTestContext.js";
 
 describe("Permission callbacks", async () => {
@@ -20,7 +21,7 @@ describe("Permission callbacks", async () => {
                 expect(invocation.sessionId).toBe(session.sessionId);
 
                 // Approve the permission
-                const result: PermissionRequestResult = { kind: "approved" };
+                const result: PermissionRequestResult = { kind: "approve-once" };
                 return result;
             },
         });
@@ -38,13 +39,13 @@ describe("Permission callbacks", async () => {
         const writeRequests = permissionRequests.filter((req) => req.kind === "write");
         expect(writeRequests.length).toBeGreaterThan(0);
 
-        await session.destroy();
+        await session.disconnect();
     });
 
     it("should deny permission when handler returns denied", async () => {
         const session = await client.createSession({
             onPermissionRequest: () => {
-                return { kind: "denied-interactively-by-user" };
+                return { kind: "reject" };
             },
         });
 
@@ -60,19 +61,71 @@ describe("Permission callbacks", async () => {
         const content = await readFile(testFile, "utf-8");
         expect(content).toBe(originalContent);
 
-        await session.destroy();
+        await session.disconnect();
     });
 
-    it("should work without permission handler (default behavior)", async () => {
-        // Create session without onPermissionRequest handler
-        const session = await client.createSession();
+    it("should deny tool operations when handler explicitly denies", async () => {
+        let permissionDenied = false;
+
+        const session = await client.createSession({
+            onPermissionRequest: () => ({
+                kind: "user-not-available",
+            }),
+        });
+        session.on((event) => {
+            if (
+                event.type === "tool.execution_complete" &&
+                !event.data.success &&
+                event.data.error?.message.includes("Permission denied")
+            ) {
+                permissionDenied = true;
+            }
+        });
+
+        await session.sendAndWait({ prompt: "Run 'node --version'" });
+
+        expect(permissionDenied).toBe(true);
+
+        await session.disconnect();
+    });
+
+    it("should deny tool operations when handler explicitly denies after resume", async () => {
+        const session1 = await client.createSession({ onPermissionRequest: approveAll });
+        const sessionId = session1.sessionId;
+        await session1.sendAndWait({ prompt: "What is 1+1?" });
+
+        const session2 = await client.resumeSession(sessionId, {
+            onPermissionRequest: () => ({
+                kind: "user-not-available",
+            }),
+        });
+        let permissionDenied = false;
+        session2.on((event) => {
+            if (
+                event.type === "tool.execution_complete" &&
+                !event.data.success &&
+                event.data.error?.message.includes("Permission denied")
+            ) {
+                permissionDenied = true;
+            }
+        });
+
+        await session2.sendAndWait({ prompt: "Run 'node --version'" });
+
+        expect(permissionDenied).toBe(true);
+
+        await session2.disconnect();
+    });
+
+    it("should work with approve-all permission handler", async () => {
+        const session = await client.createSession({ onPermissionRequest: approveAll });
 
         const message = await session.sendAndWait({
             prompt: "What is 2+2?",
         });
         expect(message?.data.content).toContain("4");
 
-        await session.destroy();
+        await session.disconnect();
     });
 
     it("should handle async permission handler", async () => {
@@ -85,7 +138,7 @@ describe("Permission callbacks", async () => {
                 // Simulate async permission check (e.g., user prompt)
                 await new Promise((resolve) => setTimeout(resolve, 10));
 
-                return { kind: "approved" };
+                return { kind: "approve-once" };
             },
         });
 
@@ -95,14 +148,14 @@ describe("Permission callbacks", async () => {
 
         expect(permissionRequests.length).toBeGreaterThan(0);
 
-        await session.destroy();
+        await session.disconnect();
     });
 
     it("should resume session with permission handler", async () => {
         const permissionRequests: PermissionRequest[] = [];
 
-        // Create session without permission handler
-        const session1 = await client.createSession();
+        // Create initial session
+        const session1 = await client.createSession({ onPermissionRequest: approveAll });
         const sessionId = session1.sessionId;
         await session1.sendAndWait({ prompt: "What is 1+1?" });
 
@@ -110,7 +163,7 @@ describe("Permission callbacks", async () => {
         const session2 = await client.resumeSession(sessionId, {
             onPermissionRequest: (request) => {
                 permissionRequests.push(request);
-                return { kind: "approved" };
+                return { kind: "approve-once" };
             },
         });
 
@@ -121,7 +174,7 @@ describe("Permission callbacks", async () => {
         // Should have permission requests from resumed session
         expect(permissionRequests.length).toBeGreaterThan(0);
 
-        await session2.destroy();
+        await session2.disconnect();
     });
 
     it("should handle permission handler errors gracefully", async () => {
@@ -138,7 +191,7 @@ describe("Permission callbacks", async () => {
         // Should handle the error and deny permission
         expect(message?.data.content?.toLowerCase()).toMatch(/fail|cannot|unable|permission/);
 
-        await session.destroy();
+        await session.disconnect();
     });
 
     it("should receive toolCallId in permission requests", async () => {
@@ -151,7 +204,7 @@ describe("Permission callbacks", async () => {
                     expect(typeof request.toolCallId).toBe("string");
                     expect(request.toolCallId.length).toBeGreaterThan(0);
                 }
-                return { kind: "approved" };
+                return { kind: "approve-once" };
             },
         });
 
@@ -161,6 +214,6 @@ describe("Permission callbacks", async () => {
 
         expect(receivedToolCallId).toBe(true);
 
-        await session.destroy();
+        await session.disconnect();
     });
 });

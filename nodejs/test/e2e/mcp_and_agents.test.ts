@@ -2,12 +2,20 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
+import { dirname, resolve } from "path";
+import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
-import type { CustomAgentConfig, MCPLocalServerConfig, MCPServerConfig } from "../../src/index.js";
+import { z } from "zod";
+import type { CustomAgentConfig, MCPStdioServerConfig, MCPServerConfig } from "../../src/index.js";
+import { approveAll, defineTool } from "../../src/index.js";
 import { createSdkTestContext } from "./harness/sdkTestContext.js";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const TEST_MCP_SERVER = resolve(__dirname, "../../../test/harness/test-mcp-server.mjs");
+
 describe("MCP Servers and Custom Agents", async () => {
-    const { copilotClient: client } = await createSdkTestContext();
+    const { copilotClient: client, openAiEndpoint } = await createSdkTestContext();
 
     describe("MCP Servers", () => {
         it("should accept MCP server configuration on session create", async () => {
@@ -17,10 +25,11 @@ describe("MCP Servers and Custom Agents", async () => {
                     command: "echo",
                     args: ["hello"],
                     tools: ["*"],
-                } as MCPLocalServerConfig,
+                } as MCPStdioServerConfig,
             };
 
             const session = await client.createSession({
+                onPermissionRequest: approveAll,
                 mcpServers,
             });
 
@@ -32,12 +41,12 @@ describe("MCP Servers and Custom Agents", async () => {
             });
             expect(message?.data.content).toContain("4");
 
-            await session.destroy();
+            await session.disconnect();
         });
 
         it("should accept MCP server configuration on session resume", async () => {
             // Create a session first
-            const session1 = await client.createSession();
+            const session1 = await client.createSession({ onPermissionRequest: approveAll });
             const sessionId = session1.sessionId;
             await session1.sendAndWait({ prompt: "What is 1+1?" });
 
@@ -48,10 +57,11 @@ describe("MCP Servers and Custom Agents", async () => {
                     command: "echo",
                     args: ["hello"],
                     tools: ["*"],
-                } as MCPLocalServerConfig,
+                } as MCPStdioServerConfig,
             };
 
             const session2 = await client.resumeSession(sessionId, {
+                onPermissionRequest: approveAll,
                 mcpServers,
             });
 
@@ -62,7 +72,7 @@ describe("MCP Servers and Custom Agents", async () => {
             });
             expect(message?.data.content).toContain("6");
 
-            await session2.destroy();
+            await session2.disconnect();
         });
 
         it("should handle multiple MCP servers", async () => {
@@ -72,21 +82,48 @@ describe("MCP Servers and Custom Agents", async () => {
                     command: "echo",
                     args: ["server1"],
                     tools: ["*"],
-                } as MCPLocalServerConfig,
+                } as MCPStdioServerConfig,
                 server2: {
                     type: "local",
                     command: "echo",
                     args: ["server2"],
                     tools: ["*"],
-                } as MCPLocalServerConfig,
+                } as MCPStdioServerConfig,
             };
 
             const session = await client.createSession({
+                onPermissionRequest: approveAll,
                 mcpServers,
             });
 
             expect(session.sessionId).toBeDefined();
-            await session.destroy();
+            await session.disconnect();
+        });
+
+        it("should pass literal env values to MCP server subprocess", async () => {
+            const mcpServers: Record<string, MCPServerConfig> = {
+                "env-echo": {
+                    type: "local",
+                    command: "node",
+                    args: [TEST_MCP_SERVER],
+                    tools: ["*"],
+                    env: { TEST_SECRET: "hunter2" },
+                } as MCPStdioServerConfig,
+            };
+
+            const session = await client.createSession({
+                mcpServers,
+                onPermissionRequest: approveAll,
+            });
+
+            expect(session.sessionId).toBeDefined();
+
+            const message = await session.sendAndWait({
+                prompt: "Use the env-echo/get_env tool to read the TEST_SECRET environment variable. Reply with just the value, nothing else.",
+            });
+            expect(message?.data.content).toContain("hunter2");
+
+            await session.disconnect();
         });
     });
 
@@ -103,6 +140,7 @@ describe("MCP Servers and Custom Agents", async () => {
             ];
 
             const session = await client.createSession({
+                onPermissionRequest: approveAll,
                 customAgents,
             });
 
@@ -114,12 +152,12 @@ describe("MCP Servers and Custom Agents", async () => {
             });
             expect(message?.data.content).toContain("10");
 
-            await session.destroy();
+            await session.disconnect();
         });
 
         it("should accept custom agent configuration on session resume", async () => {
             // Create a session first
-            const session1 = await client.createSession();
+            const session1 = await client.createSession({ onPermissionRequest: approveAll });
             const sessionId = session1.sessionId;
             await session1.sendAndWait({ prompt: "What is 1+1?" });
 
@@ -134,6 +172,7 @@ describe("MCP Servers and Custom Agents", async () => {
             ];
 
             const session2 = await client.resumeSession(sessionId, {
+                onPermissionRequest: approveAll,
                 customAgents,
             });
 
@@ -144,7 +183,7 @@ describe("MCP Servers and Custom Agents", async () => {
             });
             expect(message?.data.content).toContain("12");
 
-            await session2.destroy();
+            await session2.disconnect();
         });
 
         it("should handle custom agent with tools configuration", async () => {
@@ -160,11 +199,12 @@ describe("MCP Servers and Custom Agents", async () => {
             ];
 
             const session = await client.createSession({
+                onPermissionRequest: approveAll,
                 customAgents,
             });
 
             expect(session.sessionId).toBeDefined();
-            await session.destroy();
+            await session.disconnect();
         });
 
         it("should handle custom agent with MCP servers", async () => {
@@ -180,17 +220,18 @@ describe("MCP Servers and Custom Agents", async () => {
                             command: "echo",
                             args: ["agent-mcp"],
                             tools: ["*"],
-                        } as MCPLocalServerConfig,
+                        } as MCPStdioServerConfig,
                     },
                 },
             ];
 
             const session = await client.createSession({
+                onPermissionRequest: approveAll,
                 customAgents,
             });
 
             expect(session.sessionId).toBeDefined();
-            await session.destroy();
+            await session.disconnect();
         });
 
         it("should handle multiple custom agents", async () => {
@@ -211,11 +252,12 @@ describe("MCP Servers and Custom Agents", async () => {
             ];
 
             const session = await client.createSession({
+                onPermissionRequest: approveAll,
                 customAgents,
             });
 
             expect(session.sessionId).toBeDefined();
-            await session.destroy();
+            await session.disconnect();
         });
     });
 
@@ -227,7 +269,7 @@ describe("MCP Servers and Custom Agents", async () => {
                     command: "echo",
                     args: ["shared"],
                     tools: ["*"],
-                } as MCPLocalServerConfig,
+                } as MCPStdioServerConfig,
             };
 
             const customAgents: CustomAgentConfig[] = [
@@ -240,6 +282,7 @@ describe("MCP Servers and Custom Agents", async () => {
             ];
 
             const session = await client.createSession({
+                onPermissionRequest: approveAll,
                 mcpServers,
                 customAgents,
             });
@@ -251,7 +294,75 @@ describe("MCP Servers and Custom Agents", async () => {
             });
             expect(message?.data.content).toContain("14");
 
-            await session.destroy();
+            await session.disconnect();
+        });
+    });
+
+    describe("Default Agent Tool Exclusion", () => {
+        it("should hide excluded tools from default agent", async () => {
+            const secretTool = defineTool("secret_tool", {
+                description: "A secret tool hidden from the default agent",
+                parameters: z.object({
+                    input: z.string().describe("Input to process"),
+                }),
+                handler: ({ input }) => `SECRET:${input}`,
+            });
+
+            const session = await client.createSession({
+                onPermissionRequest: approveAll,
+                tools: [secretTool],
+                defaultAgent: {
+                    excludedTools: ["secret_tool"],
+                },
+            });
+
+            // Ask about the tool — the default agent should not see it
+            const message = await session.sendAndWait({
+                prompt: "Do you have access to a tool called secret_tool? Answer yes or no.",
+            });
+
+            // Sanity-check the replayed response (not the actual exclusion assertion)
+            expect(message?.data.content?.toLowerCase()).toContain("no");
+
+            // The real assertion: verify the runtime excluded the tool from the CAPI request
+            const exchanges = await openAiEndpoint.getExchanges();
+            const toolNames = exchanges.flatMap((e) =>
+                (e.request.tools ?? []).map((t) => ("function" in t ? t.function.name : ""))
+            );
+            expect(toolNames).not.toContain("secret_tool");
+
+            await session.disconnect();
+        });
+
+        it("should accept defaultAgent configuration on session resume", async () => {
+            const session1 = await client.createSession({ onPermissionRequest: approveAll });
+            const sessionId = session1.sessionId;
+            await session1.sendAndWait({ prompt: "What is 3+3?" });
+
+            const secretTool = defineTool("secret_tool", {
+                description: "A secret tool hidden from the default agent",
+                parameters: z.object({
+                    input: z.string().describe("Input to process"),
+                }),
+                handler: ({ input }) => `SECRET:${input}`,
+            });
+
+            const session2 = await client.resumeSession(sessionId, {
+                onPermissionRequest: approveAll,
+                tools: [secretTool],
+                defaultAgent: {
+                    excludedTools: ["secret_tool"],
+                },
+            });
+
+            expect(session2.sessionId).toBe(sessionId);
+
+            const message = await session2.sendAndWait({
+                prompt: "What is 4+4?",
+            });
+            expect(message?.data.content).toContain("8");
+
+            await session2.disconnect();
         });
     });
 });

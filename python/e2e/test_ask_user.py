@@ -4,6 +4,8 @@ Tests for user input (ask_user) functionality
 
 import pytest
 
+from copilot.session import PermissionHandler
+
 from .testharness import E2ETestContext
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -27,15 +29,14 @@ class TestAskUser:
                 "wasFreeform": not bool(choices),
             }
 
-        session = await ctx.client.create_session({"on_user_input_request": on_user_input_request})
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all,
+            on_user_input_request=on_user_input_request,
+        )
 
         await session.send_and_wait(
-            {
-                "prompt": (
-                    "Ask me to choose between 'Option A' and 'Option B' using the ask_user "
-                    "tool. Wait for my response before continuing."
-                )
-            }
+            "Ask me to choose between 'Option A' and 'Option B' using the ask_user "
+            "tool. Wait for my response before continuing."
         )
 
         # Should have received at least one user input request
@@ -46,7 +47,7 @@ class TestAskUser:
             req.get("question") and len(req.get("question")) > 0 for req in user_input_requests
         )
 
-        await session.destroy()
+        await session.disconnect()
 
     async def test_should_receive_choices_in_user_input_request(self, ctx: E2ETestContext):
         """Test that choices are received in user input request"""
@@ -61,15 +62,14 @@ class TestAskUser:
                 "wasFreeform": False,
             }
 
-        session = await ctx.client.create_session({"on_user_input_request": on_user_input_request})
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all,
+            on_user_input_request=on_user_input_request,
+        )
 
         await session.send_and_wait(
-            {
-                "prompt": (
-                    "Use the ask_user tool to ask me to pick between exactly two options: "
-                    "'Red' and 'Blue'. These should be provided as choices. Wait for my answer."
-                )
-            }
+            "Use the ask_user tool to ask me to pick between exactly two options: "
+            "'Red' and 'Blue'. These should be provided as choices. Wait for my answer."
         )
 
         # Should have received a request
@@ -82,7 +82,7 @@ class TestAskUser:
         )
         assert request_with_choices is not None
 
-        await session.destroy()
+        await session.disconnect()
 
     async def test_should_handle_freeform_user_input_response(self, ctx: E2ETestContext):
         """Test that freeform user input responses work"""
@@ -97,15 +97,14 @@ class TestAskUser:
                 "wasFreeform": True,
             }
 
-        session = await ctx.client.create_session({"on_user_input_request": on_user_input_request})
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all,
+            on_user_input_request=on_user_input_request,
+        )
 
         response = await session.send_and_wait(
-            {
-                "prompt": (
-                    "Ask me a question using ask_user and then include my answer in your "
-                    "response. The question should be 'What is your favorite color?'"
-                )
-            }
+            "Ask me a question using ask_user and then include my answer in your "
+            "response. The question should be 'What is your favorite color?'"
         )
 
         # Should have received a request
@@ -115,4 +114,4 @@ class TestAskUser:
         # (This is a soft check since the model may paraphrase)
         assert response is not None
 
-        await session.destroy()
+        await session.disconnect()

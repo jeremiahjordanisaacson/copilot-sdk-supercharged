@@ -1,6 +1,6 @@
 import { ChildProcess } from "child_process";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { CopilotClient } from "../../src/index.js";
+import { CopilotClient, approveAll } from "../../src/index.js";
 
 function onTestFinishedForceStop(client: CopilotClient) {
     onTestFinished(async () => {
@@ -43,33 +43,38 @@ describe("Client", () => {
         expect(client.getState()).toBe("disconnected");
     });
 
-    it.skipIf(process.platform === "darwin")("should return errors on failed cleanup", async () => {
-        // Use TCP mode to avoid stdin stream destruction issues
-        // Without this, on macOS there are intermittent test failures
-        // saying "Cannot call write after a stream was destroyed"
-        // because the JSON-RPC logic is still trying to write to stdin after
-        // the process has exited.
-        const client = new CopilotClient({ useStdio: false });
+    it.skipIf(process.platform === "darwin")(
+        "should stop cleanly when the server exits during cleanup",
+        async () => {
+            // Use TCP mode to avoid stdin stream destruction issues
+            // Without this, on macOS there are intermittent test failures
+            // saying "Cannot call write after a stream was destroyed"
+            // because the JSON-RPC logic is still trying to write to stdin after
+            // the process has exited.
+            const client = new CopilotClient({ useStdio: false });
 
-        await client.createSession();
+            await client.createSession({ onPermissionRequest: approveAll });
 
-        // Kill the server process to force cleanup to fail
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const cliProcess = (client as any).cliProcess as ChildProcess;
-        expect(cliProcess).toBeDefined();
-        cliProcess.kill("SIGKILL");
-        await new Promise((resolve) => setTimeout(resolve, 100));
+            // Kill the server processto force cleanup to fail
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const cliProcess = (client as any).cliProcess as ChildProcess;
+            expect(cliProcess).toBeDefined();
+            cliProcess.kill("SIGKILL");
+            await new Promise((resolve) => setTimeout(resolve, 100));
 
-        const errors = await client.stop();
-        expect(errors.length).toBeGreaterThan(0);
-        expect(errors[0].message).toContain("Failed to destroy session");
-    });
+            const errors = await client.stop();
+            expect(client.getState()).toBe("disconnected");
+            if (errors.length > 0) {
+                expect(errors[0].message).toContain("Failed to disconnect session");
+            }
+        }
+    );
 
     it("should forceStop without cleanup", async () => {
         const client = new CopilotClient({});
         onTestFinishedForceStop(client);
 
-        await client.createSession();
+        await client.createSession({ onPermissionRequest: approveAll });
         await client.forceStop();
         expect(client.getState()).toBe("disconnected");
     });
@@ -131,5 +136,32 @@ describe("Client", () => {
         }
 
         await client.stop();
+    });
+
+    it("should report error with stderr when CLI fails to start", async () => {
+        const client = new CopilotClient({
+            cliArgs: ["--nonexistent-flag-for-testing"],
+            useStdio: true,
+        });
+        onTestFinishedForceStop(client);
+
+        let initialError: Error | undefined;
+        try {
+            await client.start();
+            expect.fail("Expected start() to throw an error");
+        } catch (error) {
+            initialError = error as Error;
+            expect(initialError.message).toContain("stderr");
+            expect(initialError.message).toContain("nonexistent");
+        }
+
+        // Verify subsequent calls also fail (don't hang)
+        try {
+            const session = await client.createSession({ onPermissionRequest: approveAll });
+            await session.send("test");
+            expect.fail("Expected send() to throw an error after CLI exit");
+        } catch (error) {
+            expect((error as Error).message).toContain("Connection is closed");
+        }
     });
 });

@@ -4,14 +4,18 @@
 
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 
 namespace GitHub.Copilot.SDK.Test.Harness;
 
-public class E2ETestContext : IAsyncDisposable
+public sealed class E2ETestContext : IAsyncDisposable
 {
     public string HomeDir { get; }
     public string WorkDir { get; }
     public string ProxyUrl { get; }
+
+    /// <summary>Optional logger injected by tests; applied to all clients created via <see cref="CreateClient"/>.</summary>
+    public ILogger? Logger { get; set; }
 
     private readonly CapiProxy _proxy;
     private readonly string _repoRoot;
@@ -74,7 +78,15 @@ public class E2ETestContext : IAsyncDisposable
         await _proxy.ConfigureAsync(snapshotPath, WorkDir);
     }
 
-    public Task<List<ParsedHttpExchange>> GetExchangesAsync() => _proxy.GetExchangesAsync();
+    public Task<List<ParsedHttpExchange>> GetExchangesAsync()
+    {
+        return _proxy.GetExchangesAsync();
+    }
+
+    public Task SetCopilotUserByTokenAsync(string token, CopilotUserConfig response)
+    {
+        return _proxy.SetCopilotUserByTokenAsync(token, response);
+    }
 
     public IReadOnlyDictionary<string, string> GetEnvironment()
     {
@@ -89,17 +101,34 @@ public class E2ETestContext : IAsyncDisposable
         return env!;
     }
 
-    public CopilotClient CreateClient() => new(new CopilotClientOptions
+    public CopilotClient CreateClient(bool useStdio = true, CopilotClientOptions? options = null)
     {
-        Cwd = WorkDir,
-        Environment = GetEnvironment(),
-        GithubToken = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")) ? "fake-token-for-e2e-tests" : null,
-    });
+        options ??= new CopilotClientOptions();
+
+        options.Cwd ??= WorkDir;
+        options.Environment ??= GetEnvironment();
+        options.UseStdio = useStdio;
+        options.Logger ??= Logger;
+
+        if (string.IsNullOrEmpty(options.CliUrl))
+        {
+            options.CliPath ??= GetCliPath(_repoRoot);
+        }
+
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"))
+            && string.IsNullOrEmpty(options.GitHubToken)
+            && string.IsNullOrEmpty(options.CliUrl))
+        {
+            options.GitHubToken = "fake-token-for-e2e-tests";
+        }
+
+        return new(options);
+    }
 
     public async ValueTask DisposeAsync()
     {
         // Skip writing snapshots in CI to avoid corrupting them on test failures
-        var isCI = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI"));
+        var isCI = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"));
         await _proxy.StopAsync(skipWritingCache: isCI);
 
         try { if (Directory.Exists(HomeDir)) Directory.Delete(HomeDir, true); } catch { }

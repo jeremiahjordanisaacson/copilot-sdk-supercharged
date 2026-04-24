@@ -6,14 +6,19 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using StreamJsonRpc;
+using StreamJsonRpc.Protocol;
 using System.Collections.Concurrent;
 using System.Data;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
+using GitHub.Copilot.SDK.Rpc;
+using System.Globalization;
 
 namespace GitHub.Copilot.SDK;
 
@@ -36,7 +41,7 @@ namespace GitHub.Copilot.SDK;
 /// await using var client = new CopilotClient();
 ///
 /// // Create a session
-/// await using var session = await client.CreateSessionAsync(new SessionConfig { Model = "gpt-4" });
+/// await using var session = await client.CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll, Model = "gpt-4" });
 ///
 /// // Handle events
 /// using var subscription = session.On(evt =>
@@ -49,20 +54,50 @@ namespace GitHub.Copilot.SDK;
 /// await session.SendAsync(new MessageOptions { Prompt = "Hello!" });
 /// </code>
 /// </example>
-public partial class CopilotClient : IDisposable, IAsyncDisposable
+public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
 {
+    internal const string NoResultPermissionV2ErrorMessage =
+        "Permission handlers cannot return 'no-result' when connected to a protocol v2 server.";
+
+    /// <summary>
+    /// Minimum protocol version this SDK can communicate with.
+    /// </summary>
+    private const int MinProtocolVersion = 2;
+
     private readonly ConcurrentDictionary<string, CopilotSession> _sessions = new();
     private readonly CopilotClientOptions _options;
     private readonly ILogger _logger;
     private Task<Connection>? _connectionTask;
+    private volatile bool _disconnected;
     private bool _disposed;
     private readonly int? _optionsPort;
     private readonly string? _optionsHost;
+    private int? _actualPort;
+    private int? _negotiatedProtocolVersion;
     private List<ModelInfo>? _modelsCache;
     private readonly SemaphoreSlim _modelsCacheLock = new(1, 1);
-    private readonly List<Action<SessionLifecycleEvent>> _lifecycleHandlers = new();
-    private readonly Dictionary<string, List<Action<SessionLifecycleEvent>>> _typedLifecycleHandlers = new();
+    private readonly Func<CancellationToken, Task<IList<ModelInfo>>>? _onListModels;
+    private readonly List<Action<SessionLifecycleEvent>> _lifecycleHandlers = [];
+    private readonly Dictionary<string, List<Action<SessionLifecycleEvent>>> _typedLifecycleHandlers = [];
     private readonly object _lifecycleHandlersLock = new();
+    private ServerRpc? _rpc;
+
+    /// <summary>
+    /// Gets the typed RPC client for server-scoped methods (no session required).
+    /// </summary>
+    /// <remarks>
+    /// The client must be started before accessing this property. Use <see cref="StartAsync"/> or set <see cref="CopilotClientOptions.AutoStart"/> to true.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">Thrown if the client has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">Thrown if the client is not started.</exception>
+    public ServerRpc Rpc => _disposed
+        ? throw new ObjectDisposedException(nameof(CopilotClient))
+        : _rpc ?? throw new InvalidOperationException("Client is not started. Call StartAsync first.");
+
+    /// <summary>
+    /// Gets the actual TCP port the CLI server is listening on, if using TCP transport.
+    /// </summary>
+    public int? ActualPort => _actualPort;
 
     /// <summary>
     /// Creates a new instance of <see cref="CopilotClient"/>.
@@ -90,18 +125,25 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         _options = options ?? new();
 
         // Validate mutually exclusive options
-        if (!string.IsNullOrEmpty(_options.CliUrl) && (_options.UseStdio || _options.CliPath != null))
+        if (!string.IsNullOrEmpty(_options.CliUrl) && _options.CliPath != null)
         {
-            throw new ArgumentException("CliUrl is mutually exclusive with UseStdio and CliPath");
+            throw new ArgumentException("CliUrl is mutually exclusive with CliPath");
+        }
+
+        // When CliUrl is provided, disable UseStdio (we connect to an external server, not spawn one)
+        if (!string.IsNullOrEmpty(_options.CliUrl))
+        {
+            _options.UseStdio = false;
         }
 
         // Validate auth options with external server
-        if (!string.IsNullOrEmpty(_options.CliUrl) && (!string.IsNullOrEmpty(_options.GithubToken) || _options.UseLoggedInUser != null))
+        if (!string.IsNullOrEmpty(_options.CliUrl) && (!string.IsNullOrEmpty(_options.GitHubToken) || _options.UseLoggedInUser != null))
         {
-            throw new ArgumentException("GithubToken and UseLoggedInUser cannot be used with CliUrl (external server manages its own auth)");
+            throw new ArgumentException("GitHubToken and UseLoggedInUser cannot be used with CliUrl (external server manages its own auth)");
         }
 
         _logger = _options.Logger ?? NullLogger.Instance;
+        _onListModels = _options.OnListModels;
 
         // Parse CliUrl if provided
         if (!string.IsNullOrEmpty(_options.CliUrl))
@@ -163,25 +205,29 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         async Task<Connection> StartCoreAsync(CancellationToken ct)
         {
             _logger.LogDebug("Starting Copilot client");
+            _disconnected = false;
 
             Task<Connection> result;
 
             if (_optionsHost is not null && _optionsPort is not null)
             {
                 // External server (TCP)
-                result = ConnectToServerAsync(null, _optionsHost, _optionsPort, ct);
+                _actualPort = _optionsPort;
+                result = ConnectToServerAsync(null, _optionsHost, _optionsPort, null, ct);
             }
             else
             {
                 // Child process (stdio or TCP)
-                var (cliProcess, portOrNull) = await StartCliServerAsync(_options, _logger, ct);
-                result = ConnectToServerAsync(cliProcess, portOrNull is null ? null : "localhost", portOrNull, ct);
+                var (cliProcess, portOrNull, stderrBuffer) = await StartCliServerAsync(_options, _logger, ct);
+                _actualPort = portOrNull;
+                result = ConnectToServerAsync(cliProcess, portOrNull is null ? null : "localhost", portOrNull, stderrBuffer, ct);
             }
 
             var connection = await result;
 
             // Verify protocol version compatibility
             await VerifyProtocolVersionAsync(connection, ct);
+            await ConfigureSessionFsAsync(ct);
 
             _logger.LogInformation("Copilot client connected");
             return connection;
@@ -189,17 +235,22 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Disconnects from the Copilot server and stops all active sessions.
+    /// Disconnects from the Copilot server and closes all active sessions.
     /// </summary>
     /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
     /// <remarks>
     /// <para>
     /// This method performs graceful cleanup:
     /// <list type="number">
-    ///     <item>Destroys all active sessions</item>
+    ///     <item>Closes all active sessions (releases in-memory resources)</item>
     ///     <item>Closes the JSON-RPC connection</item>
     ///     <item>Terminates the CLI server process (if spawned by this client)</item>
     /// </list>
+    /// </para>
+    /// <para>
+    /// Note: session data on disk is preserved, so sessions can be resumed later.
+    /// To permanently remove session data before stopping, call
+    /// <see cref="DeleteSessionAsync"/> for each session first.
     /// </para>
     /// </remarks>
     /// <exception cref="AggregateException">Thrown when multiple errors occur during cleanup.</exception>
@@ -220,7 +271,7 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                errors.Add(new Exception($"Failed to destroy session {session.SessionId}: {ex.Message}", ex));
+                errors.Add(new Exception($"Failed to dispose session {session.SessionId}: {ex.Message}", ex));
             }
         }
 
@@ -289,7 +340,8 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         try { ctx.Rpc.Dispose(); }
         catch (Exception ex) { errors?.Add(ex); }
 
-        // Clear models cache
+        // Clear RPC and models cache
+        _rpc = null;
         _modelsCache = null;
 
         if (ctx.NetworkStream is not null)
@@ -315,13 +367,50 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         }
     }
 
+    private static (SystemMessageConfig? wireConfig, Dictionary<string, Func<string, Task<string>>>? callbacks) ExtractTransformCallbacks(SystemMessageConfig? systemMessage)
+    {
+        if (systemMessage?.Mode != SystemMessageMode.Customize || systemMessage.Sections == null)
+        {
+            return (systemMessage, null);
+        }
+
+        var callbacks = new Dictionary<string, Func<string, Task<string>>>();
+        var wireSections = new Dictionary<string, SectionOverride>();
+
+        foreach (var (sectionId, sectionOverride) in systemMessage.Sections)
+        {
+            if (sectionOverride.Transform != null)
+            {
+                callbacks[sectionId] = sectionOverride.Transform;
+                wireSections[sectionId] = new SectionOverride { Action = SectionOverrideAction.Transform };
+            }
+            else
+            {
+                wireSections[sectionId] = sectionOverride;
+            }
+        }
+
+        if (callbacks.Count == 0)
+        {
+            return (systemMessage, null);
+        }
+
+        var wireConfig = new SystemMessageConfig
+        {
+            Mode = systemMessage.Mode,
+            Content = systemMessage.Content,
+            Sections = wireSections
+        };
+
+        return (wireConfig, callbacks);
+    }
+
     /// <summary>
     /// Creates a new Copilot session with the specified configuration.
     /// </summary>
-    /// <param name="config">Configuration for the session. If null, default settings are used.</param>
+    /// <param name="config">Configuration for the session, including the required <see cref="SessionConfig.OnPermissionRequest"/> handler.</param>
     /// <param name="cancellationToken">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
     /// <returns>A task that resolves to provide the <see cref="CopilotSession"/>.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the client is not connected and AutoStart is disabled, or when a session with the same ID already exists.</exception>
     /// <remarks>
     /// Sessions maintain conversation state, handle events, and manage tool execution.
     /// If the client is not connected and <see cref="CopilotClientOptions.AutoStart"/> is enabled (default),
@@ -330,21 +419,29 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     /// <example>
     /// <code>
     /// // Basic session
-    /// var session = await client.CreateSessionAsync();
+    /// var session = await client.CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll });
     ///
     /// // Session with model and tools
-    /// var session = await client.CreateSessionAsync(new SessionConfig
+    /// var session = await client.CreateSessionAsync(new()
     /// {
+    ///     OnPermissionRequest = PermissionHandler.ApproveAll,
     ///     Model = "gpt-4",
     ///     Tools = [AIFunctionFactory.Create(MyToolMethod)]
     /// });
     /// </code>
     /// </example>
-    public async Task<CopilotSession> CreateSessionAsync(SessionConfig? config = null, CancellationToken cancellationToken = default)
+    public async Task<CopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken = default)
     {
+        if (config.OnPermissionRequest == null)
+        {
+            throw new ArgumentException(
+                "An OnPermissionRequest handler is required when creating a session. " +
+                "For example, to allow all permissions, use CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll });");
+        }
+
         var connection = await EnsureConnectedAsync(cancellationToken);
 
-        var hasHooks = config?.Hooks != null && (
+        var hasHooks = config.Hooks != null && (
             config.Hooks.OnPreToolUse != null ||
             config.Hooks.OnPostToolUse != null ||
             config.Hooks.OnUserPromptSubmitted != null ||
@@ -352,48 +449,83 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
             config.Hooks.OnSessionEnd != null ||
             config.Hooks.OnErrorOccurred != null);
 
-        var request = new CreateSessionRequest(
-            config?.Model,
-            config?.SessionId,
-            config?.ReasoningEffort,
-            config?.Tools?.Select(ToolDefinition.FromAIFunction).ToList(),
-            config?.SystemMessage,
-            config?.AvailableTools,
-            config?.ExcludedTools,
-            config?.Provider,
-            config?.OnPermissionRequest != null ? true : null,
-            config?.OnUserInputRequest != null ? true : null,
-            hasHooks ? true : null,
-            config?.WorkingDirectory,
-            config?.Streaming == true ? true : null,
-            config?.McpServers,
-            config?.CustomAgents,
-            config?.ConfigDir,
-            config?.SkillDirectories,
-            config?.DisabledSkills,
-            config?.InfiniteSessions);
+        var (wireSystemMessage, transformCallbacks) = ExtractTransformCallbacks(config.SystemMessage);
 
-        var response = await InvokeRpcAsync<CreateSessionResponse>(
-            connection.Rpc, "session.create", [request], cancellationToken);
+        var sessionId = config.SessionId ?? Guid.NewGuid().ToString();
 
-        var session = new CopilotSession(response.SessionId, connection.Rpc, response.WorkspacePath);
-        session.RegisterTools(config?.Tools ?? []);
-        if (config?.OnPermissionRequest != null)
-        {
-            session.RegisterPermissionHandler(config.OnPermissionRequest);
-        }
-        if (config?.OnUserInputRequest != null)
+        // Create and register the session before issuing the RPC so that
+        // events emitted by the CLI (e.g. session.start) are not dropped.
+        var session = new CopilotSession(sessionId, connection.Rpc, _logger);
+        session.RegisterTools(config.Tools ?? []);
+        session.RegisterPermissionHandler(config.OnPermissionRequest);
+        session.RegisterCommands(config.Commands);
+        session.RegisterElicitationHandler(config.OnElicitationRequest);
+        if (config.OnUserInputRequest != null)
         {
             session.RegisterUserInputHandler(config.OnUserInputRequest);
         }
-        if (config?.Hooks != null)
+        if (config.Hooks != null)
         {
             session.RegisterHooks(config.Hooks);
         }
-
-        if (!_sessions.TryAdd(response.SessionId, session))
+        if (transformCallbacks != null)
         {
-            throw new InvalidOperationException($"Session {response.SessionId} already exists");
+            session.RegisterTransformCallbacks(transformCallbacks);
+        }
+        if (config.OnEvent != null)
+        {
+            session.On(config.OnEvent);
+        }
+        ConfigureSessionFsHandlers(session, config.CreateSessionFsHandler);
+        _sessions[sessionId] = session;
+
+        try
+        {
+            var (traceparent, tracestate) = TelemetryHelpers.GetTraceContext();
+
+            var request = new CreateSessionRequest(
+                config.Model,
+                sessionId,
+                config.ClientName,
+                config.ReasoningEffort,
+                config.Tools?.Select(ToolDefinition.FromAIFunction).ToList(),
+                wireSystemMessage,
+                config.AvailableTools,
+                config.ExcludedTools,
+                config.Provider,
+                (bool?)true,
+                config.OnUserInputRequest != null ? true : null,
+                hasHooks ? true : null,
+                config.WorkingDirectory,
+                config.Streaming is true ? true : null,
+                config.IncludeSubAgentStreamingEvents,
+                config.McpServers,
+                "direct",
+                config.CustomAgents,
+                config.DefaultAgent,
+                config.Agent,
+                config.ConfigDir,
+                config.EnableConfigDiscovery,
+                config.SkillDirectories,
+                config.DisabledSkills,
+                config.InfiniteSessions,
+                Commands: config.Commands?.Select(c => new CommandWireDefinition(c.Name, c.Description)).ToList(),
+                RequestElicitation: config.OnElicitationRequest != null,
+                Traceparent: traceparent,
+                Tracestate: tracestate,
+                ModelCapabilities: config.ModelCapabilities,
+                GitHubToken: config.GitHubToken);
+
+            var response = await InvokeRpcAsync<CreateSessionResponse>(
+                connection.Rpc, "session.create", [request], cancellationToken);
+
+            session.WorkspacePath = response.WorkspacePath;
+            session.SetCapabilities(response.Capabilities);
+        }
+        catch
+        {
+            _sessions.TryRemove(sessionId, out _);
+            throw;
         }
 
         return session;
@@ -403,9 +535,10 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     /// Resumes an existing Copilot session with the specified configuration.
     /// </summary>
     /// <param name="sessionId">The ID of the session to resume.</param>
-    /// <param name="config">Configuration for the resumed session. If null, default settings are used.</param>
+    /// <param name="config">Configuration for the resumed session, including the required <see cref="ResumeSessionConfig.OnPermissionRequest"/> handler.</param>
     /// <param name="cancellationToken">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
     /// <returns>A task that resolves to provide the <see cref="CopilotSession"/>.</returns>
+    /// <exception cref="ArgumentException">Thrown when <see cref="ResumeSessionConfig.OnPermissionRequest"/> is not set.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the session does not exist or the client is not connected.</exception>
     /// <remarks>
     /// This allows you to continue a previous conversation, maintaining all conversation history.
@@ -414,20 +547,28 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     /// <example>
     /// <code>
     /// // Resume a previous session
-    /// var session = await client.ResumeSessionAsync("session-123");
+    /// var session = await client.ResumeSessionAsync("session-123", new() { OnPermissionRequest = PermissionHandler.ApproveAll });
     ///
     /// // Resume with new tools
-    /// var session = await client.ResumeSessionAsync("session-123", new ResumeSessionConfig
+    /// var session = await client.ResumeSessionAsync("session-123", new()
     /// {
+    ///     OnPermissionRequest = PermissionHandler.ApproveAll,
     ///     Tools = [AIFunctionFactory.Create(MyNewToolMethod)]
     /// });
     /// </code>
     /// </example>
-    public async Task<CopilotSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig? config = null, CancellationToken cancellationToken = default)
+    public async Task<CopilotSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken = default)
     {
+        if (config.OnPermissionRequest == null)
+        {
+            throw new ArgumentException(
+                "An OnPermissionRequest handler is required when resuming a session. " +
+                "For example, to allow all permissions, use new() { OnPermissionRequest = PermissionHandler.ApproveAll }.");
+        }
+
         var connection = await EnsureConnectedAsync(cancellationToken);
 
-        var hasHooks = config?.Hooks != null && (
+        var hasHooks = config.Hooks != null && (
             config.Hooks.OnPreToolUse != null ||
             config.Hooks.OnPostToolUse != null ||
             config.Hooks.OnUserPromptSubmitted != null ||
@@ -435,48 +576,84 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
             config.Hooks.OnSessionEnd != null ||
             config.Hooks.OnErrorOccurred != null);
 
-        var request = new ResumeSessionRequest(
-            sessionId,
-            config?.Model,
-            config?.ReasoningEffort,
-            config?.Tools?.Select(ToolDefinition.FromAIFunction).ToList(),
-            config?.SystemMessage,
-            config?.AvailableTools,
-            config?.ExcludedTools,
-            config?.Provider,
-            config?.OnPermissionRequest != null ? true : null,
-            config?.OnUserInputRequest != null ? true : null,
-            hasHooks ? true : null,
-            config?.WorkingDirectory,
-            config?.ConfigDir,
-            config?.DisableResume == true ? true : null,
-            config?.Streaming == true ? true : null,
-            config?.McpServers,
-            config?.CustomAgents,
-            config?.SkillDirectories,
-            config?.DisabledSkills,
-            config?.InfiniteSessions);
+        var (wireSystemMessage, transformCallbacks) = ExtractTransformCallbacks(config.SystemMessage);
 
-        var response = await InvokeRpcAsync<ResumeSessionResponse>(
-            connection.Rpc, "session.resume", [request], cancellationToken);
-
-        var session = new CopilotSession(response.SessionId, connection.Rpc, response.WorkspacePath);
-        session.RegisterTools(config?.Tools ?? []);
-        if (config?.OnPermissionRequest != null)
-        {
-            session.RegisterPermissionHandler(config.OnPermissionRequest);
-        }
-        if (config?.OnUserInputRequest != null)
+        // Create and register the session before issuing the RPC so that
+        // events emitted by the CLI (e.g. session.start) are not dropped.
+        var session = new CopilotSession(sessionId, connection.Rpc, _logger);
+        session.RegisterTools(config.Tools ?? []);
+        session.RegisterPermissionHandler(config.OnPermissionRequest);
+        session.RegisterCommands(config.Commands);
+        session.RegisterElicitationHandler(config.OnElicitationRequest);
+        if (config.OnUserInputRequest != null)
         {
             session.RegisterUserInputHandler(config.OnUserInputRequest);
         }
-        if (config?.Hooks != null)
+        if (config.Hooks != null)
         {
             session.RegisterHooks(config.Hooks);
         }
+        if (transformCallbacks != null)
+        {
+            session.RegisterTransformCallbacks(transformCallbacks);
+        }
+        if (config.OnEvent != null)
+        {
+            session.On(config.OnEvent);
+        }
+        ConfigureSessionFsHandlers(session, config.CreateSessionFsHandler);
+        _sessions[sessionId] = session;
 
-        // Replace any existing session entry to ensure new config (like permission handler) is used
-        _sessions[response.SessionId] = session;
+        try
+        {
+            var (traceparent, tracestate) = TelemetryHelpers.GetTraceContext();
+
+            var request = new ResumeSessionRequest(
+                sessionId,
+                config.ClientName,
+                config.Model,
+                config.ReasoningEffort,
+                config.Tools?.Select(ToolDefinition.FromAIFunction).ToList(),
+                wireSystemMessage,
+                config.AvailableTools,
+                config.ExcludedTools,
+                config.Provider,
+                (bool?)true,
+                config.OnUserInputRequest != null ? true : null,
+                hasHooks ? true : null,
+                config.WorkingDirectory,
+                config.ConfigDir,
+                config.EnableConfigDiscovery,
+                config.DisableResume is true ? true : null,
+                config.Streaming is true ? true : null,
+                config.IncludeSubAgentStreamingEvents,
+                config.McpServers,
+                "direct",
+                config.CustomAgents,
+                config.DefaultAgent,
+                config.Agent,
+                config.SkillDirectories,
+                config.DisabledSkills,
+                config.InfiniteSessions,
+                Commands: config.Commands?.Select(c => new CommandWireDefinition(c.Name, c.Description)).ToList(),
+                RequestElicitation: config.OnElicitationRequest != null,
+                Traceparent: traceparent,
+                Tracestate: tracestate,
+                ModelCapabilities: config.ModelCapabilities,
+                GitHubToken: config.GitHubToken);
+
+            var response = await InvokeRpcAsync<ResumeSessionResponse>(
+                connection.Rpc, "session.resume", [request], cancellationToken);
+
+            session.WorkspacePath = response.WorkspacePath;
+            session.SetCapabilities(response.Capabilities);
+        }
+        catch
+        {
+            _sessions.TryRemove(sessionId, out _);
+            throw;
+        }
+
         return session;
     }
 
@@ -490,7 +667,7 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     /// <code>
     /// if (client.State == ConnectionState.Connected)
     /// {
-    ///     var session = await client.CreateSessionAsync();
+    ///     var session = await client.CreateSessionAsync(new() { OnPermissionRequest = PermissionHandler.ApproveAll });
     /// }
     /// </code>
     /// </example>
@@ -501,6 +678,7 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
             if (_connectionTask == null) return ConnectionState.Disconnected;
             if (_connectionTask.IsFaulted) return ConnectionState.Error;
             if (!_connectionTask.IsCompleted) return ConnectionState.Connecting;
+            if (_disconnected) return ConnectionState.Disconnected;
             return ConnectionState.Connected;
         }
     }
@@ -564,28 +742,37 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     /// The cache is cleared when the client disconnects.
     /// </remarks>
     /// <exception cref="InvalidOperationException">Thrown when the client is not connected or not authenticated.</exception>
-    public async Task<List<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
+    public async Task<IList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
     {
-        var connection = await EnsureConnectedAsync(cancellationToken);
-
-        // Use semaphore for async locking to prevent race condition with concurrent calls
         await _modelsCacheLock.WaitAsync(cancellationToken);
         try
         {
             // Check cache (already inside lock)
             if (_modelsCache is not null)
             {
-                return new List<ModelInfo>(_modelsCache); // Return a copy to prevent cache mutation
+                return [.. _modelsCache]; // Return a copy to prevent cache mutation
             }
 
-            // Cache miss - fetch from backend while holding lock
-            var response = await InvokeRpcAsync<GetModelsResponse>(
-                connection.Rpc, "models.list", [], cancellationToken);
+            IList<ModelInfo> models;
+            if (_onListModels is not null)
+            {
+                // Use custom handler instead of CLI RPC
+                models = await _onListModels(cancellationToken);
+            }
+            else
+            {
+                var connection = await EnsureConnectedAsync(cancellationToken);
 
-            // Update cache before releasing lock
-            _modelsCache = response.Models;
+                // Cache miss - fetch from backend while holding lock
+                var response = await InvokeRpcAsync<GetModelsResponse>(
+                    connection.Rpc, "models.list", [], cancellationToken);
+                models = response.Models;
+            }
 
-            return new List<ModelInfo>(response.Models); // Return a copy to prevent cache mutation
+            // Update cache before releasing lock (copy to prevent external mutation)
+            _modelsCache = [.. models];
+
+            return [.. models]; // Return a copy to prevent cache mutation
         }
         finally
         {
@@ -604,7 +791,7 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     /// var lastId = await client.GetLastSessionIdAsync();
     /// if (lastId != null)
     /// {
-    ///     var session = await client.ResumeSessionAsync(lastId);
+    ///     var session = await client.ResumeSessionAsync(lastId, new() { OnPermissionRequest = PermissionHandler.ApproveAll });
     /// }
     /// </code>
     /// </example>
@@ -619,15 +806,17 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Deletes a Copilot session by its ID.
+    /// Permanently deletes a session and all its data from disk, including
+    /// conversation history, planning state, and artifacts.
     /// </summary>
     /// <param name="sessionId">The ID of the session to delete.</param>
     /// <param name="cancellationToken">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
     /// <returns>A task that represents the asynchronous delete operation.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the session does not exist or deletion fails.</exception>
     /// <remarks>
-    /// This permanently removes the session and all its conversation history.
-    /// The session cannot be resumed after deletion.
+    /// Unlike <see cref="CopilotSession.DisposeAsync"/>, which only releases in-memory
+    /// resources and preserves session data for later resumption, this method is
+    /// irreversible. The session cannot be resumed after deletion.
     /// </remarks>
     /// <example>
     /// <code>
@@ -652,6 +841,7 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     /// <summary>
     /// Lists all sessions known to the Copilot server.
     /// </summary>
+    /// <param name="filter">Optional filter to narrow down the session list by cwd, git root, repository, or branch.</param>
     /// <param name="cancellationToken">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
     /// <returns>A task that resolves with a list of <see cref="SessionMetadata"/> for all available sessions.</returns>
     /// <exception cref="InvalidOperationException">Thrown when the client is not connected.</exception>
@@ -664,14 +854,44 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     /// }
     /// </code>
     /// </example>
-    public async Task<List<SessionMetadata>> ListSessionsAsync(CancellationToken cancellationToken = default)
+    public async Task<IList<SessionMetadata>> ListSessionsAsync(SessionListFilter? filter = null, CancellationToken cancellationToken = default)
     {
         var connection = await EnsureConnectedAsync(cancellationToken);
 
         var response = await InvokeRpcAsync<ListSessionsResponse>(
-            connection.Rpc, "session.list", [], cancellationToken);
+            connection.Rpc, "session.list", [new ListSessionsRequest(filter)], cancellationToken);
 
         return response.Sessions;
+    }
+
+    /// <summary>
+    /// Gets metadata for a specific session by ID.
+    /// </summary>
+    /// <remarks>
+    /// This provides an efficient O(1) lookup of a single session's metadata
+    /// instead of listing all sessions.
+    /// </remarks>
+    /// <param name="sessionId">The ID of the session to look up.</param>
+    /// <param name="cancellationToken">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
+    /// <returns>A task that resolves with the <see cref="SessionMetadata"/>, or null if the session was not found.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the client is not connected.</exception>
+    /// <example>
+    /// <code>
+    /// var metadata = await client.GetSessionMetadataAsync("session-123");
+    /// if (metadata != null)
+    /// {
+    ///     Console.WriteLine($"Session started at: {metadata.StartTime}");
+    /// }
+    /// </code>
+    /// </example>
+    public async Task<SessionMetadata?> GetSessionMetadataAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        var connection = await EnsureConnectedAsync(cancellationToken);
+
+        var response = await InvokeRpcAsync<GetSessionMetadataResponse>(
+            connection.Rpc, "session.getMetadata", [new GetSessionMetadataRequest(sessionId)], cancellationToken);
+
+        return response.Session;
     }
 
     /// <summary>
@@ -783,7 +1003,7 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         {
             if (!_typedLifecycleHandlers.TryGetValue(eventType, out var handlers))
             {
-                handlers = new List<Action<SessionLifecycleEvent>>();
+                handlers = [];
                 _typedLifecycleHandlers[eventType] = handlers;
             }
             handlers.Add(handler);
@@ -809,9 +1029,9 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         lock (_lifecycleHandlersLock)
         {
             typedHandlers = _typedLifecycleHandlers.TryGetValue(evt.Type, out var handlers)
-                ? new List<Action<SessionLifecycleEvent>>(handlers)
-                : new List<Action<SessionLifecycleEvent>>();
-            wildcardHandlers = new List<Action<SessionLifecycleEvent>>(_lifecycleHandlers);
+                ? [.. handlers]
+                : [];
+            wildcardHandlers = [.. _lifecycleHandlers];
         }
 
         foreach (var handler in typedHandlers)
@@ -827,9 +1047,36 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
 
     internal static async Task<T> InvokeRpcAsync<T>(JsonRpc rpc, string method, object?[]? args, CancellationToken cancellationToken)
     {
+        return await InvokeRpcAsync<T>(rpc, method, args, null, cancellationToken);
+    }
+
+    internal static async Task InvokeRpcAsync(JsonRpc rpc, string method, object?[]? args, CancellationToken cancellationToken)
+    {
+        await InvokeRpcAsync<object>(rpc, method, args, null, cancellationToken);
+    }
+
+    internal static async Task<T> InvokeRpcAsync<T>(JsonRpc rpc, string method, object?[]? args, StringBuilder? stderrBuffer, CancellationToken cancellationToken)
+    {
         try
         {
             return await rpc.InvokeWithCancellationAsync<T>(method, args, cancellationToken);
+        }
+        catch (StreamJsonRpc.ConnectionLostException ex)
+        {
+            string? stderrOutput = null;
+            if (stderrBuffer is not null)
+            {
+                lock (stderrBuffer)
+                {
+                    stderrOutput = stderrBuffer.ToString().Trim();
+                }
+            }
+
+            if (!string.IsNullOrEmpty(stderrOutput))
+            {
+                throw new IOException($"CLI process exited unexpectedly.\nstderr: {stderrOutput}", ex);
+            }
+            throw new IOException($"Communication error with Copilot CLI: {ex.Message}", ex);
         }
         catch (StreamJsonRpc.RemoteRpcException ex)
         {
@@ -848,33 +1095,71 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         return (Task<Connection>)StartAsync(cancellationToken);
     }
 
+    private async Task ConfigureSessionFsAsync(CancellationToken cancellationToken)
+    {
+        if (_options.SessionFs is null)
+        {
+            return;
+        }
+
+        await Rpc.SessionFs.SetProviderAsync(
+            _options.SessionFs.InitialCwd,
+            _options.SessionFs.SessionStatePath,
+            _options.SessionFs.Conventions,
+            cancellationToken);
+    }
+
+    private void ConfigureSessionFsHandlers(CopilotSession session, Func<CopilotSession, SessionFsProvider>? createSessionFsHandler)
+    {
+        if (_options.SessionFs is null)
+        {
+            return;
+        }
+
+        if (createSessionFsHandler is null)
+        {
+            throw new InvalidOperationException(
+                "CreateSessionFsHandler is required in the session config when CopilotClientOptions.SessionFs is configured.");
+        }
+
+        session.ClientSessionApis.SessionFs = createSessionFsHandler(session)
+            ?? throw new InvalidOperationException("CreateSessionFsHandler returned null.");
+    }
+
     private async Task VerifyProtocolVersionAsync(Connection connection, CancellationToken cancellationToken)
     {
-        var expectedVersion = SdkProtocolVersion.GetVersion();
+        var maxVersion = SdkProtocolVersion.GetVersion();
         var pingResponse = await InvokeRpcAsync<PingResponse>(
-            connection.Rpc, "ping", [new PingRequest()], cancellationToken);
+            connection.Rpc, "ping", [new PingRequest()], connection.StderrBuffer, cancellationToken);
 
         if (!pingResponse.ProtocolVersion.HasValue)
         {
             throw new InvalidOperationException(
-                $"SDK protocol version mismatch: SDK expects version {expectedVersion}, " +
+                $"SDK protocol version mismatch: SDK supports versions {MinProtocolVersion}-{maxVersion}, " +
                 $"but server does not report a protocol version. " +
                 $"Please update your server to ensure compatibility.");
         }
 
-        if (pingResponse.ProtocolVersion.Value != expectedVersion)
+        var serverVersion = pingResponse.ProtocolVersion.Value;
+        if (serverVersion < MinProtocolVersion || serverVersion > maxVersion)
         {
             throw new InvalidOperationException(
-                $"SDK protocol version mismatch: SDK expects version {expectedVersion}, " +
-                $"but server reports version {pingResponse.ProtocolVersion.Value}. " +
+                $"SDK protocol version mismatch: SDK supports versions {MinProtocolVersion}-{maxVersion}, " +
+                $"but server reports version {serverVersion}. " +
                 $"Please update your SDK or server to ensure compatibility.");
         }
+
+        _negotiatedProtocolVersion = serverVersion;
     }
 
-    private static async Task<(Process Process, int? DetectedLocalhostTcpPort)> StartCliServerAsync(CopilotClientOptions options, ILogger logger, CancellationToken cancellationToken)
+    private static async Task<(Process Process, int? DetectedLocalhostTcpPort, StringBuilder StderrBuffer)> StartCliServerAsync(CopilotClientOptions options, ILogger logger, CancellationToken cancellationToken)
     {
-        // Use explicit path or bundled CLI - no PATH fallback
-        var cliPath = options.CliPath ?? GetBundledCliPath(out var searchedPath)
+        // Use explicit path, COPILOT_CLI_PATH env var (from options.Environment or process env), or bundled CLI - no PATH fallback
+        var envCliPath = options.Environment is not null && options.Environment.TryGetValue("COPILOT_CLI_PATH", out var envValue) ? envValue
+            : System.Environment.GetEnvironmentVariable("COPILOT_CLI_PATH");
+        var cliPath = options.CliPath
+            ?? envCliPath
+            ?? GetBundledCliPath(out var searchedPath)
             ?? throw new InvalidOperationException($"Copilot CLI not found at '{searchedPath}'. Ensure the SDK NuGet package was restored correctly or provide an explicit CliPath.");
         var args = new List<string>();
 
@@ -891,20 +1176,25 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         }
         else if (options.Port > 0)
         {
-            args.AddRange(["--port", options.Port.ToString()]);
+            args.AddRange(["--port", options.Port.ToString(CultureInfo.InvariantCulture)]);
         }
 
         // Add auth-related flags
-        if (!string.IsNullOrEmpty(options.GithubToken))
+        if (!string.IsNullOrEmpty(options.GitHubToken))
         {
             args.AddRange(["--auth-token-env", "COPILOT_SDK_AUTH_TOKEN"]);
         }
 
-        // Default UseLoggedInUser to false when GithubToken is provided
-        var useLoggedInUser = options.UseLoggedInUser ?? string.IsNullOrEmpty(options.GithubToken);
+        // Default UseLoggedInUser to false when GitHubToken is provided
+        var useLoggedInUser = options.UseLoggedInUser ?? string.IsNullOrEmpty(options.GitHubToken);
         if (!useLoggedInUser)
         {
             args.Add("--no-auto-login");
+        }
+
+        if (options.SessionIdleTimeoutSeconds is > 0)
+        {
+            args.AddRange(["--session-idle-timeout", options.SessionIdleTimeoutSeconds.Value.ToString(CultureInfo.InvariantCulture)]);
         }
 
         var (fileName, processArgs) = ResolveCliCommand(cliPath, args);
@@ -933,15 +1223,27 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         startInfo.Environment.Remove("NODE_DEBUG");
 
         // Set auth token in environment if provided
-        if (!string.IsNullOrEmpty(options.GithubToken))
+        if (!string.IsNullOrEmpty(options.GitHubToken))
         {
-            startInfo.Environment["COPILOT_SDK_AUTH_TOKEN"] = options.GithubToken;
+            startInfo.Environment["COPILOT_SDK_AUTH_TOKEN"] = options.GitHubToken;
+        }
+
+        // Set telemetry environment variables if configured
+        if (options.Telemetry is { } telemetry)
+        {
+            startInfo.Environment["COPILOT_OTEL_ENABLED"] = "true";
+            if (telemetry.OtlpEndpoint is not null) startInfo.Environment["OTEL_EXPORTER_OTLP_ENDPOINT"] = telemetry.OtlpEndpoint;
+            if (telemetry.FilePath is not null) startInfo.Environment["COPILOT_OTEL_FILE_EXPORTER_PATH"] = telemetry.FilePath;
+            if (telemetry.ExporterType is not null) startInfo.Environment["COPILOT_OTEL_EXPORTER_TYPE"] = telemetry.ExporterType;
+            if (telemetry.SourceName is not null) startInfo.Environment["COPILOT_OTEL_SOURCE_NAME"] = telemetry.SourceName;
+            if (telemetry.CaptureContent is { } capture) startInfo.Environment["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = capture ? "true" : "false";
         }
 
         var cliProcess = new Process { StartInfo = startInfo };
         cliProcess.Start();
 
-        // Forward stderr to logger
+        // Capture stderr for error messages and forward to logger
+        var stderrBuffer = new StringBuilder();
         _ = Task.Run(async () =>
         {
             while (cliProcess != null && !cliProcess.HasExited)
@@ -949,7 +1251,15 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
                 var line = await cliProcess.StandardError.ReadLineAsync(cancellationToken);
                 if (line != null)
                 {
-                    logger.LogDebug("[CLI] {Line}", line);
+                    lock (stderrBuffer)
+                    {
+                        stderrBuffer.AppendLine(line);
+                    }
+
+                    if (logger.IsEnabled(LogLevel.Debug))
+                    {
+                        logger.LogDebug("[CLI] {Line}", line);
+                    }
                 }
             }
         }, cancellationToken);
@@ -963,27 +1273,45 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
 
             while (!cts.Token.IsCancellationRequested)
             {
-                var line = await cliProcess.StandardOutput.ReadLineAsync(cts.Token);
-                if (line == null) throw new Exception("CLI process exited unexpectedly");
-
-                var match = Regex.Match(line, @"listening on port (\d+)", RegexOptions.IgnoreCase);
-                if (match.Success)
+                var line = await cliProcess.StandardOutput.ReadLineAsync(cts.Token) ?? throw new IOException("CLI process exited unexpectedly");
+                if (ListeningOnPortRegex().Match(line) is { Success: true } match)
                 {
-                    detectedLocalhostTcpPort = int.Parse(match.Groups[1].Value);
+                    detectedLocalhostTcpPort = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
                     break;
                 }
             }
         }
 
-        return (cliProcess, detectedLocalhostTcpPort);
+        return (cliProcess, detectedLocalhostTcpPort, stderrBuffer);
     }
 
     private static string? GetBundledCliPath(out string searchedPath)
     {
         var binaryName = OperatingSystem.IsWindows() ? "copilot.exe" : "copilot";
-        var rid = Path.GetFileName(System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier);
+        // Always use portable RID (e.g., linux-x64) to match the build-time placement,
+        // since distro-specific RIDs (e.g., ubuntu.24.04-x64) are normalized at build time.
+        var rid = GetPortableRid()
+            ?? Path.GetFileName(System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier);
         searchedPath = Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", binaryName);
         return File.Exists(searchedPath) ? searchedPath : null;
+    }
+
+    private static string? GetPortableRid()
+    {
+        string os;
+        if (OperatingSystem.IsWindows()) os = "win";
+        else if (OperatingSystem.IsLinux()) os = "linux";
+        else if (OperatingSystem.IsMacOS()) os = "osx";
+        else return null;
+
+        var arch = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture switch
+        {
+            System.Runtime.InteropServices.Architecture.X64 => "x64",
+            System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
+            _ => null,
+        };
+
+        return arch != null ? $"{os}-{arch}" : null;
     }
 
     private static (string FileName, IEnumerable<string> Args) ResolveCliCommand(string cliPath, IEnumerable<string> args)
@@ -998,7 +1326,7 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         return (cliPath, args);
     }
 
-    private async Task<Connection> ConnectToServerAsync(Process? cliProcess, string? tcpHost, int? tcpPort, CancellationToken cancellationToken)
+    private async Task<Connection> ConnectToServerAsync(Process? cliProcess, string? tcpHost, int? tcpPort, StringBuilder? stderrBuffer, CancellationToken cancellationToken)
     {
         Stream inputStream, outputStream;
         TcpClient? tcpClient = null;
@@ -1035,18 +1363,36 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         var handler = new RpcHandler(this);
         rpc.AddLocalRpcMethod("session.event", handler.OnSessionEvent);
         rpc.AddLocalRpcMethod("session.lifecycle", handler.OnSessionLifecycle);
-        rpc.AddLocalRpcMethod("tool.call", handler.OnToolCall);
-        rpc.AddLocalRpcMethod("permission.request", handler.OnPermissionRequest);
+        // Protocol v3 servers send tool calls / permission requests as broadcast events.
+        // Protocol v2 servers use the older tool.call / permission.request RPC model.
+        // We always register v2 adapters because handlers are set up before version
+        // negotiation; a v3 server will simply never send these requests.
+        rpc.AddLocalRpcMethod("tool.call", handler.OnToolCallV2);
+        rpc.AddLocalRpcMethod("permission.request", handler.OnPermissionRequestV2);
         rpc.AddLocalRpcMethod("userInput.request", handler.OnUserInputRequest);
         rpc.AddLocalRpcMethod("hooks.invoke", handler.OnHooksInvoke);
+        rpc.AddLocalRpcMethod("systemMessage.transform", handler.OnSystemMessageTransform);
+        ClientSessionApiRegistration.RegisterClientSessionApiHandlers(rpc, sessionId =>
+        {
+            var session = GetSession(sessionId) ?? throw new ArgumentException($"Unknown session {sessionId}");
+            return session.ClientSessionApis;
+        });
         rpc.StartListening();
-        return new Connection(rpc, cliProcess, tcpClient, networkStream);
+
+        // Transition state to Disconnected if the JSON-RPC connection drops
+        _ = rpc.Completion.ContinueWith(_ => _disconnected = true, TaskScheduler.Default);
+
+        _rpc = new ServerRpc(rpc);
+
+        return new Connection(rpc, cliProcess, tcpClient, networkStream, stderrBuffer);
     }
 
     [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Using happy path from https://microsoft.github.io/vs-streamjsonrpc/docs/nativeAOT.html")]
     [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Using happy path from https://microsoft.github.io/vs-streamjsonrpc/docs/nativeAOT.html")]
-    private static SystemTextJsonFormatter CreateSystemTextJsonFormatter() =>
-        new SystemTextJsonFormatter() { JsonSerializerOptions = SerializerOptionsForMessageFormatter };
+    private static SystemTextJsonFormatter CreateSystemTextJsonFormatter()
+    {
+        return new() { JsonSerializerOptions = SerializerOptionsForMessageFormatter };
+    }
 
     private static JsonSerializerOptions SerializerOptionsForMessageFormatter { get; } = CreateSerializerOptions();
 
@@ -1062,14 +1408,23 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         options.TypeInfoResolverChain.Add(TypesJsonContext.Default);
         options.TypeInfoResolverChain.Add(CopilotSession.SessionJsonContext.Default);
         options.TypeInfoResolverChain.Add(SessionEventsJsonContext.Default);
+        options.TypeInfoResolverChain.Add(SDK.Rpc.RpcJsonContext.Default);
+
+        // StreamJsonRpc's RequestId needs serialization when CancellationToken fires during
+        // JSON-RPC operations. Its built-in converter (RequestIdSTJsonConverter) is internal,
+        // and [JsonSerializable] can't source-gen for it (SYSLIB1220), so we provide our own
+        // AOT-safe resolver + converter.
+        options.TypeInfoResolverChain.Add(new RequestIdTypeInfoResolver());
 
         options.MakeReadOnly();
 
         return options;
     }
 
-    internal CopilotSession? GetSession(string sessionId) =>
-        _sessions.TryGetValue(sessionId, out var session) ? session : null;
+    internal CopilotSession? GetSession(string sessionId)
+    {
+        return _sessions.TryGetValue(sessionId, out var session) ? session : null;
+    }
 
     /// <summary>
     /// Disposes the <see cref="CopilotClient"/> synchronously.
@@ -1079,7 +1434,7 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     /// </remarks>
     public void Dispose()
     {
-        DisposeAsync().GetAwaiter().GetResult();
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     /// <summary>
@@ -1129,20 +1484,48 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
             client.DispatchLifecycleEvent(evt);
         }
 
-        public async Task<ToolCallResponse> OnToolCall(string sessionId,
+        public async Task<UserInputRequestResponse> OnUserInputRequest(string sessionId, string question, IList<string>? choices = null, bool? allowFreeform = null)
+        {
+            var session = client.GetSession(sessionId) ?? throw new ArgumentException($"Unknown session {sessionId}");
+            var request = new UserInputRequest
+            {
+                Question = question,
+                Choices = choices,
+                AllowFreeform = allowFreeform
+            };
+
+            var result = await session.HandleUserInputRequestAsync(request);
+            return new UserInputRequestResponse(result.Answer, result.WasFreeform);
+        }
+
+        public async Task<HooksInvokeResponse> OnHooksInvoke(string sessionId, string hookType, JsonElement input)
+        {
+            var session = client.GetSession(sessionId) ?? throw new ArgumentException($"Unknown session {sessionId}");
+            var output = await session.HandleHooksInvokeAsync(hookType, input);
+            return new HooksInvokeResponse(output);
+        }
+
+        public async Task<SystemMessageTransformRpcResponse> OnSystemMessageTransform(string sessionId, JsonElement sections)
+        {
+            var session = client.GetSession(sessionId) ?? throw new ArgumentException($"Unknown session {sessionId}");
+            return await session.HandleSystemMessageTransformAsync(sections);
+        }
+
+        // Protocol v2 backward-compatibility adapters
+
+        public async Task<ToolCallResponseV2> OnToolCallV2(string sessionId,
             string toolCallId,
             string toolName,
-            object? arguments)
+            object? arguments,
+            string? traceparent = null,
+            string? tracestate = null)
         {
-            var session = client.GetSession(sessionId);
-            if (session == null)
-            {
-                throw new ArgumentException($"Unknown session {sessionId}");
-            }
+            using var _ = TelemetryHelpers.RestoreTraceContext(traceparent, tracestate);
 
+            var session = client.GetSession(sessionId) ?? throw new ArgumentException($"Unknown session {sessionId}");
             if (session.GetTool(toolName) is not { } tool)
             {
-                return new ToolCallResponse(new ToolResultObject
+                return new ToolCallResponseV2(new ToolResultObject
                 {
                     TextResultForLlm = $"Tool '{toolName}' is not supported.",
                     ResultType = "failure",
@@ -1160,14 +1543,10 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
                     Arguments = arguments
                 };
 
-                // Map args from JSON into AIFunction format
                 var aiFunctionArgs = new AIFunctionArguments
                 {
                     Context = new Dictionary<object, object?>
                     {
-                        // Allow recipient to access the raw ToolInvocation if they want, e.g., to get SessionId
-                        // This is an alternative to using MEAI's ConfigureParameterBinding, which we can't use
-                        // because we're not the ones producing the AIFunction.
                         [typeof(ToolInvocation)] = invocation
                     }
                 };
@@ -1181,98 +1560,51 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
 
                     foreach (var prop in incomingJsonArgs.EnumerateObject())
                     {
-                        // MEAI will deserialize the JsonElement value respecting the delegate's parameter types
                         aiFunctionArgs[prop.Name] = prop.Value;
                     }
                 }
 
                 var result = await tool.InvokeAsync(aiFunctionArgs);
 
-                // If the function returns a ToolResultObject, use it directly; otherwise, wrap the result
-                // This lets the developer provide BinaryResult, SessionLog, etc. if they deal with that themselves
-                var toolResultObject = result is ToolResultAIContent trac ? trac.Result : new ToolResultObject
-                {
-                    ResultType = "success",
-
-                    // In most cases, result will already have been converted to JsonElement by the AIFunction.
-                    // We special-case string for consistency with our Node/Python/Go clients.
-                    // TODO: I don't think it's right to special-case string here, and all the clients should
-                    // always serialize the result to JSON (otherwise what stringification is going to happen?
-                    // something we don't control? an error?)
-                    TextResultForLlm = result is JsonElement { ValueKind: JsonValueKind.String } je
-                        ? je.GetString()!
-                        : JsonSerializer.Serialize(result, tool.JsonSerializerOptions.GetTypeInfo(typeof(object))),
-                };
-                return new ToolCallResponse(toolResultObject);
+                var toolResultObject = ToolResultObject.ConvertFromInvocationResult(result, tool.JsonSerializerOptions);
+                return new ToolCallResponseV2(toolResultObject);
             }
             catch (Exception ex)
             {
-                return new ToolCallResponse(new()
+                return new ToolCallResponseV2(new ToolResultObject
                 {
-                    // TODO: We should offer some way to control whether or not to expose detailed exception information to the LLM.
-                    //       For security, the default must be false, but developers can opt into allowing it.
-                    TextResultForLlm = $"Invoking this tool produced an error. Detailed information is not available.",
+                    TextResultForLlm = "Invoking this tool produced an error. Detailed information is not available.",
                     ResultType = "failure",
                     Error = ex.Message
                 });
             }
         }
 
-        public async Task<PermissionRequestResponse> OnPermissionRequest(string sessionId, JsonElement permissionRequest)
+        public async Task<PermissionRequestResponseV2> OnPermissionRequestV2(string sessionId, JsonElement permissionRequest)
         {
-            var session = client.GetSession(sessionId);
-            if (session == null)
-            {
-                return new PermissionRequestResponse(new PermissionRequestResult
-                {
-                    Kind = "denied-no-approval-rule-and-could-not-request-from-user"
-                });
-            }
+            var session = client.GetSession(sessionId)
+                ?? throw new ArgumentException($"Unknown session {sessionId}");
 
             try
             {
                 var result = await session.HandlePermissionRequestAsync(permissionRequest);
-                return new PermissionRequestResponse(result);
-            }
-            catch
-            {
-                // If permission handler fails, deny the permission
-                return new PermissionRequestResponse(new PermissionRequestResult
+                if (result.Kind == new PermissionRequestResultKind("no-result"))
                 {
-                    Kind = "denied-no-approval-rule-and-could-not-request-from-user"
+                    throw new InvalidOperationException(NoResultPermissionV2ErrorMessage);
+                }
+                return new PermissionRequestResponseV2(result);
+            }
+            catch (InvalidOperationException ex) when (ex.Message == NoResultPermissionV2ErrorMessage)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return new PermissionRequestResponseV2(new PermissionRequestResult
+                {
+                    Kind = PermissionRequestResultKind.UserNotAvailable
                 });
             }
-        }
-
-        public async Task<UserInputRequestResponse> OnUserInputRequest(string sessionId, string question, List<string>? choices = null, bool? allowFreeform = null)
-        {
-            var session = client.GetSession(sessionId);
-            if (session == null)
-            {
-                throw new ArgumentException($"Unknown session {sessionId}");
-            }
-
-            var request = new UserInputRequest
-            {
-                Question = question,
-                Choices = choices,
-                AllowFreeform = allowFreeform
-            };
-
-            var result = await session.HandleUserInputRequestAsync(request);
-            return new UserInputRequestResponse(result.Answer, result.WasFreeform);
-        }
-
-        public async Task<HooksInvokeResponse> OnHooksInvoke(string sessionId, string hookType, JsonElement input)
-        {
-            var session = client.GetSession(sessionId);
-            if (session == null)
-            {
-                throw new ArgumentException($"Unknown session {sessionId}");
-            }
-
-            var output = await session.HandleHooksInvokeAsync(hookType, input);
-            return new HooksInvokeResponse(output);
         }
     }
 
@@ -1280,12 +1612,14 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         JsonRpc rpc,
         Process? cliProcess, // Set if we created the child process
         TcpClient? tcpClient, // Set if using TCP
-        NetworkStream? networkStream) // Set if using TCP
+        NetworkStream? networkStream, // Set if using TCP
+        StringBuilder? stderrBuffer = null) // Captures stderr for error messages
     {
         public Process? CliProcess => cliProcess;
         public TcpClient? TcpClient => tcpClient;
         public JsonRpc Rpc => rpc;
         public NetworkStream? NetworkStream => networkStream;
+        public StringBuilder? StderrBuffer => stderrBuffer;
     }
 
     private static class ProcessArgumentEscaper
@@ -1302,62 +1636,100 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     internal record CreateSessionRequest(
         string? Model,
         string? SessionId,
+        string? ClientName,
         string? ReasoningEffort,
-        List<ToolDefinition>? Tools,
+        IList<ToolDefinition>? Tools,
         SystemMessageConfig? SystemMessage,
-        List<string>? AvailableTools,
-        List<string>? ExcludedTools,
+        IList<string>? AvailableTools,
+        IList<string>? ExcludedTools,
         ProviderConfig? Provider,
         bool? RequestPermission,
         bool? RequestUserInput,
         bool? Hooks,
         string? WorkingDirectory,
         bool? Streaming,
-        Dictionary<string, object>? McpServers,
-        List<CustomAgentConfig>? CustomAgents,
+        bool? IncludeSubAgentStreamingEvents,
+        IDictionary<string, McpServerConfig>? McpServers,
+        string? EnvValueMode,
+        IList<CustomAgentConfig>? CustomAgents,
+        DefaultAgentConfig? DefaultAgent,
+        string? Agent,
         string? ConfigDir,
-        List<string>? SkillDirectories,
-        List<string>? DisabledSkills,
-        InfiniteSessionConfig? InfiniteSessions);
+        bool? EnableConfigDiscovery,
+        IList<string>? SkillDirectories,
+        IList<string>? DisabledSkills,
+        InfiniteSessionConfig? InfiniteSessions,
+        IList<CommandWireDefinition>? Commands = null,
+        bool? RequestElicitation = null,
+        string? Traceparent = null,
+        string? Tracestate = null,
+        ModelCapabilitiesOverride? ModelCapabilities = null,
+        string? GitHubToken = null);
 
     internal record ToolDefinition(
         string Name,
         string? Description,
-        JsonElement Parameters /* JSON schema */)
+        JsonElement Parameters, /* JSON schema */
+        bool? OverridesBuiltInTool = null,
+        bool? SkipPermission = null)
     {
         public static ToolDefinition FromAIFunction(AIFunction function)
-            => new ToolDefinition(function.Name, function.Description, function.JsonSchema);
+        {
+            var overrides = function.AdditionalProperties.TryGetValue("is_override", out var val) && val is true;
+            var skipPerm = function.AdditionalProperties.TryGetValue("skip_permission", out var skipVal) && skipVal is true;
+            return new ToolDefinition(function.Name, function.Description, function.JsonSchema,
+                overrides ? true : null,
+                skipPerm ? true : null);
+        }
     }
 
     internal record CreateSessionResponse(
         string SessionId,
-        string? WorkspacePath);
+        string? WorkspacePath,
+        SessionCapabilities? Capabilities = null);
 
     internal record ResumeSessionRequest(
         string SessionId,
+        string? ClientName,
         string? Model,
         string? ReasoningEffort,
-        List<ToolDefinition>? Tools,
+        IList<ToolDefinition>? Tools,
         SystemMessageConfig? SystemMessage,
-        List<string>? AvailableTools,
-        List<string>? ExcludedTools,
+        IList<string>? AvailableTools,
+        IList<string>? ExcludedTools,
         ProviderConfig? Provider,
         bool? RequestPermission,
         bool? RequestUserInput,
         bool? Hooks,
         string? WorkingDirectory,
         string? ConfigDir,
+        bool? EnableConfigDiscovery,
         bool? DisableResume,
         bool? Streaming,
-        Dictionary<string, object>? McpServers,
-        List<CustomAgentConfig>? CustomAgents,
-        List<string>? SkillDirectories,
-        List<string>? DisabledSkills,
-        InfiniteSessionConfig? InfiniteSessions);
+        bool? IncludeSubAgentStreamingEvents,
+        IDictionary<string, McpServerConfig>? McpServers,
+        string? EnvValueMode,
+        IList<CustomAgentConfig>? CustomAgents,
+        DefaultAgentConfig? DefaultAgent,
+        string? Agent,
+        IList<string>? SkillDirectories,
+        IList<string>? DisabledSkills,
+        InfiniteSessionConfig? InfiniteSessions,
+        IList<CommandWireDefinition>? Commands = null,
+        bool? RequestElicitation = null,
+        string? Traceparent = null,
+        string? Tracestate = null,
+        ModelCapabilitiesOverride? ModelCapabilities = null,
+        string? GitHubToken = null);
 
     internal record ResumeSessionResponse(
         string SessionId,
-        string? WorkspacePath);
+        string? WorkspacePath,
+        SessionCapabilities? Capabilities = null);
+
+    internal record CommandWireDefinition(
+        string Name,
+        string? Description);
 
     internal record GetLastSessionIdResponse(
         string? SessionId);
@@ -1369,14 +1741,17 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         bool Success,
         string? Error);
 
+    internal record ListSessionsRequest(
+        SessionListFilter? Filter);
+
     internal record ListSessionsResponse(
         List<SessionMetadata> Sessions);
 
-    internal record ToolCallResponse(
-        ToolResultObject? Result);
+    internal record GetSessionMetadataRequest(
+        string SessionId);
 
-    internal record PermissionRequestResponse(
-        PermissionRequestResult Result);
+    internal record GetSessionMetadataResponse(
+        SessionMetadata? Session);
 
     internal record UserInputRequestResponse(
         string Answer,
@@ -1384,6 +1759,13 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
 
     internal record HooksInvokeResponse(
         object? Output);
+
+    // Protocol v2 backward-compatibility response types
+    internal record ToolCallResponseV2(
+        ToolResultObject Result);
+
+    internal record PermissionRequestResponseV2(
+        PermissionRequestResult Result);
 
     /// <summary>Trace source that forwards all logs to the ILogger.</summary>
     internal sealed class LoggerTraceSource : TraceSource
@@ -1396,33 +1778,70 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
 
         private sealed class LoggerTraceListener(ILogger logger) : TraceListener
         {
-            public override void TraceEvent(TraceEventCache? eventCache, string source, TraceEventType eventType, int id, string? message) =>
-                logger.Log(MapLevel(eventType), "[{Source}] {Message}", source, message);
-
-            public override void TraceEvent(TraceEventCache? eventCache, string source, TraceEventType eventType, int id, string? format, params object?[]? args) =>
-                logger.Log(MapLevel(eventType), "[{Source}] {Message}", source, args is null || args.Length == 0 ? format : string.Format(format ?? "", args));
-
-            public override void TraceData(TraceEventCache? eventCache, string source, TraceEventType eventType, int id, object? data) =>
-                logger.Log(MapLevel(eventType), "[{Source}] {Data}", source, data);
-
-            public override void TraceData(TraceEventCache? eventCache, string source, TraceEventType eventType, int id, params object?[]? data) =>
-                logger.Log(MapLevel(eventType), "[{Source}] {Data}", source, data is null ? null : string.Join(", ", data));
-
-            public override void Write(string? message) =>
-                logger.LogTrace("{Message}", message);
-
-            public override void WriteLine(string? message) =>
-                logger.LogTrace("{Message}", message);
-
-            private static LogLevel MapLevel(TraceEventType eventType) => eventType switch
+            public override void TraceEvent(TraceEventCache? eventCache, string source, TraceEventType eventType, int id, string? message)
             {
-                TraceEventType.Critical => LogLevel.Critical,
-                TraceEventType.Error => LogLevel.Error,
-                TraceEventType.Warning => LogLevel.Warning,
-                TraceEventType.Information => LogLevel.Information,
-                TraceEventType.Verbose => LogLevel.Debug,
-                _ => LogLevel.Trace
-            };
+                LogLevel level = MapLevel(eventType);
+                if (logger.IsEnabled(level))
+                {
+                    logger.Log(level, "[{Source}] {Message}", source, message);
+                }
+            }
+
+            public override void TraceEvent(TraceEventCache? eventCache, string source, TraceEventType eventType, int id, string? format, params object?[]? args)
+            {
+                LogLevel level = MapLevel(eventType);
+                if (logger.IsEnabled(level))
+                {
+                    logger.Log(level, "[{Source}] {Message}", source, args is null || args.Length == 0 ? format : string.Format(CultureInfo.InvariantCulture, format ?? "", args));
+                }
+            }
+
+            public override void TraceData(TraceEventCache? eventCache, string source, TraceEventType eventType, int id, object? data)
+            {
+                LogLevel level = MapLevel(eventType);
+                if (logger.IsEnabled(level))
+                {
+                    logger.Log(level, "[{Source}] {Data}", source, data);
+                }
+            }
+
+            public override void TraceData(TraceEventCache? eventCache, string source, TraceEventType eventType, int id, params object?[]? data)
+            {
+                LogLevel level = MapLevel(eventType);
+                if (logger.IsEnabled(level))
+                {
+                    logger.Log(level, "[{Source}] {Data}", source, data is null ? null : string.Join(", ", data));
+                }
+            }
+
+            public override void Write(string? message)
+            {
+                if (logger.IsEnabled(LogLevel.Trace))
+                {
+                    logger.LogTrace("{Message}", message);
+                }
+            }
+
+            public override void WriteLine(string? message)
+            {
+                if (logger.IsEnabled(LogLevel.Trace))
+                {
+                    logger.LogTrace("{Message}", message);
+                }
+            }
+
+            private static LogLevel MapLevel(TraceEventType eventType)
+            {
+                return eventType switch
+                {
+                    TraceEventType.Critical => LogLevel.Critical,
+                    TraceEventType.Error => LogLevel.Error,
+                    TraceEventType.Warning => LogLevel.Warning,
+                    TraceEventType.Information => LogLevel.Information,
+                    TraceEventType.Verbose => LogLevel.Debug,
+                    _ => LogLevel.Trace
+                };
+            }
         }
     }
 
@@ -1431,6 +1850,7 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
         AllowOutOfOrderMetadataProperties = true,
         NumberHandling = JsonNumberHandling.AllowReadingFromString,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonSerializable(typeof(CommonErrorData))]
     [JsonSerializable(typeof(CreateSessionRequest))]
     [JsonSerializable(typeof(CreateSessionResponse))]
     [JsonSerializable(typeof(CustomAgentConfig))]
@@ -1438,15 +1858,23 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     [JsonSerializable(typeof(DeleteSessionResponse))]
     [JsonSerializable(typeof(GetLastSessionIdResponse))]
     [JsonSerializable(typeof(HooksInvokeResponse))]
+    [JsonSerializable(typeof(ListSessionsRequest))]
     [JsonSerializable(typeof(ListSessionsResponse))]
-    [JsonSerializable(typeof(PermissionRequestResponse))]
+    [JsonSerializable(typeof(GetSessionMetadataRequest))]
+    [JsonSerializable(typeof(GetSessionMetadataResponse))]
+    [JsonSerializable(typeof(ModelCapabilitiesOverride))]
     [JsonSerializable(typeof(PermissionRequestResult))]
+    [JsonSerializable(typeof(PermissionRequestResponseV2))]
     [JsonSerializable(typeof(ProviderConfig))]
     [JsonSerializable(typeof(ResumeSessionRequest))]
     [JsonSerializable(typeof(ResumeSessionResponse))]
+    [JsonSerializable(typeof(SessionCapabilities))]
+    [JsonSerializable(typeof(SessionUiCapabilities))]
     [JsonSerializable(typeof(SessionMetadata))]
     [JsonSerializable(typeof(SystemMessageConfig))]
-    [JsonSerializable(typeof(ToolCallResponse))]
+    [JsonSerializable(typeof(SystemMessageTransformRpcResponse))]
+    [JsonSerializable(typeof(CommandWireDefinition))]
+    [JsonSerializable(typeof(ToolCallResponseV2))]
     [JsonSerializable(typeof(ToolDefinition))]
     [JsonSerializable(typeof(ToolResultAIContent))]
     [JsonSerializable(typeof(ToolResultObject))]
@@ -1454,30 +1882,64 @@ public partial class CopilotClient : IDisposable, IAsyncDisposable
     [JsonSerializable(typeof(UserInputRequest))]
     [JsonSerializable(typeof(UserInputResponse))]
     internal partial class ClientJsonContext : JsonSerializerContext;
-}
 
-// Must inherit from AIContent as a signal to MEAI to avoid JSON-serializing the
-// value before passing it back to us
-public class ToolResultAIContent(ToolResultObject toolResult) : AIContent
-{
-    public ToolResultObject Result => toolResult;
+    /// <summary>
+    /// AOT-safe type info resolver for <see cref="RequestId"/>.
+    /// StreamJsonRpc's own RequestIdSTJsonConverter is internal (SYSLIB1220/CS0122),
+    /// so we provide our own converter and wire it through <see cref="JsonMetadataServices.CreateValueInfo{T}"/>
+    /// to stay fully AOT/trimming-compatible.
+    /// </summary>
+    private sealed class RequestIdTypeInfoResolver : IJsonTypeInfoResolver
+    {
+        public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
+        {
+            if (type == typeof(RequestId))
+                return JsonMetadataServices.CreateValueInfo<RequestId>(options, new RequestIdJsonConverter());
+            return null;
+        }
+    }
+
+    private sealed class RequestIdJsonConverter : JsonConverter<RequestId>
+    {
+        public override RequestId Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return reader.TokenType switch
+            {
+                JsonTokenType.Number => reader.TryGetInt64(out long val)
+                    ? new RequestId(val)
+                    : new RequestId(reader.HasValueSequence
+                        ? Encoding.UTF8.GetString(reader.ValueSequence)
+                        : Encoding.UTF8.GetString(reader.ValueSpan)),
+                JsonTokenType.String => new RequestId(reader.GetString()!),
+                JsonTokenType.Null => RequestId.Null,
+                _ => throw new JsonException($"Unexpected token type for RequestId: {reader.TokenType}"),
+            };
+        }
+
+        public override void Write(Utf8JsonWriter writer, RequestId value, JsonSerializerOptions options)
+        {
+            if (value.Number.HasValue)
+                writer.WriteNumberValue(value.Number.Value);
+            else if (value.String is not null)
+                writer.WriteStringValue(value.String);
+            else
+                writer.WriteNullValue();
+        }
+    }
+
+    [GeneratedRegex(@"listening on port ([0-9]+)", RegexOptions.IgnoreCase)]
+    private static partial Regex ListeningOnPortRegex();
 }
 
 /// <summary>
-/// A disposable that invokes an action when disposed.
+/// Wraps a <see cref="ToolResultObject"/> as <see cref="AIContent"/> to pass structured tool results
+/// back through Microsoft.Extensions.AI without JSON serialization.
 /// </summary>
-internal sealed class ActionDisposable : IDisposable
+/// <param name="toolResult">The tool result to wrap.</param>
+public class ToolResultAIContent(ToolResultObject toolResult) : AIContent
 {
-    private Action? _action;
-
-    public ActionDisposable(Action action)
-    {
-        _action = action;
-    }
-
-    public void Dispose()
-    {
-        var action = Interlocked.Exchange(ref _action, null);
-        action?.Invoke();
-    }
+    /// <summary>
+    /// Gets the underlying <see cref="ToolResultObject"/>.
+    /// </summary>
+    public ToolResultObject Result => toolResult;
 }

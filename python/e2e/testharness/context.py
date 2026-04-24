@@ -9,15 +9,23 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 from copilot import CopilotClient
+from copilot.client import SubprocessConfig
 
 from .proxy import CapiProxy
 
 
 def get_cli_path_for_tests() -> str:
-    """Get CLI path for E2E tests. Uses node_modules CLI during development."""
+    """Get CLI path for E2E tests.
+
+    Uses COPILOT_CLI_PATH env var if set, otherwise node_modules CLI.
+    """
+    env_path = os.environ.get("COPILOT_CLI_PATH")
+    if env_path and Path(env_path).exists():
+        return str(Path(env_path).resolve())
+
     # Look for CLI in sibling nodejs directory's node_modules
     base_path = Path(__file__).parents[3]
     full_path = base_path / "nodejs" / "node_modules" / "@github" / "copilot" / "index.js"
@@ -39,8 +47,8 @@ class E2ETestContext:
         self.home_dir: str = ""
         self.work_dir: str = ""
         self.proxy_url: str = ""
-        self._proxy: Optional[CapiProxy] = None
-        self._client: Optional[CopilotClient] = None
+        self._proxy: CapiProxy | None = None
+        self._client: CopilotClient | None = None
 
     async def setup(self):
         """Set up the test context with a shared client."""
@@ -54,14 +62,16 @@ class E2ETestContext:
 
         # Create the shared client (like Node.js/Go do)
         # Use fake token in CI to allow cached responses without real auth
-        github_token = "fake-token-for-e2e-tests" if os.environ.get("CI") == "true" else None
+        github_token = (
+            "fake-token-for-e2e-tests" if os.environ.get("GITHUB_ACTIONS") == "true" else None
+        )
         self._client = CopilotClient(
-            {
-                "cli_path": self.cli_path,
-                "cwd": self.work_dir,
-                "env": self.get_env(),
-                "github_token": github_token,
-            }
+            SubprocessConfig(
+                cli_path=self.cli_path,
+                cwd=self.work_dir,
+                env=self.get_env(),
+                github_token=github_token,
+            )
         )
 
     async def teardown(self, test_failed: bool = False):
@@ -71,7 +81,10 @@ class E2ETestContext:
             test_failed: If True, skip writing snapshots to avoid corruption.
         """
         if self._client:
-            await self._client.stop()
+            try:
+                await self._client.stop()
+            except ExceptionGroup:
+                pass  # stop() completes all cleanup before raising; safe to ignore in teardown
             self._client = None
 
         if self._proxy:
@@ -132,6 +145,12 @@ class E2ETestContext:
         if not self._client:
             raise RuntimeError("Context not set up. Call setup() first.")
         return self._client
+
+    async def set_copilot_user_by_token(self, token: str, response: dict[str, Any]) -> None:
+        """Register a per-token response for the /copilot_internal/user endpoint."""
+        if not self._proxy:
+            raise RuntimeError("Proxy not started")
+        await self._proxy.set_copilot_user_by_token(token, response)
 
     async def get_exchanges(self):
         """Retrieve the captured HTTP exchanges from the proxy."""

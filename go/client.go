@@ -12,6 +12,7 @@
 //	defer client.Stop()
 //
 //	session, err := client.CreateSession(&copilot.SessionConfig{
+//	    OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 //	    Model: "gpt-4",
 //	})
 //	if err != nil {
@@ -19,8 +20,8 @@
 //	}
 //
 //	session.On(func(event copilot.SessionEvent) {
-//	    if event.Type == "assistant.message" {
-//	        fmt.Println(event.Data.Content)
+//	    if d, ok := event.Data.(*copilot.AssistantMessageData); ok {
+//	        fmt.Println(d.Content)
 //	    }
 //	})
 //
@@ -40,10 +41,33 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/github/copilot-sdk/go/internal/embeddedcli"
 	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
+	"github.com/github/copilot-sdk/go/rpc"
 )
+
+const noResultPermissionV2Error = "permission handlers cannot return 'no-result' when connected to a protocol v2 server"
+
+func validateSessionFsConfig(config *SessionFsConfig) error {
+	if config == nil {
+		return nil
+	}
+	if config.InitialCwd == "" {
+		return errors.New("SessionFs.InitialCwd is required")
+	}
+	if config.SessionStatePath == "" {
+		return errors.New("SessionFs.SessionStatePath is required")
+	}
+	if config.Conventions != rpc.SessionFSSetProviderConventionsPosix && config.Conventions != rpc.SessionFSSetProviderConventionsWindows {
+		return errors.New("SessionFs.Conventions must be either 'posix' or 'windows'")
+	}
+	return nil
+}
 
 // Client manages the connection to the Copilot CLI server and provides session management.
 //
@@ -65,24 +89,34 @@ import (
 //	}
 //	defer client.Stop()
 type Client struct {
-	options                ClientOptions
-	process                *exec.Cmd
-	client                 *jsonrpc2.Client
-	actualPort             int
-	actualHost             string
-	state                  ConnectionState
-	sessions               map[string]*Session
-	sessionsMux            sync.Mutex
-	isExternalServer       bool
-	conn                   net.Conn // stores net.Conn for external TCP connections
-	useStdio               bool     // resolved value from options
-	autoStart              bool     // resolved value from options
-	autoRestart            bool     // resolved value from options
-	modelsCache            []ModelInfo
-	modelsCacheMux         sync.Mutex
-	lifecycleHandlers      []SessionLifecycleHandler
-	typedLifecycleHandlers map[SessionLifecycleEventType][]SessionLifecycleHandler
-	lifecycleHandlersMux   sync.Mutex
+	options          ClientOptions
+	process          *exec.Cmd
+	client           *jsonrpc2.Client
+	actualPort       int
+	actualHost       string
+	state            ConnectionState
+	sessions         map[string]*Session
+	sessionsMux      sync.Mutex
+	isExternalServer bool
+	conn             net.Conn // stores net.Conn for external TCP connections
+	useStdio         bool     // resolved value from options
+	autoStart        bool     // resolved value from options
+
+	modelsCache               []ModelInfo
+	modelsCacheMux            sync.Mutex
+	lifecycleHandlers         []SessionLifecycleHandler
+	typedLifecycleHandlers    map[SessionLifecycleEventType][]SessionLifecycleHandler
+	lifecycleHandlersMux      sync.Mutex
+	startStopMux              sync.RWMutex // protects process and state during start/[force]stop
+	processDone               chan struct{}
+	processErrorPtr           *error
+	osProcess                 atomic.Pointer[os.Process]
+	negotiatedProtocolVersion int
+	onListModels              func(ctx context.Context) ([]ModelInfo, error)
+
+	// RPC provides typed server-scoped RPC methods.
+	// This field is nil until the client is connected via Start().
+	RPC *rpc.ServerRpc
 }
 
 // NewClient creates a new Copilot CLI client with the given options.
@@ -102,7 +136,7 @@ type Client struct {
 //	})
 func NewClient(options *ClientOptions) *Client {
 	opts := ClientOptions{
-		CLIPath:  "copilot",
+		CLIPath:  "",
 		Cwd:      "",
 		Port:     0,
 		LogLevel: "info",
@@ -116,7 +150,6 @@ func NewClient(options *ClientOptions) *Client {
 		isExternalServer: false,
 		useStdio:         true,
 		autoStart:        true, // default
-		autoRestart:      true, // default
 	}
 
 	if options != nil {
@@ -126,8 +159,8 @@ func NewClient(options *ClientOptions) *Client {
 		}
 
 		// Validate auth options with external server
-		if options.CLIUrl != "" && (options.GithubToken != "" || options.UseLoggedInUser != nil) {
-			panic("GithubToken and UseLoggedInUser cannot be used with CLIUrl (external server manages its own auth)")
+		if options.CLIUrl != "" && (options.GitHubToken != "" || options.UseLoggedInUser != nil) {
+			panic("GitHubToken and UseLoggedInUser cannot be used with CLIUrl (external server manages its own auth)")
 		}
 
 		// Parse CLIUrl if provided
@@ -142,6 +175,9 @@ func NewClient(options *ClientOptions) *Client {
 
 		if options.CLIPath != "" {
 			opts.CLIPath = options.CLIPath
+		}
+		if len(options.CLIArgs) > 0 {
+			opts.CLIArgs = append([]string{}, options.CLIArgs...)
 		}
 		if options.Cwd != "" {
 			opts.Cwd = options.Cwd
@@ -163,15 +199,26 @@ func NewClient(options *ClientOptions) *Client {
 		if options.AutoStart != nil {
 			client.autoStart = *options.AutoStart
 		}
-		if options.AutoRestart != nil {
-			client.autoRestart = *options.AutoRestart
-		}
-		if options.GithubToken != "" {
-			opts.GithubToken = options.GithubToken
+		if options.GitHubToken != "" {
+			opts.GitHubToken = options.GitHubToken
 		}
 		if options.UseLoggedInUser != nil {
 			opts.UseLoggedInUser = options.UseLoggedInUser
 		}
+		if options.OnListModels != nil {
+			client.onListModels = options.OnListModels
+		}
+		if options.SessionFs != nil {
+			if err := validateSessionFsConfig(options.SessionFs); err != nil {
+				panic(err.Error())
+			}
+			sessionFs := *options.SessionFs
+			opts.SessionFs = &sessionFs
+		}
+		if options.Telemetry != nil {
+			opts.Telemetry = options.Telemetry
+		}
+		opts.SessionIdleTimeoutSeconds = options.SessionIdleTimeoutSeconds
 	}
 
 	// Default Env to current environment if not set
@@ -179,13 +226,27 @@ func NewClient(options *ClientOptions) *Client {
 		opts.Env = os.Environ()
 	}
 
-	// Check environment variable for CLI path
-	if cliPath := os.Getenv("COPILOT_CLI_PATH"); cliPath != "" {
-		opts.CLIPath = cliPath
+	// Check effective environment for CLI path (only if not explicitly set via options)
+	if opts.CLIPath == "" {
+		if cliPath := getEnvValue(opts.Env, "COPILOT_CLI_PATH"); cliPath != "" {
+			opts.CLIPath = cliPath
+		}
 	}
 
 	client.options = opts
 	return client
+}
+
+// getEnvValue looks up a key in an environment slice ([]string of "KEY=VALUE").
+// Returns the value if found, or empty string otherwise.
+func getEnvValue(env []string, key string) string {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			return env[i][len(prefix):]
+		}
+	}
+	return ""
 }
 
 // parseCliUrl parses a CLI URL into host and port components.
@@ -239,6 +300,9 @@ func parseCliUrl(url string) (string, int) {
 //	}
 //	// Now ready to create sessions
 func (c *Client) Start(ctx context.Context) error {
+	c.startStopMux.Lock()
+	defer c.startStopMux.Unlock()
+
 	if c.state == StateConnected {
 		return nil
 	}
@@ -248,6 +312,7 @@ func (c *Client) Start(ctx context.Context) error {
 	// Only start CLI server process if not connecting to external server
 	if !c.isExternalServer {
 		if err := c.startCLIServer(ctx); err != nil {
+			c.process = nil
 			c.state = StateError
 			return err
 		}
@@ -255,14 +320,30 @@ func (c *Client) Start(ctx context.Context) error {
 
 	// Connect to the server
 	if err := c.connectToServer(ctx); err != nil {
+		killErr := c.killProcess()
 		c.state = StateError
-		return err
+		return errors.Join(err, killErr)
 	}
 
 	// Verify protocol version compatibility
 	if err := c.verifyProtocolVersion(ctx); err != nil {
+		killErr := c.killProcess()
 		c.state = StateError
-		return err
+		return errors.Join(err, killErr)
+	}
+
+	// If a session filesystem provider was configured, register it.
+	if c.options.SessionFs != nil {
+		_, err := c.RPC.SessionFs.SetProvider(ctx, &rpc.SessionFSSetProviderRequest{
+			InitialCwd:       c.options.SessionFs.InitialCwd,
+			SessionStatePath: c.options.SessionFs.SessionStatePath,
+			Conventions:      c.options.SessionFs.Conventions,
+		})
+		if err != nil {
+			killErr := c.killProcess()
+			c.state = StateError
+			return errors.Join(err, killErr)
+		}
 	}
 
 	c.state = StateConnected
@@ -272,9 +353,13 @@ func (c *Client) Start(ctx context.Context) error {
 // Stop stops the CLI server and closes all active sessions.
 //
 // This method performs graceful cleanup:
-//  1. Destroys all active sessions
+//  1. Closes all active sessions (releases in-memory resources)
 //  2. Closes the JSON-RPC connection
 //  3. Terminates the CLI server process (if spawned by this client)
+//
+// Note: session data on disk is preserved, so sessions can be resumed later.
+// To permanently remove session data before stopping, call [Client.DeleteSession]
+// for each session first.
 //
 // Returns an error that aggregates all errors encountered during cleanup.
 //
@@ -286,7 +371,7 @@ func (c *Client) Start(ctx context.Context) error {
 func (c *Client) Stop() error {
 	var errs []error
 
-	// Destroy all active sessions
+	// Disconnect all active sessions
 	c.sessionsMux.Lock()
 	sessions := make([]*Session, 0, len(c.sessions))
 	for _, session := range c.sessions {
@@ -295,8 +380,8 @@ func (c *Client) Stop() error {
 	c.sessionsMux.Unlock()
 
 	for _, session := range sessions {
-		if err := session.Destroy(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to destroy session %s: %w", session.SessionID, err))
+		if err := session.Disconnect(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to disconnect session %s: %w", session.SessionID, err))
 		}
 	}
 
@@ -304,13 +389,16 @@ func (c *Client) Stop() error {
 	c.sessions = make(map[string]*Session)
 	c.sessionsMux.Unlock()
 
+	c.startStopMux.Lock()
+	defer c.startStopMux.Unlock()
+
 	// Kill CLI process FIRST (this closes stdout and unblocks readLoop) - only if we spawned it
 	if c.process != nil && !c.isExternalServer {
-		if err := c.process.Process.Kill(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to kill CLI process: %w", err))
+		if err := c.killProcess(); err != nil {
+			errs = append(errs, err)
 		}
-		c.process = nil
 	}
+	c.process = nil
 
 	// Close external TCP connection if exists
 	if c.isExternalServer && c.conn != nil {
@@ -336,6 +424,7 @@ func (c *Client) Stop() error {
 		c.actualPort = 0
 	}
 
+	c.RPC = nil
 	return errors.Join(errs...)
 }
 
@@ -362,16 +451,27 @@ func (c *Client) Stop() error {
 //	    client.ForceStop()
 //	}
 func (c *Client) ForceStop() {
+	// Kill the process without waiting for startStopMux, which Start may hold.
+	// This unblocks any I/O Start is doing (connect, version check).
+	if p := c.osProcess.Swap(nil); p != nil {
+		p.Kill()
+	}
+
 	// Clear sessions immediately without trying to destroy them
 	c.sessionsMux.Lock()
 	c.sessions = make(map[string]*Session)
 	c.sessionsMux.Unlock()
 
+	c.startStopMux.Lock()
+	defer c.startStopMux.Unlock()
+
 	// Kill CLI process (only if we spawned it)
+	// This is a fallback in case the process wasn't killed above (e.g. if Start hadn't set
+	// osProcess yet), or if the process was restarted and osProcess now points to a new process.
 	if c.process != nil && !c.isExternalServer {
-		c.process.Process.Kill() // Ignore errors
-		c.process = nil
+		_ = c.killProcess() // Ignore errors since we're force stopping
 	}
+	c.process = nil
 
 	// Close external TCP connection if exists
 	if c.isExternalServer && c.conn != nil {
@@ -394,14 +494,16 @@ func (c *Client) ForceStop() {
 	if !c.isExternalServer {
 		c.actualPort = 0
 	}
+
+	c.RPC = nil
 }
 
-func (c *Client) ensureConnected() error {
+func (c *Client) ensureConnected(ctx context.Context) error {
 	if c.client != nil {
 		return nil
 	}
 	if c.autoStart {
-		return c.Start(context.Background())
+		return c.Start(ctx)
 	}
 	return fmt.Errorf("client not connected. Call Start() first")
 }
@@ -412,17 +514,20 @@ func (c *Client) ensureConnected() error {
 // If the client is not connected and AutoStart is enabled, this will automatically
 // start the connection.
 //
-// The config parameter is optional; pass nil for default settings.
+// The config parameter is required and must include an OnPermissionRequest handler.
 //
 // Returns the created session or an error if session creation fails.
 //
 // Example:
 //
 //	// Basic session
-//	session, err := client.CreateSession(context.Background(), nil)
+//	session, err := client.CreateSession(context.Background(), &copilot.SessionConfig{
+//	    OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+//	})
 //
 //	// Session with model and tools
 //	session, err := client.CreateSession(context.Background(), &copilot.SessionConfig{
+//	    OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 //	    Model: "gpt-4",
 //	    Tools: []copilot.Tool{
 //	        {
@@ -432,91 +537,187 @@ func (c *Client) ensureConnected() error {
 //	        },
 //	    },
 //	})
+//
+// extractTransformCallbacks separates transform callbacks from a SystemMessageConfig,
+// returning a wire-safe config and a map of callbacks (nil if none).
+func extractTransformCallbacks(config *SystemMessageConfig) (*SystemMessageConfig, map[string]SectionTransformFn) {
+	if config == nil || config.Mode != "customize" || len(config.Sections) == 0 {
+		return config, nil
+	}
+
+	callbacks := make(map[string]SectionTransformFn)
+	wireSections := make(map[string]SectionOverride)
+	for id, override := range config.Sections {
+		if override.Transform != nil {
+			callbacks[id] = override.Transform
+			wireSections[id] = SectionOverride{Action: "transform"}
+		} else {
+			wireSections[id] = override
+		}
+	}
+
+	if len(callbacks) == 0 {
+		return config, nil
+	}
+
+	wireConfig := &SystemMessageConfig{
+		Mode:     config.Mode,
+		Content:  config.Content,
+		Sections: wireSections,
+	}
+	return wireConfig, callbacks
+}
+
 func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Session, error) {
-	if err := c.ensureConnected(); err != nil {
+	if config == nil || config.OnPermissionRequest == nil {
+		return nil, fmt.Errorf("an OnPermissionRequest handler is required when creating a session. For example, to allow all permissions, use &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll}")
+	}
+
+	if err := c.ensureConnected(ctx); err != nil {
 		return nil, err
 	}
 
 	req := createSessionRequest{}
-	if config != nil {
-		req.Model = config.Model
-		req.SessionID = config.SessionID
-		req.ReasoningEffort = config.ReasoningEffort
-		req.ConfigDir = config.ConfigDir
-		req.Tools = config.Tools
-		req.SystemMessage = config.SystemMessage
-		req.AvailableTools = config.AvailableTools
-		req.ExcludedTools = config.ExcludedTools
-		req.Provider = config.Provider
-		req.WorkingDirectory = config.WorkingDirectory
-		req.MCPServers = config.MCPServers
-		req.CustomAgents = config.CustomAgents
-		req.SkillDirectories = config.SkillDirectories
-		req.DisabledSkills = config.DisabledSkills
-		req.InfiniteSessions = config.InfiniteSessions
+	req.Model = config.Model
+	req.ClientName = config.ClientName
+	req.ReasoningEffort = config.ReasoningEffort
+	req.ConfigDir = config.ConfigDir
+	if config.EnableConfigDiscovery {
+		req.EnableConfigDiscovery = Bool(true)
+	}
+	req.Tools = config.Tools
+	wireSystemMessage, transformCallbacks := extractTransformCallbacks(config.SystemMessage)
+	req.SystemMessage = wireSystemMessage
+	req.AvailableTools = config.AvailableTools
+	req.ExcludedTools = config.ExcludedTools
+	req.Provider = config.Provider
+	req.ModelCapabilities = config.ModelCapabilities
+	req.WorkingDirectory = config.WorkingDirectory
+	req.MCPServers = config.MCPServers
+	req.EnvValueMode = "direct"
+	req.CustomAgents = config.CustomAgents
+	req.DefaultAgent = config.DefaultAgent
+	req.Agent = config.Agent
+	req.SkillDirectories = config.SkillDirectories
+	req.DisabledSkills = config.DisabledSkills
+	req.InfiniteSessions = config.InfiniteSessions
+	req.GitHubToken = config.GitHubToken
 
-		if config.Streaming {
-			req.Streaming = Bool(true)
+	if len(config.Commands) > 0 {
+		cmds := make([]wireCommand, 0, len(config.Commands))
+		for _, cmd := range config.Commands {
+			cmds = append(cmds, wireCommand{Name: cmd.Name, Description: cmd.Description})
 		}
-		if config.OnPermissionRequest != nil {
-			req.RequestPermission = Bool(true)
+		req.Commands = cmds
+	}
+	if config.OnElicitationRequest != nil {
+		req.RequestElicitation = Bool(true)
+	}
+
+	if config.Streaming {
+		req.Streaming = Bool(true)
+	}
+	if config.IncludeSubAgentStreamingEvents != nil {
+		req.IncludeSubAgentStreamingEvents = config.IncludeSubAgentStreamingEvents
+	} else {
+		req.IncludeSubAgentStreamingEvents = Bool(true)
+	}
+	if config.OnUserInputRequest != nil {
+		req.RequestUserInput = Bool(true)
+	}
+	if config.Hooks != nil && (config.Hooks.OnPreToolUse != nil ||
+		config.Hooks.OnPostToolUse != nil ||
+		config.Hooks.OnUserPromptSubmitted != nil ||
+		config.Hooks.OnSessionStart != nil ||
+		config.Hooks.OnSessionEnd != nil ||
+		config.Hooks.OnErrorOccurred != nil) {
+		req.Hooks = Bool(true)
+	}
+	req.RequestPermission = Bool(true)
+
+	traceparent, tracestate := getTraceContext(ctx)
+	req.Traceparent = traceparent
+	req.Tracestate = tracestate
+
+	sessionID := config.SessionID
+	if sessionID == "" {
+		sessionID = uuid.New().String()
+	}
+	req.SessionID = sessionID
+
+	// Create and register the session before issuing the RPC so that
+	// events emitted by the CLI (e.g. session.start) are not dropped.
+	session := newSession(sessionID, c.client, "")
+
+	session.registerTools(config.Tools)
+	session.registerPermissionHandler(config.OnPermissionRequest)
+	if config.OnUserInputRequest != nil {
+		session.registerUserInputHandler(config.OnUserInputRequest)
+	}
+	if config.Hooks != nil {
+		session.registerHooks(config.Hooks)
+	}
+	if transformCallbacks != nil {
+		session.registerTransformCallbacks(transformCallbacks)
+	}
+	if config.OnEvent != nil {
+		session.On(config.OnEvent)
+	}
+	if len(config.Commands) > 0 {
+		session.registerCommands(config.Commands)
+	}
+	if config.OnElicitationRequest != nil {
+		session.registerElicitationHandler(config.OnElicitationRequest)
+	}
+
+	c.sessionsMux.Lock()
+	c.sessions[sessionID] = session
+	c.sessionsMux.Unlock()
+
+	if c.options.SessionFs != nil {
+		if config.CreateSessionFsHandler == nil {
+			c.sessionsMux.Lock()
+			delete(c.sessions, sessionID)
+			c.sessionsMux.Unlock()
+			return nil, fmt.Errorf("CreateSessionFsHandler is required in session config when SessionFs is enabled in client options")
 		}
-		if config.OnUserInputRequest != nil {
-			req.RequestUserInput = Bool(true)
-		}
-		if config.Hooks != nil && (config.Hooks.OnPreToolUse != nil ||
-			config.Hooks.OnPostToolUse != nil ||
-			config.Hooks.OnUserPromptSubmitted != nil ||
-			config.Hooks.OnSessionStart != nil ||
-			config.Hooks.OnSessionEnd != nil ||
-			config.Hooks.OnErrorOccurred != nil) {
-			req.Hooks = Bool(true)
-		}
+		session.clientSessionApis.SessionFs = newSessionFsAdapter(config.CreateSessionFsHandler(session))
 	}
 
 	result, err := c.client.Request("session.create", req)
 	if err != nil {
+		c.sessionsMux.Lock()
+		delete(c.sessions, sessionID)
+		c.sessionsMux.Unlock()
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
 	var response createSessionResponse
 	if err := json.Unmarshal(result, &response); err != nil {
+		c.sessionsMux.Lock()
+		delete(c.sessions, sessionID)
+		c.sessionsMux.Unlock()
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	session := newSession(response.SessionID, c.client, response.WorkspacePath)
-
-	if config != nil {
-		session.registerTools(config.Tools)
-		if config.OnPermissionRequest != nil {
-			session.registerPermissionHandler(config.OnPermissionRequest)
-		}
-		if config.OnUserInputRequest != nil {
-			session.registerUserInputHandler(config.OnUserInputRequest)
-		}
-		if config.Hooks != nil {
-			session.registerHooks(config.Hooks)
-		}
-	} else {
-		session.registerTools(nil)
-	}
-
-	c.sessionsMux.Lock()
-	c.sessions[response.SessionID] = session
-	c.sessionsMux.Unlock()
+	session.workspacePath = response.WorkspacePath
+	session.setCapabilities(response.Capabilities)
 
 	return session, nil
 }
 
-// ResumeSession resumes an existing conversation session by its ID using default options.
+// ResumeSession resumes an existing conversation session by its ID.
 //
-// This is a convenience method that calls [Client.ResumeSessionWithOptions] with nil config.
+// This is a convenience method that calls [Client.ResumeSessionWithOptions].
+// The config must include an OnPermissionRequest handler.
 //
 // Example:
 //
-//	session, err := client.ResumeSession(context.Background(), "session-123")
-func (c *Client) ResumeSession(ctx context.Context, sessionID string) (*Session, error) {
-	return c.ResumeSessionWithOptions(ctx, sessionID, nil)
+//	session, err := client.ResumeSession(context.Background(), "session-123", &copilot.ResumeSessionConfig{
+//	    OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+//	})
+func (c *Client) ResumeSession(ctx context.Context, sessionID string, config *ResumeSessionConfig) (*Session, error) {
+	return c.ResumeSessionWithOptions(ctx, sessionID, config)
 }
 
 // ResumeSessionWithOptions resumes an existing conversation session with additional configuration.
@@ -527,81 +728,140 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string) (*Session,
 // Example:
 //
 //	session, err := client.ResumeSessionWithOptions(context.Background(), "session-123", &copilot.ResumeSessionConfig{
+//	    OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 //	    Tools: []copilot.Tool{myNewTool},
 //	})
 func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string, config *ResumeSessionConfig) (*Session, error) {
-	if err := c.ensureConnected(); err != nil {
+	if config == nil || config.OnPermissionRequest == nil {
+		return nil, fmt.Errorf("an OnPermissionRequest handler is required when resuming a session. For example, to allow all permissions, use &copilot.ResumeSessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll}")
+	}
+
+	if err := c.ensureConnected(ctx); err != nil {
 		return nil, err
 	}
 
 	var req resumeSessionRequest
 	req.SessionID = sessionID
-	if config != nil {
-		req.Model = config.Model
-		req.ReasoningEffort = config.ReasoningEffort
-		req.SystemMessage = config.SystemMessage
-		req.Tools = config.Tools
-		req.Provider = config.Provider
-		req.AvailableTools = config.AvailableTools
-		req.ExcludedTools = config.ExcludedTools
-		if config.Streaming {
-			req.Streaming = Bool(true)
+	req.ClientName = config.ClientName
+	req.Model = config.Model
+	req.ReasoningEffort = config.ReasoningEffort
+	wireSystemMessage, transformCallbacks := extractTransformCallbacks(config.SystemMessage)
+	req.SystemMessage = wireSystemMessage
+	req.Tools = config.Tools
+	req.Provider = config.Provider
+	req.ModelCapabilities = config.ModelCapabilities
+	req.AvailableTools = config.AvailableTools
+	req.ExcludedTools = config.ExcludedTools
+	if config.Streaming {
+		req.Streaming = Bool(true)
+	}
+	if config.IncludeSubAgentStreamingEvents != nil {
+		req.IncludeSubAgentStreamingEvents = config.IncludeSubAgentStreamingEvents
+	} else {
+		req.IncludeSubAgentStreamingEvents = Bool(true)
+	}
+	if config.OnUserInputRequest != nil {
+		req.RequestUserInput = Bool(true)
+	}
+	if config.Hooks != nil && (config.Hooks.OnPreToolUse != nil ||
+		config.Hooks.OnPostToolUse != nil ||
+		config.Hooks.OnUserPromptSubmitted != nil ||
+		config.Hooks.OnSessionStart != nil ||
+		config.Hooks.OnSessionEnd != nil ||
+		config.Hooks.OnErrorOccurred != nil) {
+		req.Hooks = Bool(true)
+	}
+	req.WorkingDirectory = config.WorkingDirectory
+	req.ConfigDir = config.ConfigDir
+	if config.EnableConfigDiscovery {
+		req.EnableConfigDiscovery = Bool(true)
+	}
+	if config.DisableResume {
+		req.DisableResume = Bool(true)
+	}
+	req.MCPServers = config.MCPServers
+	req.EnvValueMode = "direct"
+	req.CustomAgents = config.CustomAgents
+	req.DefaultAgent = config.DefaultAgent
+	req.Agent = config.Agent
+	req.SkillDirectories = config.SkillDirectories
+	req.DisabledSkills = config.DisabledSkills
+	req.InfiniteSessions = config.InfiniteSessions
+	req.GitHubToken = config.GitHubToken
+	req.RequestPermission = Bool(true)
+
+	if len(config.Commands) > 0 {
+		cmds := make([]wireCommand, 0, len(config.Commands))
+		for _, cmd := range config.Commands {
+			cmds = append(cmds, wireCommand{Name: cmd.Name, Description: cmd.Description})
 		}
-		if config.OnPermissionRequest != nil {
-			req.RequestPermission = Bool(true)
+		req.Commands = cmds
+	}
+	if config.OnElicitationRequest != nil {
+		req.RequestElicitation = Bool(true)
+	}
+
+	traceparent, tracestate := getTraceContext(ctx)
+	req.Traceparent = traceparent
+	req.Tracestate = tracestate
+
+	// Create and register the session before issuing the RPC so that
+	// events emitted by the CLI (e.g. session.start) are not dropped.
+	session := newSession(sessionID, c.client, "")
+
+	session.registerTools(config.Tools)
+	session.registerPermissionHandler(config.OnPermissionRequest)
+	if config.OnUserInputRequest != nil {
+		session.registerUserInputHandler(config.OnUserInputRequest)
+	}
+	if config.Hooks != nil {
+		session.registerHooks(config.Hooks)
+	}
+	if transformCallbacks != nil {
+		session.registerTransformCallbacks(transformCallbacks)
+	}
+	if config.OnEvent != nil {
+		session.On(config.OnEvent)
+	}
+	if len(config.Commands) > 0 {
+		session.registerCommands(config.Commands)
+	}
+	if config.OnElicitationRequest != nil {
+		session.registerElicitationHandler(config.OnElicitationRequest)
+	}
+
+	c.sessionsMux.Lock()
+	c.sessions[sessionID] = session
+	c.sessionsMux.Unlock()
+
+	if c.options.SessionFs != nil {
+		if config.CreateSessionFsHandler == nil {
+			c.sessionsMux.Lock()
+			delete(c.sessions, sessionID)
+			c.sessionsMux.Unlock()
+			return nil, fmt.Errorf("CreateSessionFsHandler is required in session config when SessionFs is enabled in client options")
 		}
-		if config.OnUserInputRequest != nil {
-			req.RequestUserInput = Bool(true)
-		}
-		if config.Hooks != nil && (config.Hooks.OnPreToolUse != nil ||
-			config.Hooks.OnPostToolUse != nil ||
-			config.Hooks.OnUserPromptSubmitted != nil ||
-			config.Hooks.OnSessionStart != nil ||
-			config.Hooks.OnSessionEnd != nil ||
-			config.Hooks.OnErrorOccurred != nil) {
-			req.Hooks = Bool(true)
-		}
-		req.WorkingDirectory = config.WorkingDirectory
-		req.ConfigDir = config.ConfigDir
-		if config.DisableResume {
-			req.DisableResume = Bool(true)
-		}
-		req.MCPServers = config.MCPServers
-		req.CustomAgents = config.CustomAgents
-		req.SkillDirectories = config.SkillDirectories
-		req.DisabledSkills = config.DisabledSkills
-		req.InfiniteSessions = config.InfiniteSessions
+		session.clientSessionApis.SessionFs = newSessionFsAdapter(config.CreateSessionFsHandler(session))
 	}
 
 	result, err := c.client.Request("session.resume", req)
 	if err != nil {
+		c.sessionsMux.Lock()
+		delete(c.sessions, sessionID)
+		c.sessionsMux.Unlock()
 		return nil, fmt.Errorf("failed to resume session: %w", err)
 	}
 
 	var response resumeSessionResponse
 	if err := json.Unmarshal(result, &response); err != nil {
+		c.sessionsMux.Lock()
+		delete(c.sessions, sessionID)
+		c.sessionsMux.Unlock()
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	session := newSession(response.SessionID, c.client, response.WorkspacePath)
-	if config != nil {
-		session.registerTools(config.Tools)
-		if config.OnPermissionRequest != nil {
-			session.registerPermissionHandler(config.OnPermissionRequest)
-		}
-		if config.OnUserInputRequest != nil {
-			session.registerUserInputHandler(config.OnUserInputRequest)
-		}
-		if config.Hooks != nil {
-			session.registerHooks(config.Hooks)
-		}
-	} else {
-		session.registerTools(nil)
-	}
-
-	c.sessionsMux.Lock()
-	c.sessions[response.SessionID] = session
-	c.sessionsMux.Unlock()
+	session.workspacePath = response.WorkspacePath
+	session.setCapabilities(response.Capabilities)
 
 	return session, nil
 }
@@ -609,23 +869,33 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 // ListSessions returns metadata about all sessions known to the server.
 //
 // Returns a list of SessionMetadata for all available sessions, including their IDs,
-// timestamps, and optional summaries.
+// timestamps, optional summaries, and context information.
+//
+// An optional filter can be provided to filter sessions by cwd, git root, repository, or branch.
 //
 // Example:
 //
-//	sessions, err := client.ListSessions(context.Background())
+//	sessions, err := client.ListSessions(context.Background(), nil)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //	for _, session := range sessions {
 //	    fmt.Printf("Session: %s\n", session.SessionID)
 //	}
-func (c *Client) ListSessions(ctx context.Context) ([]SessionMetadata, error) {
-	if err := c.ensureConnected(); err != nil {
+//
+// Example with filter:
+//
+//	sessions, err := client.ListSessions(context.Background(), &SessionListFilter{Repository: "owner/repo"})
+func (c *Client) ListSessions(ctx context.Context, filter *SessionListFilter) ([]SessionMetadata, error) {
+	if err := c.ensureConnected(ctx); err != nil {
 		return nil, err
 	}
 
-	result, err := c.client.Request("session.list", listSessionsRequest{})
+	params := listSessionsRequest{}
+	if filter != nil {
+		params.Filter = filter
+	}
+	result, err := c.client.Request("session.list", params)
 	if err != nil {
 		return nil, err
 	}
@@ -638,8 +908,43 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionMetadata, error) {
 	return response.Sessions, nil
 }
 
-// DeleteSession permanently deletes a session and all its conversation history.
+// GetSessionMetadata returns metadata for a specific session by ID.
 //
+// This provides an efficient O(1) lookup of a single session's metadata
+// instead of listing all sessions. Returns nil if the session is not found.
+//
+// Example:
+//
+//	metadata, err := client.GetSessionMetadata(context.Background(), "session-123")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	if metadata != nil {
+//	    fmt.Printf("Session started at: %s\n", metadata.StartTime)
+//	}
+func (c *Client) GetSessionMetadata(ctx context.Context, sessionID string) (*SessionMetadata, error) {
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
+	}
+
+	result, err := c.client.Request("session.getMetadata", getSessionMetadataRequest{SessionID: sessionID})
+	if err != nil {
+		return nil, err
+	}
+
+	var response getSessionMetadataResponse
+	if err := json.Unmarshal(result, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal session metadata response: %w", err)
+	}
+
+	return response.Session, nil
+}
+
+// DeleteSession permanently deletes a session and all its data from disk,
+// including conversation history, planning state, and artifacts.
+//
+// Unlike [Session.Disconnect], which only releases in-memory resources and
+// preserves session data for later resumption, DeleteSession is irreversible.
 // The session cannot be resumed after deletion. If the session is in the local
 // sessions map, it will be removed.
 //
@@ -649,7 +954,7 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionMetadata, error) {
 //	    log.Fatal(err)
 //	}
 func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
-	if err := c.ensureConnected(); err != nil {
+	if err := c.ensureConnected(ctx); err != nil {
 		return err
 	}
 
@@ -679,6 +984,40 @@ func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// GetLastSessionID returns the ID of the most recently updated session.
+//
+// This is useful for resuming the last conversation when the session ID
+// was not stored. Returns nil if no sessions exist.
+//
+// Example:
+//
+//	lastID, err := client.GetLastSessionID(context.Background())
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	if lastID != nil {
+//	    session, err := client.ResumeSession(context.Background(), *lastID, &copilot.ResumeSessionConfig{
+//	        OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+//	    })
+//	}
+func (c *Client) GetLastSessionID(ctx context.Context) (*string, error) {
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
+	}
+
+	result, err := c.client.Request("session.getLastId", getLastSessionIDRequest{})
+	if err != nil {
+		return nil, err
+	}
+
+	var response getLastSessionIDResponse
+	if err := json.Unmarshal(result, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal getLastId response: %w", err)
+	}
+
+	return response.SessionID, nil
+}
+
 // GetForegroundSessionID returns the ID of the session currently displayed in the TUI.
 //
 // This is only available when connecting to a server running in TUI+server mode
@@ -694,14 +1033,8 @@ func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 //	    fmt.Printf("TUI is displaying session: %s\n", *sessionID)
 //	}
 func (c *Client) GetForegroundSessionID(ctx context.Context) (*string, error) {
-	if c.client == nil {
-		if c.autoStart {
-			if err := c.Start(ctx); err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, fmt.Errorf("client not connected. Call Start() first")
-		}
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
 	}
 
 	result, err := c.client.Request("session.getForeground", getForegroundSessionRequest{})
@@ -728,14 +1061,8 @@ func (c *Client) GetForegroundSessionID(ctx context.Context) (*string, error) {
 //	    log.Fatal(err)
 //	}
 func (c *Client) SetForegroundSessionID(ctx context.Context, sessionID string) error {
-	if c.client == nil {
-		if c.autoStart {
-			if err := c.Start(ctx); err != nil {
-				return err
-			}
-		} else {
-			return fmt.Errorf("client not connected. Call Start() first")
-		}
+	if err := c.ensureConnected(ctx); err != nil {
+		return err
 	}
 
 	result, err := c.client.Request("session.setForeground", setForegroundSessionRequest{SessionID: sessionID})
@@ -857,10 +1184,20 @@ func (c *Client) handleLifecycleEvent(event SessionLifecycleEvent) {
 // Example:
 //
 //	if client.State() == copilot.StateConnected {
-//	    session, err := client.CreateSession(context.Background(), nil)
+//	    session, err := client.CreateSession(context.Background(), &copilot.SessionConfig{
+//	        OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+//	    })
 //	}
 func (c *Client) State() ConnectionState {
+	c.startStopMux.RLock()
+	defer c.startStopMux.RUnlock()
 	return c.state
+}
+
+// ActualPort returns the TCP port the CLI server is listening on.
+// Returns 0 if the client is not connected or using stdio transport.
+func (c *Client) ActualPort() int {
+	return c.actualPort
 }
 
 // Ping sends a ping request to the server to verify connectivity.
@@ -934,58 +1271,75 @@ func (c *Client) GetAuthStatus(ctx context.Context) (*GetAuthStatusResponse, err
 // Results are cached after the first successful call to avoid rate limiting.
 // The cache is cleared when the client disconnects.
 func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
-	if c.client == nil {
-		return nil, fmt.Errorf("client not connected")
-	}
-
 	// Use mutex for locking to prevent race condition with concurrent calls
 	c.modelsCacheMux.Lock()
 	defer c.modelsCacheMux.Unlock()
 
 	// Check cache (already inside lock)
 	if c.modelsCache != nil {
-		// Return a copy to prevent cache mutation
 		result := make([]ModelInfo, len(c.modelsCache))
 		copy(result, c.modelsCache)
 		return result, nil
 	}
 
-	// Cache miss - fetch from backend while holding lock
-	result, err := c.client.Request("models.list", listModelsRequest{})
-	if err != nil {
-		return nil, err
+	var models []ModelInfo
+	if c.onListModels != nil {
+		// Use custom handler instead of CLI RPC
+		var err error
+		models, err = c.onListModels(ctx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if c.client == nil {
+			return nil, fmt.Errorf("client not connected")
+		}
+		// Cache miss - fetch from backend while holding lock
+		result, err := c.client.Request("models.list", listModelsRequest{})
+		if err != nil {
+			return nil, err
+		}
+
+		var response listModelsResponse
+		if err := json.Unmarshal(result, &response); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal models response: %w", err)
+		}
+		models = response.Models
 	}
 
-	var response listModelsResponse
-	if err := json.Unmarshal(result, &response); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal models response: %w", err)
-	}
-
-	// Update cache before releasing lock
-	c.modelsCache = response.Models
+	// Update cache before releasing lock (copy to prevent external mutation)
+	cache := make([]ModelInfo, len(models))
+	copy(cache, models)
+	c.modelsCache = cache
 
 	// Return a copy to prevent cache mutation
-	models := make([]ModelInfo, len(response.Models))
-	copy(models, response.Models)
-	return models, nil
+	result := make([]ModelInfo, len(models))
+	copy(result, models)
+	return result, nil
 }
 
-// verifyProtocolVersion verifies that the server's protocol version matches the SDK's expected version
+// minProtocolVersion is the minimum protocol version this SDK can communicate with.
+const minProtocolVersion = 2
+
+// verifyProtocolVersion verifies that the server's protocol version is within the supported range
+// and stores the negotiated version.
 func (c *Client) verifyProtocolVersion(ctx context.Context) error {
-	expectedVersion := GetSdkProtocolVersion()
+	maxVersion := GetSdkProtocolVersion()
 	pingResult, err := c.Ping(ctx, "")
 	if err != nil {
 		return err
 	}
 
 	if pingResult.ProtocolVersion == nil {
-		return fmt.Errorf("SDK protocol version mismatch: SDK expects version %d, but server does not report a protocol version. Please update your server to ensure compatibility", expectedVersion)
+		return fmt.Errorf("SDK protocol version mismatch: SDK supports versions %d-%d, but server does not report a protocol version. Please update your server to ensure compatibility", minProtocolVersion, maxVersion)
 	}
 
-	if *pingResult.ProtocolVersion != expectedVersion {
-		return fmt.Errorf("SDK protocol version mismatch: SDK expects version %d, but server reports version %d. Please update your SDK or server to ensure compatibility", expectedVersion, *pingResult.ProtocolVersion)
+	serverVersion := *pingResult.ProtocolVersion
+	if serverVersion < minProtocolVersion || serverVersion > maxVersion {
+		return fmt.Errorf("SDK protocol version mismatch: SDK supports versions %d-%d, but server reports version %d. Please update your SDK or server to ensure compatibility", minProtocolVersion, maxVersion, serverVersion)
 	}
 
+	c.negotiatedProtocolVersion = serverVersion
 	return nil
 }
 
@@ -994,7 +1348,19 @@ func (c *Client) verifyProtocolVersion(ctx context.Context) error {
 // This spawns the CLI server as a subprocess using the configured transport
 // mode (stdio or TCP).
 func (c *Client) startCLIServer(ctx context.Context) error {
-	args := []string{"--headless", "--no-auto-update", "--log-level", c.options.LogLevel}
+	cliPath := c.options.CLIPath
+	if cliPath == "" {
+		// If no CLI path is provided, attempt to use the embedded CLI if available
+		cliPath = embeddedcli.Path()
+	}
+	if cliPath == "" {
+		// Default to "copilot" in PATH if no embedded CLI is available and no custom path is set
+		cliPath = "copilot"
+	}
+
+	// Start with user-provided CLIArgs, then add SDK-managed args
+	args := append([]string{}, c.options.CLIArgs...)
+	args = append(args, "--headless", "--no-auto-update", "--log-level", c.options.LogLevel)
 
 	// Choose transport mode
 	if c.useStdio {
@@ -1004,29 +1370,36 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 	}
 
 	// Add auth-related flags
-	if c.options.GithubToken != "" {
+	if c.options.GitHubToken != "" {
 		args = append(args, "--auth-token-env", "COPILOT_SDK_AUTH_TOKEN")
 	}
-	// Default useLoggedInUser to false when GithubToken is provided
+	// Default useLoggedInUser to false when GitHubToken is provided
 	useLoggedInUser := true
 	if c.options.UseLoggedInUser != nil {
 		useLoggedInUser = *c.options.UseLoggedInUser
-	} else if c.options.GithubToken != "" {
+	} else if c.options.GitHubToken != "" {
 		useLoggedInUser = false
 	}
 	if !useLoggedInUser {
 		args = append(args, "--no-auto-login")
 	}
 
-	// If CLIPath is a .js file, run it with node
-	// Note we can't rely on the shebang as Windows doesn't support it
-	command := c.options.CLIPath
-	if strings.HasSuffix(c.options.CLIPath, ".js") {
-		command = "node"
-		args = append([]string{c.options.CLIPath}, args...)
+	if c.options.SessionIdleTimeoutSeconds > 0 {
+		args = append(args, "--session-idle-timeout", strconv.Itoa(c.options.SessionIdleTimeoutSeconds))
 	}
 
-	c.process = exec.CommandContext(ctx, command, args...)
+	// If CLIPath is a .js file, run it with node
+	// Note we can't rely on the shebang as Windows doesn't support it
+	command := cliPath
+	if strings.HasSuffix(cliPath, ".js") {
+		command = "node"
+		args = append([]string{cliPath}, args...)
+	}
+
+	c.process = exec.Command(command, args...)
+
+	// Configure platform-specific process attributes (e.g., hide window on Windows)
+	configureProcAttr(c.process)
 
 	// Set working directory if specified
 	if c.options.Cwd != "" {
@@ -1035,8 +1408,32 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 
 	// Add auth token if needed.
 	c.process.Env = c.options.Env
-	if c.options.GithubToken != "" {
-		c.process.Env = append(c.process.Env, "COPILOT_SDK_AUTH_TOKEN="+c.options.GithubToken)
+	if c.options.GitHubToken != "" {
+		c.process.Env = append(c.process.Env, "COPILOT_SDK_AUTH_TOKEN="+c.options.GitHubToken)
+	}
+
+	if c.options.Telemetry != nil {
+		t := c.options.Telemetry
+		c.process.Env = append(c.process.Env, "COPILOT_OTEL_ENABLED=true")
+		if t.OTLPEndpoint != "" {
+			c.process.Env = append(c.process.Env, "OTEL_EXPORTER_OTLP_ENDPOINT="+t.OTLPEndpoint)
+		}
+		if t.FilePath != "" {
+			c.process.Env = append(c.process.Env, "COPILOT_OTEL_FILE_EXPORTER_PATH="+t.FilePath)
+		}
+		if t.ExporterType != "" {
+			c.process.Env = append(c.process.Env, "COPILOT_OTEL_EXPORTER_TYPE="+t.ExporterType)
+		}
+		if t.SourceName != "" {
+			c.process.Env = append(c.process.Env, "COPILOT_OTEL_SOURCE_NAME="+t.SourceName)
+		}
+		if t.CaptureContent != nil {
+			val := "false"
+			if *t.CaptureContent {
+				val = "true"
+			}
+			c.process.Env = append(c.process.Env, "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT="+val)
+		}
 	}
 
 	if c.useStdio {
@@ -1051,26 +1448,25 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 			return fmt.Errorf("failed to create stdout pipe: %w", err)
 		}
 
-		stderr, err := c.process.StderrPipe()
-		if err != nil {
-			return fmt.Errorf("failed to create stderr pipe: %w", err)
-		}
-
-		// Read stderr in background
-		go func() {
-			scanner := bufio.NewScanner(stderr)
-			for scanner.Scan() {
-				// Optionally log stderr
-				// fmt.Fprintf(os.Stderr, "CLI stderr: %s\n", scanner.Text())
-			}
-		}()
-
 		if err := c.process.Start(); err != nil {
 			return fmt.Errorf("failed to start CLI server: %w", err)
 		}
 
+		c.monitorProcess()
+
 		// Create JSON-RPC client immediately
 		c.client = jsonrpc2.NewClient(stdin, stdout)
+		c.client.SetProcessDone(c.processDone, c.processErrorPtr)
+		c.client.SetOnClose(func() {
+			// Run in a goroutine to avoid deadlocking with Stop/ForceStop,
+			// which hold startStopMux while waiting for readLoop to finish.
+			go func() {
+				c.startStopMux.Lock()
+				defer c.startStopMux.Unlock()
+				c.state = StateDisconnected
+			}()
+		})
+		c.RPC = rpc.NewServerRpc(c.client)
 		c.setupNotificationHandler()
 		c.client.Start()
 
@@ -1086,22 +1482,30 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 			return fmt.Errorf("failed to start CLI server: %w", err)
 		}
 
-		// Wait for port announcement
+		c.monitorProcess()
+
 		scanner := bufio.NewScanner(stdout)
-		timeout := time.After(10 * time.Second)
 		portRegex := regexp.MustCompile(`listening on port (\d+)`)
+
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
 
 		for {
 			select {
-			case <-timeout:
-				return fmt.Errorf("timeout waiting for CLI server to start")
+			case <-ctx.Done():
+				killErr := c.killProcess()
+				return errors.Join(fmt.Errorf("failed waiting for CLI server to start: %w", ctx.Err()), killErr)
+			case <-c.processDone:
+				killErr := c.killProcess()
+				return errors.Join(errors.New("CLI server process exited before reporting port"), killErr)
 			default:
 				if scanner.Scan() {
 					line := scanner.Text()
 					if matches := portRegex.FindStringSubmatch(line); len(matches) > 1 {
 						port, err := strconv.Atoi(matches[1])
 						if err != nil {
-							return fmt.Errorf("failed to parse port: %w", err)
+							killErr := c.killProcess()
+							return errors.Join(fmt.Errorf("failed to parse port: %w", err), killErr)
 						}
 						c.actualPort = port
 						return nil
@@ -1110,6 +1514,39 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (c *Client) killProcess() error {
+	if p := c.osProcess.Swap(nil); p != nil {
+		if err := p.Kill(); err != nil {
+			return fmt.Errorf("failed to kill CLI process: %w", err)
+		}
+	}
+	c.process = nil
+	return nil
+}
+
+// monitorProcess signals when the CLI process exits and captures any exit error.
+// processError is intentionally a local: each process lifecycle gets its own
+// error value, so goroutines from previous processes can't overwrite the
+// current one. Closing the channel synchronizes with readers, guaranteeing
+// they see the final processError value.
+func (c *Client) monitorProcess() {
+	done := make(chan struct{})
+	c.processDone = done
+	proc := c.process
+	c.osProcess.Store(proc.Process)
+	var processError error
+	c.processErrorPtr = &processError
+	go func() {
+		waitErr := proc.Wait()
+		if waitErr != nil {
+			processError = fmt.Errorf("CLI process exited: %w", waitErr)
+		} else {
+			processError = errors.New("CLI process exited unexpectedly")
+		}
+		close(done)
+	}()
 }
 
 // connectToServer establishes a connection to the server.
@@ -1129,12 +1566,13 @@ func (c *Client) connectViaTcp(ctx context.Context) error {
 		return fmt.Errorf("server port not available")
 	}
 
-	// Create TCP connection that cancels on context done or after 10 seconds
+	// Merge a 10-second timeout with the caller's context so whichever
+	// deadline comes first wins.
 	address := net.JoinHostPort(c.actualHost, fmt.Sprintf("%d", c.actualPort))
-	dialer := net.Dialer{
-		Timeout: 10 * time.Second,
-	}
-	conn, err := dialer.DialContext(ctx, "tcp", address)
+	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(dialCtx, "tcp", address)
 	if err != nil {
 		return fmt.Errorf("failed to connect to CLI server at %s: %w", address, err)
 	}
@@ -1143,20 +1581,45 @@ func (c *Client) connectViaTcp(ctx context.Context) error {
 
 	// Create JSON-RPC client with the connection
 	c.client = jsonrpc2.NewClient(conn, conn)
+	if c.processDone != nil {
+		c.client.SetProcessDone(c.processDone, c.processErrorPtr)
+	}
+	c.client.SetOnClose(func() {
+		go func() {
+			c.startStopMux.Lock()
+			defer c.startStopMux.Unlock()
+			c.state = StateDisconnected
+		}()
+	})
+	c.RPC = rpc.NewServerRpc(c.client)
 	c.setupNotificationHandler()
 	c.client.Start()
 
 	return nil
 }
 
-// setupNotificationHandler configures handlers for session events, tool calls, and permission requests.
+// setupNotificationHandler configures handlers for session events and RPC requests.
+// Protocol v3 servers send tool calls and permission requests as broadcast session events.
+// Protocol v2 servers use the older tool.call / permission.request RPC model.
+// We always register v2 adapters because handlers are set up before version negotiation;
+// a v3 server will simply never send these requests.
 func (c *Client) setupNotificationHandler() {
 	c.client.SetRequestHandler("session.event", jsonrpc2.NotificationHandlerFor(c.handleSessionEvent))
 	c.client.SetRequestHandler("session.lifecycle", jsonrpc2.NotificationHandlerFor(c.handleLifecycleEvent))
-	c.client.SetRequestHandler("tool.call", jsonrpc2.RequestHandlerFor(c.handleToolCallRequest))
-	c.client.SetRequestHandler("permission.request", jsonrpc2.RequestHandlerFor(c.handlePermissionRequest))
+	c.client.SetRequestHandler("tool.call", jsonrpc2.RequestHandlerFor(c.handleToolCallRequestV2))
+	c.client.SetRequestHandler("permission.request", jsonrpc2.RequestHandlerFor(c.handlePermissionRequestV2))
 	c.client.SetRequestHandler("userInput.request", jsonrpc2.RequestHandlerFor(c.handleUserInputRequest))
 	c.client.SetRequestHandler("hooks.invoke", jsonrpc2.RequestHandlerFor(c.handleHooksInvoke))
+	c.client.SetRequestHandler("systemMessage.transform", jsonrpc2.RequestHandlerFor(c.handleSystemMessageTransform))
+	rpc.RegisterClientSessionApiHandlers(c.client, func(sessionID string) *rpc.ClientSessionApiHandlers {
+		c.sessionsMux.Lock()
+		defer c.sessionsMux.Unlock()
+		session := c.sessions[sessionID]
+		if session == nil {
+			return nil
+		}
+		return session.clientSessionApis
+	})
 }
 
 func (c *Client) handleSessionEvent(req sessionEventRequest) {
@@ -1171,84 +1634,6 @@ func (c *Client) handleSessionEvent(req sessionEventRequest) {
 	if ok {
 		session.dispatchEvent(req.Event)
 	}
-}
-
-// handleToolCallRequest handles a tool call request from the CLI server.
-func (c *Client) handleToolCallRequest(req toolCallRequest) (*toolCallResponse, *jsonrpc2.Error) {
-	if req.SessionID == "" || req.ToolCallID == "" || req.ToolName == "" {
-		return nil, &jsonrpc2.Error{Code: -32602, Message: "invalid tool call payload"}
-	}
-
-	c.sessionsMux.Lock()
-	session, ok := c.sessions[req.SessionID]
-	c.sessionsMux.Unlock()
-	if !ok {
-		return nil, &jsonrpc2.Error{Code: -32602, Message: fmt.Sprintf("unknown session %s", req.SessionID)}
-	}
-
-	handler, ok := session.getToolHandler(req.ToolName)
-	if !ok {
-		return &toolCallResponse{Result: buildUnsupportedToolResult(req.ToolName)}, nil
-	}
-
-	result := c.executeToolCall(req.SessionID, req.ToolCallID, req.ToolName, req.Arguments, handler)
-	return &toolCallResponse{Result: result}, nil
-}
-
-// executeToolCall executes a tool handler and returns the result.
-func (c *Client) executeToolCall(
-	sessionID, toolCallID, toolName string,
-	arguments any,
-	handler ToolHandler,
-) (result ToolResult) {
-	invocation := ToolInvocation{
-		SessionID:  sessionID,
-		ToolCallID: toolCallID,
-		ToolName:   toolName,
-		Arguments:  arguments,
-	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			result = buildFailedToolResult(fmt.Sprintf("tool panic: %v", r))
-		}
-	}()
-
-	if handler != nil {
-		var err error
-		result, err = handler(invocation)
-		if err != nil {
-			result = buildFailedToolResult(err.Error())
-		}
-	}
-
-	return result
-}
-
-// handlePermissionRequest handles a permission request from the CLI server.
-func (c *Client) handlePermissionRequest(req permissionRequestRequest) (*permissionRequestResponse, *jsonrpc2.Error) {
-	if req.SessionID == "" {
-		return nil, &jsonrpc2.Error{Code: -32602, Message: "invalid permission request payload"}
-	}
-
-	c.sessionsMux.Lock()
-	session, ok := c.sessions[req.SessionID]
-	c.sessionsMux.Unlock()
-	if !ok {
-		return nil, &jsonrpc2.Error{Code: -32602, Message: fmt.Sprintf("unknown session %s", req.SessionID)}
-	}
-
-	result, err := session.handlePermissionRequest(req.Request)
-	if err != nil {
-		// Return denial on error
-		return &permissionRequestResponse{
-			Result: PermissionRequestResult{
-				Kind: "denied-no-approval-rule-and-could-not-request-from-user",
-			},
-		}, nil
-	}
-
-	return &permissionRequestResponse{Result: result}, nil
 }
 
 // handleUserInputRequest handles a user input request from the CLI server.
@@ -1301,22 +1686,139 @@ func (c *Client) handleHooksInvoke(req hooksInvokeRequest) (map[string]any, *jso
 	return result, nil
 }
 
-// The detailed error is stored in the Error field but not exposed to the LLM for security.
-func buildFailedToolResult(internalError string) ToolResult {
-	return ToolResult{
-		TextResultForLLM: "Invoking this tool produced an error. Detailed information is not available.",
-		ResultType:       "failure",
-		Error:            internalError,
-		ToolTelemetry:    map[string]any{},
+// handleSystemMessageTransform handles a system message transform request from the CLI server.
+func (c *Client) handleSystemMessageTransform(req systemMessageTransformRequest) (systemMessageTransformResponse, *jsonrpc2.Error) {
+	if req.SessionID == "" {
+		return systemMessageTransformResponse{}, &jsonrpc2.Error{Code: -32602, Message: "invalid system message transform payload"}
 	}
+
+	c.sessionsMux.Lock()
+	session, ok := c.sessions[req.SessionID]
+	c.sessionsMux.Unlock()
+	if !ok {
+		return systemMessageTransformResponse{}, &jsonrpc2.Error{Code: -32602, Message: fmt.Sprintf("unknown session %s", req.SessionID)}
+	}
+
+	resp, err := session.handleSystemMessageTransform(req.Sections)
+	if err != nil {
+		return systemMessageTransformResponse{}, &jsonrpc2.Error{Code: -32603, Message: err.Error()}
+	}
+	return resp, nil
 }
 
-// buildUnsupportedToolResult creates a failure ToolResult for an unsupported tool.
-func buildUnsupportedToolResult(toolName string) ToolResult {
-	return ToolResult{
-		TextResultForLLM: fmt.Sprintf("Tool '%s' is not supported by this client instance.", toolName),
-		ResultType:       "failure",
-		Error:            fmt.Sprintf("tool '%s' not supported", toolName),
-		ToolTelemetry:    map[string]any{},
+// ========================================================================
+// Protocol v2 backward-compatibility adapters
+// ========================================================================
+
+// toolCallRequestV2 is the v2 RPC request payload for tool.call.
+type toolCallRequestV2 struct {
+	SessionID   string `json:"sessionId"`
+	ToolCallID  string `json:"toolCallId"`
+	ToolName    string `json:"toolName"`
+	Arguments   any    `json:"arguments"`
+	Traceparent string `json:"traceparent,omitempty"`
+	Tracestate  string `json:"tracestate,omitempty"`
+}
+
+// toolCallResponseV2 is the v2 RPC response payload for tool.call.
+type toolCallResponseV2 struct {
+	Result ToolResult `json:"result"`
+}
+
+// permissionRequestV2 is the v2 RPC request payload for permission.request.
+type permissionRequestV2 struct {
+	SessionID string            `json:"sessionId"`
+	Request   PermissionRequest `json:"permissionRequest"`
+}
+
+// permissionResponseV2 is the v2 RPC response payload for permission.request.
+type permissionResponseV2 struct {
+	Result PermissionRequestResult `json:"result"`
+}
+
+// handleToolCallRequestV2 handles a v2-style tool.call RPC request from the server.
+func (c *Client) handleToolCallRequestV2(req toolCallRequestV2) (*toolCallResponseV2, *jsonrpc2.Error) {
+	if req.SessionID == "" || req.ToolCallID == "" || req.ToolName == "" {
+		return nil, &jsonrpc2.Error{Code: -32602, Message: "invalid tool call payload"}
 	}
+
+	c.sessionsMux.Lock()
+	session, ok := c.sessions[req.SessionID]
+	c.sessionsMux.Unlock()
+	if !ok {
+		return nil, &jsonrpc2.Error{Code: -32602, Message: fmt.Sprintf("unknown session %s", req.SessionID)}
+	}
+
+	handler, ok := session.getToolHandler(req.ToolName)
+	if !ok {
+		return &toolCallResponseV2{Result: ToolResult{
+			TextResultForLLM: fmt.Sprintf("Tool '%s' is not supported by this client instance.", req.ToolName),
+			ResultType:       "failure",
+			Error:            fmt.Sprintf("tool '%s' not supported", req.ToolName),
+			ToolTelemetry:    map[string]any{},
+		}}, nil
+	}
+
+	ctx := contextWithTraceParent(context.Background(), req.Traceparent, req.Tracestate)
+
+	invocation := ToolInvocation{
+		SessionID:    req.SessionID,
+		ToolCallID:   req.ToolCallID,
+		ToolName:     req.ToolName,
+		Arguments:    req.Arguments,
+		TraceContext: ctx,
+	}
+
+	result, err := handler(invocation)
+	if err != nil {
+		return &toolCallResponseV2{Result: ToolResult{
+			TextResultForLLM: "Invoking this tool produced an error. Detailed information is not available.",
+			ResultType:       "failure",
+			Error:            err.Error(),
+			ToolTelemetry:    map[string]any{},
+		}}, nil
+	}
+
+	return &toolCallResponseV2{Result: result}, nil
+}
+
+// handlePermissionRequestV2 handles a v2-style permission.request RPC request from the server.
+func (c *Client) handlePermissionRequestV2(req permissionRequestV2) (*permissionResponseV2, *jsonrpc2.Error) {
+	if req.SessionID == "" {
+		return nil, &jsonrpc2.Error{Code: -32602, Message: "invalid permission request payload"}
+	}
+
+	c.sessionsMux.Lock()
+	session, ok := c.sessions[req.SessionID]
+	c.sessionsMux.Unlock()
+	if !ok {
+		return nil, &jsonrpc2.Error{Code: -32602, Message: fmt.Sprintf("unknown session %s", req.SessionID)}
+	}
+
+	handler := session.getPermissionHandler()
+	if handler == nil {
+		return &permissionResponseV2{
+			Result: PermissionRequestResult{
+				Kind: PermissionRequestResultKindDeniedCouldNotRequestFromUser,
+			},
+		}, nil
+	}
+
+	invocation := PermissionInvocation{
+		SessionID: session.SessionID,
+	}
+
+	result, err := handler(req.Request, invocation)
+	if err != nil {
+		return &permissionResponseV2{
+			Result: PermissionRequestResult{
+				Kind: PermissionRequestResultKindDeniedCouldNotRequestFromUser,
+			},
+		}, nil
+	}
+	if result.Kind == "no-result" {
+		return nil, &jsonrpc2.Error{Code: -32603, Message: noResultPermissionV2Error}
+	}
+
+	return &permissionResponseV2{Result: result}, nil
 }

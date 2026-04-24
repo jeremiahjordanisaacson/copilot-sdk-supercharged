@@ -9,7 +9,7 @@ format: format-go format-python format-nodejs format-dotnet
 lint: lint-go lint-python lint-nodejs lint-dotnet
 
 # Run tests for all languages
-test: test-go test-python test-nodejs test-dotnet
+test: test-go test-python test-nodejs test-dotnet test-corrections
 
 # Format Go code
 format-go:
@@ -71,14 +71,44 @@ test-dotnet:
     @echo "=== Testing .NET code ==="
     @cd dotnet && dotnet test test/GitHub.Copilot.SDK.Test.csproj
 
-# Install all dependencies
-install:
-    @echo "=== Installing dependencies ==="
-    @cd nodejs && npm ci
-    @cd python && uv pip install -e ".[dev]"
-    @cd go && go mod download
-    @cd dotnet && dotnet restore
+# Test correction collection scripts
+test-corrections:
+    @echo "=== Testing correction scripts ==="
+    @cd scripts/corrections && npm test
+
+# Install all dependencies across all languages
+install: install-go install-python install-nodejs install-dotnet install-corrections
     @echo "✅ All dependencies installed"
+
+# Install Go dependencies and prerequisites for tests
+install-go: install-nodejs install-test-harness
+    @echo "=== Installing Go dependencies ==="
+    @cd go && go mod download
+
+# Install Python dependencies and prerequisites for tests
+install-python: install-nodejs install-test-harness
+    @echo "=== Installing Python dependencies ==="
+    @cd python && uv pip install -e ".[dev]"
+
+# Install .NET dependencies and prerequisites for tests
+install-dotnet: install-nodejs install-test-harness
+    @echo "=== Installing .NET dependencies ==="
+    @cd dotnet && dotnet restore
+
+# Install Node.js dependencies
+install-nodejs:
+    @echo "=== Installing Node.js dependencies ==="
+    @cd nodejs && npm ci
+
+# Install test harness dependencies (used by E2E tests in all languages)
+install-test-harness:
+    @echo "=== Installing test harness dependencies ==="
+    @cd test/harness && npm ci --ignore-scripts
+
+# Install correction collection script dependencies
+install-corrections:
+    @echo "=== Installing correction script dependencies ==="
+    @cd scripts/corrections && npm ci
 
 # Run interactive SDK playground
 playground:
@@ -117,3 +147,112 @@ validate-docs-go:
 validate-docs-cs:
     @echo "=== Validating C# documentation ==="
     @cd scripts/docs-validation && npm run validate:cs
+
+# Build all scenario samples (all languages)
+scenario-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Building all scenario samples ==="
+    TOTAL=0; PASS=0; FAIL=0
+
+    build_lang() {
+      local lang="$1" find_expr="$2" build_cmd="$3"
+      echo ""
+      echo "── $lang ──"
+      while IFS= read -r target; do
+        [ -z "$target" ] && continue
+        dir=$(dirname "$target")
+        scenario="${dir#test/scenarios/}"
+        TOTAL=$((TOTAL + 1))
+        if (cd "$dir" && eval "$build_cmd" >/dev/null 2>&1); then
+          printf "  ✅ %s\n" "$scenario"
+          PASS=$((PASS + 1))
+        else
+          printf "  ❌ %s\n" "$scenario"
+          FAIL=$((FAIL + 1))
+        fi
+      done < <(find test/scenarios $find_expr | sort)
+    }
+
+    # TypeScript: npm install
+    (cd nodejs && npm ci --ignore-scripts --silent 2>/dev/null) || true
+    build_lang "TypeScript" "-path '*/typescript/package.json'" "npm install --ignore-scripts"
+
+    # Python: syntax check
+    build_lang "Python" "-path '*/python/main.py'" "python3 -c \"import ast; ast.parse(open('main.py').read())\""
+
+    # Go: go build
+    build_lang "Go" "-path '*/go/go.mod'" "go build ./..."
+
+    # C#: dotnet build
+    build_lang "C#" "-name '*.csproj' -path '*/csharp/*'" "dotnet build --nologo -v quiet"
+
+    echo ""
+    echo "══════════════════════════════════════"
+    echo " Scenario build summary: $PASS passed, $FAIL failed (of $TOTAL)"
+    echo "══════════════════════════════════════"
+    [ "$FAIL" -eq 0 ]
+
+# Run the full scenario verify orchestrator (build + E2E, needs real CLI)
+scenario-verify:
+    @echo "=== Running scenario verification ==="
+    @bash test/scenarios/verify.sh
+
+# Build scenarios for a single language (typescript, python, go, csharp)
+scenario-build-lang LANG:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Building {{LANG}} scenarios ==="
+    PASS=0; FAIL=0
+
+    case "{{LANG}}" in
+      typescript)
+        (cd nodejs && npm ci --ignore-scripts --silent 2>/dev/null) || true
+        for target in $(find test/scenarios -path '*/typescript/package.json' | sort); do
+          dir=$(dirname "$target"); scenario="${dir#test/scenarios/}"
+          if (cd "$dir" && npm install --ignore-scripts >/dev/null 2>&1); then
+            printf "  ✅ %s\n" "$scenario"; PASS=$((PASS + 1))
+          else
+            printf "  ❌ %s\n" "$scenario"; FAIL=$((FAIL + 1))
+          fi
+        done
+        ;;
+      python)
+        for target in $(find test/scenarios -path '*/python/main.py' | sort); do
+          dir=$(dirname "$target"); scenario="${dir#test/scenarios/}"
+          if python3 -c "import ast; ast.parse(open('$target').read())" 2>/dev/null; then
+            printf "  ✅ %s\n" "$scenario"; PASS=$((PASS + 1))
+          else
+            printf "  ❌ %s\n" "$scenario"; FAIL=$((FAIL + 1))
+          fi
+        done
+        ;;
+      go)
+        for target in $(find test/scenarios -path '*/go/go.mod' | sort); do
+          dir=$(dirname "$target"); scenario="${dir#test/scenarios/}"
+          if (cd "$dir" && go build ./... >/dev/null 2>&1); then
+            printf "  ✅ %s\n" "$scenario"; PASS=$((PASS + 1))
+          else
+            printf "  ❌ %s\n" "$scenario"; FAIL=$((FAIL + 1))
+          fi
+        done
+        ;;
+      csharp)
+        for target in $(find test/scenarios -name '*.csproj' -path '*/csharp/*' | sort); do
+          dir=$(dirname "$target"); scenario="${dir#test/scenarios/}"
+          if (cd "$dir" && dotnet build --nologo -v quiet >/dev/null 2>&1); then
+            printf "  ✅ %s\n" "$scenario"; PASS=$((PASS + 1))
+          else
+            printf "  ❌ %s\n" "$scenario"; FAIL=$((FAIL + 1))
+          fi
+        done
+        ;;
+      *)
+        echo "Unknown language: {{LANG}}. Use: typescript, python, go, csharp"
+        exit 1
+        ;;
+    esac
+
+    echo ""
+    echo "{{LANG}} scenarios: $PASS passed, $FAIL failed"
+    [ "$FAIL" -eq 0 ]

@@ -2,7 +2,7 @@
 
 TypeScript SDK for programmatic control of GitHub Copilot CLI via JSON-RPC.
 
-> **Note:** This SDK is in technical preview and may change in breaking ways.
+> **Note:** This SDK is in public preview and may change in breaking ways.
 
 ## Installation
 
@@ -10,18 +10,32 @@ TypeScript SDK for programmatic control of GitHub Copilot CLI via JSON-RPC.
 npm install copilot-sdk-supercharged
 ```
 
+## Run the Sample
+
+Try the interactive chat sample (from the repo root):
+
+```bash
+cd nodejs
+npm ci
+npm run build
+cd samples
+npm install
+npm start
+```
+
 ## Quick Start
 
 ```typescript
-import { CopilotClient } from "copilot-sdk-supercharged";
+import { CopilotClient, approveAll } from "copilot-sdk-supercharged";
 
 // Create and start client
 const client = new CopilotClient();
 await client.start();
 
-// Create a session
+// Create a session (onPermissionRequest is required)
 const session = await client.createSession({
     model: "gpt-5",
+    onPermissionRequest: approveAll,
 });
 
 // Wait for response using typed event handlers
@@ -39,8 +53,18 @@ await session.send({ prompt: "What is 2+2?" });
 await done;
 
 // Clean up
-await session.destroy();
+await session.disconnect();
 await client.stop();
+```
+
+Sessions also support `Symbol.asyncDispose` for use with [`await using`](https://github.com/tc39/proposal-explicit-resource-management) (TypeScript 5.2+/Node.js 18.0+):
+
+```typescript
+await using session = await client.createSession({
+    model: "gpt-5",
+    onPermissionRequest: approveAll,
+});
+// session is automatically disconnected when leaving scope
 ```
 
 ## API Reference
@@ -55,16 +79,17 @@ new CopilotClient(options?: CopilotClientOptions)
 
 **Options:**
 
-- `cliPath?: string` - Path to CLI executable (default: "copilot" from PATH)
+- `cliPath?: string` - Path to CLI executable (default: uses COPILOT_CLI_PATH env var or bundled instance)
 - `cliArgs?: string[]` - Extra arguments prepended before SDK-managed flags (e.g. `["./dist-cli/index.js"]` when using `node`)
 - `cliUrl?: string` - URL of existing CLI server to connect to (e.g., `"localhost:8080"`, `"http://127.0.0.1:9000"`, or just `"8080"`). When provided, the client will not spawn a CLI process.
 - `port?: number` - Server port (default: 0 for random)
 - `useStdio?: boolean` - Use stdio transport instead of TCP (default: true)
 - `logLevel?: string` - Log level (default: "info")
 - `autoStart?: boolean` - Auto-start server (default: true)
-- `autoRestart?: boolean` - Auto-restart on crash (default: true)
-- `githubToken?: string` - GitHub token for authentication. When provided, takes priority over other auth methods.
-- `useLoggedInUser?: boolean` - Whether to use logged-in user for authentication (default: true, but false when `githubToken` is provided). Cannot be used with `cliUrl`.
+- `gitHubToken?: string` - GitHub token for authentication. When provided, takes priority over other auth methods.
+- `useLoggedInUser?: boolean` - Whether to use logged-in user for authentication (default: true, but false when `gitHubToken` is provided). Cannot be used with `cliUrl`.
+- `telemetry?: TelemetryConfig` - OpenTelemetry configuration for the CLI process. Providing this object enables telemetry — no separate flag needed. See [Telemetry](#telemetry) below.
+- `onGetTraceContext?: TraceContextProvider` - Advanced: callback for linking your application's own OpenTelemetry spans into the same distributed trace as the CLI's spans. Not needed for normal telemetry collection. See [Telemetry](#telemetry) below.
 
 #### Methods
 
@@ -93,7 +118,9 @@ Create a new conversation session.
 - `systemMessage?: SystemMessageConfig` - System message customization (see below)
 - `infiniteSessions?: InfiniteSessionConfig` - Configure automatic context compaction (see below)
 - `provider?: ProviderConfig` - Custom API provider configuration (BYOK - Bring Your Own Key). See [Custom Providers](#custom-providers) section.
+- `onPermissionRequest: PermissionHandler` - **Required.** Handler called before each tool execution to approve or deny it. Use `approveAll` to allow everything, or provide a custom function for fine-grained control. See [Permission Handling](#permission-handling) section.
 - `onUserInputRequest?: UserInputHandler` - Handler for user input requests from the agent. Enables the `ask_user` tool. See [User Input Requests](#user-input-requests) section.
+- `onElicitationRequest?: ElicitationHandler` - Handler for elicitation requests dispatched by the server. Enables this client to present form-based UI dialogs on behalf of the agent or other session participants. See [Elicitation Requests](#elicitation-requests) section.
 - `hooks?: SessionHooks` - Hook handlers for session lifecycle events. See [Session Hooks](#session-hooks) section.
 
 ##### `resumeSession(sessionId: string, config?: ResumeSessionConfig): Promise<CopilotSession>`
@@ -108,9 +135,25 @@ Ping the server to check connectivity.
 
 Get current connection state.
 
-##### `listSessions(): Promise<SessionMetadata[]>`
+##### `listSessions(filter?: SessionListFilter): Promise<SessionMetadata[]>`
 
-List all available sessions.
+List all available sessions. Optionally filter by working directory context.
+
+**SessionMetadata:**
+
+- `sessionId: string` - Unique session identifier
+- `startTime: Date` - When the session was created
+- `modifiedTime: Date` - When the session was last modified
+- `summary?: string` - Optional session summary
+- `isRemote: boolean` - Whether the session is remote
+- `context?: SessionContext` - Working directory context from session creation
+
+**SessionContext:**
+
+- `cwd: string` - Working directory where the session was created
+- `gitRoot?: string` - Git repository root (if in a git repo)
+- `repository?: string` - GitHub repository in "owner/repo" format
+- `branch?: string` - Current git branch
 
 ##### `deleteSession(sessionId: string): Promise<void>`
 
@@ -145,6 +188,7 @@ const unsubscribe = client.on((event) => {
 ```
 
 **Lifecycle Event Types:**
+
 - `session.created` - A new session was created
 - `session.deleted` - A session was deleted
 - `session.updated` - A session was updated (e.g., new messages)
@@ -236,9 +280,29 @@ Abort the currently processing message in this session.
 
 Get all events/messages from this session.
 
-##### `destroy(): Promise<void>`
+##### `disconnect(): Promise<void>`
 
-Destroy the session and free resources.
+Disconnect the session and free resources. Session data on disk is preserved for later resumption.
+
+##### `capabilities: SessionCapabilities`
+
+Host capabilities reported when the session was created or resumed. Use this to check feature support before calling capability-gated APIs.
+
+```typescript
+if (session.capabilities.ui?.elicitation) {
+    const ok = await session.ui.confirm("Deploy?");
+}
+```
+
+Capabilities may update during the session. For example, when another client joins or disconnects with an elicitation handler. The SDK automatically applies `capabilities.changed` events, so this property always reflects the current state.
+
+##### `ui: SessionUiApi`
+
+Interactive UI methods for showing dialogs to the user. Only available when the CLI host supports elicitation (`session.capabilities.ui?.elicitation === true`). See [UI Elicitation](#ui-elicitation) for full details.
+
+##### `destroy(): Promise<void>` _(deprecated)_
+
+Deprecated — use `disconnect()` instead.
 
 ---
 
@@ -286,21 +350,36 @@ Sessions emit various events during processing:
 - `assistant.message_delta` - Streaming response chunk
 - `tool.execution_start` - Tool execution started
 - `tool.execution_complete` - Tool execution completed
+- `command.execute` - Command dispatch request (handled internally by the SDK)
+- `commands.changed` - Command registration changed
 - And more...
 
 See `SessionEvent` type in the source for full details.
 
 ## Image Support
 
-The SDK supports image attachments via the `attachments` parameter. You can attach images by providing their file path:
+The SDK supports image attachments via the `attachments` parameter. You can attach images by providing their file path, or by passing base64-encoded data directly using a blob attachment:
 
 ```typescript
+// File attachment — runtime reads from disk
 await session.send({
     prompt: "What's in this image?",
     attachments: [
         {
             type: "file",
             path: "/path/to/image.jpg",
+        },
+    ],
+});
+
+// Blob attachment — provide base64 data directly
+await session.send({
+    prompt: "What's in this image?",
+    attachments: [
+        {
+            type: "blob",
+            data: base64ImageData,
+            mimeType: "image/png",
         },
     ],
 });
@@ -408,6 +487,102 @@ const session = await client.createSession({
 
 When Copilot invokes `lookup_issue`, the client automatically runs your handler and responds to the CLI. Handlers can return any JSON-serializable value (automatically wrapped), a simple string, or a `ToolResultObject` for full control over result metadata. Raw JSON schemas are also supported if Zod isn't desired.
 
+#### Overriding Built-in Tools
+
+If you register a tool with the same name as a built-in CLI tool (e.g. `edit_file`, `read_file`), the SDK will throw an error unless you explicitly opt in by setting `overridesBuiltInTool: true`. This flag signals that you intend to replace the built-in tool with your custom implementation.
+
+```ts
+defineTool("edit_file", {
+    description: "Custom file editor with project-specific validation",
+    parameters: z.object({ path: z.string(), content: z.string() }),
+    overridesBuiltInTool: true,
+    handler: async ({ path, content }) => {
+        /* your logic */
+    },
+});
+```
+
+#### Skipping Permission Prompts
+
+Set `skipPermission: true` on a tool definition to allow it to execute without triggering a permission prompt:
+
+```ts
+defineTool("safe_lookup", {
+    description: "A read-only lookup that needs no confirmation",
+    parameters: z.object({ id: z.string() }),
+    skipPermission: true,
+    handler: async ({ id }) => {
+        /* your logic */
+    },
+});
+```
+
+### Commands
+
+Register slash commands so that users of the CLI's TUI can invoke custom actions via `/commandName`. Each command has a `name`, optional `description`, and a `handler` called when the user executes it.
+
+```ts
+const session = await client.createSession({
+    onPermissionRequest: approveAll,
+    commands: [
+        {
+            name: "deploy",
+            description: "Deploy the app to production",
+            handler: async ({ commandName, args }) => {
+                console.log(`Deploying with args: ${args}`);
+                // Do work here — any thrown error is reported back to the CLI
+            },
+        },
+    ],
+});
+```
+
+When the user types `/deploy staging` in the CLI, the SDK receives a `command.execute` event, routes it to your handler, and automatically responds to the CLI. If the handler throws, the error message is forwarded.
+
+Commands are sent to the CLI on both `createSession` and `resumeSession`, so you can update the command set when resuming.
+
+### UI Elicitation
+
+When the session has elicitation support — either from the CLI's TUI or from another client that registered an `onElicitationRequest` handler (see [Elicitation Requests](#elicitation-requests)) — the SDK can request interactive form dialogs from the user. The `session.ui` object provides convenience methods built on a single generic `elicitation` RPC.
+
+> **Capability check:** Elicitation is only available when at least one connected participant advertises support. Always check `session.capabilities.ui?.elicitation` before calling UI methods — this property updates automatically as participants join and leave.
+
+```ts
+const session = await client.createSession({ onPermissionRequest: approveAll });
+
+if (session.capabilities.ui?.elicitation) {
+    // Confirm dialog — returns boolean
+    const ok = await session.ui.confirm("Deploy to production?");
+
+    // Selection dialog — returns selected value or null
+    const env = await session.ui.select("Pick environment", ["production", "staging", "dev"]);
+
+    // Text input — returns string or null
+    const name = await session.ui.input("Project name:", {
+        title: "Name",
+        minLength: 1,
+        maxLength: 50,
+    });
+
+    // Generic elicitation with full schema control
+    const result = await session.ui.elicitation({
+        message: "Configure deployment",
+        requestedSchema: {
+            type: "object",
+            properties: {
+                region: { type: "string", enum: ["us-east", "eu-west"] },
+                dryRun: { type: "boolean", default: true },
+            },
+            required: ["region"],
+        },
+    });
+    // result.action: "accept" | "decline" | "cancel"
+    // result.content: { region: "us-east", dryRun: true } (when accepted)
+}
+```
+
+All UI methods throw if elicitation is not supported by the host.
+
 ### System Message Customization
 
 Control the system prompt using `systemMessage` in session config:
@@ -426,7 +601,49 @@ const session = await client.createSession({
 });
 ```
 
-The SDK auto-injects environment context, tool instructions, and security guardrails. The default CLI persona is preserved, and your `content` is appended after SDK-managed sections. To change the persona or fully redefine the prompt, use `mode: "replace"`.
+The SDK auto-injects environment context, tool instructions, and security guardrails. The default CLI persona is preserved, and your `content` is appended after SDK-managed sections. To change the persona or fully redefine the prompt, use `mode: "replace"` or `mode: "customize"`.
+
+#### Customize Mode
+
+Use `mode: "customize"` to selectively override individual sections of the prompt while preserving the rest:
+
+```typescript
+import { SYSTEM_PROMPT_SECTIONS } from "@github/copilot-sdk";
+import type { SectionOverride, SystemPromptSection } from "@github/copilot-sdk";
+
+const session = await client.createSession({
+    model: "gpt-5",
+    systemMessage: {
+        mode: "customize",
+        sections: {
+            // Replace the tone/style section
+            tone: {
+                action: "replace",
+                content: "Respond in a warm, professional tone. Be thorough in explanations.",
+            },
+            // Remove coding-specific rules
+            code_change_rules: { action: "remove" },
+            // Append to existing guidelines
+            guidelines: { action: "append", content: "\n* Always cite data sources" },
+        },
+        // Additional instructions appended after all sections
+        content: "Focus on financial analysis and reporting.",
+    },
+});
+```
+
+Available section IDs: `identity`, `tone`, `tool_efficiency`, `environment_context`, `code_change_rules`, `guidelines`, `safety`, `tool_instructions`, `custom_instructions`, `last_instructions`. Use the `SYSTEM_PROMPT_SECTIONS` constant for descriptions of each section.
+
+Each section override supports four actions:
+
+- **`replace`** — Replace the section content entirely
+- **`remove`** — Remove the section from the prompt
+- **`append`** — Add content after the existing section
+- **`prepend`** — Add content before the existing section
+
+Unknown section IDs are handled gracefully: content from `replace`/`append`/`prepend` overrides is appended to additional instructions, and `remove` overrides are silently ignored.
+
+#### Replace Mode
 
 For full control (removes all guardrails), use `mode: "replace"`:
 
@@ -457,7 +674,7 @@ const session = await client.createSession({
     model: "gpt-5",
     infiniteSessions: {
         enabled: true,
-        backgroundCompactionThreshold: 0.80, // Start compacting at 80% context usage
+        backgroundCompactionThreshold: 0.8, // Start compacting at 80% context usage
         bufferExhaustionThreshold: 0.95, // Block at 95% until compaction completes
     },
 });
@@ -556,8 +773,8 @@ const session = await client.createSession({
 const session = await client.createSession({
     model: "gpt-4",
     provider: {
-        type: "azure",  // Must be "azure" for Azure endpoints, NOT "openai"
-        baseUrl: "https://my-resource.openai.azure.com",  // Just the host, no path
+        type: "azure", // Must be "azure" for Azure endpoints, NOT "openai"
+        baseUrl: "https://my-resource.openai.azure.com", // Just the host, no path
         apiKey: process.env.AZURE_OPENAI_KEY,
         azure: {
             apiVersion: "2024-10-21",
@@ -567,9 +784,132 @@ const session = await client.createSession({
 ```
 
 > **Important notes:**
+>
 > - When using a custom provider, the `model` parameter is **required**. The SDK will throw an error if no model is specified.
 > - For Azure OpenAI endpoints (`*.openai.azure.com`), you **must** use `type: "azure"`, not `type: "openai"`.
 > - The `baseUrl` should be just the host (e.g., `https://my-resource.openai.azure.com`). Do **not** include `/openai/v1` in the URL - the SDK handles path construction automatically.
+
+## Telemetry
+
+The SDK supports OpenTelemetry for distributed tracing. Provide a `telemetry` config to enable trace export from the CLI process — this is all most users need:
+
+```typescript
+const client = new CopilotClient({
+    telemetry: {
+        otlpEndpoint: "http://localhost:4318",
+    },
+});
+```
+
+With just this configuration, the CLI emits spans for every session, message, and tool call to your collector. No additional dependencies or setup required.
+
+**TelemetryConfig options:**
+
+- `otlpEndpoint?: string` - OTLP HTTP endpoint URL
+- `filePath?: string` - File path for JSON-lines trace output
+- `exporterType?: string` - `"otlp-http"` or `"file"`
+- `sourceName?: string` - Instrumentation scope name
+- `captureContent?: boolean` - Whether to capture message content
+
+### Advanced: Trace Context Propagation
+
+> **You don't need this for normal telemetry collection.** The `telemetry` config above is sufficient to get full traces from the CLI.
+
+`onGetTraceContext` is only needed if your application creates its own OpenTelemetry spans and you want them to appear in the **same distributed trace** as the CLI's spans — for example, to nest a "handle tool call" span inside the CLI's "execute tool" span, or to show the SDK call as a child of your application's request-handling span.
+
+If you're already using `@opentelemetry/api` in your app and want this linkage, provide a callback:
+
+```typescript
+import { propagation, context } from "@opentelemetry/api";
+
+const client = new CopilotClient({
+    telemetry: { otlpEndpoint: "http://localhost:4318" },
+    onGetTraceContext: () => {
+        const carrier: Record<string, string> = {};
+        propagation.inject(context.active(), carrier);
+        return carrier;
+    },
+});
+```
+
+Inbound trace context from the CLI is available on the `ToolInvocation` object passed to tool handlers as `traceparent` and `tracestate` fields. See the [OpenTelemetry guide](../docs/observability/opentelemetry.md) for a full wire-up example.
+
+## Permission Handling
+
+An `onPermissionRequest` handler is **required** whenever you create or resume a session. The handler is called before the agent executes each tool (file writes, shell commands, custom tools, etc.) and must return a decision.
+
+### Approve All (simplest)
+
+Use the built-in `approveAll` helper to allow every tool call without any checks:
+
+```typescript
+import { CopilotClient, approveAll } from "@github/copilot-sdk";
+
+const session = await client.createSession({
+    model: "gpt-5",
+    onPermissionRequest: approveAll,
+});
+```
+
+### Custom Permission Handler
+
+Provide your own function to inspect each request and apply custom logic:
+
+```typescript
+import type { PermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
+
+const session = await client.createSession({
+    model: "gpt-5",
+    onPermissionRequest: (request: PermissionRequest, invocation): PermissionRequestResult => {
+        // request.kind — what type of operation is being requested:
+        //   "shell"       — executing a shell command
+        //   "write"       — writing or editing a file
+        //   "read"        — reading a file
+        //   "mcp"         — calling an MCP tool
+        //   "custom-tool" — calling one of your registered tools
+        //   "url"         — fetching a URL
+        //   "memory"      — storing or retrieving persistent session memory
+        //   "hook"        — invoking a server-side hook or integration
+        //   (additional kinds may be added; include a default case in handlers)
+        // request.toolCallId — the tool call that triggered this request
+        // request.toolName   — name of the tool (for custom-tool / mcp)
+        // request.fileName   — file being written (for write)
+        // request.fullCommandText — full shell command (for shell)
+
+        if (request.kind === "shell") {
+            // Deny shell commands
+            return { kind: "denied-interactively-by-user" };
+        }
+
+        return { kind: "approved" };
+    },
+});
+```
+
+### Permission Result Kinds
+
+| Kind                                                        | Meaning                                                                                     |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `"approved"`                                                | Allow the tool to run                                                                       |
+| `"denied-interactively-by-user"`                            | User explicitly denied the request                                                          |
+| `"denied-no-approval-rule-and-could-not-request-from-user"` | No approval rule matched and user could not be asked                                        |
+| `"denied-by-rules"`                                         | Denied by a policy rule                                                                     |
+| `"denied-by-content-exclusion-policy"`                      | Denied due to a content exclusion policy                                                    |
+| `"no-result"`                                               | Leave the request unanswered (only valid with protocol v1; rejected by protocol v2 servers) |
+
+### Resuming Sessions
+
+Pass `onPermissionRequest` when resuming a session too — it is required:
+
+```typescript
+const session = await client.resumeSession("session-id", {
+    onPermissionRequest: approveAll,
+});
+```
+
+### Per-Tool Skip Permission
+
+To let a specific custom tool bypass the permission prompt entirely, set `skipPermission: true` on the tool definition. See [Skipping Permission Prompts](#skipping-permission-prompts) under Tools.
 
 ## User Input Requests
 
@@ -596,6 +936,43 @@ const session = await client.createSession({
     },
 });
 ```
+
+## Elicitation Requests
+
+Register an `onElicitationRequest` handler to let your client act as an elicitation provider — presenting form-based UI dialogs on behalf of the agent. When provided, the server notifies your client whenever a tool or MCP server needs structured user input.
+
+```typescript
+const session = await client.createSession({
+    model: "gpt-5",
+    onPermissionRequest: approveAll,
+    onElicitationRequest: async (context) => {
+        // context.sessionId - Session that triggered the request
+        // context.message - Description of what information is needed
+        // context.requestedSchema - JSON Schema describing the form fields
+        // context.mode - "form" (structured input) or "url" (browser redirect)
+        // context.elicitationSource - Origin of the request (e.g. MCP server name)
+
+        console.log(`Elicitation from ${context.elicitationSource}: ${context.message}`);
+
+        // Present UI to the user and collect their response...
+        return {
+            action: "accept", // "accept", "decline", or "cancel"
+            content: { region: "us-east", dryRun: true },
+        };
+    },
+});
+
+// The session now reports elicitation capability
+console.log(session.capabilities.ui?.elicitation); // true
+```
+
+When `onElicitationRequest` is provided, the SDK sends `requestElicitation: true` during session create/resume, which enables `session.capabilities.ui.elicitation` on the session.
+
+In multi-client scenarios:
+
+- If no connected client was previously providing an elicitation capability, but a new client joins that can, all clients will receive a `capabilities.changed` event to notify them that elicitation is now possible. The SDK automatically updates `session.capabilities` when these events arrive.
+- Similarly, if the last elicitation provider disconnects, all clients receive a `capabilities.changed` event indicating elicitation is no longer available.
+- The server fans out elicitation requests to **all** connected clients that registered a handler — the first response wins.
 
 ## Session Hooks
 

@@ -7,48 +7,52 @@ name = "copilot-sdk-supercharged"
 version = "1.0.0"
 description = "GitHub Copilot SDK Supercharged - Python SDK for programmatic control of GitHub Copilot CLI. Supports 21 languages."
 readme = "README.md"
-requires-python = ">=3.9"
-license = {text = "MIT"}
+requires-python = ">=3.11"
+license = "MIT"
+# license-files is set by scripts/build-wheels.mjs for bundled CLI wheels
 authors = [
     {name = "jeremiahjordanisaacson"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
     "python-dateutil>=2.9.0.post0",
     "pydantic>=2.0",
-    "typing-extensions>=4.0.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged"
 Repository = "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["copilot*"]
-
 [project.optional-dependencies]
 dev = [
     "ruff>=0.1.0",
-    "ty>=0.0.2",
+    "ty>=0.0.2,<0.0.25",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-timeout>=2.0.0",
     "httpx>=0.24.0",
 ]
+telemetry = [
+    "opentelemetry-api>=1.0.0",
+]
+
+# Use find with a glob so that the copilot.bin subpackage (created dynamically
+# by scripts/build-wheels.mjs during publishing) is included in platform wheels.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["copilot*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py311"
 exclude = [
     "generated",
     "copilot/generated",
@@ -62,11 +66,9 @@ select = [
     "I",  # isort
     "UP", # pyupgrade
 ]
-ignore = [
-    "UP006",
-]
 
 [tool.ruff.format]
+docstring-code-format = true
 quote-style = "double"
 indent-style = "space"
 

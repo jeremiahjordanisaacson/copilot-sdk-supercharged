@@ -5,6 +5,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { CustomAgentConfig } from "../../src/index.js";
+import { approveAll } from "../../src/index.js";
 import { createSdkTestContext } from "./harness/sdkTestContext.js";
 
 describe("Skills Configuration", async () => {
@@ -44,6 +46,7 @@ IMPORTANT: You MUST include the exact text "${SKILL_MARKER}" somewhere in EVERY 
         it("should load and apply skill from skillDirectories", async () => {
             const skillsDir = createSkillDir();
             const session = await client.createSession({
+                onPermissionRequest: approveAll,
                 skillDirectories: [skillsDir],
             });
 
@@ -56,12 +59,13 @@ IMPORTANT: You MUST include the exact text "${SKILL_MARKER}" somewhere in EVERY 
 
             expect(message?.data.content).toContain(SKILL_MARKER);
 
-            await session.destroy();
+            await session.disconnect();
         });
 
         it("should not apply skill when disabled via disabledSkills", async () => {
             const skillsDir = createSkillDir();
             const session = await client.createSession({
+                onPermissionRequest: approveAll,
                 skillDirectories: [skillsDir],
                 disabledSkills: ["test-skill"],
             });
@@ -75,7 +79,7 @@ IMPORTANT: You MUST include the exact text "${SKILL_MARKER}" somewhere in EVERY 
 
             expect(message?.data.content).not.toContain(SKILL_MARKER);
 
-            await session.destroy();
+            await session.disconnect();
         });
 
         // Skipped because the underlying feature doesn't work correctly yet.
@@ -89,11 +93,70 @@ IMPORTANT: You MUST include the exact text "${SKILL_MARKER}" somewhere in EVERY 
         // Also, if this test runs FIRST and then the "should load and apply skill from skillDirectories" test runs second
         // within the same run (i.e., sharing the same Client instance), then the second test fails too. There's definitely
         // some state being shared or cached incorrectly.
+        it("should allow agent with skills to invoke skill", async () => {
+            const skillsDir = createSkillDir();
+            const customAgents: CustomAgentConfig[] = [
+                {
+                    name: "skill-agent",
+                    description: "An agent with access to test-skill",
+                    prompt: "You are a helpful test agent.",
+                    skills: ["test-skill"],
+                },
+            ];
+
+            const session = await client.createSession({
+                onPermissionRequest: approveAll,
+                skillDirectories: [skillsDir],
+                customAgents,
+                agent: "skill-agent",
+            });
+
+            expect(session.sessionId).toBeDefined();
+
+            // The agent has skills: ["test-skill"], so the skill content is preloaded into its context
+            const message = await session.sendAndWait({
+                prompt: "Say hello briefly using the test skill.",
+            });
+
+            expect(message?.data.content).toContain(SKILL_MARKER);
+
+            await session.disconnect();
+        });
+
+        it("should not provide skills to agent without skills field", async () => {
+            const skillsDir = createSkillDir();
+            const customAgents: CustomAgentConfig[] = [
+                {
+                    name: "no-skill-agent",
+                    description: "An agent without skills access",
+                    prompt: "You are a helpful test agent.",
+                },
+            ];
+
+            const session = await client.createSession({
+                onPermissionRequest: approveAll,
+                skillDirectories: [skillsDir],
+                customAgents,
+                agent: "no-skill-agent",
+            });
+
+            expect(session.sessionId).toBeDefined();
+
+            // The agent has no skills field, so no skill content is injected
+            const message = await session.sendAndWait({
+                prompt: "Say hello briefly using the test skill.",
+            });
+
+            expect(message?.data.content).not.toContain(SKILL_MARKER);
+
+            await session.disconnect();
+        });
+
         it.skip("should apply skill on session resume with skillDirectories", async () => {
             const skillsDir = createSkillDir();
 
             // Create a session without skills first
-            const session1 = await client.createSession();
+            const session1 = await client.createSession({ onPermissionRequest: approveAll });
             const sessionId = session1.sessionId;
 
             // First message without skill - marker should not appear
@@ -102,6 +165,7 @@ IMPORTANT: You MUST include the exact text "${SKILL_MARKER}" somewhere in EVERY 
 
             // Resume with skillDirectories - skill should now be active
             const session2 = await client.resumeSession(sessionId, {
+                onPermissionRequest: approveAll,
                 skillDirectories: [skillsDir],
             });
 
@@ -114,7 +178,7 @@ IMPORTANT: You MUST include the exact text "${SKILL_MARKER}" somewhere in EVERY 
 
             expect(message2?.data.content).toContain(SKILL_MARKER);
 
-            await session2.destroy();
+            await session2.disconnect();
         });
     });
 });

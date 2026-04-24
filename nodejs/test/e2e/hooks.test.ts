@@ -11,6 +11,7 @@ import type {
     PostToolUseHookInput,
     PostToolUseHookOutput,
 } from "../../src/index.js";
+import { approveAll } from "../../src/index.js";
 import { createSdkTestContext } from "./harness/sdkTestContext.js";
 
 describe("Session hooks", async () => {
@@ -20,6 +21,7 @@ describe("Session hooks", async () => {
         const preToolUseInputs: PreToolUseHookInput[] = [];
 
         const session = await client.createSession({
+            onPermissionRequest: approveAll,
             hooks: {
                 onPreToolUse: async (input, invocation) => {
                     preToolUseInputs.push(input);
@@ -43,13 +45,14 @@ describe("Session hooks", async () => {
         // Should have received the tool name
         expect(preToolUseInputs.some((input) => input.toolName)).toBe(true);
 
-        await session.destroy();
+        await session.disconnect();
     });
 
     it("should invoke postToolUse hook after model runs a tool", async () => {
         const postToolUseInputs: PostToolUseHookInput[] = [];
 
         const session = await client.createSession({
+            onPermissionRequest: approveAll,
             hooks: {
                 onPostToolUse: async (input, invocation) => {
                     postToolUseInputs.push(input);
@@ -73,7 +76,7 @@ describe("Session hooks", async () => {
         expect(postToolUseInputs.some((input) => input.toolName)).toBe(true);
         expect(postToolUseInputs.some((input) => input.toolResult !== undefined)).toBe(true);
 
-        await session.destroy();
+        await session.disconnect();
     });
 
     it("should invoke both preToolUse and postToolUse hooks for a single tool call", async () => {
@@ -81,6 +84,7 @@ describe("Session hooks", async () => {
         const postToolUseInputs: PostToolUseHookInput[] = [];
 
         const session = await client.createSession({
+            onPermissionRequest: approveAll,
             hooks: {
                 onPreToolUse: async (input) => {
                     preToolUseInputs.push(input);
@@ -109,13 +113,14 @@ describe("Session hooks", async () => {
         const commonTool = preToolNames.find((name) => postToolNames.includes(name));
         expect(commonTool).toBeDefined();
 
-        await session.destroy();
+        await session.disconnect();
     });
 
     it("should deny tool execution when preToolUse returns deny", async () => {
         const preToolUseInputs: PreToolUseHookInput[] = [];
 
         const session = await client.createSession({
+            onPermissionRequest: approveAll,
             hooks: {
                 onPreToolUse: async (input) => {
                     preToolUseInputs.push(input);
@@ -140,6 +145,6 @@ describe("Session hooks", async () => {
         // At minimum, we verify the hook was invoked
         expect(response).toBeDefined();
 
-        await session.destroy();
+        await session.disconnect();
     });
 });

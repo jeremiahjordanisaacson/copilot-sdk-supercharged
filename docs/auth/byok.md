@@ -10,6 +10,7 @@ BYOK allows you to use the Copilot SDK with your own API keys from model provide
 | Azure OpenAI / Azure AI Foundry | `"azure"` | Azure-hosted models |
 | Anthropic | `"anthropic"` | Claude models |
 | Ollama | `"openai"` | Local models via OpenAI-compatible API |
+| Microsoft Foundry Local | `"openai"` | Run AI models locally on your device via OpenAI-compatible API |
 | Other OpenAI-compatible | `"openai"` | vLLM, LiteLLM, etc. |
 
 ## Quick Start: Azure AI Foundry
@@ -23,6 +24,7 @@ Azure AI Foundry (formerly Azure OpenAI) is a common BYOK deployment target for 
 import asyncio
 import os
 from copilot import CopilotClient
+from copilot.session import PermissionHandler
 
 FOUNDRY_MODEL_URL = "https://your-resource.openai.azure.com/openai/v1/"
 # Set FOUNDRY_API_KEY environment variable
@@ -31,14 +33,11 @@ async def main():
     client = CopilotClient()
     await client.start()
 
-    session = await client.create_session({
-        "model": "gpt-5.2-codex",  # Your deployment name
-        "provider": {
-            "type": "openai",
-            "base_url": FOUNDRY_MODEL_URL,
-            "wire_api": "responses",  # Use "completions" for older models
-            "api_key": os.environ["FOUNDRY_API_KEY"],
-        },
+    session = await client.create_session(on_permission_request=PermissionHandler.approve_all, model="gpt-5.2-codex", provider={
+        "type": "openai",
+        "base_url": FOUNDRY_MODEL_URL,
+        "wire_api": "responses",  # Use "completions" for older models
+        "api_key": os.environ["FOUNDRY_API_KEY"],
     })
 
     done = asyncio.Event()
@@ -53,7 +52,7 @@ async def main():
     await session.send({"prompt": "What is 2+2?"})
     await done.wait()
 
-    await session.destroy()
+    await session.disconnect()
     await client.stop()
 
 asyncio.run(main())
@@ -131,7 +130,9 @@ func main() {
         panic(err)
     }
 
-    fmt.Println(*response.Data.Content)
+    if d, ok := response.Data.(*copilot.AssistantMessageData); ok {
+        fmt.Println(d.Content)
+    }
 }
 ```
 
@@ -161,6 +162,36 @@ var response = await session.SendAndWaitAsync(new MessageOptions
     Prompt = "What is 2+2?",
 });
 Console.WriteLine(response?.Data.Content);
+```
+
+</details>
+
+<details>
+<summary><strong>Java</strong></summary>
+
+```java
+import com.github.copilot.sdk.CopilotClient;
+import com.github.copilot.sdk.events.*;
+import com.github.copilot.sdk.json.*;
+
+var client = new CopilotClient();
+client.start().get();
+
+var session = client.createSession(new SessionConfig()
+    .setModel("gpt-5.2-codex")  // Your deployment name
+    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
+    .setProvider(new ProviderConfig()
+        .setType("openai")
+        .setBaseUrl("https://your-resource.openai.azure.com/openai/v1/")
+        .setWireApi("responses")  // Use "completions" for older models
+        .setApiKey(System.getenv("FOUNDRY_API_KEY")))
+).get();
+
+var response = session.sendAndWait(new MessageOptions()
+    .setPrompt("What is 2+2?")).get();
+System.out.println(response.getData().content());
+
+client.stop().get();
 ```
 
 </details>
@@ -250,6 +281,37 @@ provider: {
 }
 ```
 
+### Microsoft Foundry Local
+
+[Microsoft Foundry Local](https://foundrylocal.ai) lets you run AI models locally on your own device with an OpenAI-compatible API. Install it via the Foundry Local CLI, then point the SDK at your local endpoint:
+
+```typescript
+provider: {
+    type: "openai",
+    baseUrl: "http://localhost:<PORT>/v1",
+    // No apiKey needed for local Foundry Local
+}
+```
+
+> **Note:** Foundry Local starts on a **dynamic port** — the port is not fixed. Use `foundry service status` to confirm the port the service is currently listening on, then use that port in your `baseUrl`.
+
+To get started with Foundry Local:
+
+```bash
+# Windows: Install Foundry Local CLI (requires winget)
+winget install Microsoft.FoundryLocal
+
+# macOS / Linux: see https://foundrylocal.ai for installation instructions
+# List available models
+foundry model list
+
+# Run a model (starts the local server automatically)
+foundry model run phi-4-mini
+
+# Check the port the service is running on
+foundry service status
+```
+
 ### Anthropic
 
 ```typescript
@@ -273,6 +335,139 @@ provider: {
 ```
 
 > **Note:** The `bearerToken` option accepts a **static token string** only. The SDK does not refresh this token automatically. If your token expires, requests will fail and you'll need to create a new session with a fresh token.
+
+## Custom Model Listing
+
+When using BYOK, the CLI server may not know which models your provider supports. You can supply a custom `onListModels` handler at the client level so that `client.listModels()` returns your provider's models in the standard `ModelInfo` format. This lets downstream consumers discover available models without querying the CLI.
+
+<details open>
+<summary><strong>Node.js / TypeScript</strong></summary>
+
+```typescript
+import { CopilotClient } from "@github/copilot-sdk";
+import type { ModelInfo } from "@github/copilot-sdk";
+
+const client = new CopilotClient({
+    onListModels: () => [
+        {
+            id: "my-custom-model",
+            name: "My Custom Model",
+            capabilities: {
+                supports: { vision: false, reasoningEffort: false },
+                limits: { max_context_window_tokens: 128000 },
+            },
+        },
+    ],
+});
+```
+
+</details>
+
+<details>
+<summary><strong>Python</strong></summary>
+
+```python
+from copilot import CopilotClient
+from copilot.client import ModelInfo, ModelCapabilities, ModelSupports, ModelLimits
+
+client = CopilotClient({
+    "on_list_models": lambda: [
+        ModelInfo(
+            id="my-custom-model",
+            name="My Custom Model",
+            capabilities=ModelCapabilities(
+                supports=ModelSupports(vision=False, reasoning_effort=False),
+                limits=ModelLimits(max_context_window_tokens=128000),
+            ),
+        )
+    ],
+})
+```
+
+</details>
+
+<details>
+<summary><strong>Go</strong></summary>
+
+```go
+package main
+
+import (
+    "context"
+    copilot "github.com/github/copilot-sdk/go"
+)
+
+func main() {
+    client := copilot.NewClient(&copilot.ClientOptions{
+        OnListModels: func(ctx context.Context) ([]copilot.ModelInfo, error) {
+            return []copilot.ModelInfo{
+                {
+                    ID:   "my-custom-model",
+                    Name: "My Custom Model",
+                    Capabilities: copilot.ModelCapabilities{
+                        Supports: copilot.ModelSupports{Vision: false, ReasoningEffort: false},
+                        Limits:   copilot.ModelLimits{MaxContextWindowTokens: 128000},
+                    },
+                },
+            }, nil
+        },
+    })
+    _ = client
+}
+```
+
+</details>
+
+<details>
+<summary><strong>.NET</strong></summary>
+
+```csharp
+using GitHub.Copilot.SDK;
+
+var client = new CopilotClient(new CopilotClientOptions
+{
+    OnListModels = (ct) => Task.FromResult<IList<ModelInfo>>(new List<ModelInfo>
+    {
+        new()
+        {
+            Id = "my-custom-model",
+            Name = "My Custom Model",
+            Capabilities = new ModelCapabilities
+            {
+                Supports = new ModelSupports { Vision = false, ReasoningEffort = false },
+                Limits = new ModelLimits { MaxContextWindowTokens = 128000 }
+            }
+        }
+    })
+});
+```
+
+</details>
+
+<details>
+<summary><strong>Java</strong></summary>
+
+```java
+import com.github.copilot.sdk.CopilotClient;
+import com.github.copilot.sdk.json.*;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+var client = new CopilotClient(new CopilotClientOptions()
+    .setOnListModels(() -> CompletableFuture.completedFuture(List.of(
+        new ModelInfo()
+            .setId("my-custom-model")
+            .setName("My Custom Model")
+            .setCapabilities(new ModelCapabilities()
+                .setSupports(new ModelSupports().setVision(false).setReasoningEffort(false))
+                .setLimits(new ModelLimits().setMaxContextWindowTokens(128000)))
+    )))
+);
+```
+
+</details>
+
+Results are cached after the first call, just like the default behavior. The handler completely replaces the CLI's `models.list` RPC — no fallback to the server occurs.
 
 ## Limitations
 
@@ -305,6 +500,7 @@ Some Copilot features may behave differently with BYOK:
 |----------|-------------|
 | Azure AI Foundry | No Entra ID auth; must use API keys |
 | Ollama | No API key; local only; model support varies |
+| [Microsoft Foundry Local](https://foundrylocal.ai) | Local only; model availability depends on device hardware; no API key required |
 | OpenAI | Subject to OpenAI rate limits and quotas |
 
 ## Troubleshooting
@@ -330,7 +526,21 @@ const session = await client.createSession({
 
 For Azure OpenAI endpoints (`*.openai.azure.com`), use the correct type:
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```typescript
+import { CopilotClient } from "@github/copilot-sdk";
+
+const client = new CopilotClient();
+const session = await client.createSession({
+    model: "gpt-4.1",
+    provider: {
+        type: "azure",
+        baseUrl: "https://my-resource.openai.azure.com",
+    },
+});
+```
+<!-- /docs-validate: hidden -->
+
 ```typescript
 // ❌ Wrong: Using "openai" type with native Azure endpoint
 provider: {
@@ -347,7 +557,21 @@ provider: {
 
 However, if your Azure AI Foundry deployment provides an OpenAI-compatible endpoint path (e.g., `/openai/v1/`), use `type: "openai"`:
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```typescript
+import { CopilotClient } from "@github/copilot-sdk";
+
+const client = new CopilotClient();
+const session = await client.createSession({
+    model: "gpt-4.1",
+    provider: {
+        type: "openai",
+        baseUrl: "https://your-resource.openai.azure.com/openai/v1/",
+    },
+});
+```
+<!-- /docs-validate: hidden -->
+
 ```typescript
 // ✅ Correct: OpenAI-compatible Azure AI Foundry endpoint
 provider: {
@@ -366,6 +590,21 @@ curl http://localhost:11434/v1/models
 
 # Start Ollama if not running
 ollama serve
+```
+
+### Connection Refused (Foundry Local)
+
+Foundry Local uses a dynamic port that may change between restarts. Confirm the active port:
+
+```bash
+# Check the service status and port
+foundry service status
+```
+
+Update your `baseUrl` to match the port shown in the output. If the service is not running, start a model to launch it:
+
+```bash
+foundry model run phi-4-mini
 ```
 
 ### Authentication Failed

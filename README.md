@@ -16,33 +16,35 @@
 
 **21 languages. One SDK.** Agents for every app.
 
-Embed Copilot's agentic workflows in your application. A production-tested agent runtime you can invoke programmatically in any major language. You define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
+Embed Copilot's agentic workflows in your application—now available in public preview as a programmable SDK for 21 languages.
+
+The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-tested agent runtime you can invoke programmatically. No need to build your own orchestration—you define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
 
 ## Available SDKs
 
-| SDK | Location | Installation | Build System |
-|-----|----------|-------------|--------------|
-| **Node.js / TypeScript** | [`nodejs/`](./nodejs/README.md) | `npm install copilot-sdk-supercharged` | npm |
-| **Python** | [`python/`](./python/README.md) | `pip install copilot-sdk-supercharged` | pip |
-| **Go** | [`go/`](./go/README.md) | `go get github.com/github/copilot-sdk/go` | Go modules |
-| **.NET / C#** | [`dotnet/`](./dotnet/README.md) | `dotnet add package CopilotSDK.Supercharged` | NuGet |
-| **Java** | [`java/`](./java/README.md) | Maven / Gradle | Maven |
-| **Rust** | [`rust/`](./rust/README.md) | `cargo add copilot-sdk-supercharged` | Cargo |
-| **Ruby** | [`ruby/`](./ruby/README.md) | `gem install copilot-sdk-supercharged` | RubyGems |
-| **PHP** | [`php/`](./php/README.md) | Composer | Composer |
-| **Swift** | [`swift/`](./swift/README.md) | Swift Package Manager | SPM |
-| **Kotlin** | [`kotlin/`](./kotlin/README.md) | Gradle | Gradle |
-| **C++** | [`cpp/`](./cpp/README.md) | CMake | CMake |
-| **C** | [`c/`](./c/README.md) | CMake | CMake |
-| **Dart** | [`dart/`](./dart/README.md) | pub | pub |
-| **Scala** | [`scala/`](./scala/README.md) | sbt | sbt |
-| **R** | [`r/`](./r/README.md) | CRAN | CRAN |
-| **Perl** | [`perl/`](./perl/README.md) | CPAN | CPAN |
-| **Lua** | [`lua/`](./lua/README.md) | `luarocks install copilot-sdk-supercharged` | LuaRocks |
-| **Shell / Bash** | [`shell/`](./shell/README.md) | Source | N/A |
-| **Elixir** | [`elixir/`](./elixir/README.md) | `{:copilot_sdk_supercharged, "~> 1.0"}` | Hex |
-| **Haskell** | [`haskell/`](./haskell/README.md) | Cabal | Cabal |
-| **Clojure** | [`clojure/`](./clojure/README.md) | `net.clojars.jeremiahisaacson/copilot-sdk-supercharged` | Clojars |
+| SDK | Location | Cookbook | Installation |
+|-----|----------|---------|-------------|
+| **Node.js / TypeScript** | [`nodejs/`](./nodejs/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/nodejs/README.md) | `npm install copilot-sdk-supercharged` |
+| **Python** | [`python/`](./python/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/python/README.md) | `pip install copilot-sdk-supercharged` |
+| **Go** | [`go/`](./go/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/go/README.md) | `go get github.com/github/copilot-sdk/go` |
+| **.NET / C#** | [`dotnet/`](./dotnet/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/dotnet/README.md) | `dotnet add package CopilotSDK.Supercharged` |
+| **Java** | [`java/`](./java/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/java/README.md) | Maven / Gradle |
+| **Rust** | [`rust/`](./rust/README.md) | | `cargo add copilot-sdk-supercharged` |
+| **Ruby** | [`ruby/`](./ruby/README.md) | | `gem install copilot-sdk-supercharged` |
+| **PHP** | [`php/`](./php/README.md) | | Composer |
+| **Swift** | [`swift/`](./swift/README.md) | | Swift Package Manager |
+| **Kotlin** | [`kotlin/`](./kotlin/README.md) | | Gradle |
+| **C++** | [`cpp/`](./cpp/README.md) | | CMake |
+| **C** | [`c/`](./c/README.md) | | CMake |
+| **Dart** | [`dart/`](./dart/README.md) | | pub |
+| **Scala** | [`scala/`](./scala/README.md) | | sbt |
+| **R** | [`r/`](./r/README.md) | | CRAN |
+| **Perl** | [`perl/`](./perl/README.md) | | CPAN |
+| **Lua** | [`lua/`](./lua/README.md) | | `luarocks install copilot-sdk-supercharged` |
+| **Shell / Bash** | [`shell/`](./shell/README.md) | | Source |
+| **Elixir** | [`elixir/`](./elixir/README.md) | | `{:copilot_sdk_supercharged, "~> 1.0"}` |
+| **Haskell** | [`haskell/`](./haskell/README.md) | | Cabal |
+| **Clojure** | [`clojure/`](./clojure/README.md) | | `net.clojars.jeremiahisaacson/copilot-sdk-supercharged` |
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
@@ -52,9 +54,10 @@ For a complete walkthrough, see the **[Getting Started Guide](./docs/getting-sta
 
 Quick steps:
 
-1. **Install the Copilot CLI:**
+1. **(Optional) Install the Copilot CLI**
 
-   Follow the [Copilot CLI installation guide](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli) to install the CLI, or ensure `copilot` is available in your PATH.
+For Node.js, Python, and .NET SDKs, the Copilot CLI is bundled automatically and no separate installation is required.
+For the Go SDK, [install the CLI manually](https://github.com/features/copilot/cli) or ensure `copilot` is available in your PATH.
 
 2. **Install your preferred SDK** using the commands above.
 
@@ -93,6 +96,7 @@ Yes, the GitHub Copilot SDK supports BYOK (Bring Your Own Key). You can configur
 ### What authentication methods are supported?
 
 The SDK supports multiple authentication methods:
+
 - **GitHub signed-in user** - Uses stored OAuth credentials from `copilot` CLI login
 - **OAuth GitHub App** - Pass user tokens from your GitHub OAuth app
 - **Environment variables** - `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`
@@ -102,7 +106,11 @@ See the **[Authentication documentation](./docs/auth/index.md)** for details on 
 
 ### Do I need to install the Copilot CLI separately?
 
-Yes, the Copilot CLI must be installed separately. The SDKs communicate with the Copilot CLI in server mode to provide agent capabilities.
+No — for Node.js, Python, and .NET SDKs, the Copilot CLI is bundled automatically as a dependency. You do not need to install it separately.
+
+For Go SDK, you may still need to install the CLI manually.
+
+Advanced: You can override the bundled CLI using `cliPath` or `cliUrl` if you want to use a custom CLI binary or connect to an external server.
 
 ### What tools are enabled by default?
 
@@ -114,7 +122,13 @@ Yes, the GitHub Copilot SDK allows you to define custom agents, skills, and tool
 
 ### Are there instructions for Copilot to speed up development with the SDK?
 
-Yes, check out the custom instructions at [`github/awesome-copilot`](https://github.com/github/awesome-copilot/blob/main/collections/copilot-sdk.md).
+Yes, check out the custom instructions for each SDK:
+
+- **[Node.js / TypeScript](https://github.com/github/awesome-copilot/blob/main/instructions/copilot-sdk-nodejs.instructions.md)**
+- **[Python](https://github.com/github/awesome-copilot/blob/main/instructions/copilot-sdk-python.instructions.md)**
+- **[.NET](https://github.com/github/awesome-copilot/blob/main/instructions/copilot-sdk-csharp.instructions.md)**
+- **[Go](https://github.com/github/awesome-copilot/blob/main/instructions/copilot-sdk-go.instructions.md)**
+- **[Java](https://github.com/github/copilot-sdk-java/blob/main/instructions/copilot-sdk-java.instructions.md)**
 
 ### What models are supported?
 
@@ -122,7 +136,7 @@ All models available via Copilot CLI are supported in the SDK. The SDK also expo
 
 ### Is the SDK production-ready?
 
-The GitHub Copilot SDK is currently in Technical Preview. While it is functional and can be used for development and testing, it may not yet be suitable for production use.
+The GitHub Copilot SDK is currently in Public Preview. While it is functional and can be used for development and testing, it may not yet be suitable for production use.
 
 ### How do I report issues or request features?
 
@@ -130,12 +144,17 @@ Please use the [GitHub Issues](https://github.com/jeremiahjordanisaacson/copilot
 
 ## Quick Links
 
-- **[Getting Started](./docs/getting-started.md)** - Tutorial to get up and running
-- **[Authentication](./docs/auth/index.md)** - GitHub OAuth, BYOK, and more
-- **[Architecture](./MULTI_LANGUAGE_SDKS.md)** - How all 21 SDKs work under the hood
-- **[Contributing](./CONTRIBUTING.md)** - How to contribute (new languages welcome!)
-- **[Website](https://jeremiahjordanisaacson.github.io/copilot-sdk-supercharged/)** - Landing page with examples in every language
-
+- **[Documentation](./docs/index.md)** – Full documentation index
+- **[Getting Started](./docs/getting-started.md)** – Tutorial to get up and running
+- **[Setup Guides](./docs/setup/index.md)** – Architecture, deployment, and scaling
+- **[Authentication](./docs/auth/index.md)** – GitHub OAuth, BYOK, and more
+- **[Features](./docs/features/index.md)** – Hooks, custom agents, MCP, skills, and more
+- **[Architecture](./MULTI_LANGUAGE_SDKS.md)** – How all 21 SDKs work under the hood
+- **[Troubleshooting](./docs/troubleshooting/debugging.md)** – Common issues and solutions
+- **[Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk)** – Practical recipes for common tasks across all languages
+- **[More Resources](https://github.com/github/awesome-copilot/blob/main/collections/copilot-sdk.md)** – Additional examples, tutorials, and community resources
+- **[Contributing](./CONTRIBUTING.md)** – How to contribute (new languages welcome!)
+- **[Website](https://jeremiahjordanisaacson.github.io/copilot-sdk-supercharged/)** – Landing page with examples in every language
 
 ## Contributing
 
