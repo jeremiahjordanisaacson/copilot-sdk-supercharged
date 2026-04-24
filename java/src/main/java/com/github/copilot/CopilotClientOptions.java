@@ -21,6 +21,8 @@ public class CopilotClientOptions {
     private Map<String, String> env;
     private String githubToken;
     private Boolean useLoggedInUser;
+    /** Server-wide idle timeout for sessions in seconds. Sessions without activity for this duration are automatically cleaned up. */
+    private Integer sessionIdleTimeoutSeconds;
 
     public CopilotClientOptions() {}
 
@@ -37,6 +39,7 @@ public class CopilotClientOptions {
     public CopilotClientOptions env(Map<String, String> env) { this.env = env; return this; }
     public CopilotClientOptions githubToken(String token) { this.githubToken = token; return this; }
     public CopilotClientOptions useLoggedInUser(boolean use) { this.useLoggedInUser = use; return this; }
+    public CopilotClientOptions sessionIdleTimeoutSeconds(int seconds) { this.sessionIdleTimeoutSeconds = seconds; return this; }
 
     // Getters
     public String getCliPath() { return cliPath; }
@@ -51,4 +54,5 @@ public class CopilotClientOptions {
     public Map<String, String> getEnv() { return env; }
     public String getGithubToken() { return githubToken; }
     public Boolean getUseLoggedInUser() { return useLoggedInUser; }
+    public Integer getSessionIdleTimeoutSeconds() { return sessionIdleTimeoutSeconds; }
 }

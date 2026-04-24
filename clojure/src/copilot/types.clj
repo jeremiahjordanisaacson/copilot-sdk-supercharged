@@ -83,7 +83,9 @@
     :tools :system-message :available-tools :excluded-tools
     :provider :on-permission-request :on-user-input-request :hooks
     :working-directory :streaming :mcp-servers :custom-agents
-    :skill-directories :disabled-skills :infinite-sessions"
+    :skill-directories :disabled-skills :infinite-sessions
+    :model-capabilities :enable-config-discovery
+    :include-sub-agent-streaming-events"
   [& {:as opts}]
   (or opts {}))
 
@@ -203,14 +205,16 @@
 
   `name`   - unique agent name
   `prompt` - agent prompt content
-  Optional: :display-name :description :tools :mcp-servers :infer"
+  Optional: :display-name :description :tools :mcp-servers :infer
+            :skills (vector of skill name strings to preload)"
   [name prompt & {:as opts}]
   (cond-> {:name name :prompt prompt}
     (:display-name opts) (assoc :displayName (:display-name opts))
     (:description opts)  (assoc :description (:description opts))
     (contains? opts :tools) (assoc :tools (:tools opts))
     (:mcp-servers opts)  (assoc :mcpServers (:mcp-servers opts))
-    (contains? opts :infer) (assoc :infer (:infer opts))))
+    (contains? opts :infer) (assoc :infer (:infer opts))
+    (:skills opts)       (assoc :skills (:skills opts))))
 
 ;; ============================================================================
 ;; Infinite session configuration
@@ -333,13 +337,15 @@
 
   `prompt` - the message string
   Optional: :attachments (vector of attachment maps), :mode (:enqueue or :immediate),
-            :response-format (keyword from response-formats), :image-options (image options map)"
+            :response-format (keyword from response-formats), :image-options (image options map),
+            :request-headers (map of string->string custom HTTP headers for outbound model requests)"
   [prompt & {:as opts}]
   (cond-> {:prompt prompt}
-    (:attachments opts)    (assoc :attachments (:attachments opts))
-    (:mode opts)           (assoc :mode (name (:mode opts)))
+    (:attachments opts)     (assoc :attachments (:attachments opts))
+    (:mode opts)            (assoc :mode (name (:mode opts)))
     (:response-format opts) (assoc :response-format (response-format->str (:response-format opts)))
-    (:image-options opts)  (assoc :image-options (:image-options opts))))
+    (:image-options opts)   (assoc :image-options (:image-options opts))
+    (:request-headers opts) (assoc :requestHeaders (:request-headers opts))))
 
 ;; ============================================================================
 ;; Session hooks
@@ -377,7 +383,8 @@
     :auto-restart     - auto-restart on crash (default true)
     :env              - environment variables map
     :github-token     - GitHub auth token
-    :use-logged-in-user - use logged-in user auth (default true unless :github-token set)"
+    :use-logged-in-user - use logged-in user auth (default true unless :github-token set)
+    :session-idle-timeout-seconds - server-wide idle timeout for sessions in seconds"
   [& {:as opts}]
   (or opts {}))
 

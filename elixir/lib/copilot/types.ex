@@ -361,9 +361,20 @@ defmodule Copilot.Types do
             tools: [String.t()] | nil,
             prompt: String.t(),
             mcp_servers: map() | nil,
-            infer: boolean() | nil
+            infer: boolean() | nil,
+            skills: [String.t()] | nil
           }
-    defstruct [:name, :display_name, :description, :tools, :prompt, :mcp_servers, :infer]
+    defstruct [
+      :name,
+      :display_name,
+      :description,
+      :tools,
+      :prompt,
+      :mcp_servers,
+      :infer,
+      # List of skill names to preload
+      :skills
+    ]
   end
 
   # ---------------------------------------------------------------------------
@@ -422,7 +433,10 @@ defmodule Copilot.Types do
             custom_agents: [Copilot.Types.CustomAgentConfig.t()] | nil,
             skill_directories: [String.t()] | nil,
             disabled_skills: [String.t()] | nil,
-            infinite_sessions: Copilot.Types.InfiniteSessionConfig.t() | nil
+            infinite_sessions: Copilot.Types.InfiniteSessionConfig.t() | nil,
+            model_capabilities: map() | nil,
+            enable_config_discovery: boolean() | nil,
+            include_sub_agent_streaming_events: boolean() | nil
           }
     defstruct [
       :session_id,
@@ -443,7 +457,13 @@ defmodule Copilot.Types do
       :custom_agents,
       :skill_directories,
       :disabled_skills,
-      :infinite_sessions
+      :infinite_sessions,
+      # Model capabilities overrides
+      :model_capabilities,
+      # Auto-discover MCP server configs (default: false)
+      :enable_config_discovery,
+      # Include sub-agent streaming events (default: true)
+      :include_sub_agent_streaming_events
     ]
   end
 
@@ -468,7 +488,10 @@ defmodule Copilot.Types do
             skill_directories: [String.t()] | nil,
             disabled_skills: [String.t()] | nil,
             infinite_sessions: Copilot.Types.InfiniteSessionConfig.t() | nil,
-            disable_resume: boolean() | nil
+            disable_resume: boolean() | nil,
+            model_capabilities: map() | nil,
+            enable_config_discovery: boolean() | nil,
+            include_sub_agent_streaming_events: boolean() | nil
           }
     defstruct [
       :model,
@@ -489,7 +512,13 @@ defmodule Copilot.Types do
       :skill_directories,
       :disabled_skills,
       :infinite_sessions,
-      :disable_resume
+      :disable_resume,
+      # Model capabilities overrides
+      :model_capabilities,
+      # Auto-discover MCP server configs (default: false)
+      :enable_config_discovery,
+      # Include sub-agent streaming events (default: true)
+      :include_sub_agent_streaming_events
     ]
   end
 
@@ -538,9 +567,18 @@ defmodule Copilot.Types do
             attachments: [map()] | nil,
             mode: String.t() | nil,
             response_format: Copilot.Types.response_format() | nil,
-            image_options: Copilot.Types.image_options() | nil
+            image_options: Copilot.Types.image_options() | nil,
+            request_headers: %{optional(String.t()) => String.t()} | nil
           }
-    defstruct [:prompt, :attachments, :mode, :response_format, :image_options]
+    defstruct [
+      :prompt,
+      :attachments,
+      :mode,
+      :response_format,
+      :image_options,
+      # Custom HTTP headers for outbound model requests
+      :request_headers
+    ]
   end
 
   # ---------------------------------------------------------------------------
@@ -558,7 +596,8 @@ defmodule Copilot.Types do
             auto_restart: boolean(),
             env: [{String.t(), String.t()}] | nil,
             github_token: String.t() | nil,
-            use_logged_in_user: boolean() | nil
+            use_logged_in_user: boolean() | nil,
+            session_idle_timeout_seconds: integer() | nil
           }
     defstruct [
       cli_path: nil,
@@ -569,7 +608,9 @@ defmodule Copilot.Types do
       auto_restart: true,
       env: nil,
       github_token: nil,
-      use_logged_in_user: nil
+      use_logged_in_user: nil,
+      # Server-wide idle timeout for sessions in seconds
+      session_idle_timeout_seconds: nil
     ]
   end
 

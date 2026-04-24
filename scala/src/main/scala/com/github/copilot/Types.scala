@@ -217,7 +217,10 @@ case class CustomAgentConfig(
   description: Option[String] = None,
   tools: Option[List[String]] = None,
   mcpServers: Option[Map[String, JsonObject]] = None,
-  infer: Option[Boolean] = None
+  infer: Option[Boolean] = None,
+
+  /** List of skill names to preload into this agent's context. */
+  skills: Option[List[String]] = None
 )
 
 object CustomAgentConfig:
@@ -275,11 +278,21 @@ case class SessionConfig(
   hooks: Option[SessionHooks] = None,
   workingDirectory: Option[String] = None,
   streaming: Option[Boolean] = None,
+
+  /** Include sub-agent streaming events in the event stream. Default: true. */
+  includeSubAgentStreamingEvents: Option[Boolean] = None,
+
   mcpServers: Option[Map[String, JsonObject]] = None,
   customAgents: Option[List[CustomAgentConfig]] = None,
   skillDirectories: Option[List[String]] = None,
   disabledSkills: Option[List[String]] = None,
-  infiniteSessions: Option[InfiniteSessionConfig] = None
+  infiniteSessions: Option[InfiniteSessionConfig] = None,
+
+  /** Per-property overrides for model capabilities, deep-merged over runtime defaults. */
+  modelCapabilities: Option[Map[String, Json]] = None,
+
+  /** When true, auto-discovers MCP server configs from working directory. Default: false. */
+  enableConfigDiscovery: Option[Boolean] = None
 )
 
 /** Configuration for resuming an existing session. */
@@ -297,11 +310,22 @@ case class ResumeSessionConfig(
   hooks: Option[SessionHooks] = None,
   workingDirectory: Option[String] = None,
   streaming: Option[Boolean] = None,
+
+  /** Include sub-agent streaming events in the event stream. Default: true. */
+  includeSubAgentStreamingEvents: Option[Boolean] = None,
+
   mcpServers: Option[Map[String, JsonObject]] = None,
   customAgents: Option[List[CustomAgentConfig]] = None,
   skillDirectories: Option[List[String]] = None,
   disabledSkills: Option[List[String]] = None,
   infiniteSessions: Option[InfiniteSessionConfig] = None,
+
+  /** Per-property overrides for model capabilities, deep-merged over runtime defaults. */
+  modelCapabilities: Option[Map[String, Json]] = None,
+
+  /** When true, auto-discovers MCP server configs from working directory. Default: false. */
+  enableConfigDiscovery: Option[Boolean] = None,
+
   disableResume: Option[Boolean] = None
 )
 
@@ -939,7 +963,10 @@ case class MessageOptions(
   attachments: Option[List[Attachment]] = None,
   mode: Option[String] = None,
   responseFormat: Option[String] = None,
-  imageOptions: Option[ImageOptions] = None
+  imageOptions: Option[ImageOptions] = None,
+
+  /** Custom HTTP headers to include in outbound model requests for this turn. */
+  requestHeaders: Option[Map[String, String]] = None
 )
 
 // ============================================================================
@@ -974,5 +1001,8 @@ case class CopilotClientOptions(
   autoRestart: Boolean = true,
   env: Option[Map[String, String]] = None,
   githubToken: Option[String] = None,
-  useLoggedInUser: Option[Boolean] = None
+  useLoggedInUser: Option[Boolean] = None,
+
+  /** Server-wide idle timeout for sessions in seconds. */
+  sessionIdleTimeoutSeconds: Option[Int] = None
 )

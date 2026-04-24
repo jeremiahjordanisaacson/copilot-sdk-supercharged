@@ -15,6 +15,8 @@ public class MessageOptions {
     private String mode;
     private String responseFormat;
     private Types.ImageOptions imageOptions;
+    /** Custom HTTP headers to include in outbound model requests for this turn. */
+    private Map<String, String> requestHeaders;
 
     public MessageOptions(String prompt) {
         this.prompt = prompt;
@@ -25,10 +27,12 @@ public class MessageOptions {
     public MessageOptions mode(String mode) { this.mode = mode; return this; }
     public MessageOptions responseFormat(String responseFormat) { this.responseFormat = responseFormat; return this; }
     public MessageOptions imageOptions(Types.ImageOptions imageOptions) { this.imageOptions = imageOptions; return this; }
+    public MessageOptions requestHeaders(Map<String, String> headers) { this.requestHeaders = headers; return this; }
 
     public String getPrompt() { return prompt; }
     public List<Map<String, Object>> getAttachments() { return attachments; }
     public String getMode() { return mode; }
     public String getResponseFormat() { return responseFormat; }
     public Types.ImageOptions getImageOptions() { return imageOptions; }
+    public Map<String, String> getRequestHeaders() { return requestHeaders; }
 }

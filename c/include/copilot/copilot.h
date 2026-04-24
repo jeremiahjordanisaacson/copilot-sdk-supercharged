@@ -321,6 +321,7 @@ typedef struct {
     const char *github_token;  /**< GitHub token (NULL = none) */
     bool use_logged_in_user;   /**< Use stored OAuth tokens (default: true) */
     const char **extra_args;   /**< NULL-terminated array of extra CLI args, or NULL */
+    int session_idle_timeout_seconds; /**< Server-wide idle timeout for sessions in seconds (0 = not set) */
 } copilot_client_options_t;
 
 /**
@@ -357,6 +358,20 @@ typedef struct {
 
     /* Infinite sessions */
     const copilot_infinite_session_config_t *infinite_sessions;  /**< NULL = default */
+
+    /* Model capabilities overrides */
+    const char *model_capabilities_json; /**< Per-property overrides for model capabilities as JSON string, or NULL */
+
+    /* Config discovery */
+    bool enable_config_discovery;  /**< When true, auto-discovers MCP server configs from working directory */
+    bool has_enable_config_discovery; /**< Whether enable_config_discovery was explicitly set */
+
+    /* Sub-agent streaming */
+    bool include_sub_agent_streaming_events; /**< Include sub-agent streaming events in the event stream (default: true) */
+    bool has_include_sub_agent_streaming_events; /**< Whether include_sub_agent_streaming_events was explicitly set */
+
+    /* Skills for custom agents */
+    const char **skills;           /**< NULL-terminated array of skill names to preload, or NULL */
 
     /* Handlers */
     copilot_permission_handler_fn on_permission_request;
@@ -420,6 +435,8 @@ typedef struct {
     const char *mode;                       /**< "enqueue" (default) or "immediate" */
     copilot_response_format_t response_format;        /**< Response format (default: TEXT) */
     const copilot_image_options_t *image_options;      /**< Image generation options, or NULL */
+    const char **request_headers_keys;   /**< Keys for custom HTTP headers (NULL-terminated), or NULL */
+    const char **request_headers_values; /**< Values for custom HTTP headers (parallel to keys), or NULL */
 } copilot_message_options_t;
 
 /* ============================================================================

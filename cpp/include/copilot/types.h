@@ -178,6 +178,9 @@ struct CustomAgentConfig {
     std::string prompt;
     std::optional<std::map<std::string, MCPServerConfig>> mcpServers;
     std::optional<bool> infer;
+
+    /// List of skill names to preload into this agent's context.
+    std::optional<std::vector<std::string>> skills;
 };
 
 inline void to_json(nlohmann::json& j, const CustomAgentConfig& c) {
@@ -187,6 +190,7 @@ inline void to_json(nlohmann::json& j, const CustomAgentConfig& c) {
     if (c.tools) j["tools"] = *c.tools;
     if (c.mcpServers) j["mcpServers"] = *c.mcpServers;
     if (c.infer) j["infer"] = *c.infer;
+    if (c.skills) j["skills"] = *c.skills;
 }
 
 // ============================================================================
@@ -551,11 +555,21 @@ struct SessionConfig {
     std::optional<SessionHooks> hooks;
     std::optional<std::string> workingDirectory;
     bool streaming = false;
+
+    /// Include sub-agent streaming events in the event stream. Default: true.
+    std::optional<bool> includeSubAgentStreamingEvents;
+
     std::optional<std::map<std::string, MCPServerConfig>> mcpServers;
     std::optional<std::vector<CustomAgentConfig>> customAgents;
     std::optional<std::vector<std::string>> skillDirectories;
     std::optional<std::vector<std::string>> disabledSkills;
     std::optional<InfiniteSessionConfig> infiniteSessions;
+
+    /// Per-property overrides for model capabilities, deep-merged over runtime defaults.
+    std::optional<nlohmann::json> modelCapabilities;
+
+    /// When true, auto-discovers MCP server configs from working directory. Default: false.
+    std::optional<bool> enableConfigDiscovery;
 };
 
 struct ResumeSessionConfig {
@@ -578,6 +592,16 @@ struct ResumeSessionConfig {
     std::optional<std::vector<std::string>> disabledSkills;
     std::optional<InfiniteSessionConfig> infiniteSessions;
     bool disableResume = false;
+    bool streaming = false;
+
+    /// Include sub-agent streaming events in the event stream. Default: true.
+    std::optional<bool> includeSubAgentStreamingEvents;
+
+    /// Per-property overrides for model capabilities, deep-merged over runtime defaults.
+    std::optional<nlohmann::json> modelCapabilities;
+
+    /// When true, auto-discovers MCP server configs from working directory. Default: false.
+    std::optional<bool> enableConfigDiscovery;
 };
 
 // ============================================================================
@@ -679,6 +703,9 @@ struct MessageOptions {
     std::optional<std::string> mode;              // "enqueue" or "immediate"
     std::optional<ResponseFormat> responseFormat;  // Desired response format
     std::optional<ImageOptions> imageOptions;      // Options for image generation
+
+    /// Custom HTTP headers to include in outbound model requests for this turn.
+    std::optional<std::map<std::string, std::string>> requestHeaders;
 };
 
 // ============================================================================
@@ -910,6 +937,9 @@ struct CopilotClientOptions {
 
     /// Whether to use the logged-in user for authentication (default: true, false when githubToken is set).
     std::optional<bool> useLoggedInUser;
+
+    /// Server-wide idle timeout for sessions in seconds.
+    std::optional<int> sessionIdleTimeoutSeconds;
 };
 
 } // namespace copilot

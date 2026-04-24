@@ -146,19 +146,20 @@ function M.ToolInvocation(fields)
 end
 
 --- Create a ClientOptions table.
--- @param fields table with optional keys: cliPath, cwd, logLevel, env, githubToken, useLoggedInUser
+-- @param fields table with optional keys: cliPath, cwd, logLevel, env, githubToken, useLoggedInUser, sessionIdleTimeoutSeconds
 -- @return table ClientOptions
 function M.ClientOptions(fields)
     fields = fields or {}
     return {
-        cliPath          = fields.cliPath or "copilot",
-        cwd              = fields.cwd,
-        logLevel         = fields.logLevel or "info",
-        env              = fields.env,            -- optional table of key=value strings
-        githubToken      = fields.githubToken,
-        useLoggedInUser  = fields.useLoggedInUser, -- optional boolean
-        autoStart        = fields.autoStart ~= false,   -- default true
-        autoRestart      = fields.autoRestart ~= false,  -- default true
+        cliPath                    = fields.cliPath or "copilot",
+        cwd                        = fields.cwd,
+        logLevel                   = fields.logLevel or "info",
+        env                        = fields.env,            -- optional table of key=value strings
+        githubToken                = fields.githubToken,
+        useLoggedInUser            = fields.useLoggedInUser, -- optional boolean
+        autoStart                  = fields.autoStart ~= false,   -- default true
+        autoRestart                = fields.autoRestart ~= false,  -- default true
+        sessionIdleTimeoutSeconds  = fields.sessionIdleTimeoutSeconds, -- optional integer, server-wide idle timeout
     }
 end
 
@@ -168,25 +169,28 @@ end
 function M.SessionConfig(fields)
     fields = fields or {}
     return {
-        sessionId           = fields.sessionId,
-        model               = fields.model,
-        reasoningEffort     = fields.reasoningEffort,
-        configDir           = fields.configDir,
-        tools               = fields.tools,              -- array of Tool
-        systemMessage       = fields.systemMessage,      -- {mode, content}
-        availableTools      = fields.availableTools,      -- array of strings
-        excludedTools       = fields.excludedTools,       -- array of strings
-        onPermissionRequest = fields.onPermissionRequest, -- function
-        onUserInputRequest  = fields.onUserInputRequest,  -- function
-        hooks               = fields.hooks,               -- SessionHooks table
-        workingDirectory    = fields.workingDirectory,
-        streaming           = fields.streaming,           -- boolean
-        provider            = fields.provider,            -- ProviderConfig
-        mcpServers          = fields.mcpServers,          -- table
-        customAgents        = fields.customAgents,        -- array
-        skillDirectories    = fields.skillDirectories,    -- array
-        disabledSkills      = fields.disabledSkills,      -- array
-        infiniteSessions    = fields.infiniteSessions,    -- InfiniteSessionConfig
+        sessionId                       = fields.sessionId,
+        model                           = fields.model,
+        reasoningEffort                 = fields.reasoningEffort,
+        configDir                       = fields.configDir,
+        tools                           = fields.tools,              -- array of Tool
+        systemMessage                   = fields.systemMessage,      -- {mode, content}
+        availableTools                  = fields.availableTools,      -- array of strings
+        excludedTools                   = fields.excludedTools,       -- array of strings
+        onPermissionRequest             = fields.onPermissionRequest, -- function
+        onUserInputRequest              = fields.onUserInputRequest,  -- function
+        hooks                           = fields.hooks,               -- SessionHooks table
+        workingDirectory                = fields.workingDirectory,
+        streaming                       = fields.streaming,           -- boolean
+        provider                        = fields.provider,            -- ProviderConfig
+        mcpServers                      = fields.mcpServers,          -- table
+        customAgents                    = fields.customAgents,        -- array
+        skillDirectories                = fields.skillDirectories,    -- array
+        disabledSkills                  = fields.disabledSkills,      -- array
+        infiniteSessions                = fields.infiniteSessions,    -- InfiniteSessionConfig
+        modelCapabilities               = fields.modelCapabilities,               -- table, model capabilities overrides
+        enableConfigDiscovery           = fields.enableConfigDiscovery,           -- boolean, auto-discover MCP server configs (default: false)
+        includeSubAgentStreamingEvents  = fields.includeSubAgentStreamingEvents,  -- boolean, include sub-agent streaming events (default: true)
     }
 end
 
@@ -196,30 +200,33 @@ end
 function M.ResumeSessionConfig(fields)
     fields = fields or {}
     return {
-        model               = fields.model,
-        reasoningEffort     = fields.reasoningEffort,
-        tools               = fields.tools,
-        systemMessage       = fields.systemMessage,
-        availableTools      = fields.availableTools,
-        excludedTools       = fields.excludedTools,
-        provider            = fields.provider,
-        onPermissionRequest = fields.onPermissionRequest,
-        onUserInputRequest  = fields.onUserInputRequest,
-        hooks               = fields.hooks,
-        workingDirectory    = fields.workingDirectory,
-        configDir           = fields.configDir,
-        streaming           = fields.streaming,
-        disableResume       = fields.disableResume,
-        mcpServers          = fields.mcpServers,
-        customAgents        = fields.customAgents,
-        skillDirectories    = fields.skillDirectories,
-        disabledSkills      = fields.disabledSkills,
-        infiniteSessions    = fields.infiniteSessions,
+        model                           = fields.model,
+        reasoningEffort                 = fields.reasoningEffort,
+        tools                           = fields.tools,
+        systemMessage                   = fields.systemMessage,
+        availableTools                  = fields.availableTools,
+        excludedTools                   = fields.excludedTools,
+        provider                        = fields.provider,
+        onPermissionRequest             = fields.onPermissionRequest,
+        onUserInputRequest              = fields.onUserInputRequest,
+        hooks                           = fields.hooks,
+        workingDirectory                = fields.workingDirectory,
+        configDir                       = fields.configDir,
+        streaming                       = fields.streaming,
+        disableResume                   = fields.disableResume,
+        mcpServers                      = fields.mcpServers,
+        customAgents                    = fields.customAgents,
+        skillDirectories                = fields.skillDirectories,
+        disabledSkills                  = fields.disabledSkills,
+        infiniteSessions                = fields.infiniteSessions,
+        modelCapabilities               = fields.modelCapabilities,               -- table, model capabilities overrides
+        enableConfigDiscovery           = fields.enableConfigDiscovery,           -- boolean, auto-discover MCP server configs (default: false)
+        includeSubAgentStreamingEvents  = fields.includeSubAgentStreamingEvents,  -- boolean, include sub-agent streaming events (default: true)
     }
 end
 
 --- Create a MessageOptions table.
--- @param fields table with keys: prompt, attachments, mode, responseFormat, imageOptions
+-- @param fields table with keys: prompt, attachments, mode, responseFormat, imageOptions, requestHeaders
 -- @return table MessageOptions
 function M.MessageOptions(fields)
     fields = fields or {}
@@ -229,6 +236,7 @@ function M.MessageOptions(fields)
         mode           = fields.mode,             -- optional string
         responseFormat = fields.responseFormat,    -- optional string (ResponseFormat constant)
         imageOptions   = fields.imageOptions,     -- optional table (from image_options())
+        requestHeaders = fields.requestHeaders,   -- optional table of string->string, custom HTTP headers
     }
 end
 
@@ -437,6 +445,19 @@ function M.InfiniteSessionConfig(fields)
         enabled                      = fields.enabled,
         backgroundCompactionThreshold = fields.backgroundCompactionThreshold,
         bufferExhaustionThreshold     = fields.bufferExhaustionThreshold,
+    }
+end
+
+--- Create a CustomAgentConfig table.
+-- @param fields table with keys: name, description, prompt, skills
+-- @return table CustomAgentConfig
+function M.CustomAgentConfig(fields)
+    fields = fields or {}
+    return {
+        name        = fields.name or "",
+        description = fields.description,       -- optional string
+        prompt      = fields.prompt,            -- optional string
+        skills      = fields.skills,            -- optional array of skill names to preload
     }
 end
 

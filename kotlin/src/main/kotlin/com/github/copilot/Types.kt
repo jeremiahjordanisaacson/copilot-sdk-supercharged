@@ -163,7 +163,12 @@ data class CustomAgentConfig(
     val tools: List<String>? = null,
     val prompt: String,
     val mcpServers: Map<String, MCPServerConfig>? = null,
-    val infer: Boolean? = null
+    val infer: Boolean? = null,
+
+    /**
+     * List of skill names to preload into this agent's context.
+     */
+    val skills: List<String>? = null
 )
 
 /**
@@ -194,11 +199,27 @@ data class SessionConfig(
     val hooks: SessionHooks? = null,
     val workingDirectory: String? = null,
     val streaming: Boolean? = null,
+
+    /**
+     * Include sub-agent streaming events in the event stream. Default: true.
+     */
+    val includeSubAgentStreamingEvents: Boolean? = null,
+
     val mcpServers: Map<String, MCPServerConfig>? = null,
     val customAgents: List<CustomAgentConfig>? = null,
     val skillDirectories: List<String>? = null,
     val disabledSkills: List<String>? = null,
-    val infiniteSessions: InfiniteSessionConfig? = null
+    val infiniteSessions: InfiniteSessionConfig? = null,
+
+    /**
+     * Per-property overrides for model capabilities, deep-merged over runtime defaults.
+     */
+    val modelCapabilities: Map<String, Any?>? = null,
+
+    /**
+     * When true, auto-discovers MCP server configs from working directory. Default: false.
+     */
+    val enableConfigDiscovery: Boolean? = null
 )
 
 /**
@@ -218,11 +239,28 @@ data class ResumeSessionConfig(
     val hooks: SessionHooks? = null,
     val workingDirectory: String? = null,
     val streaming: Boolean? = null,
+
+    /**
+     * Include sub-agent streaming events in the event stream. Default: true.
+     */
+    val includeSubAgentStreamingEvents: Boolean? = null,
+
     val mcpServers: Map<String, MCPServerConfig>? = null,
     val customAgents: List<CustomAgentConfig>? = null,
     val skillDirectories: List<String>? = null,
     val disabledSkills: List<String>? = null,
     val infiniteSessions: InfiniteSessionConfig? = null,
+
+    /**
+     * Per-property overrides for model capabilities, deep-merged over runtime defaults.
+     */
+    val modelCapabilities: Map<String, Any?>? = null,
+
+    /**
+     * When true, auto-discovers MCP server configs from working directory. Default: false.
+     */
+    val enableConfigDiscovery: Boolean? = null,
+
     val disableResume: Boolean? = null
 )
 
@@ -425,7 +463,12 @@ data class MessageOptions(
     val attachments: List<Attachment>? = null,
     val mode: String? = null,
     val responseFormat: ResponseFormat? = null,
-    val imageOptions: ImageOptions? = null
+    val imageOptions: ImageOptions? = null,
+
+    /**
+     * Custom HTTP headers to include in outbound model requests for this turn.
+     */
+    val requestHeaders: Map<String, String>? = null
 )
 
 // ============================================================================
@@ -640,5 +683,10 @@ data class CopilotClientOptions(
     /**
      * Whether to use the logged-in user for authentication. Defaults to true (false when githubToken provided).
      */
-    val useLoggedInUser: Boolean? = null
+    val useLoggedInUser: Boolean? = null,
+
+    /**
+     * Server-wide idle timeout for sessions in seconds.
+     */
+    val sessionIdleTimeoutSeconds: Int? = null
 )

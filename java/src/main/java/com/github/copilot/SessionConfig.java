@@ -25,11 +25,17 @@ public class SessionConfig {
     private SessionHooks hooks;
     private String workingDirectory;
     private Boolean streaming;
+    /** Include sub-agent streaming events in the event stream. Defaults to true. */
+    private Boolean includeSubAgentStreamingEvents;
     private Map<String, MCPServerConfig> mcpServers;
     private List<CustomAgentConfig> customAgents;
     private List<String> skillDirectories;
     private List<String> disabledSkills;
     private InfiniteSessionConfig infiniteSessions;
+    /** Per-property overrides for model capabilities, deep-merged over runtime defaults. */
+    private Map<String, Object> modelCapabilities;
+    /** When true, automatically discovers MCP server configurations from the working directory. Defaults to false. */
+    private Boolean enableConfigDiscovery;
 
     public SessionConfig() {}
 
@@ -48,11 +54,14 @@ public class SessionConfig {
     public SessionConfig hooks(SessionHooks hooks) { this.hooks = hooks; return this; }
     public SessionConfig workingDirectory(String dir) { this.workingDirectory = dir; return this; }
     public SessionConfig streaming(boolean streaming) { this.streaming = streaming; return this; }
+    public SessionConfig includeSubAgentStreamingEvents(boolean include) { this.includeSubAgentStreamingEvents = include; return this; }
     public SessionConfig mcpServers(Map<String, MCPServerConfig> servers) { this.mcpServers = servers; return this; }
     public SessionConfig customAgents(List<CustomAgentConfig> agents) { this.customAgents = agents; return this; }
     public SessionConfig skillDirectories(List<String> dirs) { this.skillDirectories = dirs; return this; }
     public SessionConfig disabledSkills(List<String> skills) { this.disabledSkills = skills; return this; }
     public SessionConfig infiniteSessions(InfiniteSessionConfig config) { this.infiniteSessions = config; return this; }
+    public SessionConfig modelCapabilities(Map<String, Object> capabilities) { this.modelCapabilities = capabilities; return this; }
+    public SessionConfig enableConfigDiscovery(boolean enable) { this.enableConfigDiscovery = enable; return this; }
 
     // Getters
     public String getSessionId() { return sessionId; }
@@ -69,9 +78,12 @@ public class SessionConfig {
     public SessionHooks getHooks() { return hooks; }
     public String getWorkingDirectory() { return workingDirectory; }
     public Boolean getStreaming() { return streaming; }
+    public Boolean getIncludeSubAgentStreamingEvents() { return includeSubAgentStreamingEvents; }
     public Map<String, MCPServerConfig> getMcpServers() { return mcpServers; }
     public List<CustomAgentConfig> getCustomAgents() { return customAgents; }
     public List<String> getSkillDirectories() { return skillDirectories; }
     public List<String> getDisabledSkills() { return disabledSkills; }
     public InfiniteSessionConfig getInfiniteSessions() { return infiniteSessions; }
+    public Map<String, Object> getModelCapabilities() { return modelCapabilities; }
+    public Boolean getEnableConfigDiscovery() { return enableConfigDiscovery; }
 }

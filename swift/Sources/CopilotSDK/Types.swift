@@ -525,6 +525,8 @@ public struct CustomAgentConfig: Codable, Sendable {
     public var prompt: String
     public var mcpServers: [String: MCPServerConfig]?
     public var infer: Bool?
+    /// List of skill names to preload into this agent's context.
+    public var skills: [String]?
 
     public init(
         name: String,
@@ -533,7 +535,8 @@ public struct CustomAgentConfig: Codable, Sendable {
         description: String? = nil,
         tools: [String]? = nil,
         mcpServers: [String: MCPServerConfig]? = nil,
-        infer: Bool? = nil
+        infer: Bool? = nil,
+        skills: [String]? = nil
     ) {
         self.name = name
         self.prompt = prompt
@@ -542,6 +545,7 @@ public struct CustomAgentConfig: Codable, Sendable {
         self.tools = tools
         self.mcpServers = mcpServers
         self.infer = infer
+        self.skills = skills
     }
 }
 
@@ -629,11 +633,17 @@ public struct SessionConfig: Sendable {
     public var hooks: SessionHooks?
     public var workingDirectory: String?
     public var streaming: Bool?
+    /// Include sub-agent streaming events in the event stream. Defaults to true.
+    public var includeSubAgentStreamingEvents: Bool?
     public var mcpServers: [String: MCPServerConfig]?
     public var customAgents: [CustomAgentConfig]?
     public var skillDirectories: [String]?
     public var disabledSkills: [String]?
     public var infiniteSessions: InfiniteSessionConfig?
+    /// Per-property overrides for model capabilities, deep-merged over runtime defaults.
+    public var modelCapabilities: [String: AnyCodable]?
+    /// When true, automatically discovers MCP server configurations from the working directory. Defaults to false.
+    public var enableConfigDiscovery: Bool?
 
     public init(
         sessionId: String? = nil,
@@ -650,11 +660,14 @@ public struct SessionConfig: Sendable {
         hooks: SessionHooks? = nil,
         workingDirectory: String? = nil,
         streaming: Bool? = nil,
+        includeSubAgentStreamingEvents: Bool? = nil,
         mcpServers: [String: MCPServerConfig]? = nil,
         customAgents: [CustomAgentConfig]? = nil,
         skillDirectories: [String]? = nil,
         disabledSkills: [String]? = nil,
-        infiniteSessions: InfiniteSessionConfig? = nil
+        infiniteSessions: InfiniteSessionConfig? = nil,
+        modelCapabilities: [String: AnyCodable]? = nil,
+        enableConfigDiscovery: Bool? = nil
     ) {
         self.sessionId = sessionId
         self.model = model
@@ -670,11 +683,14 @@ public struct SessionConfig: Sendable {
         self.hooks = hooks
         self.workingDirectory = workingDirectory
         self.streaming = streaming
+        self.includeSubAgentStreamingEvents = includeSubAgentStreamingEvents
         self.mcpServers = mcpServers
         self.customAgents = customAgents
         self.skillDirectories = skillDirectories
         self.disabledSkills = disabledSkills
         self.infiniteSessions = infiniteSessions
+        self.modelCapabilities = modelCapabilities
+        self.enableConfigDiscovery = enableConfigDiscovery
     }
 }
 
@@ -693,11 +709,17 @@ public struct ResumeSessionConfig: Sendable {
     public var hooks: SessionHooks?
     public var workingDirectory: String?
     public var streaming: Bool?
+    /// Include sub-agent streaming events in the event stream. Defaults to true.
+    public var includeSubAgentStreamingEvents: Bool?
     public var mcpServers: [String: MCPServerConfig]?
     public var customAgents: [CustomAgentConfig]?
     public var skillDirectories: [String]?
     public var disabledSkills: [String]?
     public var infiniteSessions: InfiniteSessionConfig?
+    /// Per-property overrides for model capabilities, deep-merged over runtime defaults.
+    public var modelCapabilities: [String: AnyCodable]?
+    /// When true, automatically discovers MCP server configurations from the working directory. Defaults to false.
+    public var enableConfigDiscovery: Bool?
     public var disableResume: Bool?
 
     public init(
@@ -714,11 +736,14 @@ public struct ResumeSessionConfig: Sendable {
         hooks: SessionHooks? = nil,
         workingDirectory: String? = nil,
         streaming: Bool? = nil,
+        includeSubAgentStreamingEvents: Bool? = nil,
         mcpServers: [String: MCPServerConfig]? = nil,
         customAgents: [CustomAgentConfig]? = nil,
         skillDirectories: [String]? = nil,
         disabledSkills: [String]? = nil,
         infiniteSessions: InfiniteSessionConfig? = nil,
+        modelCapabilities: [String: AnyCodable]? = nil,
+        enableConfigDiscovery: Bool? = nil,
         disableResume: Bool? = nil
     ) {
         self.model = model
@@ -734,11 +759,14 @@ public struct ResumeSessionConfig: Sendable {
         self.hooks = hooks
         self.workingDirectory = workingDirectory
         self.streaming = streaming
+        self.includeSubAgentStreamingEvents = includeSubAgentStreamingEvents
         self.mcpServers = mcpServers
         self.customAgents = customAgents
         self.skillDirectories = skillDirectories
         self.disabledSkills = disabledSkills
         self.infiniteSessions = infiniteSessions
+        self.modelCapabilities = modelCapabilities
+        self.enableConfigDiscovery = enableConfigDiscovery
         self.disableResume = disableResume
     }
 }
@@ -873,19 +901,23 @@ public struct MessageOptions: Sendable {
     public var mode: String?
     public var responseFormat: ResponseFormat?
     public var imageOptions: ImageOptions?
+    /// Custom HTTP headers to include in outbound model requests for this turn.
+    public var requestHeaders: [String: String]?
 
     public init(
         prompt: String,
         attachments: [Attachment]? = nil,
         mode: String? = nil,
         responseFormat: ResponseFormat? = nil,
-        imageOptions: ImageOptions? = nil
+        imageOptions: ImageOptions? = nil,
+        requestHeaders: [String: String]? = nil
     ) {
         self.prompt = prompt
         self.attachments = attachments
         self.mode = mode
         self.responseFormat = responseFormat
         self.imageOptions = imageOptions
+        self.requestHeaders = requestHeaders
     }
 }
 
@@ -1098,6 +1130,9 @@ public struct CopilotClientOptions: Sendable {
     /// Whether to use the logged-in user for authentication. Defaults to true.
     public var useLoggedInUser: Bool?
 
+    /// Server-wide idle timeout for sessions in seconds. Sessions without activity for this duration are automatically cleaned up.
+    public var sessionIdleTimeoutSeconds: Int?
+
     public init(
         cliPath: String? = nil,
         cliArgs: [String]? = nil,
@@ -1110,7 +1145,8 @@ public struct CopilotClientOptions: Sendable {
         autoRestart: Bool? = nil,
         env: [String: String]? = nil,
         githubToken: String? = nil,
-        useLoggedInUser: Bool? = nil
+        useLoggedInUser: Bool? = nil,
+        sessionIdleTimeoutSeconds: Int? = nil
     ) {
         self.cliPath = cliPath
         self.cliArgs = cliArgs
@@ -1124,6 +1160,7 @@ public struct CopilotClientOptions: Sendable {
         self.env = env
         self.githubToken = githubToken
         self.useLoggedInUser = useLoggedInUser
+        self.sessionIdleTimeoutSeconds = sessionIdleTimeoutSeconds
     }
 }
 

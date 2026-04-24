@@ -190,6 +190,7 @@ module Copilot
   # Custom agent configuration.
   CustomAgentConfig = Struct.new(
     :name, :display_name, :description, :tools, :prompt, :mcp_servers, :infer,
+    :skills,
     keyword_init: true
   ) do
     def to_wire
@@ -199,6 +200,7 @@ module Copilot
       h[:tools] = tools if tools
       h[:mcpServers] = mcp_servers if mcp_servers
       h[:infer] = infer unless infer.nil?
+      h[:skills] = skills if skills
       h
     end
   end
@@ -222,8 +224,10 @@ module Copilot
     :session_id, :model, :reasoning_effort, :config_dir,
     :tools, :system_message, :available_tools, :excluded_tools,
     :provider, :on_permission_request, :on_user_input_request, :hooks,
-    :working_directory, :streaming, :mcp_servers, :custom_agents,
+    :working_directory, :streaming, :include_sub_agent_streaming_events,
+    :mcp_servers, :custom_agents,
     :skill_directories, :disabled_skills, :infinite_sessions,
+    :model_capabilities, :enable_config_discovery,
     keyword_init: true
   )
 
@@ -232,8 +236,10 @@ module Copilot
     :model, :reasoning_effort, :config_dir,
     :tools, :system_message, :available_tools, :excluded_tools,
     :provider, :on_permission_request, :on_user_input_request, :hooks,
-    :working_directory, :streaming, :mcp_servers, :custom_agents,
+    :working_directory, :streaming, :include_sub_agent_streaming_events,
+    :mcp_servers, :custom_agents,
     :skill_directories, :disabled_skills, :infinite_sessions,
+    :model_capabilities, :enable_config_discovery,
     :disable_resume,
     keyword_init: true
   )
@@ -255,7 +261,7 @@ module Copilot
   ContentBlock = Struct.new(:type, :text, :image, keyword_init: true)
 
   # Options for sending a message.
-  MessageOptions = Struct.new(:prompt, :attachments, :mode, :response_format, :image_options, keyword_init: true)
+  MessageOptions = Struct.new(:prompt, :attachments, :mode, :response_format, :image_options, :request_headers, keyword_init: true)
 
   # Ping response from the server.
   PingResponse = Struct.new(:message, :timestamp, :protocol_version, keyword_init: true) do
@@ -494,7 +500,7 @@ module Copilot
   ClientOptions = Struct.new(
     :cli_path, :cli_args, :cwd, :port, :use_stdio, :cli_url,
     :log_level, :auto_start, :auto_restart, :env,
-    :github_token, :use_logged_in_user,
+    :github_token, :use_logged_in_user, :session_idle_timeout_seconds,
     keyword_init: true
   )
 end

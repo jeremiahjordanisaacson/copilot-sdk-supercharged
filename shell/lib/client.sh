@@ -11,6 +11,23 @@ COPILOT_CLIENT_STATE="disconnected"  # disconnected | connecting | connected | e
 COPILOT_CLIENT_CLI_PATH=""
 COPILOT_CLIENT_LOG_LEVEL="info"
 
+# --- Session Config Variables ---
+# Set these before calling copilot_client_create_session to include in the payload.
+# Server-wide idle timeout for sessions in seconds (integer, optional)
+COPILOT_SESSION_IDLE_TIMEOUT_SECONDS=""
+# Custom HTTP headers for outbound model requests (JSON object string, optional)
+# Example: '{"X-Custom":"value"}'
+COPILOT_REQUEST_HEADERS=""
+# List of skill names to preload (JSON array string, optional)
+# Example: '["skill1","skill2"]'
+COPILOT_AGENT_SKILLS=""
+# Model capabilities overrides (JSON object string, optional)
+COPILOT_MODEL_CAPABILITIES=""
+# Auto-discover MCP server configs (boolean string: "true"/"false", optional, default: false)
+COPILOT_ENABLE_CONFIG_DISCOVERY=""
+# Include sub-agent streaming events (boolean string: "true"/"false", optional, default: true)
+COPILOT_INCLUDE_SUB_AGENT_STREAMING_EVENTS=""
+
 # --- Client Functions ---
 
 # Start the Copilot CLI client.
@@ -115,6 +132,25 @@ copilot_client_create_session() {
         params=$(jq -c -n --arg model "$model" '{"model":$model}')
     elif [[ -n "$system_message" ]]; then
         params=$(jq -c -n --arg sysMsg "$system_message" '{"systemMessage":$sysMsg}')
+    fi
+
+    # Append optional session config fields if set
+    if [[ -n "$COPILOT_MODEL_CAPABILITIES" ]]; then
+        params=$(echo "$params" | jq -c --argjson mc "$COPILOT_MODEL_CAPABILITIES" '. + {"modelCapabilities":$mc}')
+    fi
+    if [[ -n "$COPILOT_ENABLE_CONFIG_DISCOVERY" ]]; then
+        if [[ "$COPILOT_ENABLE_CONFIG_DISCOVERY" == "true" ]]; then
+            params=$(echo "$params" | jq -c '. + {"enableConfigDiscovery":true}')
+        else
+            params=$(echo "$params" | jq -c '. + {"enableConfigDiscovery":false}')
+        fi
+    fi
+    if [[ -n "$COPILOT_INCLUDE_SUB_AGENT_STREAMING_EVENTS" ]]; then
+        if [[ "$COPILOT_INCLUDE_SUB_AGENT_STREAMING_EVENTS" == "true" ]]; then
+            params=$(echo "$params" | jq -c '. + {"includeSubAgentStreamingEvents":true}')
+        else
+            params=$(echo "$params" | jq -c '. + {"includeSubAgentStreamingEvents":false}')
+        fi
     fi
 
     if ! copilot_jsonrpc_request "session.create" "$params"; then

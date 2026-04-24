@@ -410,6 +410,9 @@ pub struct CustomAgentConfig {
     pub mcp_servers: Option<HashMap<String, McpServerConfig>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub infer: Option<bool>,
+    /// List of skill names to preload into this agent's context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Vec<String>>,
 }
 
 // ============================================================================
@@ -506,6 +509,9 @@ pub struct SessionConfig {
     pub working_directory: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub streaming: Option<bool>,
+    /// Include sub-agent streaming events in the event stream. Defaults to true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_sub_agent_streaming_events: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mcp_servers: Option<HashMap<String, McpServerConfig>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -516,6 +522,12 @@ pub struct SessionConfig {
     pub disabled_skills: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub infinite_sessions: Option<InfiniteSessionConfig>,
+    /// Per-property overrides for model capabilities, deep-merged over runtime defaults.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_capabilities: Option<HashMap<String, serde_json::Value>>,
+    /// When true, automatically discovers MCP server configurations from the working directory. Defaults to false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_config_discovery: Option<bool>,
     /// Set by the SDK based on whether handlers are registered (not user-set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_permission: Option<bool>,
@@ -552,6 +564,9 @@ pub struct ResumeSessionConfig {
     pub working_directory: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub streaming: Option<bool>,
+    /// Include sub-agent streaming events in the event stream. Defaults to true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_sub_agent_streaming_events: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mcp_servers: Option<HashMap<String, McpServerConfig>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -562,6 +577,12 @@ pub struct ResumeSessionConfig {
     pub disabled_skills: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub infinite_sessions: Option<InfiniteSessionConfig>,
+    /// Per-property overrides for model capabilities, deep-merged over runtime defaults.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_capabilities: Option<HashMap<String, serde_json::Value>>,
+    /// When true, automatically discovers MCP server configurations from the working directory. Defaults to false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_config_discovery: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disable_resume: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -689,6 +710,9 @@ pub struct MessageOptions {
     pub response_format: Option<ResponseFormat>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_options: Option<ImageOptions>,
+    /// Custom HTTP headers to include in outbound model requests for this turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_headers: Option<HashMap<String, String>>,
 }
 
 // ============================================================================
@@ -970,6 +994,8 @@ pub struct CopilotClientOptions {
     pub github_token: Option<String>,
     /// Whether to use the logged-in user for authentication.
     pub use_logged_in_user: Option<bool>,
+    /// Server-wide idle timeout for sessions in seconds. Sessions without activity for this duration are automatically cleaned up.
+    pub session_idle_timeout_seconds: Option<u64>,
 }
 
 impl Default for CopilotClientOptions {
@@ -987,6 +1013,7 @@ impl Default for CopilotClientOptions {
             env: None,
             github_token: None,
             use_logged_in_user: None,
+            session_idle_timeout_seconds: None,
         }
     }
 }

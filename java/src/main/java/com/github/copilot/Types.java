@@ -183,6 +183,8 @@ public final class Types {
         public String prompt;
         @JsonProperty("mcpServers") public Map<String, MCPServerConfig> mcpServers;
         public Boolean infer;
+        /** List of skill names to preload into this agent's context. */
+        public List<String> skills;
     }
 
     /** Infinite session configuration. */

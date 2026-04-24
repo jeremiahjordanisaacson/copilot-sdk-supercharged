@@ -744,6 +744,9 @@ class CustomAgentConfig {
   final Map<String, MCPServerConfig>? mcpServers;
   final bool? infer;
 
+  /// List of skill names to preload into this agent's context.
+  final List<String>? skills;
+
   const CustomAgentConfig({
     required this.name,
     this.displayName,
@@ -752,6 +755,7 @@ class CustomAgentConfig {
     required this.prompt,
     this.mcpServers,
     this.infer,
+    this.skills,
   });
 
   Map<String, dynamic> toJson() => {
@@ -764,6 +768,7 @@ class CustomAgentConfig {
           'mcpServers':
               mcpServers!.map((k, v) => MapEntry(k, v.toJson())),
         if (infer != null) 'infer': infer,
+        if (skills != null) 'skills': skills,
       };
 }
 
@@ -1223,12 +1228,16 @@ class MessageOptions {
   /// Options for image generation (used when [responseFormat] is image).
   final ImageOptions? imageOptions;
 
+  /// Custom HTTP headers to include in outbound model requests for this turn.
+  final Map<String, String>? requestHeaders;
+
   const MessageOptions({
     required this.prompt,
     this.attachments,
     this.mode,
     this.responseFormat,
     this.imageOptions,
+    this.requestHeaders,
   });
 }
 
@@ -1255,11 +1264,21 @@ class SessionConfig {
   final SessionHooks? hooks;
   final String? workingDirectory;
   final bool? streaming;
+
+  /// Include sub-agent streaming events in the event stream. Default: true.
+  final bool? includeSubAgentStreamingEvents;
+
   final Map<String, MCPServerConfig>? mcpServers;
   final List<CustomAgentConfig>? customAgents;
   final List<String>? skillDirectories;
   final List<String>? disabledSkills;
   final InfiniteSessionConfig? infiniteSessions;
+
+  /// Per-property overrides for model capabilities, deep-merged over runtime defaults.
+  final Map<String, dynamic>? modelCapabilities;
+
+  /// When true, auto-discovers MCP server configs from working directory. Default: false.
+  final bool? enableConfigDiscovery;
 
   const SessionConfig({
     this.sessionId,
@@ -1276,11 +1295,14 @@ class SessionConfig {
     this.hooks,
     this.workingDirectory,
     this.streaming,
+    this.includeSubAgentStreamingEvents,
     this.mcpServers,
     this.customAgents,
     this.skillDirectories,
     this.disabledSkills,
     this.infiniteSessions,
+    this.modelCapabilities,
+    this.enableConfigDiscovery,
   });
 }
 
@@ -1299,11 +1321,22 @@ class ResumeSessionConfig {
   final SessionHooks? hooks;
   final String? workingDirectory;
   final bool? streaming;
+
+  /// Include sub-agent streaming events in the event stream. Default: true.
+  final bool? includeSubAgentStreamingEvents;
+
   final Map<String, MCPServerConfig>? mcpServers;
   final List<CustomAgentConfig>? customAgents;
   final List<String>? skillDirectories;
   final List<String>? disabledSkills;
   final InfiniteSessionConfig? infiniteSessions;
+
+  /// Per-property overrides for model capabilities, deep-merged over runtime defaults.
+  final Map<String, dynamic>? modelCapabilities;
+
+  /// When true, auto-discovers MCP server configs from working directory. Default: false.
+  final bool? enableConfigDiscovery;
+
   final bool? disableResume;
 
   const ResumeSessionConfig({
@@ -1320,11 +1353,14 @@ class ResumeSessionConfig {
     this.hooks,
     this.workingDirectory,
     this.streaming,
+    this.includeSubAgentStreamingEvents,
     this.mcpServers,
     this.customAgents,
     this.skillDirectories,
     this.disabledSkills,
     this.infiniteSessions,
+    this.modelCapabilities,
+    this.enableConfigDiscovery,
     this.disableResume,
   });
 }
@@ -1373,6 +1409,9 @@ class CopilotClientOptions {
   /// (false when [githubToken] is provided).
   final bool? useLoggedInUser;
 
+  /// Server-wide idle timeout for sessions in seconds.
+  final int? sessionIdleTimeoutSeconds;
+
   const CopilotClientOptions({
     this.cliPath,
     this.cliArgs,
@@ -1386,6 +1425,7 @@ class CopilotClientOptions {
     this.env,
     this.githubToken,
     this.useLoggedInUser,
+    this.sessionIdleTimeoutSeconds,
   });
 }
 

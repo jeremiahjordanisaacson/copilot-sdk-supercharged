@@ -454,6 +454,7 @@ class CustomAgentConfig
      * @param string[]|null $tools Tool names (null for all)
      * @param array<string,MCPLocalServerConfig|MCPRemoteServerConfig>|null $mcpServers
      * @param bool|null $infer Whether available for inference
+     * @param string[]|null $skills Skill names to preload into this agent's context
      */
     public function __construct(
         public readonly string $name,
@@ -463,6 +464,7 @@ class CustomAgentConfig
         public readonly ?array $tools = null,
         public readonly ?array $mcpServers = null,
         public readonly ?bool $infer = null,
+        public readonly ?array $skills = null,
     ) {}
 
     public function toArray(): array
@@ -488,6 +490,9 @@ class CustomAgentConfig
         }
         if ($this->infer !== null) {
             $result['infer'] = $this->infer;
+        }
+        if ($this->skills !== null) {
+            $result['skills'] = $this->skills;
         }
         return $result;
     }
@@ -559,6 +564,8 @@ class SessionConfig
      * @param string[]|null $skillDirectories
      * @param string[]|null $disabledSkills
      * @param InfiniteSessionConfig|null $infiniteSessions
+     * @param array<string,mixed>|null $modelCapabilities Per-property overrides for model capabilities
+     * @param bool|null $enableConfigDiscovery Auto-discover MCP server configs from working directory
      */
     public function __construct(
         public readonly ?string $sessionId = null,
@@ -575,11 +582,15 @@ class SessionConfig
         public readonly ?SessionHooks $hooks = null,
         public readonly ?string $workingDirectory = null,
         public readonly ?bool $streaming = null,
+        /** Include sub-agent streaming events in the event stream. Defaults to true. */
+        public readonly ?bool $includeSubAgentStreamingEvents = null,
         public readonly ?array $mcpServers = null,
         public readonly ?array $customAgents = null,
         public readonly ?array $skillDirectories = null,
         public readonly ?array $disabledSkills = null,
         public readonly ?InfiniteSessionConfig $infiniteSessions = null,
+        public readonly ?array $modelCapabilities = null,
+        public readonly ?bool $enableConfigDiscovery = null,
     ) {}
 
     public function toServerParams(): array
@@ -624,6 +635,9 @@ class SessionConfig
         if ($this->streaming !== null) {
             $params['streaming'] = $this->streaming;
         }
+        if ($this->includeSubAgentStreamingEvents !== null) {
+            $params['includeSubAgentStreamingEvents'] = $this->includeSubAgentStreamingEvents;
+        }
         if ($this->mcpServers !== null) {
             $mcpArr = [];
             foreach ($this->mcpServers as $name => $config) {
@@ -645,6 +659,12 @@ class SessionConfig
         }
         if ($this->infiniteSessions !== null) {
             $params['infiniteSessions'] = $this->infiniteSessions->toArray();
+        }
+        if ($this->modelCapabilities !== null) {
+            $params['modelCapabilities'] = $this->modelCapabilities;
+        }
+        if ($this->enableConfigDiscovery !== null) {
+            $params['enableConfigDiscovery'] = $this->enableConfigDiscovery;
         }
         return $params;
     }
@@ -671,6 +691,8 @@ class ResumeSessionConfig
      * @param string[]|null $skillDirectories
      * @param string[]|null $disabledSkills
      * @param InfiniteSessionConfig|null $infiniteSessions
+     * @param array<string,mixed>|null $modelCapabilities Per-property overrides for model capabilities
+     * @param bool|null $enableConfigDiscovery Auto-discover MCP server configs from working directory
      * @param bool|null $disableResume
      */
     public function __construct(
@@ -687,11 +709,15 @@ class ResumeSessionConfig
         public readonly ?string $workingDirectory = null,
         public readonly ?string $configDir = null,
         public readonly ?bool $streaming = null,
+        /** Include sub-agent streaming events in the event stream. Defaults to true. */
+        public readonly ?bool $includeSubAgentStreamingEvents = null,
         public readonly ?array $mcpServers = null,
         public readonly ?array $customAgents = null,
         public readonly ?array $skillDirectories = null,
         public readonly ?array $disabledSkills = null,
         public readonly ?InfiniteSessionConfig $infiniteSessions = null,
+        public readonly ?array $modelCapabilities = null,
+        public readonly ?bool $enableConfigDiscovery = null,
         public readonly ?bool $disableResume = null,
     ) {}
 
@@ -734,6 +760,9 @@ class ResumeSessionConfig
         if ($this->streaming !== null) {
             $params['streaming'] = $this->streaming;
         }
+        if ($this->includeSubAgentStreamingEvents !== null) {
+            $params['includeSubAgentStreamingEvents'] = $this->includeSubAgentStreamingEvents;
+        }
         if ($this->mcpServers !== null) {
             $mcpArr = [];
             foreach ($this->mcpServers as $name => $config) {
@@ -755,6 +784,12 @@ class ResumeSessionConfig
         }
         if ($this->infiniteSessions !== null) {
             $params['infiniteSessions'] = $this->infiniteSessions->toArray();
+        }
+        if ($this->modelCapabilities !== null) {
+            $params['modelCapabilities'] = $this->modelCapabilities;
+        }
+        if ($this->enableConfigDiscovery !== null) {
+            $params['enableConfigDiscovery'] = $this->enableConfigDiscovery;
         }
         if ($this->disableResume !== null) {
             $params['disableResume'] = $this->disableResume;
@@ -953,6 +988,7 @@ class MessageOptions
      * @param string|null $mode "enqueue" (default) or "immediate"
      * @param string|null $responseFormat Response format (see ResponseFormat constants)
      * @param ImageOptions|null $imageOptions Image generation options
+     * @param array<string,string>|null $requestHeaders Custom HTTP headers for outbound model requests
      */
     public function __construct(
         public readonly string $prompt,
@@ -960,6 +996,7 @@ class MessageOptions
         public readonly ?string $mode = null,
         public readonly ?string $responseFormat = null,
         public readonly ?ImageOptions $imageOptions = null,
+        public readonly ?array $requestHeaders = null,
     ) {}
 
     public function toArray(): array
@@ -979,6 +1016,9 @@ class MessageOptions
         }
         if ($this->imageOptions !== null) {
             $result['imageOptions'] = $this->imageOptions->toArray();
+        }
+        if ($this->requestHeaders !== null) {
+            $result['requestHeaders'] = $this->requestHeaders;
         }
         return $result;
     }
@@ -1580,6 +1620,7 @@ class CopilotClientOptions
      * @param array<string,string>|null $env Environment variables
      * @param string|null $githubToken GitHub token for auth
      * @param bool|null $useLoggedInUser Use logged-in user auth
+     * @param int|null $sessionIdleTimeoutSeconds Server-wide idle timeout for sessions in seconds
      */
     public function __construct(
         public readonly ?string $cliPath = null,
@@ -1594,5 +1635,6 @@ class CopilotClientOptions
         public readonly ?array $env = null,
         public readonly ?string $githubToken = null,
         public readonly ?bool $useLoggedInUser = null,
+        public readonly ?int $sessionIdleTimeoutSeconds = null,
     ) {}
 }

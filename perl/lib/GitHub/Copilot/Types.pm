@@ -431,6 +431,8 @@ has attachments     => (is => 'ro', default => sub { undef });
 has mode            => (is => 'ro', default => sub { undef });
 has response_format => (is => 'ro', default => sub { undef });
 has image_options   => (is => 'ro', default => sub { undef });
+# Custom HTTP headers for outbound model requests
+has request_headers => (is => 'ro', default => sub { undef });
 
 sub TO_JSON {
     my ($self) = @_;
@@ -439,6 +441,7 @@ sub TO_JSON {
     $h{mode}           = $self->mode            if defined $self->mode;
     $h{responseFormat} = $self->response_format if defined $self->response_format;
     $h{imageOptions}   = $self->image_options   if defined $self->image_options;
+    $h{requestHeaders} = $self->request_headers if defined $self->request_headers;
     return \%h;
 }
 
@@ -467,6 +470,12 @@ has config_dir             => (is => 'ro', default => sub { undef });
 has skill_directories      => (is => 'ro', default => sub { undef });
 has disabled_skills        => (is => 'ro', default => sub { undef });
 has infinite_sessions      => (is => 'ro', default => sub { undef });
+# Model capabilities overrides
+has model_capabilities     => (is => 'ro', default => sub { undef });
+# Auto-discover MCP server configs (default: false)
+has enable_config_discovery => (is => 'ro', default => sub { undef });
+# Include sub-agent streaming events (default: true)
+has include_sub_agent_streaming_events => (is => 'ro', default => sub { undef });
 
 sub to_wire {
     my ($self) = @_;
@@ -491,6 +500,13 @@ sub to_wire {
     $payload{skillDirectories} = $self->skill_directories if defined $self->skill_directories;
     $payload{disabledSkills}   = $self->disabled_skills   if defined $self->disabled_skills;
     $payload{infiniteSessions} = $self->infinite_sessions if defined $self->infinite_sessions;
+    $payload{modelCapabilities} = $self->model_capabilities if defined $self->model_capabilities;
+    if (defined $self->enable_config_discovery) {
+        $payload{enableConfigDiscovery} = $self->enable_config_discovery ? \1 : \0;
+    }
+    if (defined $self->include_sub_agent_streaming_events) {
+        $payload{includeSubAgentStreamingEvents} = $self->include_sub_agent_streaming_events ? \1 : \0;
+    }
 
     $payload{requestPermission} = \1 if defined $self->on_permission_request;
     $payload{requestUserInput}  = \1 if defined $self->on_user_input_request;
@@ -512,6 +528,44 @@ sub to_wire {
     }
 
     return \%payload;
+}
+
+# ============================================================================
+# ClientConfig - client/connection configuration
+# ============================================================================
+package GitHub::Copilot::Types::ClientConfig;
+use Moo;
+
+# Server-wide idle timeout for sessions in seconds
+has session_idle_timeout_seconds => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{sessionIdleTimeoutSeconds} = $self->session_idle_timeout_seconds
+        if defined $self->session_idle_timeout_seconds;
+    return \%h;
+}
+
+# ============================================================================
+# CustomAgentConfig - configuration for a custom agent
+# ============================================================================
+package GitHub::Copilot::Types::CustomAgentConfig;
+use Moo;
+
+has name        => (is => 'ro', required => 1);
+has description => (is => 'ro', default => sub { undef });
+has prompt      => (is => 'ro', default => sub { undef });
+# List of skill names to preload
+has skills      => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (name => $self->name);
+    $h{description} = $self->description if defined $self->description;
+    $h{prompt}      = $self->prompt      if defined $self->prompt;
+    $h{skills}      = $self->skills      if defined $self->skills;
+    return \%h;
 }
 
 # ============================================================================

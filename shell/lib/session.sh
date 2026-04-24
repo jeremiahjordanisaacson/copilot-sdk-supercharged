@@ -71,6 +71,11 @@ copilot_session_send() {
         params=$(echo "$params" | jq -c --argjson io "$image_options" '. + {"imageOptions":$io}')
     fi
 
+    # Add custom HTTP headers for outbound model requests if set
+    if [[ -n "$COPILOT_REQUEST_HEADERS" ]]; then
+        params=$(echo "$params" | jq -c --argjson rh "$COPILOT_REQUEST_HEADERS" '. + {"requestHeaders":$rh}')
+    fi
+
     if ! copilot_jsonrpc_request "session.send" "$params"; then
         echo "ERROR: Failed to send message" >&2
         return 1
@@ -132,6 +137,11 @@ copilot_session_send_and_wait() {
     # Add optional imageOptions if provided (expects a JSON string)
     if [[ -n "$image_options" ]]; then
         params=$(echo "$params" | jq -c --argjson io "$image_options" '. + {"imageOptions":$io}')
+    fi
+
+    # Add custom HTTP headers for outbound model requests if set
+    if [[ -n "$COPILOT_REQUEST_HEADERS" ]]; then
+        params=$(echo "$params" | jq -c --argjson rh "$COPILOT_REQUEST_HEADERS" '. + {"requestHeaders":$rh}')
     fi
 
     if ! copilot_jsonrpc_request "session.send" "$params"; then

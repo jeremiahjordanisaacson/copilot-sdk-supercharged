@@ -381,6 +381,7 @@ data CustomAgentConfig = CustomAgentConfig
   , cacPrompt      :: !Text
   , cacMcpServers  :: !(Maybe (Map.Map Text MCPServerConfig))
   , cacInfer       :: !(Maybe Bool)
+  , cacSkills      :: !(Maybe [Text])  -- ^ List of skill names to preload
   } deriving (Show, Eq, Generic)
 
 instance ToJSON CustomAgentConfig where
@@ -392,6 +393,7 @@ instance ToJSON CustomAgentConfig where
     , "prompt"      .= cacPrompt
     , "mcpServers"  .= cacMcpServers
     , "infer"       .= cacInfer
+    , "skills"      .= cacSkills
     ]
 
 instance FromJSON CustomAgentConfig where
@@ -404,6 +406,7 @@ instance FromJSON CustomAgentConfig where
       <*> o .:  "prompt"
       <*> o .:? "mcpServers"
       <*> o .:? "infer"
+      <*> o .:? "skills"
 
 -- ============================================================================
 -- Infinite Session Configuration
@@ -436,96 +439,108 @@ instance FromJSON InfiniteSessionConfig where
 
 -- | Configuration for creating a new session.
 data SessionConfig = SessionConfig
-  { scSessionId          :: !(Maybe Text)
-  , scModel              :: !(Maybe Text)
-  , scReasoningEffort    :: !(Maybe Text)
-  , scConfigDir          :: !(Maybe Text)
-  , scTools              :: ![Tool]
-  , scSystemMessage      :: !(Maybe SystemMessageConfig)
-  , scAvailableTools     :: !(Maybe [Text])
-  , scExcludedTools      :: !(Maybe [Text])
-  , scProvider           :: !(Maybe ProviderConfig)
-  , scOnPermissionRequest :: !(Maybe PermissionHandler)
-  , scOnUserInputRequest :: !(Maybe UserInputHandler)
-  , scHooks              :: !(Maybe SessionHooks)
-  , scWorkingDirectory   :: !(Maybe Text)
-  , scStreaming          :: !(Maybe Bool)
-  , scMcpServers         :: !(Maybe (Map.Map Text MCPServerConfig))
-  , scCustomAgents       :: !(Maybe [CustomAgentConfig])
-  , scSkillDirectories   :: !(Maybe [Text])
-  , scDisabledSkills     :: !(Maybe [Text])
-  , scInfiniteSessions   :: !(Maybe InfiniteSessionConfig)
+  { scSessionId                      :: !(Maybe Text)
+  , scModel                          :: !(Maybe Text)
+  , scReasoningEffort                :: !(Maybe Text)
+  , scConfigDir                      :: !(Maybe Text)
+  , scTools                          :: ![Tool]
+  , scSystemMessage                  :: !(Maybe SystemMessageConfig)
+  , scAvailableTools                 :: !(Maybe [Text])
+  , scExcludedTools                  :: !(Maybe [Text])
+  , scProvider                       :: !(Maybe ProviderConfig)
+  , scOnPermissionRequest            :: !(Maybe PermissionHandler)
+  , scOnUserInputRequest             :: !(Maybe UserInputHandler)
+  , scHooks                          :: !(Maybe SessionHooks)
+  , scWorkingDirectory               :: !(Maybe Text)
+  , scStreaming                      :: !(Maybe Bool)
+  , scIncludeSubAgentStreamingEvents :: !(Maybe Bool)  -- ^ Include sub-agent streaming events (default: true)
+  , scMcpServers                     :: !(Maybe (Map.Map Text MCPServerConfig))
+  , scCustomAgents                   :: !(Maybe [CustomAgentConfig])
+  , scSkillDirectories               :: !(Maybe [Text])
+  , scDisabledSkills                 :: !(Maybe [Text])
+  , scInfiniteSessions               :: !(Maybe InfiniteSessionConfig)
+  , scModelCapabilities              :: !(Maybe (Map.Map Text Value))  -- ^ Model capabilities overrides
+  , scEnableConfigDiscovery          :: !(Maybe Bool)  -- ^ Auto-discover MCP server configs (default: false)
   }
 
 -- | Default (empty) session configuration.
 defaultSessionConfig :: SessionConfig
 defaultSessionConfig = SessionConfig
-  { scSessionId           = Nothing
-  , scModel               = Nothing
-  , scReasoningEffort     = Nothing
-  , scConfigDir           = Nothing
-  , scTools               = []
-  , scSystemMessage       = Nothing
-  , scAvailableTools      = Nothing
-  , scExcludedTools       = Nothing
-  , scProvider            = Nothing
-  , scOnPermissionRequest = Nothing
-  , scOnUserInputRequest  = Nothing
-  , scHooks               = Nothing
-  , scWorkingDirectory    = Nothing
-  , scStreaming           = Nothing
-  , scMcpServers          = Nothing
-  , scCustomAgents        = Nothing
-  , scSkillDirectories    = Nothing
-  , scDisabledSkills      = Nothing
-  , scInfiniteSessions    = Nothing
+  { scSessionId                      = Nothing
+  , scModel                          = Nothing
+  , scReasoningEffort                = Nothing
+  , scConfigDir                      = Nothing
+  , scTools                          = []
+  , scSystemMessage                  = Nothing
+  , scAvailableTools                 = Nothing
+  , scExcludedTools                  = Nothing
+  , scProvider                       = Nothing
+  , scOnPermissionRequest            = Nothing
+  , scOnUserInputRequest             = Nothing
+  , scHooks                          = Nothing
+  , scWorkingDirectory               = Nothing
+  , scStreaming                      = Nothing
+  , scIncludeSubAgentStreamingEvents = Nothing
+  , scMcpServers                     = Nothing
+  , scCustomAgents                   = Nothing
+  , scSkillDirectories               = Nothing
+  , scDisabledSkills                 = Nothing
+  , scInfiniteSessions               = Nothing
+  , scModelCapabilities              = Nothing
+  , scEnableConfigDiscovery          = Nothing
   }
 
 -- | Configuration for resuming a session.
 data ResumeSessionConfig = ResumeSessionConfig
-  { rscModel              :: !(Maybe Text)
-  , rscReasoningEffort    :: !(Maybe Text)
-  , rscTools              :: ![Tool]
-  , rscSystemMessage      :: !(Maybe SystemMessageConfig)
-  , rscAvailableTools     :: !(Maybe [Text])
-  , rscExcludedTools      :: !(Maybe [Text])
-  , rscProvider           :: !(Maybe ProviderConfig)
-  , rscOnPermissionRequest :: !(Maybe PermissionHandler)
-  , rscOnUserInputRequest :: !(Maybe UserInputHandler)
-  , rscHooks              :: !(Maybe SessionHooks)
-  , rscWorkingDirectory   :: !(Maybe Text)
-  , rscConfigDir          :: !(Maybe Text)
-  , rscStreaming          :: !(Maybe Bool)
-  , rscMcpServers         :: !(Maybe (Map.Map Text MCPServerConfig))
-  , rscCustomAgents       :: !(Maybe [CustomAgentConfig])
-  , rscSkillDirectories   :: !(Maybe [Text])
-  , rscDisabledSkills     :: !(Maybe [Text])
-  , rscInfiniteSessions   :: !(Maybe InfiniteSessionConfig)
-  , rscDisableResume      :: !(Maybe Bool)
+  { rscModel                          :: !(Maybe Text)
+  , rscReasoningEffort                :: !(Maybe Text)
+  , rscTools                          :: ![Tool]
+  , rscSystemMessage                  :: !(Maybe SystemMessageConfig)
+  , rscAvailableTools                 :: !(Maybe [Text])
+  , rscExcludedTools                  :: !(Maybe [Text])
+  , rscProvider                       :: !(Maybe ProviderConfig)
+  , rscOnPermissionRequest            :: !(Maybe PermissionHandler)
+  , rscOnUserInputRequest             :: !(Maybe UserInputHandler)
+  , rscHooks                          :: !(Maybe SessionHooks)
+  , rscWorkingDirectory               :: !(Maybe Text)
+  , rscConfigDir                      :: !(Maybe Text)
+  , rscStreaming                      :: !(Maybe Bool)
+  , rscIncludeSubAgentStreamingEvents :: !(Maybe Bool)  -- ^ Include sub-agent streaming events (default: true)
+  , rscMcpServers                     :: !(Maybe (Map.Map Text MCPServerConfig))
+  , rscCustomAgents                   :: !(Maybe [CustomAgentConfig])
+  , rscSkillDirectories               :: !(Maybe [Text])
+  , rscDisabledSkills                 :: !(Maybe [Text])
+  , rscInfiniteSessions               :: !(Maybe InfiniteSessionConfig)
+  , rscModelCapabilities              :: !(Maybe (Map.Map Text Value))  -- ^ Model capabilities overrides
+  , rscEnableConfigDiscovery          :: !(Maybe Bool)  -- ^ Auto-discover MCP server configs (default: false)
+  , rscDisableResume                  :: !(Maybe Bool)
   }
 
 -- | Default (empty) resume session configuration.
 defaultResumeSessionConfig :: ResumeSessionConfig
 defaultResumeSessionConfig = ResumeSessionConfig
-  { rscModel              = Nothing
-  , rscReasoningEffort    = Nothing
-  , rscTools              = []
-  , rscSystemMessage      = Nothing
-  , rscAvailableTools     = Nothing
-  , rscExcludedTools      = Nothing
-  , rscProvider           = Nothing
-  , rscOnPermissionRequest = Nothing
-  , rscOnUserInputRequest = Nothing
-  , rscHooks              = Nothing
-  , rscWorkingDirectory   = Nothing
-  , rscConfigDir          = Nothing
-  , rscStreaming          = Nothing
-  , rscMcpServers         = Nothing
-  , rscCustomAgents       = Nothing
-  , rscSkillDirectories   = Nothing
-  , rscDisabledSkills     = Nothing
-  , rscInfiniteSessions   = Nothing
-  , rscDisableResume      = Nothing
+  { rscModel                          = Nothing
+  , rscReasoningEffort                = Nothing
+  , rscTools                          = []
+  , rscSystemMessage                  = Nothing
+  , rscAvailableTools                 = Nothing
+  , rscExcludedTools                  = Nothing
+  , rscProvider                       = Nothing
+  , rscOnPermissionRequest            = Nothing
+  , rscOnUserInputRequest             = Nothing
+  , rscHooks                          = Nothing
+  , rscWorkingDirectory               = Nothing
+  , rscConfigDir                      = Nothing
+  , rscStreaming                      = Nothing
+  , rscIncludeSubAgentStreamingEvents = Nothing
+  , rscMcpServers                     = Nothing
+  , rscCustomAgents                   = Nothing
+  , rscSkillDirectories               = Nothing
+  , rscDisabledSkills                 = Nothing
+  , rscInfiniteSessions               = Nothing
+  , rscModelCapabilities              = Nothing
+  , rscEnableConfigDiscovery          = Nothing
+  , rscDisableResume                  = Nothing
   }
 
 -- ============================================================================
@@ -656,6 +671,7 @@ data MessageOptions = MessageOptions
   , moMode           :: !(Maybe Text)  -- ^ "enqueue" or "immediate"
   , moResponseFormat :: !(Maybe ResponseFormat)
   , moImageOptions   :: !(Maybe ImageOptions)
+  , moRequestHeaders :: !(Maybe (Map.Map Text Text))  -- ^ Custom HTTP headers for outbound model requests
   } deriving (Show, Eq, Generic)
 
 -- ============================================================================
@@ -1279,27 +1295,29 @@ type SessionLifecycleHandler = SessionLifecycleEvent -> IO ()
 
 -- | Options for creating a 'CopilotClient'.
 data CopilotClientOptions = CopilotClientOptions
-  { ccoCliPath        :: !(Maybe FilePath)
-  , ccoCliArgs        :: ![String]
-  , ccoCwd            :: !(Maybe FilePath)
-  , ccoLogLevel       :: !Text
-  , ccoAutoStart      :: !Bool
-  , ccoAutoRestart    :: !Bool
-  , ccoEnv            :: !(Maybe [(String, String)])
-  , ccoGithubToken    :: !(Maybe Text)
-  , ccoUseLoggedInUser :: !(Maybe Bool)
+  { ccoCliPath                   :: !(Maybe FilePath)
+  , ccoCliArgs                   :: ![String]
+  , ccoCwd                       :: !(Maybe FilePath)
+  , ccoLogLevel                  :: !Text
+  , ccoAutoStart                 :: !Bool
+  , ccoAutoRestart               :: !Bool
+  , ccoEnv                       :: !(Maybe [(String, String)])
+  , ccoGithubToken               :: !(Maybe Text)
+  , ccoUseLoggedInUser           :: !(Maybe Bool)
+  , ccoSessionIdleTimeoutSeconds :: !(Maybe Int)  -- ^ Server-wide idle timeout for sessions in seconds
   }
 
 -- | Default client options.
 defaultClientOptions :: CopilotClientOptions
 defaultClientOptions = CopilotClientOptions
-  { ccoCliPath         = Nothing
-  , ccoCliArgs         = []
-  , ccoCwd             = Nothing
-  , ccoLogLevel        = "info"
-  , ccoAutoStart       = True
-  , ccoAutoRestart     = True
-  , ccoEnv             = Nothing
-  , ccoGithubToken     = Nothing
-  , ccoUseLoggedInUser = Nothing
+  { ccoCliPath                   = Nothing
+  , ccoCliArgs                   = []
+  , ccoCwd                       = Nothing
+  , ccoLogLevel                  = "info"
+  , ccoAutoStart                 = True
+  , ccoAutoRestart               = True
+  , ccoEnv                       = Nothing
+  , ccoGithubToken               = Nothing
+  , ccoUseLoggedInUser           = Nothing
+  , ccoSessionIdleTimeoutSeconds = Nothing
   }

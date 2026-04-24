@@ -760,6 +760,7 @@ Tool <- R6::R6Class(
 #' @field mode Character or NULL. Message processing mode ("enqueue" or "immediate").
 #' @field response_format Character or NULL. Response format ("text", "image", or "json_object").
 #' @field image_options List or NULL. Image generation options (from \code{image_options()}).
+#' @field request_headers Named list or NULL. Custom HTTP headers for outbound model requests.
 #' @export
 MessageOptions <- R6::R6Class(
   "MessageOptions",
@@ -769,6 +770,7 @@ MessageOptions <- R6::R6Class(
     mode = NULL,
     response_format = NULL,
     image_options = NULL,
+    request_headers = NULL,
 
     #' @description Create new MessageOptions.
     #' @param prompt Character. The prompt text.
@@ -776,13 +778,16 @@ MessageOptions <- R6::R6Class(
     #' @param mode Character or NULL.
     #' @param response_format Character or NULL. One of RESPONSE_FORMATS.
     #' @param image_options List or NULL. Image generation options.
+    #' @param request_headers Named list or NULL. Custom HTTP headers for outbound model requests.
     initialize = function(prompt, attachments = NULL, mode = NULL,
-                          response_format = NULL, image_options = NULL) {
+                          response_format = NULL, image_options = NULL,
+                          request_headers = NULL) {
       self$prompt <- prompt
       self$attachments <- attachments
       self$mode <- mode
       self$response_format <- response_format
       self$image_options <- image_options
+      self$request_headers <- request_headers
     },
 
     #' @description Convert to list.
@@ -792,6 +797,7 @@ MessageOptions <- R6::R6Class(
       if (!is.null(self$mode)) result$mode <- self$mode
       if (!is.null(self$response_format)) result$responseFormat <- self$response_format
       if (!is.null(self$image_options)) result$imageOptions <- self$image_options
+      if (!is.null(self$request_headers)) result$requestHeaders <- self$request_headers
       result
     }
   )
@@ -848,6 +854,148 @@ parse_content_block <- function(block) {
   }
   block
 }
+
+
+# ---------------------------------------------------------------------------
+# CopilotClientOptions
+# ---------------------------------------------------------------------------
+
+#' CopilotClientOptions
+#'
+#' Options for creating a CopilotClient connection.
+#'
+#' @field session_idle_timeout_seconds Integer or NULL. Server-wide idle timeout for sessions in seconds.
+#' @export
+CopilotClientOptions <- R6::R6Class(
+  "CopilotClientOptions",
+  public = list(
+    session_idle_timeout_seconds = NULL,
+
+    #' @description Create new CopilotClientOptions.
+    #' @param session_idle_timeout_seconds Integer or NULL. Server-wide idle timeout in seconds.
+    initialize = function(session_idle_timeout_seconds = NULL) {
+      self$session_idle_timeout_seconds <- session_idle_timeout_seconds
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$session_idle_timeout_seconds)) {
+        result$sessionIdleTimeoutSeconds <- as.integer(self$session_idle_timeout_seconds)
+      }
+      result
+    }
+  )
+)
+
+
+# ---------------------------------------------------------------------------
+# AgentConfig
+# ---------------------------------------------------------------------------
+
+#' AgentConfig
+#'
+#' Configuration for a custom agent.
+#'
+#' @field name Character. Agent name.
+#' @field description Character or NULL. Agent description.
+#' @field prompt Character or NULL. Agent prompt.
+#' @field skills Character vector or NULL. List of skill names to preload.
+#' @export
+AgentConfig <- R6::R6Class(
+  "AgentConfig",
+  public = list(
+    name = NULL,
+    description = NULL,
+    prompt = NULL,
+    skills = NULL,
+
+    #' @description Create a new AgentConfig.
+    #' @param name Character. Agent name.
+    #' @param description Character or NULL.
+    #' @param prompt Character or NULL.
+    #' @param skills Character vector or NULL. List of skill names to preload.
+    initialize = function(name, description = NULL, prompt = NULL, skills = NULL) {
+      self$name <- name
+      self$description <- description
+      self$prompt <- prompt
+      self$skills <- skills
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list(name = self$name)
+      if (!is.null(self$description)) result$description <- self$description
+      if (!is.null(self$prompt)) result$prompt <- self$prompt
+      if (!is.null(self$skills)) result$skills <- self$skills
+      result
+    }
+  )
+)
+
+
+# ---------------------------------------------------------------------------
+# SessionConfig
+# ---------------------------------------------------------------------------
+
+#' SessionConfig
+#'
+#' Configuration for creating a Copilot session.
+#'
+#' @field model Character or NULL. Model identifier.
+#' @field system_message Character or NULL. System message.
+#' @field model_capabilities Named list or NULL. Model capabilities overrides.
+#' @field enable_config_discovery Logical or NULL. Auto-discover MCP server configs. Default: FALSE.
+#' @field include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events. Default: TRUE.
+#' @field streaming Logical or NULL. Enable streaming mode.
+#' @export
+SessionConfig <- R6::R6Class(
+  "SessionConfig",
+  public = list(
+    model = NULL,
+    system_message = NULL,
+    model_capabilities = NULL,
+    enable_config_discovery = NULL,
+    include_sub_agent_streaming_events = NULL,
+    streaming = NULL,
+
+    #' @description Create a new SessionConfig.
+    #' @param model Character or NULL.
+    #' @param system_message Character or NULL.
+    #' @param model_capabilities Named list or NULL. Model capabilities overrides.
+    #' @param enable_config_discovery Logical or NULL. Auto-discover MCP server configs.
+    #' @param include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events.
+    #' @param streaming Logical or NULL.
+    initialize = function(model = NULL, system_message = NULL,
+                          model_capabilities = NULL,
+                          enable_config_discovery = NULL,
+                          include_sub_agent_streaming_events = NULL,
+                          streaming = NULL) {
+      self$model <- model
+      self$system_message <- system_message
+      self$model_capabilities <- model_capabilities
+      self$enable_config_discovery <- enable_config_discovery
+      self$include_sub_agent_streaming_events <- include_sub_agent_streaming_events
+      self$streaming <- streaming
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$model)) result$model <- self$model
+      if (!is.null(self$system_message)) result$systemMessage <- self$system_message
+      if (!is.null(self$model_capabilities)) result$modelCapabilities <- self$model_capabilities
+      if (!is.null(self$enable_config_discovery)) {
+        result$enableConfigDiscovery <- self$enable_config_discovery
+      }
+      if (!is.null(self$include_sub_agent_streaming_events)) {
+        result$includeSubAgentStreamingEvents <- self$include_sub_agent_streaming_events
+      }
+      if (!is.null(self$streaming)) result$streaming <- self$streaming
+      result
+    }
+  )
+)
 
 
 # ---------------------------------------------------------------------------
