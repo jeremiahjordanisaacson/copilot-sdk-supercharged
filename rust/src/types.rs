@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // ============================================================================
 // Connection State
@@ -579,6 +580,9 @@ pub struct SessionConfig {
     /// When true, automatically discovers MCP server configurations from the working directory. Defaults to false.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_config_discovery: Option<bool>,
+    /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub github_token: Option<String>,
     /// Set by the SDK based on whether handlers are registered (not user-set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_permission: Option<bool>,
@@ -588,6 +592,92 @@ pub struct SessionConfig {
     /// Set by the SDK based on whether hooks are registered (not user-set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hooks: Option<bool>,
+    /// Slash commands registered for this session (not serialized).
+    #[serde(skip)]
+    pub commands: Option<Vec<CommandDefinition>>,
+    /// Handler for elicitation requests from the server (not serialized).
+    #[serde(skip)]
+    pub on_elicitation_request: Option<ElicitationHandlerFn>,
+}
+
+// ============================================================================
+// Commands
+// ============================================================================
+
+/// Context for a slash-command invocation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandContext {
+    pub session_id: String,
+    pub command: String,
+    pub command_name: String,
+    pub args: String,
+}
+
+/// Clonable, debuggable wrapper for command handler functions.
+#[derive(Clone)]
+pub struct CommandHandlerFn(
+    pub Arc<dyn Fn(CommandContext) -> Result<(), Box<dyn std::error::Error + Send + Sync>> + Send + Sync>,
+);
+
+impl std::fmt::Debug for CommandHandlerFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<command_handler>")
+    }
+}
+
+/// Definition of a slash command registered with the session.
+#[derive(Debug, Clone)]
+pub struct CommandDefinition {
+    /// Command name (without leading /).
+    pub name: String,
+    /// Human-readable description shown in command completion UI.
+    pub description: Option<String>,
+    /// Handler invoked when the command is executed.
+    pub handler: CommandHandlerFn,
+}
+
+// ============================================================================
+// UI Elicitation
+// ============================================================================
+
+/// Context for an elicitation request from the server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElicitationContext {
+    pub session_id: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_schema: Option<HashMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elicitation_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// Result returned from an elicitation handler.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElicitationResult {
+    /// User action: "accept", "decline", or "cancel".
+    pub action: String,
+    /// Form values submitted by the user (present when action is "accept").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<HashMap<String, serde_json::Value>>,
+}
+
+/// Clonable, debuggable wrapper for elicitation handler functions.
+#[derive(Clone)]
+pub struct ElicitationHandlerFn(
+    pub Arc<dyn Fn(ElicitationContext) -> Result<ElicitationResult, Box<dyn std::error::Error + Send + Sync>> + Send + Sync>,
+);
+
+impl std::fmt::Debug for ElicitationHandlerFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<elicitation_handler>")
+    }
 }
 
 /// Configuration for resuming a session.
@@ -634,6 +724,9 @@ pub struct ResumeSessionConfig {
     /// When true, automatically discovers MCP server configurations from the working directory. Defaults to false.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_config_discovery: Option<bool>,
+    /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub github_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disable_resume: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1015,6 +1108,50 @@ pub struct ForegroundSessionInfo {
 }
 
 // ============================================================================
+// Session Filesystem Types
+// ============================================================================
+
+/// Configuration for a custom session filesystem provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionFsConfig {
+    pub initial_cwd: String,
+    pub session_state_path: String,
+    pub conventions: String,
+}
+
+/// File metadata returned by session filesystem operations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionFsFileInfo {
+    pub name: String,
+    pub size: i64,
+    pub is_directory: bool,
+    pub is_file: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<String>,
+}
+
+/// Interface for session filesystem providers.
+///
+/// Implementors provide file operations scoped to a session. Methods use
+/// idiomatic Rust error handling: return an error for failures.
+pub trait SessionFsProvider: Send + Sync {
+    fn read_file(&self, session_id: &str, path: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
+    fn write_file(&self, session_id: &str, path: &str, content: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    fn append_file(&self, session_id: &str, path: &str, content: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    fn exists(&self, session_id: &str, path: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+    fn stat(&self, session_id: &str, path: &str) -> Result<SessionFsFileInfo, Box<dyn std::error::Error + Send + Sync>>;
+    fn mkdir(&self, session_id: &str, path: &str, recursive: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    fn readdir(&self, session_id: &str, path: &str) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>>;
+    fn readdir_with_types(&self, session_id: &str, path: &str) -> Result<Vec<SessionFsFileInfo>, Box<dyn std::error::Error + Send + Sync>>;
+    fn rm(&self, session_id: &str, path: &str, recursive: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    fn rename(&self, session_id: &str, old_path: &str, new_path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+// ============================================================================
 // Client Options
 // ============================================================================
 
@@ -1047,6 +1184,8 @@ pub struct CopilotClientOptions {
     pub use_logged_in_user: Option<bool>,
     /// Server-wide idle timeout for sessions in seconds. Sessions without activity for this duration are automatically cleaned up.
     pub session_idle_timeout_seconds: Option<u64>,
+    /// Custom session filesystem configuration.
+    pub session_fs: Option<SessionFsConfig>,
 }
 
 impl Default for CopilotClientOptions {
@@ -1065,6 +1204,7 @@ impl Default for CopilotClientOptions {
             github_token: None,
             use_logged_in_user: None,
             session_idle_timeout_seconds: None,
+            session_fs: None,
         }
     }
 }

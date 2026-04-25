@@ -383,6 +383,112 @@ typedef struct {
 } copilot_mcp_server_config_t;
 
 /* ============================================================================
+ * Session filesystem types
+ * ============================================================================ */
+
+/**
+ * Configuration for a custom session filesystem provider.
+ */
+typedef struct {
+    const char *initial_cwd;        /**< Initial working directory */
+    const char *session_state_path; /**< Path for session state storage */
+    const char *conventions;        /**< Path conventions ("windows" or "posix") */
+} copilot_session_fs_config_t;
+
+/**
+ * File metadata returned by session filesystem operations.
+ */
+typedef struct {
+    const char *name;
+    int64_t size;
+    bool is_directory;
+    bool is_file;
+    const char *created_at;   /**< ISO 8601 timestamp or NULL */
+    const char *modified_at;  /**< ISO 8601 timestamp or NULL */
+} copilot_session_fs_file_info_t;
+
+/**
+ * Session filesystem provider — a struct of function pointers.
+ * Implementors fill in each callback to provide file operations scoped to a session.
+ */
+typedef struct {
+    copilot_error_t (*read_file)(const char *session_id, const char *path,
+                                  char **out_content, void *user_data);
+    copilot_error_t (*write_file)(const char *session_id, const char *path,
+                                   const char *content, void *user_data);
+    copilot_error_t (*append_file)(const char *session_id, const char *path,
+                                    const char *content, void *user_data);
+    copilot_error_t (*exists)(const char *session_id, const char *path,
+                               bool *out_exists, void *user_data);
+    copilot_error_t (*stat)(const char *session_id, const char *path,
+                             copilot_session_fs_file_info_t *out_info, void *user_data);
+    copilot_error_t (*mkdir)(const char *session_id, const char *path,
+                              bool recursive, void *user_data);
+    copilot_error_t (*readdir)(const char *session_id, const char *path,
+                                char ***out_entries, size_t *out_count, void *user_data);
+    copilot_error_t (*readdir_with_types)(const char *session_id, const char *path,
+                                           copilot_session_fs_file_info_t **out_entries,
+                                           size_t *out_count, void *user_data);
+    copilot_error_t (*rm)(const char *session_id, const char *path,
+                           bool recursive, void *user_data);
+    copilot_error_t (*rename_file)(const char *session_id, const char *old_path,
+                                    const char *new_path, void *user_data);
+    void *user_data; /**< User context passed to all callbacks */
+} copilot_session_fs_provider_t;
+
+/* ============================================================================
+ * Commands
+ * ============================================================================ */
+
+/** Context for a slash-command invocation. */
+typedef struct {
+    const char *session_id;     /**< Session ID where the command was invoked */
+    const char *command;        /**< Full command text (e.g. "/deploy production") */
+    const char *command_name;   /**< Command name without leading / */
+    const char *args;           /**< Raw argument string after the command name */
+} copilot_command_context_t;
+
+/** Handler invoked when a registered slash-command is executed. */
+typedef void (*copilot_command_handler_fn)(
+    const copilot_command_context_t *context,
+    void *user_data
+);
+
+/** Definition of a slash command registered with the session. */
+typedef struct {
+    const char *name;           /**< Command name (without leading /) */
+    const char *description;    /**< Human-readable description (NULL for none) */
+    copilot_command_handler_fn handler;  /**< Handler callback */
+    void *user_data;            /**< User data passed to handler */
+} copilot_command_definition_t;
+
+/* ============================================================================
+ * UI Elicitation
+ * ============================================================================ */
+
+/** Context for an elicitation request from the server. */
+typedef struct {
+    const char *session_id;         /**< Session that triggered the request */
+    const char *message;            /**< Prompt message to show the user */
+    const char *requested_schema_json;  /**< JSON schema for expected input, or NULL */
+    const char *mode;               /**< Elicitation mode, or NULL */
+    const char *elicitation_source;  /**< Source that initiated the request, or NULL */
+    const char *url;                /**< Optional URL for context, or NULL */
+} copilot_elicitation_context_t;
+
+/** Result returned from an elicitation handler. */
+typedef struct {
+    const char *action;     /**< "accept", "decline", or "cancel" */
+    const char *content_json;  /**< JSON string of form values (NULL when not accept) */
+} copilot_elicitation_result_t;
+
+/** Handler for elicitation requests from the server. */
+typedef copilot_elicitation_result_t (*copilot_elicitation_handler_fn)(
+    const copilot_elicitation_context_t *context,
+    void *user_data
+);
+
+/* ============================================================================
  * Client options
  * ============================================================================ */
 
@@ -397,6 +503,7 @@ typedef struct {
     bool use_logged_in_user;   /**< Use stored OAuth tokens (default: true) */
     const char **extra_args;   /**< NULL-terminated array of extra CLI args, or NULL */
     int session_idle_timeout_seconds; /**< Server-wide idle timeout for sessions in seconds (0 = not set) */
+    const copilot_session_fs_config_t *session_fs; /**< Session filesystem config, or NULL */
 } copilot_client_options_t;
 
 /**
@@ -448,6 +555,9 @@ typedef struct {
     /* Skills for custom agents */
     const char **skills;           /**< NULL-terminated array of skill names to preload, or NULL */
 
+    /* GitHub token */
+    const char *github_token;      /**< GitHub token for authentication. Overrides client-level token for this session only. (NULL = none) */
+
     /* Handlers */
     copilot_permission_handler_fn on_permission_request;
     void *permission_user_data;
@@ -457,6 +567,14 @@ typedef struct {
 
     copilot_hook_handler_fn on_hook;
     void *hook_user_data;
+
+    /* Commands */
+    const copilot_command_definition_t *commands;  /**< Array of command definitions */
+    size_t commands_count;
+
+    /* Elicitation */
+    copilot_elicitation_handler_fn on_elicitation_request;
+    void *elicitation_user_data;
 } copilot_session_config_t;
 
 /**

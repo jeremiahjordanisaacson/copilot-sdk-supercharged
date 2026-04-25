@@ -661,6 +661,97 @@ public enum ReasoningEffort: String, Codable, Sendable {
     case xhigh
 }
 
+// MARK: - Commands
+
+/// Context for a slash-command invocation.
+public struct CommandContext: Sendable {
+    /// Session ID where the command was invoked.
+    public var sessionId: String
+    /// The full command text (e.g. "/deploy production").
+    public var command: String
+    /// Command name without leading /.
+    public var commandName: String
+    /// Raw argument string after the command name.
+    public var args: String
+
+    public init(sessionId: String, command: String, commandName: String, args: String) {
+        self.sessionId = sessionId
+        self.command = command
+        self.commandName = commandName
+        self.args = args
+    }
+}
+
+/// Handler invoked when a registered slash-command is executed.
+public typealias CommandHandler = @Sendable (CommandContext) async throws -> Void
+
+/// Definition of a slash command registered with the session.
+public struct CommandDefinition: Sendable {
+    /// Command name (without leading /).
+    public var name: String
+    /// Human-readable description shown in command completion UI.
+    public var description: String?
+    /// Handler invoked when the command is executed.
+    public var handler: CommandHandler
+
+    public init(name: String, description: String? = nil, handler: @escaping CommandHandler) {
+        self.name = name
+        self.description = description
+        self.handler = handler
+    }
+}
+
+// MARK: - UI Elicitation
+
+/// Context for an elicitation request from the server.
+public struct ElicitationContext: Sendable {
+    /// Session ID that triggered the request.
+    public var sessionId: String
+    /// Prompt message describing what information is needed.
+    public var message: String
+    /// JSON Schema describing the form fields (optional).
+    public var requestedSchema: [String: AnyCodable]?
+    /// Elicitation mode ("form" or "url").
+    public var mode: String?
+    /// Source that initiated the request.
+    public var elicitationSource: String?
+    /// URL to open in the user's browser (url mode only).
+    public var url: String?
+
+    public init(
+        sessionId: String,
+        message: String,
+        requestedSchema: [String: AnyCodable]? = nil,
+        mode: String? = nil,
+        elicitationSource: String? = nil,
+        url: String? = nil
+    ) {
+        self.sessionId = sessionId
+        self.message = message
+        self.requestedSchema = requestedSchema
+        self.mode = mode
+        self.elicitationSource = elicitationSource
+        self.url = url
+    }
+}
+
+/// Result returned from an elicitation handler.
+public struct ElicitationResult: Sendable {
+    /// User action: "accept", "decline", or "cancel".
+    public var action: String
+    /// Form values submitted by the user (present when action is "accept").
+    public var content: [String: AnyCodable]?
+
+    public init(action: String, content: [String: AnyCodable]? = nil) {
+        self.action = action
+        self.content = content
+    }
+}
+
+/// Handler for elicitation requests from the server.
+public typealias ElicitationHandler = @Sendable (ElicitationContext) async throws
+    -> ElicitationResult
+
 // MARK: - Session Configuration
 
 /// Configuration for creating a new session.
@@ -690,6 +781,12 @@ public struct SessionConfig: Sendable {
     public var modelCapabilities: [String: AnyCodable]?
     /// When true, automatically discovers MCP server configurations from the working directory. Defaults to false.
     public var enableConfigDiscovery: Bool?
+    /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
+    public var gitHubToken: String?
+    /// Slash commands registered for this session.
+    public var commands: [CommandDefinition]?
+    /// Handler for elicitation requests from the server.
+    public var onElicitationRequest: ElicitationHandler?
 
     public init(
         sessionId: String? = nil,
@@ -713,7 +810,10 @@ public struct SessionConfig: Sendable {
         disabledSkills: [String]? = nil,
         infiniteSessions: InfiniteSessionConfig? = nil,
         modelCapabilities: [String: AnyCodable]? = nil,
-        enableConfigDiscovery: Bool? = nil
+        enableConfigDiscovery: Bool? = nil,
+        gitHubToken: String? = nil,
+        commands: [CommandDefinition]? = nil,
+        onElicitationRequest: ElicitationHandler? = nil
     ) {
         self.sessionId = sessionId
         self.model = model
@@ -737,6 +837,9 @@ public struct SessionConfig: Sendable {
         self.infiniteSessions = infiniteSessions
         self.modelCapabilities = modelCapabilities
         self.enableConfigDiscovery = enableConfigDiscovery
+        self.gitHubToken = gitHubToken
+        self.commands = commands
+        self.onElicitationRequest = onElicitationRequest
     }
 }
 
@@ -766,7 +869,13 @@ public struct ResumeSessionConfig: Sendable {
     public var modelCapabilities: [String: AnyCodable]?
     /// When true, automatically discovers MCP server configurations from the working directory. Defaults to false.
     public var enableConfigDiscovery: Bool?
+    /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
+    public var gitHubToken: String?
     public var disableResume: Bool?
+    /// Slash commands registered for this session.
+    public var commands: [CommandDefinition]?
+    /// Handler for elicitation requests from the server.
+    public var onElicitationRequest: ElicitationHandler?
 
     public init(
         model: String? = nil,
@@ -790,7 +899,10 @@ public struct ResumeSessionConfig: Sendable {
         infiniteSessions: InfiniteSessionConfig? = nil,
         modelCapabilities: [String: AnyCodable]? = nil,
         enableConfigDiscovery: Bool? = nil,
-        disableResume: Bool? = nil
+        gitHubToken: String? = nil,
+        disableResume: Bool? = nil,
+        commands: [CommandDefinition]? = nil,
+        onElicitationRequest: ElicitationHandler? = nil
     ) {
         self.model = model
         self.reasoningEffort = reasoningEffort
@@ -813,7 +925,10 @@ public struct ResumeSessionConfig: Sendable {
         self.infiniteSessions = infiniteSessions
         self.modelCapabilities = modelCapabilities
         self.enableConfigDiscovery = enableConfigDiscovery
+        self.gitHubToken = gitHubToken
         self.disableResume = disableResume
+        self.commands = commands
+        self.onElicitationRequest = onElicitationRequest
     }
 }
 
@@ -1136,6 +1251,54 @@ public struct ForegroundSessionInfo: Codable, Sendable {
     public let workspacePath: String?
 }
 
+// MARK: - Session Filesystem
+
+/// Configuration for a custom session filesystem provider.
+public struct SessionFsConfig: Codable {
+    public var initialCwd: String
+    public var sessionStatePath: String
+    public var conventions: String
+
+    public init(initialCwd: String, sessionStatePath: String, conventions: String) {
+        self.initialCwd = initialCwd
+        self.sessionStatePath = sessionStatePath
+        self.conventions = conventions
+    }
+}
+
+/// File metadata returned by session filesystem operations.
+public struct SessionFsFileInfo {
+    public var name: String
+    public var size: Int64
+    public var isDirectory: Bool
+    public var isFile: Bool
+    public var createdAt: String?
+    public var modifiedAt: String?
+
+    public init(name: String, size: Int64, isDirectory: Bool, isFile: Bool, createdAt: String? = nil, modifiedAt: String? = nil) {
+        self.name = name
+        self.size = size
+        self.isDirectory = isDirectory
+        self.isFile = isFile
+        self.createdAt = createdAt
+        self.modifiedAt = modifiedAt
+    }
+}
+
+/// Protocol for session filesystem providers.
+public protocol SessionFsProvider {
+    func readFile(sessionId: String, path: String) async throws -> String
+    func writeFile(sessionId: String, path: String, content: String) async throws
+    func appendFile(sessionId: String, path: String, content: String) async throws
+    func exists(sessionId: String, path: String) async throws -> Bool
+    func stat(sessionId: String, path: String) async throws -> SessionFsFileInfo
+    func mkdir(sessionId: String, path: String, recursive: Bool) async throws
+    func readdir(sessionId: String, path: String) async throws -> [String]
+    func readdirWithTypes(sessionId: String, path: String) async throws -> [SessionFsFileInfo]
+    func rm(sessionId: String, path: String, recursive: Bool) async throws
+    func rename(sessionId: String, oldPath: String, newPath: String) async throws
+}
+
 // MARK: - Client Options
 
 /// Options for creating a CopilotClient.
@@ -1179,6 +1342,9 @@ public struct CopilotClientOptions: Sendable {
     /// Server-wide idle timeout for sessions in seconds. Sessions without activity for this duration are automatically cleaned up.
     public var sessionIdleTimeoutSeconds: Int?
 
+    /// Configuration for a custom session filesystem provider.
+    public var sessionFs: SessionFsConfig?
+
     public init(
         cliPath: String? = nil,
         cliArgs: [String]? = nil,
@@ -1192,7 +1358,8 @@ public struct CopilotClientOptions: Sendable {
         env: [String: String]? = nil,
         githubToken: String? = nil,
         useLoggedInUser: Bool? = nil,
-        sessionIdleTimeoutSeconds: Int? = nil
+        sessionIdleTimeoutSeconds: Int? = nil,
+        sessionFs: SessionFsConfig? = nil
     ) {
         self.cliPath = cliPath
         self.cliArgs = cliArgs
@@ -1207,6 +1374,7 @@ public struct CopilotClientOptions: Sendable {
         self.githubToken = githubToken
         self.useLoggedInUser = useLoggedInUser
         self.sessionIdleTimeoutSeconds = sessionIdleTimeoutSeconds
+        self.sessionFs = sessionFs
     }
 }
 

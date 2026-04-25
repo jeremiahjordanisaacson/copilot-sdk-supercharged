@@ -467,6 +467,64 @@ defmodule Copilot.Types do
   end
 
   # ---------------------------------------------------------------------------
+  # Commands
+  # ---------------------------------------------------------------------------
+
+  @typedoc "Command handler callback."
+  @type command_handler :: (CommandContext.t() -> :ok | {:error, any()})
+
+  defmodule CommandContext do
+    @moduledoc "Context for a slash-command invocation."
+    @type t :: %__MODULE__{
+            session_id: String.t(),
+            command: String.t(),
+            command_name: String.t(),
+            args: String.t()
+          }
+    defstruct [:session_id, :command, :command_name, args: ""]
+  end
+
+  defmodule CommandDefinition do
+    @moduledoc "Definition of a slash command registered with the session."
+    @type t :: %__MODULE__{
+            name: String.t(),
+            description: String.t() | nil,
+            handler: Copilot.Types.command_handler()
+          }
+    defstruct [:name, :description, :handler]
+  end
+
+  # ---------------------------------------------------------------------------
+  # UI Elicitation
+  # ---------------------------------------------------------------------------
+
+  @typedoc "Elicitation handler callback."
+  @type elicitation_handler ::
+          (ElicitationContext.t() -> ElicitationResult.t() | {:error, any()})
+
+  defmodule ElicitationContext do
+    @moduledoc "Context for an elicitation request from the server."
+    @type t :: %__MODULE__{
+            session_id: String.t(),
+            message: String.t(),
+            requested_schema: map() | nil,
+            mode: String.t() | nil,
+            elicitation_source: String.t() | nil,
+            url: String.t() | nil
+          }
+    defstruct [:session_id, :message, :requested_schema, :mode, :elicitation_source, :url]
+  end
+
+  defmodule ElicitationResult do
+    @moduledoc "Result returned from an elicitation handler."
+    @type t :: %__MODULE__{
+            action: String.t(),
+            content: map() | nil
+          }
+    defstruct [:action, :content]
+  end
+
+  # ---------------------------------------------------------------------------
   # Session Configuration
   # ---------------------------------------------------------------------------
 
@@ -494,7 +552,11 @@ defmodule Copilot.Types do
             infinite_sessions: Copilot.Types.InfiniteSessionConfig.t() | nil,
             model_capabilities: map() | nil,
             enable_config_discovery: boolean() | nil,
-            include_sub_agent_streaming_events: boolean() | nil
+            include_sub_agent_streaming_events: boolean() | nil,
+            github_token: String.t() | nil,
+            commands: [Copilot.Types.CommandDefinition.t()] | nil,
+            on_elicitation_request: Copilot.Types.elicitation_handler() | nil,
+            session_fs: Copilot.Types.SessionFsConfig.t() | nil
           }
     defstruct [
       :session_id,
@@ -521,7 +583,15 @@ defmodule Copilot.Types do
       # Auto-discover MCP server configs (default: false)
       :enable_config_discovery,
       # Include sub-agent streaming events (default: true)
-      :include_sub_agent_streaming_events
+      :include_sub_agent_streaming_events,
+      # GitHub token for authentication. Overrides client-level token for this session only.
+      :github_token,
+      # Slash commands registered for this session
+      :commands,
+      # Handler for elicitation requests from the server
+      :on_elicitation_request,
+      # Custom session filesystem provider configuration
+      :session_fs
     ]
   end
 
@@ -549,7 +619,10 @@ defmodule Copilot.Types do
             disable_resume: boolean() | nil,
             model_capabilities: map() | nil,
             enable_config_discovery: boolean() | nil,
-            include_sub_agent_streaming_events: boolean() | nil
+            include_sub_agent_streaming_events: boolean() | nil,
+            github_token: String.t() | nil,
+            commands: [Copilot.Types.CommandDefinition.t()] | nil,
+            on_elicitation_request: Copilot.Types.elicitation_handler() | nil
           }
     defstruct [
       :model,
@@ -576,7 +649,13 @@ defmodule Copilot.Types do
       # Auto-discover MCP server configs (default: false)
       :enable_config_discovery,
       # Include sub-agent streaming events (default: true)
-      :include_sub_agent_streaming_events
+      :include_sub_agent_streaming_events,
+      # GitHub token for authentication. Overrides client-level token for this session only.
+      :github_token,
+      # Slash commands registered for this session
+      :commands,
+      # Handler for elicitation requests from the server
+      :on_elicitation_request
     ]
   end
 
@@ -640,6 +719,47 @@ defmodule Copilot.Types do
   end
 
   # ---------------------------------------------------------------------------
+  # Session Filesystem Types
+  # ---------------------------------------------------------------------------
+
+  defmodule SessionFsConfig do
+    @moduledoc "Configuration for a custom session filesystem provider."
+    @type t :: %__MODULE__{
+            initial_cwd: String.t(),
+            session_state_path: String.t(),
+            conventions: String.t()
+          }
+    defstruct [:initial_cwd, :session_state_path, :conventions]
+  end
+
+  defmodule SessionFsFileInfo do
+    @moduledoc "File metadata returned by session filesystem operations."
+    @type t :: %__MODULE__{
+            name: String.t(),
+            size: integer(),
+            is_directory: boolean(),
+            is_file: boolean(),
+            created_at: String.t() | nil,
+            modified_at: String.t() | nil
+          }
+    defstruct [:name, :size, :is_directory, :is_file, :created_at, :modified_at]
+  end
+
+  defmodule SessionFsProvider do
+    @moduledoc "Behaviour for session filesystem providers."
+    @callback read_file(session_id :: String.t(), path :: String.t()) :: {:ok, String.t()} | {:error, term()}
+    @callback write_file(session_id :: String.t(), path :: String.t(), content :: String.t()) :: :ok | {:error, term()}
+    @callback append_file(session_id :: String.t(), path :: String.t(), content :: String.t()) :: :ok | {:error, term()}
+    @callback exists?(session_id :: String.t(), path :: String.t()) :: {:ok, boolean()} | {:error, term()}
+    @callback stat(session_id :: String.t(), path :: String.t()) :: {:ok, SessionFsFileInfo.t()} | {:error, term()}
+    @callback mkdir(session_id :: String.t(), path :: String.t(), recursive :: boolean()) :: :ok | {:error, term()}
+    @callback readdir(session_id :: String.t(), path :: String.t()) :: {:ok, [String.t()]} | {:error, term()}
+    @callback readdir_with_types(session_id :: String.t(), path :: String.t()) :: {:ok, [SessionFsFileInfo.t()]} | {:error, term()}
+    @callback rm(session_id :: String.t(), path :: String.t(), recursive :: boolean()) :: :ok | {:error, term()}
+    @callback rename(session_id :: String.t(), old_path :: String.t(), new_path :: String.t()) :: :ok | {:error, term()}
+  end
+
+  # ---------------------------------------------------------------------------
   # Client Options
   # ---------------------------------------------------------------------------
 
@@ -655,7 +775,8 @@ defmodule Copilot.Types do
             env: [{String.t(), String.t()}] | nil,
             github_token: String.t() | nil,
             use_logged_in_user: boolean() | nil,
-            session_idle_timeout_seconds: integer() | nil
+            session_idle_timeout_seconds: integer() | nil,
+            session_fs: Copilot.Types.SessionFsConfig.t() | nil
           }
     defstruct [
       cli_path: nil,
@@ -668,7 +789,9 @@ defmodule Copilot.Types do
       github_token: nil,
       use_logged_in_user: nil,
       # Server-wide idle timeout for sessions in seconds
-      session_idle_timeout_seconds: nil
+      session_idle_timeout_seconds: nil,
+      # Custom session filesystem provider configuration
+      session_fs: nil
     ]
   end
 

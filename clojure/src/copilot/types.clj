@@ -72,6 +72,44 @@
    :arguments    arguments})
 
 ;; ============================================================================
+;; Commands
+;; ============================================================================
+
+(defn command-context
+  "Construct a command context map."
+  [session-id command command-name args]
+  {:session-id   session-id
+   :command      command
+   :command-name command-name
+   :args         args})
+
+(defn command-definition
+  "Define a slash command.  `handler` is a function of one arg (command-context map)."
+  ([name handler] {:name name :handler handler})
+  ([name description handler]
+   {:name name :description description :handler handler}))
+
+;; ============================================================================
+;; UI Elicitation
+;; ============================================================================
+
+(defn elicitation-context
+  "Construct an elicitation context map."
+  [session-id message & {:keys [requested-schema mode elicitation-source url]}]
+  (cond-> {:session-id session-id :message message}
+    requested-schema  (assoc :requested-schema requested-schema)
+    mode              (assoc :mode mode)
+    elicitation-source (assoc :elicitation-source elicitation-source)
+    url               (assoc :url url)))
+
+(defn elicitation-result
+  "Construct an elicitation result map.
+  `action` is one of \"accept\", \"decline\", \"cancel\".
+  `content` is an optional map of form values."
+  ([action] {:action action})
+  ([action content] {:action action :content content}))
+
+;; ============================================================================
 ;; Session configuration
 ;; ============================================================================
 
@@ -85,13 +123,16 @@
     :working-directory :streaming :mcp-servers :custom-agents
     :skill-directories :disabled-skills :infinite-sessions
     :model-capabilities :enable-config-discovery
-    :include-sub-agent-streaming-events"
+    :include-sub-agent-streaming-events
+    :github-token :commands :on-elicitation-request
+    :session-fs (session filesystem provider map)"
   [& {:as opts}]
   (or opts {}))
 
 (defn resume-session-config
   "Create a resume-session configuration map.  Accepts the same keys as
-  `session-config` plus :disable-resume."
+  `session-config` plus :disable-resume, :github-token,
+  :commands, and :on-elicitation-request."
   [& {:as opts}]
   (or opts {}))
 
@@ -398,6 +439,53 @@
   (or opts {}))
 
 ;; ============================================================================
+;; Session filesystem types
+;; ============================================================================
+
+(defn session-fs-config
+  "Create a session filesystem configuration.
+
+  `initial-cwd`        - initial working directory
+  `session-state-path` - path for session state storage
+  `conventions`        - path conventions (\"windows\" or \"posix\")"
+  [initial-cwd session-state-path conventions]
+  {:initialCwd       initial-cwd
+   :sessionStatePath session-state-path
+   :conventions      conventions})
+
+(defn session-fs-file-info
+  "Create a session filesystem file info map.
+
+  `name`          - file or directory name
+  `size`          - size in bytes
+  `is-directory`  - boolean
+  `is-file`       - boolean
+  Optional: :created-at (ISO 8601 string), :modified-at (ISO 8601 string)"
+  [name size is-directory is-file & {:as opts}]
+  (cond-> {:name        name
+           :size        size
+           :isDirectory is-directory
+           :isFile      is-file}
+    (:created-at opts)  (assoc :createdAt (:created-at opts))
+    (:modified-at opts) (assoc :modifiedAt (:modified-at opts))))
+
+;; Session Filesystem Provider convention
+;;
+;; To implement a session filesystem provider in Clojure, supply a map with
+;; the following function-valued keys:
+;;
+;;   :read-file           (fn [session-id path] ...) → string
+;;   :write-file          (fn [session-id path content] ...) → nil
+;;   :append-file         (fn [session-id path content] ...) → nil
+;;   :exists?             (fn [session-id path] ...) → boolean
+;;   :stat                (fn [session-id path] ...) → session-fs-file-info map
+;;   :mkdir               (fn [session-id path recursive?] ...) → nil
+;;   :readdir             (fn [session-id path] ...) → vector of strings
+;;   :readdir-with-types  (fn [session-id path] ...) → vector of file-info maps
+;;   :rm                  (fn [session-id path recursive?] ...) → nil
+;;   :rename              (fn [session-id old-path new-path] ...) → nil
+
+;; ============================================================================
 ;; Client options
 ;; ============================================================================
 
@@ -417,7 +505,8 @@
     :env              - environment variables map
     :github-token     - GitHub auth token
     :use-logged-in-user - use logged-in user auth (default true unless :github-token set)
-    :session-idle-timeout-seconds - server-wide idle timeout for sessions in seconds"
+    :session-idle-timeout-seconds - server-wide idle timeout for sessions in seconds
+    :session-fs       - session filesystem provider map (see session-fs-config)"
   [& {:as opts}]
   (or opts {}))
 

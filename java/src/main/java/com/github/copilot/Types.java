@@ -149,6 +149,75 @@ public final class Types {
         UserInputResponse handle(UserInputRequest request, String sessionId) throws Exception;
     }
 
+    /** Context for a slash-command invocation. */
+    public static class CommandContext {
+        public String sessionId;
+        public String command;
+        public String commandName;
+        public String args;
+
+        public CommandContext() {}
+
+        public CommandContext(String sessionId, String command, String commandName, String args) {
+            this.sessionId = sessionId;
+            this.command = command;
+            this.commandName = commandName;
+            this.args = args;
+        }
+    }
+
+    /** Handler invoked when a registered slash-command is executed. */
+    @FunctionalInterface
+    public interface CommandHandler {
+        void handle(CommandContext context) throws Exception;
+    }
+
+    /** Definition of a slash command registered with the session. */
+    public static class CommandDefinition {
+        public String name;
+        public String description;
+        public CommandHandler handler;
+
+        public CommandDefinition() {}
+
+        public CommandDefinition(String name, String description, CommandHandler handler) {
+            this.name = name;
+            this.description = description;
+            this.handler = handler;
+        }
+    }
+
+    /** Context for an elicitation request from the server. */
+    public static class ElicitationContext {
+        public String sessionId;
+        public String message;
+        public Map<String, Object> requestedSchema;
+        public String mode;
+        public String elicitationSource;
+        public String url;
+
+        public ElicitationContext() {}
+    }
+
+    /** Result returned from an elicitation handler. */
+    public static class ElicitationResult {
+        public String action;
+        public Map<String, Object> content;
+
+        public ElicitationResult() {}
+
+        public ElicitationResult(String action, Map<String, Object> content) {
+            this.action = action;
+            this.content = content;
+        }
+    }
+
+    /** Handler for elicitation requests. */
+    @FunctionalInterface
+    public interface ElicitationHandler {
+        ElicitationResult handle(ElicitationContext context) throws Exception;
+    }
+
     /** Provider configuration for BYOK. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ProviderConfig {
@@ -338,5 +407,41 @@ public final class Types {
     public static class StopError {
         public String message;
         public StopError(String message) { this.message = message; }
+    }
+
+    /** Configuration for a custom session filesystem provider. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class SessionFsConfig {
+        @JsonProperty("initialCwd") public String initialCwd;
+        @JsonProperty("sessionStatePath") public String sessionStatePath;
+        @JsonProperty("conventions") public String conventions;
+    }
+
+    /** File metadata returned by SessionFsProvider methods. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class SessionFsFileInfo {
+        public String name;
+        public long size;
+        @JsonProperty("isDirectory") public boolean isDirectory;
+        @JsonProperty("isFile") public boolean isFile;
+        @JsonProperty("createdAt") public String createdAt;
+        @JsonProperty("modifiedAt") public String modifiedAt;
+    }
+
+    /**
+     * Interface for session filesystem providers.
+     * Implementors provide file operations scoped to a session.
+     */
+    public interface SessionFsProvider {
+        String readFile(String sessionId, String path) throws Exception;
+        void writeFile(String sessionId, String path, String content) throws Exception;
+        void appendFile(String sessionId, String path, String content) throws Exception;
+        boolean exists(String sessionId, String path) throws Exception;
+        SessionFsFileInfo stat(String sessionId, String path) throws Exception;
+        void mkdir(String sessionId, String path, boolean recursive) throws Exception;
+        List<String> readdir(String sessionId, String path) throws Exception;
+        List<SessionFsFileInfo> readdirWithTypes(String sessionId, String path) throws Exception;
+        void rm(String sessionId, String path, boolean recursive) throws Exception;
+        void rename(String sessionId, String oldPath, String newPath) throws Exception;
     }
 }

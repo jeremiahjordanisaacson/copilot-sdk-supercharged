@@ -32,6 +32,30 @@ COPILOT_INCLUDE_SUB_AGENT_STREAMING_EVENTS=""
 # For local/stdio servers, include: tools, command, args, and optionally type, timeout, env, cwd
 # For remote HTTP/SSE servers, include: tools, type ("http"/"sse"), url, and optionally timeout, headers
 COPILOT_MCP_SERVERS=""
+# GitHub token for authentication (string, optional)
+# When set, overrides the client-level token for this session only.
+COPILOT_GITHUB_TOKEN=""
+
+# --- Session Filesystem Config ---
+# Session filesystem configuration (JSON object string, optional)
+# Example: '{"initialCwd":"/home/user/project","sessionStatePath":"/tmp/state","conventions":"posix"}'
+COPILOT_SESSION_FS=""
+
+# Session Filesystem Provider:
+# To implement a session filesystem provider in Shell, define the following
+# functions and set COPILOT_SESSION_FS_PROVIDER="custom":
+#
+#   copilot_session_fs_read_file       <session_id> <path>             → stdout: file content
+#   copilot_session_fs_write_file      <session_id> <path> <content>   → exit 0
+#   copilot_session_fs_append_file     <session_id> <path> <content>   → exit 0
+#   copilot_session_fs_exists          <session_id> <path>             → exit 0 (exists) / exit 1 (not)
+#   copilot_session_fs_stat            <session_id> <path>             → stdout: JSON SessionFsFileInfo
+#   copilot_session_fs_mkdir           <session_id> <path> [recursive] → exit 0
+#   copilot_session_fs_readdir         <session_id> <path>             → stdout: newline-separated names
+#   copilot_session_fs_readdir_types   <session_id> <path>             → stdout: JSON array of FileInfo
+#   copilot_session_fs_rm              <session_id> <path> [recursive] → exit 0
+#   copilot_session_fs_rename          <session_id> <old> <new>        → exit 0
+COPILOT_SESSION_FS_PROVIDER=""
 
 # --- MCP Server Config Helpers ---
 
@@ -228,12 +252,18 @@ copilot_client_create_session() {
             params=$(echo "$params" | jq -c '. + {"enableConfigDiscovery":false}')
         fi
     fi
+    if [[ -n "$COPILOT_SESSION_FS" ]]; then
+        params=$(echo "$params" | jq -c --argjson sf "$COPILOT_SESSION_FS" '. + {"sessionFs":$sf}')
+    fi
     if [[ -n "$COPILOT_INCLUDE_SUB_AGENT_STREAMING_EVENTS" ]]; then
         if [[ "$COPILOT_INCLUDE_SUB_AGENT_STREAMING_EVENTS" == "true" ]]; then
             params=$(echo "$params" | jq -c '. + {"includeSubAgentStreamingEvents":true}')
         else
             params=$(echo "$params" | jq -c '. + {"includeSubAgentStreamingEvents":false}')
         fi
+    fi
+    if [[ -n "$COPILOT_GITHUB_TOKEN" ]]; then
+        params=$(echo "$params" | jq -c --arg tok "$COPILOT_GITHUB_TOKEN" '. + {"gitHubToken":$tok}')
     fi
 
     if ! copilot_jsonrpc_request "session.create" "$params"; then

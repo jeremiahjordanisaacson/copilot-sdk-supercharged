@@ -1303,6 +1303,105 @@ class MessageOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+/// Context for a slash-command invocation.
+class CommandContext {
+  /// Session ID where the command was invoked.
+  final String sessionId;
+
+  /// The full command text (e.g. "/deploy production").
+  final String command;
+
+  /// Command name without leading /.
+  final String commandName;
+
+  /// Raw argument string after the command name.
+  final String args;
+
+  const CommandContext({
+    required this.sessionId,
+    required this.command,
+    required this.commandName,
+    this.args = '',
+  });
+}
+
+/// Handler invoked when a registered slash-command is executed.
+typedef CommandHandler = Future<void> Function(CommandContext context);
+
+/// Definition of a slash command registered with the session.
+class CommandDefinition {
+  /// Command name (without leading /).
+  final String name;
+
+  /// Human-readable description shown in command completion UI.
+  final String? description;
+
+  /// Handler invoked when the command is executed.
+  final CommandHandler handler;
+
+  const CommandDefinition({
+    required this.name,
+    this.description,
+    required this.handler,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// UI Elicitation
+// ---------------------------------------------------------------------------
+
+/// Context for an elicitation request from the server.
+class ElicitationContext {
+  /// Session ID that triggered the request.
+  final String sessionId;
+
+  /// Prompt message describing what information is needed.
+  final String message;
+
+  /// JSON Schema describing the form fields (optional).
+  final Map<String, dynamic>? requestedSchema;
+
+  /// Elicitation mode ("form" or "url").
+  final String? mode;
+
+  /// Source that initiated the request.
+  final String? elicitationSource;
+
+  /// URL to open in the user's browser (url mode only).
+  final String? url;
+
+  const ElicitationContext({
+    required this.sessionId,
+    required this.message,
+    this.requestedSchema,
+    this.mode,
+    this.elicitationSource,
+    this.url,
+  });
+}
+
+/// Result returned from an elicitation handler.
+class ElicitationResult {
+  /// User action: "accept", "decline", or "cancel".
+  final String action;
+
+  /// Form values submitted by the user (present when action is "accept").
+  final Map<String, dynamic>? content;
+
+  const ElicitationResult({
+    required this.action,
+    this.content,
+  });
+}
+
+/// Handler for elicitation requests from the server.
+typedef ElicitationHandler = Future<ElicitationResult> Function(
+    ElicitationContext context);
+
+// ---------------------------------------------------------------------------
 // Session Configuration
 // ---------------------------------------------------------------------------
 
@@ -1341,6 +1440,15 @@ class SessionConfig {
   /// When true, auto-discovers MCP server configs from working directory. Default: false.
   final bool? enableConfigDiscovery;
 
+  /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
+  final String? gitHubToken;
+
+  /// Slash commands registered for this session.
+  final List<CommandDefinition>? commands;
+
+  /// Handler for elicitation requests from the server.
+  final ElicitationHandler? onElicitationRequest;
+
   const SessionConfig({
     this.sessionId,
     this.model,
@@ -1364,6 +1472,9 @@ class SessionConfig {
     this.infiniteSessions,
     this.modelCapabilities,
     this.enableConfigDiscovery,
+    this.gitHubToken,
+    this.commands,
+    this.onElicitationRequest,
   });
 }
 
@@ -1398,6 +1509,15 @@ class ResumeSessionConfig {
   /// When true, auto-discovers MCP server configs from working directory. Default: false.
   final bool? enableConfigDiscovery;
 
+  /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
+  final String? gitHubToken;
+
+  /// Slash commands registered for this session.
+  final List<CommandDefinition>? commands;
+
+  /// Handler for elicitation requests from the server.
+  final ElicitationHandler? onElicitationRequest;
+
   final bool? disableResume;
 
   const ResumeSessionConfig({
@@ -1422,8 +1542,101 @@ class ResumeSessionConfig {
     this.infiniteSessions,
     this.modelCapabilities,
     this.enableConfigDiscovery,
+    this.gitHubToken,
+    this.commands,
+    this.onElicitationRequest,
     this.disableResume,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Session Filesystem Types
+// ---------------------------------------------------------------------------
+
+/// Configuration for a custom session filesystem provider.
+class SessionFsConfig {
+  /// Initial working directory for the session filesystem.
+  final String initialCwd;
+
+  /// Path to the session state directory.
+  final String sessionStatePath;
+
+  /// Conventions string for the session filesystem.
+  final String conventions;
+
+  const SessionFsConfig({
+    required this.initialCwd,
+    required this.sessionStatePath,
+    required this.conventions,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'initialCwd': initialCwd,
+        'sessionStatePath': sessionStatePath,
+        'conventions': conventions,
+      };
+
+  factory SessionFsConfig.fromJson(Map<String, dynamic> json) {
+    return SessionFsConfig(
+      initialCwd: json['initialCwd'] as String,
+      sessionStatePath: json['sessionStatePath'] as String,
+      conventions: json['conventions'] as String,
+    );
+  }
+}
+
+/// File metadata returned by session filesystem operations.
+class SessionFsFileInfo {
+  final String name;
+  final int size;
+  final bool isDirectory;
+  final bool isFile;
+  final String? createdAt;
+  final String? modifiedAt;
+
+  const SessionFsFileInfo({
+    required this.name,
+    required this.size,
+    required this.isDirectory,
+    required this.isFile,
+    this.createdAt,
+    this.modifiedAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'size': size,
+        'isDirectory': isDirectory,
+        'isFile': isFile,
+        if (createdAt != null) 'createdAt': createdAt,
+        if (modifiedAt != null) 'modifiedAt': modifiedAt,
+      };
+
+  factory SessionFsFileInfo.fromJson(Map<String, dynamic> json) {
+    return SessionFsFileInfo(
+      name: json['name'] as String,
+      size: json['size'] as int,
+      isDirectory: json['isDirectory'] as bool,
+      isFile: json['isFile'] as bool,
+      createdAt: json['createdAt'] as String?,
+      modifiedAt: json['modifiedAt'] as String?,
+    );
+  }
+}
+
+/// Interface for session filesystem providers.
+abstract class SessionFsProvider {
+  Future<String> readFile(String sessionId, String path);
+  Future<void> writeFile(String sessionId, String path, String content);
+  Future<void> appendFile(String sessionId, String path, String content);
+  Future<bool> exists(String sessionId, String path);
+  Future<SessionFsFileInfo> stat(String sessionId, String path);
+  Future<void> mkdir(String sessionId, String path, {bool recursive = false});
+  Future<List<String>> readdir(String sessionId, String path);
+  Future<List<SessionFsFileInfo>> readdirWithTypes(
+      String sessionId, String path);
+  Future<void> rm(String sessionId, String path, {bool recursive = false});
+  Future<void> rename(String sessionId, String oldPath, String newPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -1473,6 +1686,9 @@ class CopilotClientOptions {
   /// Server-wide idle timeout for sessions in seconds.
   final int? sessionIdleTimeoutSeconds;
 
+  /// Custom session filesystem provider configuration.
+  final SessionFsConfig? sessionFs;
+
   const CopilotClientOptions({
     this.cliPath,
     this.cliArgs,
@@ -1487,6 +1703,7 @@ class CopilotClientOptions {
     this.githubToken,
     this.useLoggedInUser,
     this.sessionIdleTimeoutSeconds,
+    this.sessionFs,
   });
 }
 

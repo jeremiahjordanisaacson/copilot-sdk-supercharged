@@ -629,6 +629,56 @@ inline void to_json(nlohmann::json& j, const SessionEvent& e) {
 using SessionEventHandler = std::function<void(const SessionEvent&)>;
 
 // ============================================================================
+// Commands
+// ============================================================================
+
+/// Context for a slash-command invocation.
+struct CommandContext {
+    std::string sessionId;
+    std::string command;
+    std::string commandName;
+    std::string args;
+};
+
+/// Handler invoked when a registered slash-command is executed.
+using CommandHandler = std::function<void(const CommandContext&)>;
+
+/// Definition of a slash command registered with the session.
+struct CommandDefinition {
+    /// Command name (without leading /).
+    std::string name;
+    /// Human-readable description shown in command completion UI.
+    std::optional<std::string> description;
+    /// Handler invoked when the command is executed.
+    CommandHandler handler;
+};
+
+// ============================================================================
+// UI Elicitation
+// ============================================================================
+
+/// Context for an elicitation request from the server.
+struct ElicitationContext {
+    std::string sessionId;
+    std::string message;
+    std::optional<nlohmann::json> requestedSchema;
+    std::optional<std::string> mode;
+    std::optional<std::string> elicitationSource;
+    std::optional<std::string> url;
+};
+
+/// Result returned from an elicitation handler.
+struct ElicitationResult {
+    /// User action: "accept", "decline", or "cancel".
+    std::string action;
+    /// Form values submitted by the user (present when action is "accept").
+    std::optional<nlohmann::json> content;
+};
+
+/// Handler for elicitation requests from the server.
+using ElicitationHandler = std::function<ElicitationResult(const ElicitationContext&)>;
+
+// ============================================================================
 // Session Configuration
 // ============================================================================
 
@@ -662,6 +712,14 @@ struct SessionConfig {
 
     /// When true, auto-discovers MCP server configs from working directory. Default: false.
     std::optional<bool> enableConfigDiscovery;
+
+    /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
+    std::optional<std::string> gitHubToken;
+
+    /// Slash commands registered for this session.
+    std::vector<CommandDefinition> commands;
+    /// Handler for elicitation requests from the server.
+    ElicitationHandler onElicitationRequest;
 };
 
 struct ResumeSessionConfig {
@@ -694,6 +752,14 @@ struct ResumeSessionConfig {
 
     /// When true, auto-discovers MCP server configs from working directory. Default: false.
     std::optional<bool> enableConfigDiscovery;
+
+    /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
+    std::optional<std::string> gitHubToken;
+
+    /// Slash commands registered for this session.
+    std::vector<CommandDefinition> commands;
+    /// Handler for elicitation requests from the server.
+    ElicitationHandler onElicitationRequest;
 };
 
 // ============================================================================
@@ -993,6 +1059,54 @@ inline void from_json(const nlohmann::json& j, SessionLifecycleEvent& e) {
 using SessionLifecycleHandler = std::function<void(const SessionLifecycleEvent&)>;
 
 // ============================================================================
+// Session Filesystem Types
+// ============================================================================
+
+/// Configuration for a custom session filesystem provider.
+struct SessionFsConfig {
+    std::string initialCwd;
+    std::string sessionStatePath;
+    std::string conventions;
+};
+
+inline void to_json(nlohmann::json& j, const SessionFsConfig& c) {
+    j = {{"initialCwd", c.initialCwd}, {"sessionStatePath", c.sessionStatePath}, {"conventions", c.conventions}};
+}
+
+inline void from_json(const nlohmann::json& j, SessionFsConfig& c) {
+    j.at("initialCwd").get_to(c.initialCwd);
+    j.at("sessionStatePath").get_to(c.sessionStatePath);
+    j.at("conventions").get_to(c.conventions);
+}
+
+/// File metadata returned by session filesystem operations.
+struct SessionFsFileInfo {
+    std::string name;
+    int64_t size = 0;
+    bool isDirectory = false;
+    bool isFile = false;
+    std::optional<std::string> createdAt;
+    std::optional<std::string> modifiedAt;
+};
+
+/// Abstract base class for session filesystem providers.
+/// Implementors provide file operations scoped to a session.
+class SessionFsProvider {
+public:
+    virtual ~SessionFsProvider() = default;
+    virtual std::string readFile(const std::string& sessionId, const std::string& path) = 0;
+    virtual void writeFile(const std::string& sessionId, const std::string& path, const std::string& content) = 0;
+    virtual void appendFile(const std::string& sessionId, const std::string& path, const std::string& content) = 0;
+    virtual bool exists(const std::string& sessionId, const std::string& path) = 0;
+    virtual SessionFsFileInfo stat(const std::string& sessionId, const std::string& path) = 0;
+    virtual void mkdir(const std::string& sessionId, const std::string& path, bool recursive) = 0;
+    virtual std::vector<std::string> readdir(const std::string& sessionId, const std::string& path) = 0;
+    virtual std::vector<SessionFsFileInfo> readdirWithTypes(const std::string& sessionId, const std::string& path) = 0;
+    virtual void rm(const std::string& sessionId, const std::string& path, bool recursive) = 0;
+    virtual void rename(const std::string& sessionId, const std::string& oldPath, const std::string& newPath) = 0;
+};
+
+// ============================================================================
 // Client Options
 // ============================================================================
 
@@ -1032,6 +1146,9 @@ struct CopilotClientOptions {
 
     /// Server-wide idle timeout for sessions in seconds.
     std::optional<int> sessionIdleTimeoutSeconds;
+
+    /// Configuration for a custom session filesystem provider.
+    std::optional<SessionFsConfig> sessionFs;
 };
 
 } // namespace copilot

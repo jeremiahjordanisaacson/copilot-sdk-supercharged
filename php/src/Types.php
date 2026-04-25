@@ -621,6 +621,70 @@ enum ReasoningEffort: string
 }
 
 // ============================================================================
+// Commands
+// ============================================================================
+
+class CommandContext
+{
+    public function __construct(
+        public readonly string $sessionId,
+        public readonly string $command,
+        public readonly string $commandName,
+        public readonly string $args,
+    ) {}
+}
+
+class CommandDefinition
+{
+    /**
+     * @param string $name Command name (without leading /)
+     * @param string|null $description Human-readable description
+     * @param callable $handler Handler callback receiving CommandContext
+     */
+    public function __construct(
+        public readonly string $name,
+        public readonly ?string $description = null,
+        public /* readonly */ $handler = null,
+    ) {}
+}
+
+// ============================================================================
+// UI Elicitation
+// ============================================================================
+
+class ElicitationContext
+{
+    /**
+     * @param string $sessionId Session that triggered the request
+     * @param string $message Prompt message
+     * @param array<string,mixed>|null $requestedSchema JSON schema for expected input
+     * @param string|null $mode Elicitation mode
+     * @param string|null $elicitationSource Source that initiated the request
+     * @param string|null $url Optional URL for context
+     */
+    public function __construct(
+        public readonly string $sessionId,
+        public readonly string $message,
+        public readonly ?array $requestedSchema = null,
+        public readonly ?string $mode = null,
+        public readonly ?string $elicitationSource = null,
+        public readonly ?string $url = null,
+    ) {}
+}
+
+class ElicitationResult
+{
+    /**
+     * @param string $action "accept", "decline", or "cancel"
+     * @param array<string,mixed>|null $content Form values (present when action is "accept")
+     */
+    public function __construct(
+        public readonly string $action,
+        public readonly ?array $content = null,
+    ) {}
+}
+
+// ============================================================================
 // Session Configuration
 // ============================================================================
 
@@ -673,6 +737,12 @@ class SessionConfig
         public readonly ?InfiniteSessionConfig $infiniteSessions = null,
         public readonly ?array $modelCapabilities = null,
         public readonly ?bool $enableConfigDiscovery = null,
+        /** GitHub token for authentication. When set on session config, overrides the client-level token for this session only. */
+        public readonly ?string $gitHubToken = null,
+        /** @var CommandDefinition[]|null $commands Slash commands for this session */
+        public readonly ?array $commands = null,
+        /** @var callable|null $onElicitationRequest Elicitation handler */
+        public /* readonly */ $onElicitationRequest = null,
     ) {}
 
     public function toServerParams(): array
@@ -748,6 +818,9 @@ class SessionConfig
         if ($this->enableConfigDiscovery !== null) {
             $params['enableConfigDiscovery'] = $this->enableConfigDiscovery;
         }
+        if ($this->gitHubToken !== null) {
+            $params['gitHubToken'] = $this->gitHubToken;
+        }
         return $params;
     }
 }
@@ -800,6 +873,12 @@ class ResumeSessionConfig
         public readonly ?InfiniteSessionConfig $infiniteSessions = null,
         public readonly ?array $modelCapabilities = null,
         public readonly ?bool $enableConfigDiscovery = null,
+        /** GitHub token for authentication. When set on session config, overrides the client-level token for this session only. */
+        public readonly ?string $gitHubToken = null,
+        /** @var CommandDefinition[]|null $commands Slash commands for this session */
+        public readonly ?array $commands = null,
+        /** @var callable|null $onElicitationRequest Elicitation handler */
+        public /* readonly */ $onElicitationRequest = null,
         public readonly ?bool $disableResume = null,
     ) {}
 
@@ -872,6 +951,9 @@ class ResumeSessionConfig
         }
         if ($this->enableConfigDiscovery !== null) {
             $params['enableConfigDiscovery'] = $this->enableConfigDiscovery;
+        }
+        if ($this->gitHubToken !== null) {
+            $params['gitHubToken'] = $this->gitHubToken;
         }
         if ($this->disableResume !== null) {
             $params['disableResume'] = $this->disableResume;
@@ -1684,6 +1766,105 @@ class SessionLifecycleEvent
 }
 
 // ============================================================================
+// Session Filesystem Types
+// ============================================================================
+
+/**
+ * Configuration for a custom session filesystem provider.
+ */
+class SessionFsConfig
+{
+    public function __construct(
+        public readonly string $initialCwd = '',
+        public readonly string $sessionStatePath = '',
+        public readonly string $conventions = '',
+    ) {}
+
+    public function toArray(): array
+    {
+        return [
+            'initialCwd' => $this->initialCwd,
+            'sessionStatePath' => $this->sessionStatePath,
+            'conventions' => $this->conventions,
+        ];
+    }
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            initialCwd: $data['initialCwd'] ?? '',
+            sessionStatePath: $data['sessionStatePath'] ?? '',
+            conventions: $data['conventions'] ?? '',
+        );
+    }
+}
+
+/**
+ * File metadata returned by session filesystem operations.
+ */
+class SessionFsFileInfo
+{
+    public function __construct(
+        public readonly string $name = '',
+        public readonly int $size = 0,
+        public readonly bool $isDirectory = false,
+        public readonly bool $isFile = false,
+        public readonly ?string $createdAt = null,
+        public readonly ?string $modifiedAt = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [
+            'name' => $this->name,
+            'size' => $this->size,
+            'isDirectory' => $this->isDirectory,
+            'isFile' => $this->isFile,
+        ];
+        if ($this->createdAt !== null) {
+            $result['createdAt'] = $this->createdAt;
+        }
+        if ($this->modifiedAt !== null) {
+            $result['modifiedAt'] = $this->modifiedAt;
+        }
+        return $result;
+    }
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            name: $data['name'] ?? '',
+            size: $data['size'] ?? 0,
+            isDirectory: $data['isDirectory'] ?? false,
+            isFile: $data['isFile'] ?? false,
+            createdAt: $data['createdAt'] ?? null,
+            modifiedAt: $data['modifiedAt'] ?? null,
+        );
+    }
+}
+
+/**
+ * Interface for session filesystem providers.
+ *
+ * Implementors provide file operations scoped to a session.
+ */
+interface SessionFsProvider
+{
+    public function readFile(string $sessionId, string $path): string;
+    public function writeFile(string $sessionId, string $path, string $content): void;
+    public function appendFile(string $sessionId, string $path, string $content): void;
+    public function exists(string $sessionId, string $path): bool;
+    public function stat(string $sessionId, string $path): SessionFsFileInfo;
+    public function mkdir(string $sessionId, string $path, bool $recursive = false): void;
+    /** @return string[] */
+    public function readdir(string $sessionId, string $path): array;
+    /** @return SessionFsFileInfo[] */
+    public function readdirWithTypes(string $sessionId, string $path): array;
+    public function rm(string $sessionId, string $path, bool $recursive = false): void;
+    public function rename(string $sessionId, string $oldPath, string $newPath): void;
+}
+
+// ============================================================================
 // Client Options
 // ============================================================================
 
@@ -1703,6 +1884,7 @@ class CopilotClientOptions
      * @param string|null $githubToken GitHub token for auth
      * @param bool|null $useLoggedInUser Use logged-in user auth
      * @param int|null $sessionIdleTimeoutSeconds Server-wide idle timeout for sessions in seconds
+     * @param SessionFsConfig|null $sessionFs Custom session filesystem configuration
      */
     public function __construct(
         public readonly ?string $cliPath = null,
@@ -1718,5 +1900,6 @@ class CopilotClientOptions
         public readonly ?string $githubToken = null,
         public readonly ?bool $useLoggedInUser = null,
         public readonly ?int $sessionIdleTimeoutSeconds = null,
+        public readonly ?SessionFsConfig $sessionFs = null,
     ) {}
 }

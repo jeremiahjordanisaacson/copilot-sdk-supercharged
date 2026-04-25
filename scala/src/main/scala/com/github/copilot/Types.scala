@@ -296,6 +296,51 @@ object ReasoningEffort:
     case "xhigh"  => Right(ReasoningEffort.XHigh)
     case other    => Left(s"Unknown ReasoningEffort: $other")
 
+// ============================================================================
+// Command & Elicitation Types
+// ============================================================================
+
+/** Context for a slash-command invocation. */
+case class CommandContext(
+  sessionId: String,
+  command: String,
+  commandName: String,
+  args: String
+)
+
+/** Handler invoked when a registered slash-command is executed. */
+type CommandHandler = CommandContext => Future[Unit]
+
+/** Definition of a slash command registered with the session. */
+case class CommandDefinition(
+  name: String,
+  description: Option[String] = None,
+  handler: CommandHandler
+)
+
+/** Context for an elicitation request from the server. */
+case class ElicitationContext(
+  sessionId: String,
+  message: String,
+  requestedSchema: Option[Map[String, Json]] = None,
+  mode: Option[String] = None,
+  elicitationSource: Option[String] = None,
+  url: Option[String] = None
+)
+
+/** Result returned from an elicitation handler. */
+case class ElicitationResult(
+  action: String,
+  content: Option[Map[String, Json]] = None
+)
+
+object ElicitationResult:
+  given Encoder[ElicitationResult] = deriveEncoder
+  given Decoder[ElicitationResult] = deriveDecoder
+
+/** Handler for elicitation requests. */
+type ElicitationHandler = ElicitationContext => Future[ElicitationResult]
+
 /** Configuration for creating a new session. */
 case class SessionConfig(
   sessionId: Option[String] = None,
@@ -326,7 +371,16 @@ case class SessionConfig(
   modelCapabilities: Option[Map[String, Json]] = None,
 
   /** When true, auto-discovers MCP server configs from working directory. Default: false. */
-  enableConfigDiscovery: Option[Boolean] = None
+  enableConfigDiscovery: Option[Boolean] = None,
+
+  /** GitHub token for authentication. When set on session config, overrides the client-level token for this session only. */
+  gitHubToken: Option[String] = None,
+
+  /** Slash commands registered for this session. */
+  commands: Option[List[CommandDefinition]] = None,
+
+  /** Handler for elicitation requests from the server. */
+  onElicitationRequest: Option[ElicitationHandler] = None
 )
 
 /** Configuration for resuming an existing session. */
@@ -359,6 +413,15 @@ case class ResumeSessionConfig(
 
   /** When true, auto-discovers MCP server configs from working directory. Default: false. */
   enableConfigDiscovery: Option[Boolean] = None,
+
+  /** GitHub token for authentication. When set on session config, overrides the client-level token for this session only. */
+  gitHubToken: Option[String] = None,
+
+  /** Slash commands registered for this session. */
+  commands: Option[List[CommandDefinition]] = None,
+
+  /** Handler for elicitation requests from the server. */
+  onElicitationRequest: Option[ElicitationHandler] = None,
 
   disableResume: Option[Boolean] = None
 )
@@ -1004,6 +1067,48 @@ case class MessageOptions(
 )
 
 // ============================================================================
+// Session Filesystem Types
+// ============================================================================
+
+/** Configuration for a custom session filesystem provider. */
+case class SessionFsConfig(
+  initialCwd: String,
+  sessionStatePath: String,
+  conventions: String
+)
+
+object SessionFsConfig:
+  given Encoder[SessionFsConfig] = deriveEncoder
+  given Decoder[SessionFsConfig] = deriveDecoder
+
+/** File metadata returned by session filesystem operations. */
+case class SessionFsFileInfo(
+  name: String,
+  size: Long,
+  isDirectory: Boolean,
+  isFile: Boolean,
+  createdAt: Option[String] = None,
+  modifiedAt: Option[String] = None
+)
+
+object SessionFsFileInfo:
+  given Encoder[SessionFsFileInfo] = deriveEncoder
+  given Decoder[SessionFsFileInfo] = deriveDecoder
+
+/** Trait for session filesystem providers. */
+trait SessionFsProvider:
+  def readFile(sessionId: String, path: String): Future[String]
+  def writeFile(sessionId: String, path: String, content: String): Future[Unit]
+  def appendFile(sessionId: String, path: String, content: String): Future[Unit]
+  def exists(sessionId: String, path: String): Future[Boolean]
+  def stat(sessionId: String, path: String): Future[SessionFsFileInfo]
+  def mkdir(sessionId: String, path: String, recursive: Boolean = false): Future[Unit]
+  def readdir(sessionId: String, path: String): Future[List[String]]
+  def readdirWithTypes(sessionId: String, path: String): Future[List[SessionFsFileInfo]]
+  def rm(sessionId: String, path: String, recursive: Boolean = false): Future[Unit]
+  def rename(sessionId: String, oldPath: String, newPath: String): Future[Unit]
+
+// ============================================================================
 // Client Options
 // ============================================================================
 
@@ -1038,5 +1143,8 @@ case class CopilotClientOptions(
   useLoggedInUser: Option[Boolean] = None,
 
   /** Server-wide idle timeout for sessions in seconds. */
-  sessionIdleTimeoutSeconds: Option[Int] = None
+  sessionIdleTimeoutSeconds: Option[Int] = None,
+
+  /** Custom session filesystem provider configuration. */
+  sessionFs: Option[SessionFsConfig] = None
 )

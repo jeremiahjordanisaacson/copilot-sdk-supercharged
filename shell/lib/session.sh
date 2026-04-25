@@ -35,6 +35,38 @@ COPILOT_SYSTEM_MESSAGE_APPEND="append"
 COPILOT_SYSTEM_MESSAGE_REPLACE="replace"
 COPILOT_SYSTEM_MESSAGE_CUSTOMIZE="customize"
 
+# --- Command Handler Support ---
+# Command contexts are passed as JSON strings with these fields:
+#   sessionId     - Session ID where the command was invoked
+#   command       - Full command text (e.g. "/deploy production")
+#   commandName   - Command name without leading /
+#   args          - Raw argument string after the command name
+#
+# Command definitions are JSON objects with:
+#   name          - Command name (without leading /)
+#   description   - Human-readable description (optional)
+#   handler       - Name of the shell function to call
+#
+# Command handlers are shell functions that receive a JSON context string:
+#   my_command_handler() { local context="$1"; ... }
+
+# --- Elicitation Support ---
+# Elicitation contexts are passed as JSON strings with these fields:
+#   sessionId         - Session that triggered the request
+#   message           - Prompt message to show the user
+#   requestedSchema   - JSON schema for expected input (optional)
+#   mode              - Elicitation mode (optional)
+#   elicitationSource - Source that initiated the request (optional)
+#   url               - Optional URL for context
+#
+# Elicitation results are JSON objects with:
+#   action   - "accept", "decline", or "cancel"
+#   content  - JSON string of form values (optional, for "accept")
+#
+# Elicitation handlers are shell functions that receive a JSON context string
+# and echo a JSON result:
+#   my_elicitation_handler() { local context="$1"; echo '{"action":"accept","content":{}}'; }
+
 # --- Session State ---
 # The active session ID (set by copilot_client_create_session / resume)
 COPILOT_SESSION_ID=""

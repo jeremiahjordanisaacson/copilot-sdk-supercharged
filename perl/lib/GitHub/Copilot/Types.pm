@@ -498,6 +498,45 @@ sub TO_JSON {
 }
 
 # ============================================================================
+# Commands
+# ============================================================================
+package GitHub::Copilot::Types::CommandContext;
+use Moo;
+
+has session_id    => (is => 'ro', required => 1);
+has command       => (is => 'ro', required => 1);
+has command_name  => (is => 'ro', required => 1);
+has args          => (is => 'ro', default => sub { '' });
+
+# Definition of a slash command registered with the session.
+package GitHub::Copilot::Types::CommandDefinition;
+use Moo;
+
+has name        => (is => 'ro', required => 1);
+has description => (is => 'ro', default => sub { undef });
+has handler     => (is => 'ro', required => 1);
+
+# ============================================================================
+# UI Elicitation
+# ============================================================================
+package GitHub::Copilot::Types::ElicitationContext;
+use Moo;
+
+has session_id         => (is => 'ro', required => 1);
+has message            => (is => 'ro', required => 1);
+has requested_schema   => (is => 'ro', default => sub { undef });
+has mode               => (is => 'ro', default => sub { undef });
+has elicitation_source => (is => 'ro', default => sub { undef });
+has url                => (is => 'ro', default => sub { undef });
+
+# Result returned from an elicitation handler.
+package GitHub::Copilot::Types::ElicitationResult;
+use Moo;
+
+has action  => (is => 'ro', required => 1);
+has content => (is => 'ro', default => sub { undef });
+
+# ============================================================================
 # SessionConfig - configuration for creating a session
 # ============================================================================
 package GitHub::Copilot::Types::SessionConfig;
@@ -528,6 +567,10 @@ has model_capabilities     => (is => 'ro', default => sub { undef });
 has enable_config_discovery => (is => 'ro', default => sub { undef });
 # Include sub-agent streaming events (default: true)
 has include_sub_agent_streaming_events => (is => 'ro', default => sub { undef });
+# GitHub token for authentication. Overrides client-level token for this session only.
+has github_token              => (is => 'ro', default => sub { undef });
+has commands                => (is => 'ro', default => sub { undef });
+has on_elicitation_request  => (is => 'ro', default => sub { undef });
 
 sub to_wire {
     my ($self) = @_;
@@ -558,6 +601,9 @@ sub to_wire {
     }
     if (defined $self->include_sub_agent_streaming_events) {
         $payload{includeSubAgentStreamingEvents} = $self->include_sub_agent_streaming_events ? \1 : \0;
+    }
+    if (defined $self->github_token) {
+        $payload{gitHubToken} = $self->github_token;
     }
 
     $payload{requestPermission} = \1 if defined $self->on_permission_request;
@@ -658,12 +704,18 @@ use Moo;
 
 # Server-wide idle timeout for sessions in seconds
 has session_idle_timeout_seconds => (is => 'ro', default => sub { undef });
+# Session filesystem provider (hashref of code references)
+has session_fs => (is => 'ro', default => sub { undef });
+# GitHub token for authentication.
+has github_token => (is => 'ro', default => sub { undef });
 
 sub TO_JSON {
     my ($self) = @_;
     my %h;
     $h{sessionIdleTimeoutSeconds} = $self->session_idle_timeout_seconds
         if defined $self->session_idle_timeout_seconds;
+    $h{gitHubToken} = $self->github_token
+        if defined $self->github_token;
     return \%h;
 }
 
@@ -706,6 +758,80 @@ sub TO_JSON {
 #   sessionStart         => on_session_start
 #   sessionEnd           => on_session_end
 #   errorOccurred        => on_error_occurred
+
+# ============================================================================
+# SessionFsConfig - configuration for a session filesystem provider
+# ============================================================================
+package GitHub::Copilot::Types::SessionFsConfig;
+use Moo;
+
+has initial_cwd        => (is => 'ro', required => 1);
+has session_state_path => (is => 'ro', required => 1);
+has conventions        => (is => 'ro', required => 1);
+
+sub TO_JSON {
+    my ($self) = @_;
+    return {
+        initialCwd       => $self->initial_cwd,
+        sessionStatePath => $self->session_state_path,
+        conventions      => $self->conventions,
+    };
+}
+
+# ============================================================================
+# SessionFsFileInfo - file metadata from session filesystem operations
+# ============================================================================
+package GitHub::Copilot::Types::SessionFsFileInfo;
+use Moo;
+
+has name         => (is => 'ro', required => 1);
+has size         => (is => 'ro', default => sub { 0 });
+has isDirectory  => (is => 'ro', default => sub { 0 });
+has isFile       => (is => 'ro', default => sub { 0 });
+has createdAt    => (is => 'ro', default => sub { undef });
+has modifiedAt   => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        name        => $hr->{name}        // '',
+        size        => $hr->{size}        // 0,
+        isDirectory => $hr->{isDirectory} // 0,
+        isFile      => $hr->{isFile}      // 0,
+        createdAt   => $hr->{createdAt},
+        modifiedAt  => $hr->{modifiedAt},
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (
+        name        => $self->name,
+        size        => $self->size,
+        isDirectory => $self->isDirectory ? \1 : \0,
+        isFile      => $self->isFile      ? \1 : \0,
+    );
+    $h{createdAt}  = $self->createdAt  if defined $self->createdAt;
+    $h{modifiedAt} = $self->modifiedAt if defined $self->modifiedAt;
+    return \%h;
+}
+
+# ============================================================================
+# SessionFsProvider convention
+# ============================================================================
+# To implement a session filesystem provider in Perl, supply a hashref with
+# the following code references:
+#
+#   read_file         => sub { my ($session_id, $path) = @_; ... }
+#   write_file        => sub { my ($session_id, $path, $content) = @_; ... }
+#   append_file       => sub { my ($session_id, $path, $content) = @_; ... }
+#   exists            => sub { my ($session_id, $path) = @_; ... }
+#   stat              => sub { my ($session_id, $path) = @_; ... }
+#   mkdir             => sub { my ($session_id, $path, $recursive) = @_; ... }
+#   readdir           => sub { my ($session_id, $path) = @_; ... }
+#   readdir_with_types => sub { my ($session_id, $path) = @_; ... }
+#   rm                => sub { my ($session_id, $path, $recursive) = @_; ... }
+#   rename            => sub { my ($session_id, $old_path, $new_path) = @_; ... }
 
 1;
 

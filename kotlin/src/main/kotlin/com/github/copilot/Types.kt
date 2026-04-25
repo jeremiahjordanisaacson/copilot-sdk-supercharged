@@ -218,6 +218,59 @@ data class InfiniteSessionConfig(
     val bufferExhaustionThreshold: Double? = null
 )
 
+// ============================================================================
+// Command & Elicitation Types
+// ============================================================================
+
+/**
+ * Context for a slash-command invocation.
+ */
+data class CommandContext(
+    val sessionId: String,
+    val command: String,
+    val commandName: String,
+    val args: String
+)
+
+/**
+ * Handler invoked when a registered slash-command is executed.
+ */
+typealias CommandHandler = suspend (context: CommandContext) -> Unit
+
+/**
+ * Definition of a slash command registered with the session.
+ */
+data class CommandDefinition(
+    val name: String,
+    val description: String? = null,
+    val handler: CommandHandler
+)
+
+/**
+ * Context for an elicitation request from the server.
+ */
+data class ElicitationContext(
+    val sessionId: String,
+    val message: String,
+    val requestedSchema: Map<String, Any?>? = null,
+    val mode: String? = null,
+    val elicitationSource: String? = null,
+    val url: String? = null
+)
+
+/**
+ * Result returned from an elicitation handler.
+ */
+data class ElicitationResult(
+    val action: String,
+    val content: Map<String, Any?>? = null
+)
+
+/**
+ * Handler for elicitation requests from the server.
+ */
+typealias ElicitationHandler = suspend (context: ElicitationContext) -> ElicitationResult
+
 /**
  * Configuration for creating a session.
  */
@@ -256,7 +309,18 @@ data class SessionConfig(
     /**
      * When true, auto-discovers MCP server configs from working directory. Default: false.
      */
-    val enableConfigDiscovery: Boolean? = null
+    val enableConfigDiscovery: Boolean? = null,
+
+    /**
+     * GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
+     */
+    val gitHubToken: String? = null,
+
+    /** Slash commands registered for this session. */
+    val commands: List<CommandDefinition>? = null,
+
+    /** Handler for elicitation requests from the server. */
+    val onElicitationRequest: ElicitationHandler? = null
 )
 
 /**
@@ -297,6 +361,17 @@ data class ResumeSessionConfig(
      * When true, auto-discovers MCP server configs from working directory. Default: false.
      */
     val enableConfigDiscovery: Boolean? = null,
+
+    /**
+     * GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
+     */
+    val gitHubToken: String? = null,
+
+    /** Slash commands registered for this session. */
+    val commands: List<CommandDefinition>? = null,
+
+    /** Handler for elicitation requests from the server. */
+    val onElicitationRequest: ElicitationHandler? = null,
 
     val disableResume: Boolean? = null
 )
@@ -650,6 +725,49 @@ data class SessionLifecycleEvent(
 typealias SessionLifecycleHandler = (event: SessionLifecycleEvent) -> Unit
 
 // ============================================================================
+// Session Filesystem Types
+// ============================================================================
+
+/**
+ * Configuration for a custom session filesystem provider.
+ */
+@Serializable
+data class SessionFsConfig(
+    val initialCwd: String,
+    val sessionStatePath: String,
+    val conventions: String
+)
+
+/**
+ * File metadata returned by session filesystem operations.
+ */
+data class SessionFsFileInfo(
+    val name: String,
+    val size: Long,
+    val isDirectory: Boolean,
+    val isFile: Boolean,
+    val createdAt: String? = null,
+    val modifiedAt: String? = null
+)
+
+/**
+ * Interface for session filesystem providers.
+ * Implementors provide file operations scoped to a session.
+ */
+interface SessionFsProvider {
+    suspend fun readFile(sessionId: String, path: String): String
+    suspend fun writeFile(sessionId: String, path: String, content: String)
+    suspend fun appendFile(sessionId: String, path: String, content: String)
+    suspend fun exists(sessionId: String, path: String): Boolean
+    suspend fun stat(sessionId: String, path: String): SessionFsFileInfo
+    suspend fun mkdir(sessionId: String, path: String, recursive: Boolean)
+    suspend fun readdir(sessionId: String, path: String): List<String>
+    suspend fun readdirWithTypes(sessionId: String, path: String): List<SessionFsFileInfo>
+    suspend fun rm(sessionId: String, path: String, recursive: Boolean)
+    suspend fun rename(sessionId: String, oldPath: String, newPath: String)
+}
+
+// ============================================================================
 // Client Options
 // ============================================================================
 
@@ -725,5 +843,10 @@ data class CopilotClientOptions(
     /**
      * Server-wide idle timeout for sessions in seconds.
      */
-    val sessionIdleTimeoutSeconds: Int? = null
+    val sessionIdleTimeoutSeconds: Int? = null,
+
+    /**
+     * Configuration for a custom session filesystem provider.
+     */
+    val sessionFs: SessionFsConfig? = null
 )

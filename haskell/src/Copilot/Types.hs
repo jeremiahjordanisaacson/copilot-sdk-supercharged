@@ -39,6 +39,12 @@ module Copilot.Types
   , MCPServerConfig (..)
   , CustomAgentConfig (..)
   , InfiniteSessionConfig (..)
+  , CommandContext (..)
+  , CommandHandler
+  , CommandDefinition (..)
+  , ElicitationContext (..)
+  , ElicitationResult (..)
+  , ElicitationHandler
   , SessionConfig (..)
   , defaultSessionConfig
   , ResumeSessionConfig (..)
@@ -103,6 +109,11 @@ module Copilot.Types
   , SessionMetadata (..)
   , SessionLifecycleEvent (..)
   , SessionLifecycleHandler
+
+    -- * Session filesystem
+  , SessionFsConfig (..)
+  , SessionFsFileInfo (..)
+  , SessionFsProvider (..)
 
     -- * Client options
   , CopilotClientOptions (..)
@@ -622,6 +633,54 @@ instance FromJSON InfiniteSessionConfig where
       <*> o .:? "bufferExhaustionThreshold"
 
 -- ============================================================================
+-- Commands
+-- ============================================================================
+
+-- | Context for a slash-command invocation.
+data CommandContext = CommandContext
+  { ccSessionId   :: !Text
+  , ccCommand     :: !Text
+  , ccCommandName :: !Text
+  , ccArgs        :: !Text
+  } deriving (Show, Eq, Generic)
+
+-- | Handler invoked when a registered slash-command is executed.
+type CommandHandler = CommandContext -> IO ()
+
+-- | Definition of a slash command registered with the session.
+data CommandDefinition = CommandDefinition
+  { cdName        :: !Text
+  , cdDescription :: !(Maybe Text)
+  , cdHandler     :: !CommandHandler
+  }
+
+instance Show CommandDefinition where
+  show cd = "CommandDefinition { name = " ++ show (cdName cd) ++ " }"
+
+-- ============================================================================
+-- UI Elicitation
+-- ============================================================================
+
+-- | Context for an elicitation request from the server.
+data ElicitationContext = ElicitationContext
+  { ecSessionId        :: !Text
+  , ecMessage          :: !Text
+  , ecRequestedSchema  :: !(Maybe (Map.Map Text Value))
+  , ecMode             :: !(Maybe Text)
+  , ecElicitationSource :: !(Maybe Text)
+  , ecUrl              :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+-- | Result returned from an elicitation handler.
+data ElicitationResult = ElicitationResult
+  { erAction  :: !Text
+  , erContent :: !(Maybe (Map.Map Text Value))
+  } deriving (Show, Eq, Generic)
+
+-- | Handler for elicitation requests from the server.
+type ElicitationHandler = ElicitationContext -> IO ElicitationResult
+
+-- ============================================================================
 -- Session Configuration
 -- ============================================================================
 
@@ -649,6 +708,9 @@ data SessionConfig = SessionConfig
   , scInfiniteSessions               :: !(Maybe InfiniteSessionConfig)
   , scModelCapabilities              :: !(Maybe (Map.Map Text Value))  -- ^ Model capabilities overrides
   , scEnableConfigDiscovery          :: !(Maybe Bool)  -- ^ Auto-discover MCP server configs (default: false)
+  , scGitHubToken                    :: !(Maybe Text)  -- ^ GitHub token for authentication. Overrides client-level token for this session only.
+  , scCommands                       :: !(Maybe [CommandDefinition])  -- ^ Slash commands registered for this session
+  , scOnElicitationRequest           :: !(Maybe ElicitationHandler)  -- ^ Handler for elicitation requests from the server
   }
 
 -- | Default (empty) session configuration.
@@ -676,6 +738,9 @@ defaultSessionConfig = SessionConfig
   , scInfiniteSessions               = Nothing
   , scModelCapabilities              = Nothing
   , scEnableConfigDiscovery          = Nothing
+  , scGitHubToken                    = Nothing
+  , scCommands                       = Nothing
+  , scOnElicitationRequest           = Nothing
   }
 
 -- | Configuration for resuming a session.
@@ -701,6 +766,9 @@ data ResumeSessionConfig = ResumeSessionConfig
   , rscInfiniteSessions               :: !(Maybe InfiniteSessionConfig)
   , rscModelCapabilities              :: !(Maybe (Map.Map Text Value))  -- ^ Model capabilities overrides
   , rscEnableConfigDiscovery          :: !(Maybe Bool)  -- ^ Auto-discover MCP server configs (default: false)
+  , rscGitHubToken                    :: !(Maybe Text)  -- ^ GitHub token for authentication. Overrides client-level token for this session only.
+  , rscCommands                       :: !(Maybe [CommandDefinition])  -- ^ Slash commands registered for this session
+  , rscOnElicitationRequest           :: !(Maybe ElicitationHandler)  -- ^ Handler for elicitation requests from the server
   , rscDisableResume                  :: !(Maybe Bool)
   }
 
@@ -728,6 +796,9 @@ defaultResumeSessionConfig = ResumeSessionConfig
   , rscInfiniteSessions               = Nothing
   , rscModelCapabilities              = Nothing
   , rscEnableConfigDiscovery          = Nothing
+  , rscGitHubToken                    = Nothing
+  , rscCommands                       = Nothing
+  , rscOnElicitationRequest           = Nothing
   , rscDisableResume                  = Nothing
   }
 
@@ -1478,6 +1549,74 @@ instance ToJSON SessionLifecycleEvent where
 type SessionLifecycleHandler = SessionLifecycleEvent -> IO ()
 
 -- ============================================================================
+-- Session Filesystem Types
+-- ============================================================================
+
+-- | Configuration for a custom session filesystem provider.
+data SessionFsConfig = SessionFsConfig
+  { sfcInitialCwd      :: !Text
+  , sfcSessionStatePath :: !Text
+  , sfcConventions      :: !Text
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON SessionFsConfig where
+  parseJSON = withObject "SessionFsConfig" $ \o ->
+    SessionFsConfig
+      <$> o .: "initialCwd"
+      <*> o .: "sessionStatePath"
+      <*> o .: "conventions"
+
+instance ToJSON SessionFsConfig where
+  toJSON SessionFsConfig{..} = object
+    [ "initialCwd"      .= sfcInitialCwd
+    , "sessionStatePath" .= sfcSessionStatePath
+    , "conventions"      .= sfcConventions
+    ]
+
+-- | File metadata returned by session filesystem operations.
+data SessionFsFileInfo = SessionFsFileInfo
+  { sffiName       :: !Text
+  , sffiSize       :: !Int
+  , sffiIsDirectory :: !Bool
+  , sffiIsFile      :: !Bool
+  , sffiCreatedAt   :: !(Maybe Text)
+  , sffiModifiedAt  :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON SessionFsFileInfo where
+  parseJSON = withObject "SessionFsFileInfo" $ \o ->
+    SessionFsFileInfo
+      <$> o .:  "name"
+      <*> o .:  "size"
+      <*> o .:  "isDirectory"
+      <*> o .:  "isFile"
+      <*> o .:? "createdAt"
+      <*> o .:? "modifiedAt"
+
+instance ToJSON SessionFsFileInfo where
+  toJSON SessionFsFileInfo{..} = object $ catMaybes
+    [ Just $ "name"        .= sffiName
+    , Just $ "size"        .= sffiSize
+    , Just $ "isDirectory" .= sffiIsDirectory
+    , Just $ "isFile"      .= sffiIsFile
+    , ("createdAt"  .=) <$> sffiCreatedAt
+    , ("modifiedAt" .=) <$> sffiModifiedAt
+    ]
+
+-- | Type class for session filesystem providers.
+class SessionFsProvider a where
+  sfReadFile        :: a -> Text -> Text -> IO Text
+  sfWriteFile       :: a -> Text -> Text -> Text -> IO ()
+  sfAppendFile      :: a -> Text -> Text -> Text -> IO ()
+  sfExists          :: a -> Text -> Text -> IO Bool
+  sfStat            :: a -> Text -> Text -> IO SessionFsFileInfo
+  sfMkdir           :: a -> Text -> Text -> Bool -> IO ()
+  sfReaddir         :: a -> Text -> Text -> IO [Text]
+  sfReaddirWithTypes :: a -> Text -> Text -> IO [SessionFsFileInfo]
+  sfRm              :: a -> Text -> Text -> Bool -> IO ()
+  sfRename          :: a -> Text -> Text -> Text -> IO ()
+
+-- ============================================================================
 -- Client Options
 -- ============================================================================
 
@@ -1493,6 +1632,7 @@ data CopilotClientOptions = CopilotClientOptions
   , ccoGithubToken               :: !(Maybe Text)
   , ccoUseLoggedInUser           :: !(Maybe Bool)
   , ccoSessionIdleTimeoutSeconds :: !(Maybe Int)  -- ^ Server-wide idle timeout for sessions in seconds
+  , ccoSessionFs                 :: !(Maybe SessionFsConfig)  -- ^ Custom session filesystem provider configuration
   }
 
 -- | Default client options.
@@ -1508,4 +1648,5 @@ defaultClientOptions = CopilotClientOptions
   , ccoGithubToken               = Nothing
   , ccoUseLoggedInUser           = Nothing
   , ccoSessionIdleTimeoutSeconds = Nothing
+  , ccoSessionFs                 = Nothing
   }

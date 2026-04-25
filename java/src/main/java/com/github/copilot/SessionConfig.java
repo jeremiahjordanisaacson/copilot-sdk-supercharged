@@ -36,6 +36,12 @@ public class SessionConfig {
     private Map<String, Object> modelCapabilities;
     /** When true, automatically discovers MCP server configurations from the working directory. Defaults to false. */
     private Boolean enableConfigDiscovery;
+    /** GitHub token for authentication. When set on session config, overrides the client-level token for this session only. */
+    private String gitHubToken;
+    /** Slash commands registered for this session. */
+    private List<CommandDefinition> commands;
+    /** Handler for elicitation requests from the server. */
+    private ElicitationHandler onElicitationRequest;
 
     public SessionConfig() {}
 
@@ -62,6 +68,9 @@ public class SessionConfig {
     public SessionConfig infiniteSessions(InfiniteSessionConfig config) { this.infiniteSessions = config; return this; }
     public SessionConfig modelCapabilities(Map<String, Object> capabilities) { this.modelCapabilities = capabilities; return this; }
     public SessionConfig enableConfigDiscovery(boolean enable) { this.enableConfigDiscovery = enable; return this; }
+    public SessionConfig gitHubToken(String token) { this.gitHubToken = token; return this; }
+    public SessionConfig commands(List<CommandDefinition> commands) { this.commands = commands; return this; }
+    public SessionConfig onElicitationRequest(ElicitationHandler handler) { this.onElicitationRequest = handler; return this; }
 
     // Getters
     public String getSessionId() { return sessionId; }
@@ -86,4 +95,7 @@ public class SessionConfig {
     public InfiniteSessionConfig getInfiniteSessions() { return infiniteSessions; }
     public Map<String, Object> getModelCapabilities() { return modelCapabilities; }
     public Boolean getEnableConfigDiscovery() { return enableConfigDiscovery; }
+    public String getGitHubToken() { return gitHubToken; }
+    public List<CommandDefinition> getCommands() { return commands; }
+    public ElicitationHandler getOnElicitationRequest() { return onElicitationRequest; }
 }

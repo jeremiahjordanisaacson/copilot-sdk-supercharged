@@ -160,6 +160,7 @@ function M.ClientOptions(fields)
         autoStart                  = fields.autoStart ~= false,   -- default true
         autoRestart                = fields.autoRestart ~= false,  -- default true
         sessionIdleTimeoutSeconds  = fields.sessionIdleTimeoutSeconds, -- optional integer, server-wide idle timeout
+        sessionFs                  = fields.sessionFs,                  -- optional table, session filesystem provider
     }
 end
 
@@ -242,6 +243,57 @@ function M.SystemMessageConfig(fields)
     }
 end
 
+--- Create a CommandContext table.
+-- @param fields table with keys: sessionId, command, commandName, args
+-- @return table CommandContext
+function M.CommandContext(fields)
+    fields = fields or {}
+    return {
+        sessionId   = fields.sessionId,
+        command     = fields.command,
+        commandName = fields.commandName,
+        args        = fields.args or "",
+    }
+end
+
+--- Create a CommandDefinition table.
+-- @param fields table with keys: name, description, handler
+-- @return table CommandDefinition
+function M.CommandDefinition(fields)
+    fields = fields or {}
+    return {
+        name        = fields.name,
+        description = fields.description,
+        handler     = fields.handler,    -- function(CommandContext)
+    }
+end
+
+--- Create an ElicitationContext table.
+-- @param fields table with keys: sessionId, message, requestedSchema, mode, elicitationSource, url
+-- @return table ElicitationContext
+function M.ElicitationContext(fields)
+    fields = fields or {}
+    return {
+        sessionId        = fields.sessionId,
+        message          = fields.message,
+        requestedSchema  = fields.requestedSchema,  -- table or nil
+        mode             = fields.mode,
+        elicitationSource = fields.elicitationSource,
+        url              = fields.url,
+    }
+end
+
+--- Create an ElicitationResult table.
+-- @param fields table with keys: action, content
+-- @return table ElicitationResult
+function M.ElicitationResult(fields)
+    fields = fields or {}
+    return {
+        action  = fields.action,   -- "accept", "decline", or "cancel"
+        content = fields.content,  -- table or nil
+    }
+end
+
 --- Create a SessionConfig table.
 -- @param fields table with optional keys (see Go SessionConfig)
 -- @return table SessionConfig
@@ -270,6 +322,10 @@ function M.SessionConfig(fields)
         modelCapabilities               = fields.modelCapabilities,               -- table, model capabilities overrides
         enableConfigDiscovery           = fields.enableConfigDiscovery,           -- boolean, auto-discover MCP server configs (default: false)
         includeSubAgentStreamingEvents  = fields.includeSubAgentStreamingEvents,  -- boolean, include sub-agent streaming events (default: true)
+        -- GitHub token for authentication. Overrides client-level token for this session only.
+        gitHubToken                     = fields.gitHubToken,
+        commands                        = fields.commands,                        -- array of CommandDefinition
+        onElicitationRequest            = fields.onElicitationRequest,            -- function(ElicitationContext) -> ElicitationResult
     }
 end
 
@@ -301,6 +357,10 @@ function M.ResumeSessionConfig(fields)
         modelCapabilities               = fields.modelCapabilities,               -- table, model capabilities overrides
         enableConfigDiscovery           = fields.enableConfigDiscovery,           -- boolean, auto-discover MCP server configs (default: false)
         includeSubAgentStreamingEvents  = fields.includeSubAgentStreamingEvents,  -- boolean, include sub-agent streaming events (default: true)
+        -- GitHub token for authentication. Overrides client-level token for this session only.
+        gitHubToken                     = fields.gitHubToken,
+        commands                        = fields.commands,                        -- array of CommandDefinition
+        onElicitationRequest            = fields.onElicitationRequest,            -- function(ElicitationContext) -> ElicitationResult
     }
 end
 
@@ -616,5 +676,52 @@ function M.parse_content_block(block)
     end
     return block
 end
+
+-- ---------------------------------------------------------------------------
+-- Session Filesystem Types
+-- ---------------------------------------------------------------------------
+
+--- Create a SessionFsConfig table.
+-- @param fields table with keys: initialCwd, sessionStatePath, conventions
+-- @return table SessionFsConfig
+function M.SessionFsConfig(fields)
+    fields = fields or {}
+    return {
+        initialCwd       = fields.initialCwd or "",
+        sessionStatePath = fields.sessionStatePath or "",
+        conventions      = fields.conventions or "posix",
+    }
+end
+
+--- Create a SessionFsFileInfo table.
+-- @param fields table with keys: name, size, isDirectory, isFile, createdAt, modifiedAt
+-- @return table SessionFsFileInfo
+function M.SessionFsFileInfo(fields)
+    fields = fields or {}
+    return {
+        name        = fields.name or "",
+        size        = fields.size or 0,
+        isDirectory = fields.isDirectory or false,
+        isFile      = fields.isFile or false,
+        createdAt   = fields.createdAt,     -- optional string (ISO 8601)
+        modifiedAt  = fields.modifiedAt,    -- optional string (ISO 8601)
+    }
+end
+
+--- Session Filesystem Provider convention.
+-- To implement a session filesystem provider in Lua, create a table with
+-- the following function fields:
+--   readFile(sessionId, path) → string
+--   writeFile(sessionId, path, content) → nil
+--   appendFile(sessionId, path, content) → nil
+--   exists(sessionId, path) → boolean
+--   stat(sessionId, path) → SessionFsFileInfo table
+--   mkdir(sessionId, path, recursive) → nil
+--   readdir(sessionId, path) → array of strings
+--   readdirWithTypes(sessionId, path) → array of SessionFsFileInfo tables
+--   rm(sessionId, path, recursive) → nil
+--   rename(sessionId, oldPath, newPath) → nil
+--
+-- Each function should return nil, err_string on error.
 
 return M

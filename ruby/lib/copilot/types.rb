@@ -262,6 +262,22 @@ module Copilot
     end
   end
 
+  # Context for a slash-command invocation.
+  CommandContext = Struct.new(:session_id, :command, :command_name, :args, keyword_init: true)
+
+  # Definition of a slash command registered with the session.
+  # handler is a callable (Proc/lambda) that receives a CommandContext.
+  CommandDefinition = Struct.new(:name, :description, :handler, keyword_init: true)
+
+  # Context for an elicitation request from the server.
+  ElicitationContext = Struct.new(
+    :session_id, :message, :requested_schema, :mode, :elicitation_source, :url,
+    keyword_init: true
+  )
+
+  # Result returned from an elicitation handler.
+  ElicitationResult = Struct.new(:action, :content, keyword_init: true)
+
   # Configuration for creating a session.
   SessionConfig = Struct.new(
     :session_id, :model, :reasoning_effort, :config_dir,
@@ -271,6 +287,8 @@ module Copilot
     :mcp_servers, :custom_agents,
     :skill_directories, :disabled_skills, :infinite_sessions,
     :model_capabilities, :enable_config_discovery,
+    :github_token,
+    :commands, :on_elicitation_request,
     keyword_init: true
   )
 
@@ -283,6 +301,8 @@ module Copilot
     :mcp_servers, :custom_agents,
     :skill_directories, :disabled_skills, :infinite_sessions,
     :model_capabilities, :enable_config_discovery,
+    :github_token,
+    :commands, :on_elicitation_request,
     :disable_resume,
     keyword_init: true
   )
@@ -539,11 +559,39 @@ module Copilot
     end
   end
 
+  # Configuration for a custom session filesystem provider.
+  SessionFsConfig = Struct.new(
+    :initial_cwd, :session_state_path, :conventions,
+    keyword_init: true
+  )
+
+  # File metadata returned by session filesystem operations.
+  SessionFsFileInfo = Struct.new(
+    :name, :size, :is_directory, :is_file, :created_at, :modified_at,
+    keyword_init: true
+  )
+
+  # Interface for session filesystem providers.
+  # Implementors should include this module and define all methods.
+  module SessionFsProvider
+    def read_file(session_id, path) raise NotImplementedError end
+    def write_file(session_id, path, content) raise NotImplementedError end
+    def append_file(session_id, path, content) raise NotImplementedError end
+    def exists?(session_id, path) raise NotImplementedError end
+    def stat(session_id, path) raise NotImplementedError end
+    def mkdir(session_id, path, recursive: false) raise NotImplementedError end
+    def readdir(session_id, path) raise NotImplementedError end
+    def readdir_with_types(session_id, path) raise NotImplementedError end
+    def rm(session_id, path, recursive: false) raise NotImplementedError end
+    def rename(session_id, old_path, new_path) raise NotImplementedError end
+  end
+
   # Client options.
   ClientOptions = Struct.new(
     :cli_path, :cli_args, :cwd, :port, :use_stdio, :cli_url,
     :log_level, :auto_start, :auto_restart, :env,
     :github_token, :use_logged_in_user, :session_idle_timeout_seconds,
+    :session_fs,
     keyword_init: true
   )
 end

@@ -857,6 +857,124 @@ parse_content_block <- function(block) {
 
 
 # ---------------------------------------------------------------------------
+# Session Filesystem Types
+# ---------------------------------------------------------------------------
+
+#' SessionFsConfig
+#'
+#' Configuration for a custom session filesystem provider.
+#'
+#' @field initial_cwd Character. Initial working directory.
+#' @field session_state_path Character. Path for session state storage.
+#' @field conventions Character. Path conventions ("windows" or "posix").
+#' @export
+SessionFsConfig <- R6::R6Class(
+  "SessionFsConfig",
+  public = list(
+    initial_cwd = NULL,
+    session_state_path = NULL,
+    conventions = NULL,
+
+    #' @description Create a new SessionFsConfig.
+    #' @param initial_cwd Character.
+    #' @param session_state_path Character.
+    #' @param conventions Character.
+    initialize = function(initial_cwd, session_state_path, conventions) {
+      self$initial_cwd <- initial_cwd
+      self$session_state_path <- session_state_path
+      self$conventions <- conventions
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      list(
+        initialCwd = self$initial_cwd,
+        sessionStatePath = self$session_state_path,
+        conventions = self$conventions
+      )
+    }
+  )
+)
+
+#' SessionFsFileInfo
+#'
+#' File metadata returned by session filesystem operations.
+#'
+#' @field name Character. File or directory name.
+#' @field size Numeric. Size in bytes.
+#' @field is_directory Logical. Whether the entry is a directory.
+#' @field is_file Logical. Whether the entry is a file.
+#' @field created_at Character or NULL. ISO 8601 creation timestamp.
+#' @field modified_at Character or NULL. ISO 8601 modification timestamp.
+#' @export
+SessionFsFileInfo <- R6::R6Class(
+  "SessionFsFileInfo",
+  public = list(
+    name = NULL,
+    size = 0,
+    is_directory = FALSE,
+    is_file = FALSE,
+    created_at = NULL,
+    modified_at = NULL,
+
+    #' @description Create a new SessionFsFileInfo.
+    #' @param name Character.
+    #' @param size Numeric.
+    #' @param is_directory Logical.
+    #' @param is_file Logical.
+    #' @param created_at Character or NULL.
+    #' @param modified_at Character or NULL.
+    initialize = function(name, size, is_directory, is_file,
+                          created_at = NULL, modified_at = NULL) {
+      self$name <- name
+      self$size <- size
+      self$is_directory <- is_directory
+      self$is_file <- is_file
+      self$created_at <- created_at
+      self$modified_at <- modified_at
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list(
+        name = self$name,
+        size = self$size,
+        isDirectory = self$is_directory,
+        isFile = self$is_file
+      )
+      if (!is.null(self$created_at)) result$createdAt <- self$created_at
+      if (!is.null(self$modified_at)) result$modifiedAt <- self$modified_at
+      result
+    }
+  )
+)
+
+#' Session Filesystem Provider
+#'
+#' To implement a session filesystem provider in R, create a list with the
+#' following function elements. Each function receives a session ID and
+#' path arguments, and should return the appropriate result or stop() on error.
+#'
+#' Expected functions:
+#' \itemize{
+#'   \item \code{read_file(session_id, path)} → character
+#'   \item \code{write_file(session_id, path, content)} → invisible NULL
+#'   \item \code{append_file(session_id, path, content)} → invisible NULL
+#'   \item \code{exists(session_id, path)} → logical
+#'   \item \code{stat(session_id, path)} → SessionFsFileInfo
+#'   \item \code{mkdir(session_id, path, recursive)} → invisible NULL
+#'   \item \code{readdir(session_id, path)} → character vector
+#'   \item \code{readdir_with_types(session_id, path)} → list of SessionFsFileInfo
+#'   \item \code{rm(session_id, path, recursive)} → invisible NULL
+#'   \item \code{rename(session_id, old_path, new_path)} → invisible NULL
+#' }
+#'
+#' @name SessionFsProvider
+#' @keywords internal
+NULL
+
+
+# ---------------------------------------------------------------------------
 # CopilotClientOptions
 # ---------------------------------------------------------------------------
 
@@ -865,16 +983,24 @@ parse_content_block <- function(block) {
 #' Options for creating a CopilotClient connection.
 #'
 #' @field session_idle_timeout_seconds Integer or NULL. Server-wide idle timeout for sessions in seconds.
+#' @field session_fs List or NULL. Session filesystem provider (list of callback functions).
 #' @export
 CopilotClientOptions <- R6::R6Class(
   "CopilotClientOptions",
   public = list(
     session_idle_timeout_seconds = NULL,
+    session_fs = NULL,
+    ## GitHub token for authentication.
+    github_token = NULL,
 
     #' @description Create new CopilotClientOptions.
     #' @param session_idle_timeout_seconds Integer or NULL. Server-wide idle timeout in seconds.
-    initialize = function(session_idle_timeout_seconds = NULL) {
+    #' @param session_fs List or NULL. Session filesystem provider (list of callback functions).
+    #' @param github_token Character or NULL. GitHub token for authentication.
+    initialize = function(session_idle_timeout_seconds = NULL, session_fs = NULL, github_token = NULL) {
       self$session_idle_timeout_seconds <- session_idle_timeout_seconds
+      self$session_fs <- session_fs
+      self$github_token <- github_token
     },
 
     #' @description Convert to list.
@@ -882,6 +1008,12 @@ CopilotClientOptions <- R6::R6Class(
       result <- list()
       if (!is.null(self$session_idle_timeout_seconds)) {
         result$sessionIdleTimeoutSeconds <- as.integer(self$session_idle_timeout_seconds)
+      }
+      if (!is.null(self$session_fs)) {
+        result$sessionFs <- self$session_fs
+      }
+      if (!is.null(self$github_token)) {
+        result$gitHubToken <- self$github_token
       }
       result
     }
@@ -1131,6 +1263,143 @@ SystemMessageConfig <- R6::R6Class(
 )
 
 # ---------------------------------------------------------------------------
+# CommandContext
+# ---------------------------------------------------------------------------
+
+#' CommandContext
+#'
+#' Context for a slash-command invocation.
+#'
+#' @field session_id Character. Session ID where the command was invoked.
+#' @field command Character. Full command text.
+#' @field command_name Character. Command name without leading /.
+#' @field args Character. Raw argument string after the command name.
+#' @export
+CommandContext <- R6::R6Class(
+  "CommandContext",
+  public = list(
+    session_id = NULL,
+    command = NULL,
+    command_name = NULL,
+    args = NULL,
+
+    #' @description Create a new CommandContext.
+    #' @param session_id Character.
+    #' @param command Character.
+    #' @param command_name Character.
+    #' @param args Character.
+    initialize = function(session_id, command, command_name, args = "") {
+      self$session_id <- session_id
+      self$command <- command
+      self$command_name <- command_name
+      self$args <- args
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# CommandDefinition
+# ---------------------------------------------------------------------------
+
+#' CommandDefinition
+#'
+#' Definition of a slash command registered with the session.
+#'
+#' @field name Character. Command name (without leading /).
+#' @field description Character or NULL. Human-readable description.
+#' @field handler Function. Handler callback receiving a CommandContext.
+#' @export
+CommandDefinition <- R6::R6Class(
+  "CommandDefinition",
+  public = list(
+    name = NULL,
+    description = NULL,
+    handler = NULL,
+
+    #' @description Create a new CommandDefinition.
+    #' @param name Character.
+    #' @param description Character or NULL.
+    #' @param handler Function.
+    initialize = function(name, description = NULL, handler) {
+      self$name <- name
+      self$description <- description
+      self$handler <- handler
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# ElicitationContext
+# ---------------------------------------------------------------------------
+
+#' ElicitationContext
+#'
+#' Context for an elicitation request from the server.
+#'
+#' @field session_id Character.
+#' @field message Character.
+#' @field requested_schema Named list or NULL.
+#' @field mode Character or NULL.
+#' @field elicitation_source Character or NULL.
+#' @field url Character or NULL.
+#' @export
+ElicitationContext <- R6::R6Class(
+  "ElicitationContext",
+  public = list(
+    session_id = NULL,
+    message = NULL,
+    requested_schema = NULL,
+    mode = NULL,
+    elicitation_source = NULL,
+    url = NULL,
+
+    #' @description Create a new ElicitationContext.
+    #' @param session_id Character.
+    #' @param message Character.
+    #' @param requested_schema Named list or NULL.
+    #' @param mode Character or NULL.
+    #' @param elicitation_source Character or NULL.
+    #' @param url Character or NULL.
+    initialize = function(session_id, message, requested_schema = NULL,
+                          mode = NULL, elicitation_source = NULL, url = NULL) {
+      self$session_id <- session_id
+      self$message <- message
+      self$requested_schema <- requested_schema
+      self$mode <- mode
+      self$elicitation_source <- elicitation_source
+      self$url <- url
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# ElicitationResult
+# ---------------------------------------------------------------------------
+
+#' ElicitationResult
+#'
+#' Result returned from an elicitation handler.
+#'
+#' @field action Character. "accept", "decline", or "cancel".
+#' @field content Named list or NULL.
+#' @export
+ElicitationResult <- R6::R6Class(
+  "ElicitationResult",
+  public = list(
+    action = NULL,
+    content = NULL,
+
+    #' @description Create a new ElicitationResult.
+    #' @param action Character.
+    #' @param content Named list or NULL.
+    initialize = function(action, content = NULL) {
+      self$action <- action
+      self$content <- content
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
 # SessionConfig
 # ---------------------------------------------------------------------------
 
@@ -1145,6 +1414,8 @@ SystemMessageConfig <- R6::R6Class(
 #' @field include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events. Default: TRUE.
 #' @field streaming Logical or NULL. Enable streaming mode.
 #' @field mcp_servers Named list or NULL. Map of server name to MCPLocalServerConfig/MCPRemoteServerConfig.
+#' @field commands List of CommandDefinition or NULL. Slash commands registered for this session.
+#' @field on_elicitation_request Function or NULL. Handler for elicitation requests from the server.
 #' @export
 SessionConfig <- R6::R6Class(
   "SessionConfig",
@@ -1156,6 +1427,9 @@ SessionConfig <- R6::R6Class(
     include_sub_agent_streaming_events = NULL,
     streaming = NULL,
     mcp_servers = NULL,
+    github_token = NULL,
+    commands = NULL,
+    on_elicitation_request = NULL,
 
     #' @description Create a new SessionConfig.
     #' @param model Character or NULL.
@@ -1165,12 +1439,18 @@ SessionConfig <- R6::R6Class(
     #' @param include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events.
     #' @param streaming Logical or NULL.
     #' @param mcp_servers Named list or NULL. Map of name to MCP server config.
+    #' @param github_token Character or NULL. GitHub token for authentication. Overrides client-level token for this session.
+    #' @param commands List of CommandDefinition or NULL.
+    #' @param on_elicitation_request Function or NULL.
     initialize = function(model = NULL, system_message = NULL,
                           model_capabilities = NULL,
                           enable_config_discovery = NULL,
                           include_sub_agent_streaming_events = NULL,
                           streaming = NULL,
-                          mcp_servers = NULL) {
+                          mcp_servers = NULL,
+                          github_token = NULL,
+                          commands = NULL,
+                          on_elicitation_request = NULL) {
       self$model <- model
       self$system_message <- system_message
       self$model_capabilities <- model_capabilities
@@ -1178,6 +1458,9 @@ SessionConfig <- R6::R6Class(
       self$include_sub_agent_streaming_events <- include_sub_agent_streaming_events
       self$streaming <- streaming
       self$mcp_servers <- mcp_servers
+      self$github_token <- github_token
+      self$commands <- commands
+      self$on_elicitation_request <- on_elicitation_request
     },
 
     #' @description Convert to list.
@@ -1210,6 +1493,15 @@ SessionConfig <- R6::R6Class(
           }
         }
         result$mcpServers <- mcp_list
+      }
+      if (!is.null(self$github_token)) result$gitHubToken <- self$github_token
+      if (!is.null(self$commands)) {
+        cmds_list <- lapply(self$commands, function(cmd) {
+          c_list <- list(name = cmd$name)
+          if (!is.null(cmd$description)) c_list$description <- cmd$description
+          c_list
+        })
+        result$commands <- cmds_list
       }
       result
     }
