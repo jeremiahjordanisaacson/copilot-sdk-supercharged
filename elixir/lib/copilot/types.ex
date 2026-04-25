@@ -171,7 +171,65 @@ defmodule Copilot.Types do
     end
   end
 
-  @type system_message_config :: SystemMessageAppendConfig.t() | SystemMessageReplaceConfig.t()
+  defmodule SystemMessageCustomizeConfig do
+    @moduledoc "Customize mode: override individual sections of the system prompt."
+    @type t :: %__MODULE__{
+            mode: :customize,
+            sections: %{optional(String.t()) => SectionOverride.t()} | nil,
+            content: String.t() | nil
+          }
+    defstruct mode: :customize, sections: nil, content: nil
+
+    def to_map(%__MODULE__{} = c) do
+      m = %{"mode" => "customize"}
+      m = if c.sections do
+        sections_map = c.sections
+          |> Enum.map(fn {k, v} -> {k, SectionOverride.to_map(v)} end)
+          |> Map.new()
+        Map.put(m, "sections", sections_map)
+      else
+        m
+      end
+      if c.content, do: Map.put(m, "content", c.content), else: m
+    end
+  end
+
+  defmodule SectionOverride do
+    @moduledoc "Override operation for a single system prompt section."
+    @type t :: %__MODULE__{action: String.t(), content: String.t() | nil}
+    defstruct [:action, :content]
+
+    def to_map(%__MODULE__{} = o) do
+      m = %{"action" => o.action}
+      if o.content, do: Map.put(m, "content", o.content), else: m
+    end
+  end
+
+  @doc "Known system prompt section identifiers for the 'customize' mode."
+  defmodule SystemPromptSection do
+    @moduledoc false
+    def identity, do: "identity"
+    def tone, do: "tone"
+    def tool_efficiency, do: "tool_efficiency"
+    def environment_context, do: "environment_context"
+    def code_change_rules, do: "code_change_rules"
+    def guidelines, do: "guidelines"
+    def safety, do: "safety"
+    def tool_instructions, do: "tool_instructions"
+    def custom_instructions, do: "custom_instructions"
+    def last_instructions, do: "last_instructions"
+  end
+
+  @doc "Override action constants."
+  defmodule SectionOverrideAction do
+    @moduledoc false
+    def replace, do: "replace"
+    def remove, do: "remove"
+    def append, do: "append"
+    def prepend, do: "prepend"
+  end
+
+  @type system_message_config :: SystemMessageAppendConfig.t() | SystemMessageReplaceConfig.t() | SystemMessageCustomizeConfig.t()
 
   # ---------------------------------------------------------------------------
   # Permission Types

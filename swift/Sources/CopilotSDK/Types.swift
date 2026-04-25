@@ -137,26 +137,72 @@ public struct Tool: Sendable {
 
 // MARK: - System Message Configuration
 
-/// System message configuration for session creation.
-public struct SystemMessageConfig: Codable, Sendable {
-    /// "append" (default) or "replace"
-    public var mode: String?
-    /// Content string. Required for "replace" mode, optional for "append".
+/// Known system prompt section identifiers for the "customize" mode.
+public struct SystemPromptSection {
+    public static let identity = "identity"
+    public static let tone = "tone"
+    public static let toolEfficiency = "tool_efficiency"
+    public static let environmentContext = "environment_context"
+    public static let codeChangeRules = "code_change_rules"
+    public static let guidelines = "guidelines"
+    public static let safety = "safety"
+    public static let toolInstructions = "tool_instructions"
+    public static let customInstructions = "custom_instructions"
+    public static let lastInstructions = "last_instructions"
+}
+
+/// Override action for a system prompt section.
+public struct SectionOverrideAction {
+    public static let replace = "replace"
+    public static let remove = "remove"
+    public static let append = "append"
+    public static let prepend = "prepend"
+}
+
+/// Override operation for a single system prompt section.
+public struct SectionOverride: Codable, Sendable {
+    public var action: String
     public var content: String?
 
-    public init(mode: String? = nil, content: String? = nil) {
-        self.mode = mode
+    public init(action: String, content: String? = nil) {
+        self.action = action
         self.content = content
     }
+}
 
-    /// Creates an append-mode config with optional additional content.
+/// System message configuration for session creation.
+///
+/// - Append mode (default): SDK foundation + optional custom content
+/// - Replace mode: Full control, caller provides entire system message
+/// - Customize mode: Section-level overrides with graceful fallback
+public struct SystemMessageConfig: Codable, Sendable {
+    /// The configuration mode: "append", "replace", or "customize".
+    public var mode: String?
+    /// Content string. For append: appended after SDK sections. For replace: the entire message.
+    /// For customize: additional content appended after all sections.
+    public var content: String?
+    /// Section overrides, keyed by section identifier. Only used in "customize" mode.
+    public var sections: [String: SectionOverride]?
+
+    public init(mode: String? = nil, content: String? = nil, sections: [String: SectionOverride]? = nil) {
+        self.mode = mode
+        self.content = content
+        self.sections = sections
+    }
+
+    /// Append mode: SDK foundation + optional custom content.
     public static func append(content: String? = nil) -> SystemMessageConfig {
         SystemMessageConfig(mode: "append", content: content)
     }
 
-    /// Creates a replace-mode config with the full system message.
+    /// Replace mode: caller provides entire system message.
     public static func replace(content: String) -> SystemMessageConfig {
         SystemMessageConfig(mode: "replace", content: content)
+    }
+
+    /// Customize mode: override individual sections of the system prompt.
+    public static func customize(sections: [String: SectionOverride]? = nil, content: String? = nil) -> SystemMessageConfig {
+        SystemMessageConfig(mode: "customize", content: content, sections: sections)
     }
 }
 

@@ -112,6 +112,49 @@ pub struct ToolCallResponsePayload {
 // System Message Configuration
 // ============================================================================
 
+/// Known system prompt section identifiers for the "customize" mode.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum SystemPromptSection {
+    #[serde(rename = "identity")]
+    Identity,
+    #[serde(rename = "tone")]
+    Tone,
+    #[serde(rename = "tool_efficiency")]
+    ToolEfficiency,
+    #[serde(rename = "environment_context")]
+    EnvironmentContext,
+    #[serde(rename = "code_change_rules")]
+    CodeChangeRules,
+    #[serde(rename = "guidelines")]
+    Guidelines,
+    #[serde(rename = "safety")]
+    Safety,
+    #[serde(rename = "tool_instructions")]
+    ToolInstructions,
+    #[serde(rename = "custom_instructions")]
+    CustomInstructions,
+    #[serde(rename = "last_instructions")]
+    LastInstructions,
+}
+
+/// Override action for a system prompt section.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SectionOverrideAction {
+    Replace,
+    Remove,
+    Append,
+    Prepend,
+}
+
+/// Override operation for a single system prompt section.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SectionOverride {
+    pub action: SectionOverrideAction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+}
+
 /// System message configuration for session creation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "camelCase")]
@@ -125,6 +168,14 @@ pub enum SystemMessageConfig {
     /// Replace mode: Full control, caller provides entire system message.
     #[serde(rename = "replace")]
     Replace { content: String },
+    /// Customize mode: Override individual sections of the system prompt.
+    #[serde(rename = "customize")]
+    Customize {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sections: Option<HashMap<SystemPromptSection, SectionOverride>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content: Option<String>,
+    },
 }
 
 // ============================================================================

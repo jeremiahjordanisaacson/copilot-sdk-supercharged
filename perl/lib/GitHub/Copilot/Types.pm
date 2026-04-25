@@ -446,6 +446,58 @@ sub TO_JSON {
 }
 
 # ============================================================================
+# MCPLocalServerConfig - local/stdio MCP server configuration
+# ============================================================================
+package GitHub::Copilot::Types::MCPLocalServerConfig;
+use Moo;
+
+has tools   => (is => 'ro', default => sub { ['*'] });
+has type    => (is => 'ro', default => sub { undef });
+has timeout => (is => 'ro', default => sub { undef });
+has command => (is => 'ro', required => 1);
+has args    => (is => 'ro', default => sub { [] });
+has env     => (is => 'ro', default => sub { undef });
+has cwd     => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (
+        tools   => $self->tools,
+        command => $self->command,
+        args    => $self->args,
+    );
+    $h{type}    = $self->type    if defined $self->type;
+    $h{timeout} = $self->timeout if defined $self->timeout;
+    $h{env}     = $self->env     if defined $self->env;
+    $h{cwd}     = $self->cwd     if defined $self->cwd;
+    return \%h;
+}
+
+# ============================================================================
+# MCPRemoteServerConfig - remote HTTP/SSE MCP server configuration
+# ============================================================================
+package GitHub::Copilot::Types::MCPRemoteServerConfig;
+use Moo;
+
+has tools   => (is => 'ro', default => sub { ['*'] });
+has type    => (is => 'ro', required => 1);
+has timeout => (is => 'ro', default => sub { undef });
+has url     => (is => 'ro', required => 1);
+has headers => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (
+        tools => $self->tools,
+        type  => $self->type,
+        url   => $self->url,
+    );
+    $h{timeout} = $self->timeout if defined $self->timeout;
+    $h{headers} = $self->headers if defined $self->headers;
+    return \%h;
+}
+
+# ============================================================================
 # SessionConfig - configuration for creating a session
 # ============================================================================
 package GitHub::Copilot::Types::SessionConfig;
@@ -528,6 +580,74 @@ sub to_wire {
     }
 
     return \%payload;
+}
+
+# ============================================================================
+# System message configuration types
+# ============================================================================
+
+# Known system prompt section identifiers for "customize" mode.
+package GitHub::Copilot::Types::SystemPromptSection;
+
+use constant {
+    IDENTITY            => 'identity',
+    TONE                => 'tone',
+    TOOL_EFFICIENCY     => 'tool_efficiency',
+    ENVIRONMENT_CONTEXT => 'environment_context',
+    CODE_CHANGE_RULES   => 'code_change_rules',
+    GUIDELINES          => 'guidelines',
+    SAFETY              => 'safety',
+    TOOL_INSTRUCTIONS   => 'tool_instructions',
+    CUSTOM_INSTRUCTIONS => 'custom_instructions',
+    LAST_INSTRUCTIONS   => 'last_instructions',
+};
+
+# Override action for a system prompt section.
+package GitHub::Copilot::Types::SectionOverrideAction;
+
+use constant {
+    REPLACE => 'replace',
+    REMOVE  => 'remove',
+    APPEND  => 'append',
+    PREPEND => 'prepend',
+};
+
+# Override operation for a single system prompt section.
+package GitHub::Copilot::Types::SectionOverride;
+use Moo;
+
+has action  => (is => 'ro', required => 1);
+has content => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (action => $self->action);
+    $h{content} = $self->content if defined $self->content;
+    return \%h;
+}
+
+# System message configuration.
+# Supports "append" (default), "replace", and "customize" modes.
+package GitHub::Copilot::Types::SystemMessageConfig;
+use Moo;
+
+has mode     => (is => 'ro', default => sub { undef });
+has content  => (is => 'ro', default => sub { undef });
+has sections => (is => 'ro', default => sub { undef }); # hashref of section => SectionOverride
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{mode}    = $self->mode    if defined $self->mode;
+    $h{content} = $self->content if defined $self->content;
+    if (defined $self->sections) {
+        my %sec;
+        for my $key (keys %{ $self->sections }) {
+            $sec{$key} = $self->sections->{$key}->TO_JSON;
+        }
+        $h{sections} = \%sec;
+    }
+    return \%h;
 }
 
 # ============================================================================

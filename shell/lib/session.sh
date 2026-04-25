@@ -12,6 +12,29 @@ COPILOT_RESPONSE_FORMAT_TEXT="text"
 COPILOT_RESPONSE_FORMAT_IMAGE="image"
 COPILOT_RESPONSE_FORMAT_JSON_OBJECT="json_object"
 
+# --- System Prompt Section Constants ---
+COPILOT_SECTION_IDENTITY="identity"
+COPILOT_SECTION_TONE="tone"
+COPILOT_SECTION_TOOL_EFFICIENCY="tool_efficiency"
+COPILOT_SECTION_ENVIRONMENT_CONTEXT="environment_context"
+COPILOT_SECTION_CODE_CHANGE_RULES="code_change_rules"
+COPILOT_SECTION_GUIDELINES="guidelines"
+COPILOT_SECTION_SAFETY="safety"
+COPILOT_SECTION_TOOL_INSTRUCTIONS="tool_instructions"
+COPILOT_SECTION_CUSTOM_INSTRUCTIONS="custom_instructions"
+COPILOT_SECTION_LAST_INSTRUCTIONS="last_instructions"
+
+# --- Section Override Action Constants ---
+COPILOT_OVERRIDE_REPLACE="replace"
+COPILOT_OVERRIDE_REMOVE="remove"
+COPILOT_OVERRIDE_APPEND="append"
+COPILOT_OVERRIDE_PREPEND="prepend"
+
+# --- System Message Mode Constants ---
+COPILOT_SYSTEM_MESSAGE_APPEND="append"
+COPILOT_SYSTEM_MESSAGE_REPLACE="replace"
+COPILOT_SYSTEM_MESSAGE_CUSTOMIZE="customize"
+
 # --- Session State ---
 # The active session ID (set by copilot_client_create_session / resume)
 COPILOT_SESSION_ID=""

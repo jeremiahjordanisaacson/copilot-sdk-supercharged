@@ -163,6 +163,85 @@ function M.ClientOptions(fields)
     }
 end
 
+--- Create a local/stdio MCP server configuration.
+-- @param fields table with keys: command, args, tools, type, timeout, env, cwd
+-- @return table MCPStdioServerConfig
+function M.MCPStdioServerConfig(fields)
+    fields = fields or {}
+    return {
+        tools   = fields.tools or {"*"},
+        type    = fields.type or "local",
+        timeout = fields.timeout,
+        command = fields.command or "",
+        args    = fields.args or {},
+        env     = fields.env,
+        cwd     = fields.cwd,
+    }
+end
+
+--- Create a remote HTTP/SSE MCP server configuration.
+-- @param fields table with keys: url, type, tools, timeout, headers
+-- @return table MCPHTTPServerConfig
+function M.MCPHTTPServerConfig(fields)
+    fields = fields or {}
+    return {
+        tools   = fields.tools or {"*"},
+        type    = fields.type or "http",
+        timeout = fields.timeout,
+        url     = fields.url or "",
+        headers = fields.headers,
+    }
+end
+
+-- ---------------------------------------------------------------------------
+-- System message configuration types
+-- ---------------------------------------------------------------------------
+
+--- Known system prompt section identifiers for the "customize" mode.
+M.SystemPromptSection = {
+    IDENTITY            = "identity",
+    TONE                = "tone",
+    TOOL_EFFICIENCY     = "tool_efficiency",
+    ENVIRONMENT_CONTEXT = "environment_context",
+    CODE_CHANGE_RULES   = "code_change_rules",
+    GUIDELINES          = "guidelines",
+    SAFETY              = "safety",
+    TOOL_INSTRUCTIONS   = "tool_instructions",
+    CUSTOM_INSTRUCTIONS = "custom_instructions",
+    LAST_INSTRUCTIONS   = "last_instructions",
+}
+
+--- Override action constants for system prompt sections.
+M.SectionOverrideAction = {
+    REPLACE = "replace",
+    REMOVE  = "remove",
+    APPEND  = "append",
+    PREPEND = "prepend",
+}
+
+--- Create a SectionOverride table.
+-- @param fields table with keys: action, content
+-- @return table SectionOverride
+function M.SectionOverride(fields)
+    fields = fields or {}
+    return {
+        action  = fields.action or "replace",
+        content = fields.content,              -- optional string
+    }
+end
+
+--- Create a SystemMessageConfig table.
+-- @param fields table with keys: mode, content, sections
+-- @return table SystemMessageConfig
+function M.SystemMessageConfig(fields)
+    fields = fields or {}
+    return {
+        mode     = fields.mode,                -- "append", "replace", or "customize"
+        content  = fields.content,             -- optional string
+        sections = fields.sections,            -- optional table of section_id => SectionOverride
+    }
+end
+
 --- Create a SessionConfig table.
 -- @param fields table with optional keys (see Go SessionConfig)
 -- @return table SessionConfig

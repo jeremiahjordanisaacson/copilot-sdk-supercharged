@@ -935,6 +935,202 @@ AgentConfig <- R6::R6Class(
 
 
 # ---------------------------------------------------------------------------
+# MCP Server Configuration
+# ---------------------------------------------------------------------------
+
+#' MCPLocalServerConfig
+#'
+#' Configuration for a local/stdio MCP server.
+#'
+#' @field tools Character vector. Tool filter: c() = none, c("*") = all.
+#' @field type Character or NULL. "local" or "stdio".
+#' @field timeout Integer or NULL. Tool call timeout in ms.
+#' @field command Character. Command to run.
+#' @field args Character vector. Command arguments.
+#' @field env Named character vector or NULL. Environment variables.
+#' @field cwd Character or NULL. Working directory.
+#' @export
+MCPLocalServerConfig <- R6::R6Class(
+  "MCPLocalServerConfig",
+  public = list(
+    tools = NULL,
+    type = NULL,
+    timeout = NULL,
+    command = NULL,
+    args = NULL,
+    env = NULL,
+    cwd = NULL,
+
+    #' @description Create a new MCPLocalServerConfig.
+    #' @param command Character. Command to run.
+    #' @param args Character vector. Command arguments.
+    #' @param tools Character vector. Default c("*").
+    #' @param type Character or NULL. "local" or "stdio".
+    #' @param timeout Integer or NULL.
+    #' @param env Named character vector or NULL.
+    #' @param cwd Character or NULL.
+    initialize = function(command, args = character(0), tools = c("*"),
+                          type = NULL, timeout = NULL, env = NULL, cwd = NULL) {
+      self$command <- command
+      self$args <- args
+      self$tools <- tools
+      self$type <- type
+      self$timeout <- timeout
+      self$env <- env
+      self$cwd <- cwd
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list(tools = self$tools, command = self$command, args = self$args)
+      if (!is.null(self$type)) result$type <- self$type
+      if (!is.null(self$timeout)) result$timeout <- self$timeout
+      if (!is.null(self$env)) result$env <- self$env
+      if (!is.null(self$cwd)) result$cwd <- self$cwd
+      result
+    }
+  )
+)
+
+#' MCPRemoteServerConfig
+#'
+#' Configuration for a remote MCP server (HTTP or SSE).
+#'
+#' @field tools Character vector. Tool filter.
+#' @field type Character. "http" or "sse".
+#' @field timeout Integer or NULL. Tool call timeout in ms.
+#' @field url Character. Server URL.
+#' @field headers Named character vector or NULL. HTTP headers.
+#' @export
+MCPRemoteServerConfig <- R6::R6Class(
+  "MCPRemoteServerConfig",
+  public = list(
+    tools = NULL,
+    type = NULL,
+    timeout = NULL,
+    url = NULL,
+    headers = NULL,
+
+    #' @description Create a new MCPRemoteServerConfig.
+    #' @param url Character. Server URL.
+    #' @param type Character. "http" or "sse".
+    #' @param tools Character vector. Default c("*").
+    #' @param timeout Integer or NULL.
+    #' @param headers Named character vector or NULL.
+    initialize = function(url, type = "http", tools = c("*"),
+                          timeout = NULL, headers = NULL) {
+      self$url <- url
+      self$type <- type
+      self$tools <- tools
+      self$timeout <- timeout
+      self$headers <- headers
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list(tools = self$tools, type = self$type, url = self$url)
+      if (!is.null(self$timeout)) result$timeout <- self$timeout
+      if (!is.null(self$headers)) result$headers <- self$headers
+      result
+    }
+  )
+)
+
+
+# ---------------------------------------------------------------------------
+# System Message Configuration
+# ---------------------------------------------------------------------------
+
+#' Known system prompt section identifiers for the "customize" mode.
+#' @export
+SYSTEM_PROMPT_SECTIONS <- c(
+  "identity", "tone", "tool_efficiency", "environment_context",
+  "code_change_rules", "guidelines", "safety", "tool_instructions",
+  "custom_instructions", "last_instructions"
+)
+
+#' Override action constants for system prompt sections.
+#' @export
+SECTION_OVERRIDE_ACTIONS <- c("replace", "remove", "append", "prepend")
+
+#' SectionOverride
+#'
+#' Override operation for a single system prompt section.
+#'
+#' @field action Character. The override action ("replace", "remove", "append", "prepend").
+#' @field content Character or NULL. Content for the override.
+#' @export
+SectionOverride <- R6::R6Class(
+  "SectionOverride",
+  public = list(
+    action = NULL,
+    content = NULL,
+
+    #' @description Create a new SectionOverride.
+    #' @param action Character. Override action.
+    #' @param content Character or NULL. Override content.
+    initialize = function(action, content = NULL) {
+      self$action <- action
+      self$content <- content
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list(action = self$action)
+      if (!is.null(self$content)) result$content <- self$content
+      result
+    }
+  )
+)
+
+#' SystemMessageConfig
+#'
+#' System message configuration for session creation.
+#'
+#' Supports three modes:
+#' - "append" (default): SDK foundation + optional custom content
+#' - "replace": Full control, caller provides entire system message
+#' - "customize": Section-level overrides with graceful fallback
+#'
+#' @field mode Character or NULL. The configuration mode.
+#' @field content Character or NULL. Content string.
+#' @field sections Named list of SectionOverride or NULL. Section overrides (customize mode).
+#' @export
+SystemMessageConfig <- R6::R6Class(
+  "SystemMessageConfig",
+  public = list(
+    mode = NULL,
+    content = NULL,
+    sections = NULL,
+
+    #' @description Create a new SystemMessageConfig.
+    #' @param mode Character or NULL.
+    #' @param content Character or NULL.
+    #' @param sections Named list of SectionOverride or NULL.
+    initialize = function(mode = NULL, content = NULL, sections = NULL) {
+      self$mode <- mode
+      self$content <- content
+      self$sections <- sections
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$mode)) result$mode <- self$mode
+      if (!is.null(self$content)) result$content <- self$content
+      if (!is.null(self$sections)) {
+        sections_list <- list()
+        for (key in names(self$sections)) {
+          sections_list[[key]] <- self$sections[[key]]$to_list()
+        }
+        result$sections <- sections_list
+      }
+      result
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
 # SessionConfig
 # ---------------------------------------------------------------------------
 
@@ -948,6 +1144,7 @@ AgentConfig <- R6::R6Class(
 #' @field enable_config_discovery Logical or NULL. Auto-discover MCP server configs. Default: FALSE.
 #' @field include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events. Default: TRUE.
 #' @field streaming Logical or NULL. Enable streaming mode.
+#' @field mcp_servers Named list or NULL. Map of server name to MCPLocalServerConfig/MCPRemoteServerConfig.
 #' @export
 SessionConfig <- R6::R6Class(
   "SessionConfig",
@@ -958,6 +1155,7 @@ SessionConfig <- R6::R6Class(
     enable_config_discovery = NULL,
     include_sub_agent_streaming_events = NULL,
     streaming = NULL,
+    mcp_servers = NULL,
 
     #' @description Create a new SessionConfig.
     #' @param model Character or NULL.
@@ -966,24 +1164,33 @@ SessionConfig <- R6::R6Class(
     #' @param enable_config_discovery Logical or NULL. Auto-discover MCP server configs.
     #' @param include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events.
     #' @param streaming Logical or NULL.
+    #' @param mcp_servers Named list or NULL. Map of name to MCP server config.
     initialize = function(model = NULL, system_message = NULL,
                           model_capabilities = NULL,
                           enable_config_discovery = NULL,
                           include_sub_agent_streaming_events = NULL,
-                          streaming = NULL) {
+                          streaming = NULL,
+                          mcp_servers = NULL) {
       self$model <- model
       self$system_message <- system_message
       self$model_capabilities <- model_capabilities
       self$enable_config_discovery <- enable_config_discovery
       self$include_sub_agent_streaming_events <- include_sub_agent_streaming_events
       self$streaming <- streaming
+      self$mcp_servers <- mcp_servers
     },
 
     #' @description Convert to list.
     to_list = function() {
       result <- list()
       if (!is.null(self$model)) result$model <- self$model
-      if (!is.null(self$system_message)) result$systemMessage <- self$system_message
+      if (!is.null(self$system_message)) {
+        if (inherits(self$system_message, "SystemMessageConfig")) {
+          result$systemMessage <- self$system_message$to_list()
+        } else {
+          result$systemMessage <- self$system_message
+        }
+      }
       if (!is.null(self$model_capabilities)) result$modelCapabilities <- self$model_capabilities
       if (!is.null(self$enable_config_discovery)) {
         result$enableConfigDiscovery <- self$enable_config_discovery
@@ -992,6 +1199,18 @@ SessionConfig <- R6::R6Class(
         result$includeSubAgentStreamingEvents <- self$include_sub_agent_streaming_events
       }
       if (!is.null(self$streaming)) result$streaming <- self$streaming
+      if (!is.null(self$mcp_servers)) {
+        mcp_list <- list()
+        for (name in names(self$mcp_servers)) {
+          srv <- self$mcp_servers[[name]]
+          if (inherits(srv, "MCPLocalServerConfig") || inherits(srv, "MCPRemoteServerConfig")) {
+            mcp_list[[name]] <- srv$to_list()
+          } else {
+            mcp_list[[name]] <- srv
+          }
+        }
+        result$mcpServers <- mcp_list
+      }
       result
     }
   )

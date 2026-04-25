@@ -16,7 +16,7 @@ public class SessionConfig {
     private String reasoningEffort;
     private String configDir;
     private List<Tool> tools;
-    private Object systemMessage;
+    private SystemMessageConfig systemMessage;
     private List<String> availableTools;
     private List<String> excludedTools;
     private ProviderConfig provider;
@@ -45,7 +45,7 @@ public class SessionConfig {
     public SessionConfig reasoningEffort(String reasoningEffort) { this.reasoningEffort = reasoningEffort; return this; }
     public SessionConfig configDir(String configDir) { this.configDir = configDir; return this; }
     public SessionConfig tools(List<Tool> tools) { this.tools = tools; return this; }
-    public SessionConfig systemMessage(Object systemMessage) { this.systemMessage = systemMessage; return this; }
+    public SessionConfig systemMessage(SystemMessageConfig systemMessage) { this.systemMessage = systemMessage; return this; }
     public SessionConfig availableTools(List<String> availableTools) { this.availableTools = availableTools; return this; }
     public SessionConfig excludedTools(List<String> excludedTools) { this.excludedTools = excludedTools; return this; }
     public SessionConfig provider(ProviderConfig provider) { this.provider = provider; return this; }
@@ -69,7 +69,7 @@ public class SessionConfig {
     public String getReasoningEffort() { return reasoningEffort; }
     public String getConfigDir() { return configDir; }
     public List<Tool> getTools() { return tools; }
-    public Object getSystemMessage() { return systemMessage; }
+    public SystemMessageConfig getSystemMessage() { return systemMessage; }
     public List<String> getAvailableTools() { return availableTools; }
     public List<String> getExcludedTools() { return excludedTools; }
     public ProviderConfig getProvider() { return provider; }

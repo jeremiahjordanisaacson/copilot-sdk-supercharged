@@ -28,9 +28,14 @@ module Copilot.Types
   , ToolCallResponse (..)
 
     -- * Session configuration
+  , SystemPromptSection (..)
+  , SectionOverrideAction (..)
+  , SectionOverride (..)
   , SystemMessageConfig (..)
   , ProviderConfig (..)
   , AzureProviderOptions (..)
+  , MCPStdioServerConfig (..)
+  , MCPHTTPServerConfig (..)
   , MCPServerConfig (..)
   , CustomAgentConfig (..)
   , InfiniteSessionConfig (..)
@@ -105,7 +110,7 @@ module Copilot.Types
   ) where
 
 import           Data.Aeson
-import           Data.Aeson.Types  (Parser)
+import           Data.Aeson.Types  (Parser, toJSONKeyText, FromJSONKeyFunction (..))
 import qualified Data.Aeson        as Aeson
 import qualified Data.Map.Strict   as Map
 import           Data.Maybe        (catMaybes)
@@ -295,17 +300,126 @@ instance FromJSON ToolCallResponse where
 -- System Message Configuration
 -- ============================================================================
 
+-- | Known system prompt section identifiers for the "customize" mode.
+data SystemPromptSection
+  = SectionIdentity
+  | SectionTone
+  | SectionToolEfficiency
+  | SectionEnvironmentContext
+  | SectionCodeChangeRules
+  | SectionGuidelines
+  | SectionSafety
+  | SectionToolInstructions
+  | SectionCustomInstructions
+  | SectionLastInstructions
+  deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON SystemPromptSection where
+  toJSON SectionIdentity           = String "identity"
+  toJSON SectionTone               = String "tone"
+  toJSON SectionToolEfficiency     = String "tool_efficiency"
+  toJSON SectionEnvironmentContext = String "environment_context"
+  toJSON SectionCodeChangeRules    = String "code_change_rules"
+  toJSON SectionGuidelines         = String "guidelines"
+  toJSON SectionSafety             = String "safety"
+  toJSON SectionToolInstructions   = String "tool_instructions"
+  toJSON SectionCustomInstructions = String "custom_instructions"
+  toJSON SectionLastInstructions   = String "last_instructions"
+
+instance FromJSON SystemPromptSection where
+  parseJSON = withText "SystemPromptSection" $ \case
+    "identity"             -> pure SectionIdentity
+    "tone"                 -> pure SectionTone
+    "tool_efficiency"      -> pure SectionToolEfficiency
+    "environment_context"  -> pure SectionEnvironmentContext
+    "code_change_rules"    -> pure SectionCodeChangeRules
+    "guidelines"           -> pure SectionGuidelines
+    "safety"               -> pure SectionSafety
+    "tool_instructions"    -> pure SectionToolInstructions
+    "custom_instructions"  -> pure SectionCustomInstructions
+    "last_instructions"    -> pure SectionLastInstructions
+    other                  -> fail $ "Unknown SystemPromptSection: " <> T.unpack other
+
+instance ToJSONKey SystemPromptSection where
+  toJSONKey = toJSONKeyText $ \case
+    SectionIdentity           -> "identity"
+    SectionTone               -> "tone"
+    SectionToolEfficiency     -> "tool_efficiency"
+    SectionEnvironmentContext -> "environment_context"
+    SectionCodeChangeRules    -> "code_change_rules"
+    SectionGuidelines         -> "guidelines"
+    SectionSafety             -> "safety"
+    SectionToolInstructions   -> "tool_instructions"
+    SectionCustomInstructions -> "custom_instructions"
+    SectionLastInstructions   -> "last_instructions"
+
+instance FromJSONKey SystemPromptSection where
+  fromJSONKey = FromJSONKeyTextParser $ \case
+    "identity"             -> pure SectionIdentity
+    "tone"                 -> pure SectionTone
+    "tool_efficiency"      -> pure SectionToolEfficiency
+    "environment_context"  -> pure SectionEnvironmentContext
+    "code_change_rules"    -> pure SectionCodeChangeRules
+    "guidelines"           -> pure SectionGuidelines
+    "safety"               -> pure SectionSafety
+    "tool_instructions"    -> pure SectionToolInstructions
+    "custom_instructions"  -> pure SectionCustomInstructions
+    "last_instructions"    -> pure SectionLastInstructions
+    other                  -> fail $ "Unknown SystemPromptSection: " <> T.unpack other
+
+-- | Override action for a system prompt section.
+data SectionOverrideAction
+  = OverrideReplace
+  | OverrideRemove
+  | OverrideAppend
+  | OverridePrepend
+  deriving (Show, Eq, Generic)
+
+instance ToJSON SectionOverrideAction where
+  toJSON OverrideReplace = String "replace"
+  toJSON OverrideRemove  = String "remove"
+  toJSON OverrideAppend  = String "append"
+  toJSON OverridePrepend = String "prepend"
+
+instance FromJSON SectionOverrideAction where
+  parseJSON = withText "SectionOverrideAction" $ \case
+    "replace" -> pure OverrideReplace
+    "remove"  -> pure OverrideRemove
+    "append"  -> pure OverrideAppend
+    "prepend" -> pure OverridePrepend
+    other     -> fail $ "Unknown SectionOverrideAction: " <> T.unpack other
+
+-- | Override operation for a single system prompt section.
+data SectionOverride = SectionOverride
+  { soAction  :: !SectionOverrideAction
+  , soContent :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON SectionOverride where
+  toJSON SectionOverride{..} = object
+    [ "action"  .= soAction
+    , "content" .= soContent
+    ]
+
+instance FromJSON SectionOverride where
+  parseJSON = withObject "SectionOverride" $ \o ->
+    SectionOverride
+      <$> o .:  "action"
+      <*> o .:? "content"
+
 -- | System message configuration for session creation.
--- Mode can be "append" (default) or "replace".
+-- Mode can be "append" (default), "replace", or "customize".
 data SystemMessageConfig = SystemMessageConfig
-  { smcMode    :: !(Maybe Text)  -- ^ "append" or "replace"
-  , smcContent :: !(Maybe Text)
+  { smcMode     :: !(Maybe Text)  -- ^ "append", "replace", or "customize"
+  , smcContent  :: !(Maybe Text)
+  , smcSections :: !(Maybe (Map.Map SystemPromptSection SectionOverride))
   } deriving (Show, Eq, Generic)
 
 instance ToJSON SystemMessageConfig where
-  toJSON SystemMessageConfig{..} = object
-    [ "mode"    .= smcMode
-    , "content" .= smcContent
+  toJSON SystemMessageConfig{..} = object $ catMaybes
+    [ ("mode"     .=) <$> smcMode
+    , ("content"  .=) <$> smcContent
+    , ("sections" .=) <$> smcSections
     ]
 
 instance FromJSON SystemMessageConfig where
@@ -313,6 +427,7 @@ instance FromJSON SystemMessageConfig where
     SystemMessageConfig
       <$> o .:? "mode"
       <*> o .:? "content"
+      <*> o .:? "sections"
 
 -- ============================================================================
 -- Provider Configuration
@@ -364,9 +479,82 @@ instance FromJSON ProviderConfig where
 -- MCP Server Configuration
 -- ============================================================================
 
--- | MCP server configuration (local or remote).
--- Stored as a generic JSON 'Value' for flexibility.
-type MCPServerConfig = Value
+-- | Configuration for a local/stdio MCP server.
+data MCPStdioServerConfig = MCPStdioServerConfig
+  { msscTools   :: ![Text]
+  , msscType    :: !(Maybe Text)   -- ^ "local" or "stdio"
+  , msscTimeout :: !(Maybe Int)    -- ^ Tool call timeout in ms
+  , msscCommand :: !Text
+  , msscArgs    :: ![Text]
+  , msscEnv     :: !(Maybe (Map.Map Text Text))
+  , msscCwd     :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON MCPStdioServerConfig where
+  toJSON MCPStdioServerConfig{..} = object $ catMaybes
+    [ Just $ "tools"   .= msscTools
+    , Just $ "command" .= msscCommand
+    , Just $ "args"    .= msscArgs
+    , ("type"    .=) <$> msscType
+    , ("timeout" .=) <$> msscTimeout
+    , ("env"     .=) <$> msscEnv
+    , ("cwd"     .=) <$> msscCwd
+    ]
+
+instance FromJSON MCPStdioServerConfig where
+  parseJSON = withObject "MCPStdioServerConfig" $ \o ->
+    MCPStdioServerConfig
+      <$> o .:  "tools"
+      <*> o .:? "type"
+      <*> o .:? "timeout"
+      <*> o .:  "command"
+      <*> o .:? "args" .!= []
+      <*> o .:? "env"
+      <*> o .:? "cwd"
+
+-- | Configuration for a remote MCP server (HTTP or SSE).
+data MCPHTTPServerConfig = MCPHTTPServerConfig
+  { mhscTools   :: ![Text]
+  , mhscType    :: !Text           -- ^ "http" or "sse"
+  , mhscTimeout :: !(Maybe Int)    -- ^ Tool call timeout in ms
+  , mhscUrl     :: !Text
+  , mhscHeaders :: !(Maybe (Map.Map Text Text))
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON MCPHTTPServerConfig where
+  toJSON MCPHTTPServerConfig{..} = object $ catMaybes
+    [ Just $ "tools"   .= mhscTools
+    , Just $ "type"    .= mhscType
+    , Just $ "url"     .= mhscUrl
+    , ("timeout" .=) <$> mhscTimeout
+    , ("headers" .=) <$> mhscHeaders
+    ]
+
+instance FromJSON MCPHTTPServerConfig where
+  parseJSON = withObject "MCPHTTPServerConfig" $ \o ->
+    MCPHTTPServerConfig
+      <$> o .:  "tools"
+      <*> o .:  "type"
+      <*> o .:? "timeout"
+      <*> o .:  "url"
+      <*> o .:? "headers"
+
+-- | Union type for MCP server configurations.
+-- Deserialization checks for "url" to distinguish HTTP from Stdio variants.
+data MCPServerConfig
+  = MCPStdio MCPStdioServerConfig
+  | MCPHTTP  MCPHTTPServerConfig
+  deriving (Show, Eq, Generic)
+
+instance ToJSON MCPServerConfig where
+  toJSON (MCPStdio c) = toJSON c
+  toJSON (MCPHTTP  c) = toJSON c
+
+instance FromJSON MCPServerConfig where
+  parseJSON v = (MCPHTTP <$> parseJSON v) <|> (MCPStdio <$> parseJSON v)
+    where
+      (<|>) :: Parser a -> Parser a -> Parser a
+      (<|>) = (Aeson.<|>)
 
 -- ============================================================================
 -- Custom Agent Configuration

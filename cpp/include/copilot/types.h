@@ -114,15 +114,58 @@ struct Tool {
 // System Message Configuration
 // ============================================================================
 
+/// Known system prompt section identifiers for the "customize" mode.
+namespace SystemPromptSection {
+    inline constexpr const char* Identity = "identity";
+    inline constexpr const char* Tone = "tone";
+    inline constexpr const char* ToolEfficiency = "tool_efficiency";
+    inline constexpr const char* EnvironmentContext = "environment_context";
+    inline constexpr const char* CodeChangeRules = "code_change_rules";
+    inline constexpr const char* Guidelines = "guidelines";
+    inline constexpr const char* Safety = "safety";
+    inline constexpr const char* ToolInstructions = "tool_instructions";
+    inline constexpr const char* CustomInstructions = "custom_instructions";
+    inline constexpr const char* LastInstructions = "last_instructions";
+}
+
+/// Override action for a system prompt section.
+namespace SectionOverrideAction {
+    inline constexpr const char* Replace = "replace";
+    inline constexpr const char* Remove = "remove";
+    inline constexpr const char* Append = "append";
+    inline constexpr const char* Prepend = "prepend";
+}
+
+/// Override operation for a single system prompt section.
+struct SectionOverride {
+    std::string action;
+    std::optional<std::string> content;
+};
+
+inline void to_json(nlohmann::json& j, const SectionOverride& o) {
+    j = {{"action", o.action}};
+    if (o.content) j["content"] = *o.content;
+}
+
+inline void from_json(const nlohmann::json& j, SectionOverride& o) {
+    j.at("action").get_to(o.action);
+    if (j.contains("content")) o.content = j["content"].get<std::string>();
+}
+
+/// System message configuration for session creation.
+///
+/// Supports "append" (default), "replace", and "customize" modes.
 struct SystemMessageConfig {
-    std::string mode;    // "append" or "replace"
+    std::string mode;    // "append", "replace", or "customize"
     std::string content;
+    std::optional<std::map<std::string, SectionOverride>> sections; // "customize" mode only
 };
 
 inline void to_json(nlohmann::json& j, const SystemMessageConfig& c) {
     j = nlohmann::json::object();
     if (!c.mode.empty()) j["mode"] = c.mode;
     if (!c.content.empty()) j["content"] = c.content;
+    if (c.sections) j["sections"] = *c.sections;
 }
 
 // ============================================================================
@@ -160,10 +203,59 @@ inline void to_json(nlohmann::json& j, const ProviderConfig& c) {
 // MCP Server Configuration
 // ============================================================================
 
-/// MCP server configurations are stored as raw JSON for flexibility.
-/// A local server has "command", "args", optional "env", "cwd", "type" ("local"/"stdio").
-/// A remote server has "url", optional "headers", "type" ("http"/"sse").
-/// Both have "tools" (list of tool names or ["*"]) and optional "timeout".
+/// Configuration for a local/stdio MCP server.
+struct MCPStdioServerConfig {
+    std::vector<std::string> tools;
+    std::optional<std::string> type;     // "local" or "stdio"
+    std::optional<int> timeout;          // Tool call timeout in ms
+    std::string command;
+    std::vector<std::string> args;
+    std::optional<std::map<std::string, std::string>> env;
+    std::optional<std::string> cwd;
+};
+
+inline void to_json(nlohmann::json& j, const MCPStdioServerConfig& c) {
+    j = {{"tools", c.tools}, {"command", c.command}, {"args", c.args}};
+    if (c.type) j["type"] = *c.type;
+    if (c.timeout) j["timeout"] = *c.timeout;
+    if (c.env) j["env"] = *c.env;
+    if (c.cwd) j["cwd"] = *c.cwd;
+}
+
+inline void from_json(const nlohmann::json& j, MCPStdioServerConfig& c) {
+    j.at("tools").get_to(c.tools);
+    j.at("command").get_to(c.command);
+    if (j.contains("args")) j["args"].get_to(c.args);
+    if (j.contains("type")) c.type = j["type"].get<std::string>();
+    if (j.contains("timeout")) c.timeout = j["timeout"].get<int>();
+    if (j.contains("env")) c.env = j["env"].get<std::map<std::string, std::string>>();
+    if (j.contains("cwd")) c.cwd = j["cwd"].get<std::string>();
+}
+
+/// Configuration for a remote MCP server (HTTP or SSE).
+struct MCPHTTPServerConfig {
+    std::vector<std::string> tools;
+    std::string type;                    // "http" or "sse"
+    std::optional<int> timeout;          // Tool call timeout in ms
+    std::string url;
+    std::optional<std::map<std::string, std::string>> headers;
+};
+
+inline void to_json(nlohmann::json& j, const MCPHTTPServerConfig& c) {
+    j = {{"tools", c.tools}, {"type", c.type}, {"url", c.url}};
+    if (c.timeout) j["timeout"] = *c.timeout;
+    if (c.headers) j["headers"] = *c.headers;
+}
+
+inline void from_json(const nlohmann::json& j, MCPHTTPServerConfig& c) {
+    j.at("tools").get_to(c.tools);
+    j.at("type").get_to(c.type);
+    j.at("url").get_to(c.url);
+    if (j.contains("timeout")) c.timeout = j["timeout"].get<int>();
+    if (j.contains("headers")) c.headers = j["headers"].get<std::map<std::string, std::string>>();
+}
+
+/// MCP server config stored as JSON to support both stdio and HTTP variants.
 using MCPServerConfig = nlohmann::json;
 
 // ============================================================================

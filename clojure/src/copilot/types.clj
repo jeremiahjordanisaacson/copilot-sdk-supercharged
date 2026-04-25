@@ -109,6 +109,39 @@
   [content]
   {:mode "replace" :content content})
 
+(defn system-message-customize
+  "Customize-mode system message. Override individual sections."
+  ([] {:mode "customize"})
+  ([sections] {:mode "customize" :sections sections})
+  ([sections content] {:mode "customize" :sections sections :content content}))
+
+(defn section-override
+  "Create a section override.
+  `action` is one of :replace :remove :append :prepend.
+  `content` is optional string."
+  ([action] {:action (name action)})
+  ([action content] {:action (name action) :content content}))
+
+;; System prompt section constants
+(def system-prompt-sections
+  {:identity            "identity"
+   :tone                "tone"
+   :tool-efficiency     "tool_efficiency"
+   :environment-context "environment_context"
+   :code-change-rules   "code_change_rules"
+   :guidelines          "guidelines"
+   :safety              "safety"
+   :tool-instructions   "tool_instructions"
+   :custom-instructions "custom_instructions"
+   :last-instructions   "last_instructions"})
+
+;; Section override action constants
+(def section-override-actions
+  {:replace "replace"
+   :remove  "remove"
+   :append  "append"
+   :prepend "prepend"})
+
 ;; ============================================================================
 ;; Permission types
 ;; ============================================================================

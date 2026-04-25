@@ -27,6 +27,89 @@ COPILOT_MODEL_CAPABILITIES=""
 COPILOT_ENABLE_CONFIG_DISCOVERY=""
 # Include sub-agent streaming events (boolean string: "true"/"false", optional, default: true)
 COPILOT_INCLUDE_SUB_AGENT_STREAMING_EVENTS=""
+# MCP servers config (JSON object string, optional)
+# Example: '{"myserver":{"tools":["*"],"command":"npx","args":["-y","my-mcp-server"]}}'
+# For local/stdio servers, include: tools, command, args, and optionally type, timeout, env, cwd
+# For remote HTTP/SSE servers, include: tools, type ("http"/"sse"), url, and optionally timeout, headers
+COPILOT_MCP_SERVERS=""
+
+# --- MCP Server Config Helpers ---
+
+# Build a local/stdio MCP server config JSON.
+#
+# Arguments:
+#   $1 - command (required)
+#   $2 - args as JSON array string (default: "[]")
+#   $3 - tools as JSON array string (default: '["*"]')
+#
+# Optional env vars to set before calling:
+#   MCP_TYPE    - "local" or "stdio" (default: "local")
+#   MCP_TIMEOUT - timeout in ms
+#   MCP_ENV     - JSON object of env vars
+#   MCP_CWD     - working directory
+#
+# Outputs the JSON object to stdout.
+copilot_mcp_stdio_config() {
+    local command="$1"
+    local mcp_args="${2:-[]}"
+    local mcp_tools="${3:-[\"*\"]}"
+
+    local json
+    json=$(jq -c -n \
+        --arg cmd "$command" \
+        --argjson args "$mcp_args" \
+        --argjson tools "$mcp_tools" \
+        '{"command":$cmd,"args":$args,"tools":$tools}')
+
+    if [[ -n "${MCP_TYPE:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg t "$MCP_TYPE" '. + {"type":$t}')
+    fi
+    if [[ -n "${MCP_TIMEOUT:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson t "$MCP_TIMEOUT" '. + {"timeout":$t}')
+    fi
+    if [[ -n "${MCP_ENV:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson e "$MCP_ENV" '. + {"env":$e}')
+    fi
+    if [[ -n "${MCP_CWD:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg c "$MCP_CWD" '. + {"cwd":$c}')
+    fi
+
+    echo "$json"
+}
+
+# Build a remote HTTP/SSE MCP server config JSON.
+#
+# Arguments:
+#   $1 - url (required)
+#   $2 - type: "http" or "sse" (default: "http")
+#   $3 - tools as JSON array string (default: '["*"]')
+#
+# Optional env vars to set before calling:
+#   MCP_TIMEOUT - timeout in ms
+#   MCP_HEADERS - JSON object of HTTP headers
+#
+# Outputs the JSON object to stdout.
+copilot_mcp_http_config() {
+    local url="$1"
+    local mcp_type="${2:-http}"
+    local mcp_tools="${3:-[\"*\"]}"
+
+    local json
+    json=$(jq -c -n \
+        --arg url "$url" \
+        --arg type "$mcp_type" \
+        --argjson tools "$mcp_tools" \
+        '{"url":$url,"type":$type,"tools":$tools}')
+
+    if [[ -n "${MCP_TIMEOUT:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson t "$MCP_TIMEOUT" '. + {"timeout":$t}')
+    fi
+    if [[ -n "${MCP_HEADERS:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson h "$MCP_HEADERS" '. + {"headers":$h}')
+    fi
+
+    echo "$json"
+}
 
 # --- Client Functions ---
 

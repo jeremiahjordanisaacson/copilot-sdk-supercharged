@@ -92,15 +92,52 @@ data class Tool(
 // ============================================================================
 
 /**
+ * Known system prompt section identifiers for the "customize" mode.
+ */
+object SystemPromptSection {
+    const val IDENTITY = "identity"
+    const val TONE = "tone"
+    const val TOOL_EFFICIENCY = "tool_efficiency"
+    const val ENVIRONMENT_CONTEXT = "environment_context"
+    const val CODE_CHANGE_RULES = "code_change_rules"
+    const val GUIDELINES = "guidelines"
+    const val SAFETY = "safety"
+    const val TOOL_INSTRUCTIONS = "tool_instructions"
+    const val CUSTOM_INSTRUCTIONS = "custom_instructions"
+    const val LAST_INSTRUCTIONS = "last_instructions"
+}
+
+/**
+ * Override action for a system prompt section.
+ */
+object SectionOverrideAction {
+    const val REPLACE = "replace"
+    const val REMOVE = "remove"
+    const val APPEND = "append"
+    const val PREPEND = "prepend"
+}
+
+/**
+ * Override operation for a single system prompt section.
+ */
+@Serializable
+data class SectionOverride(
+    val action: String,
+    val content: String? = null
+)
+
+/**
  * System message configuration.
  *
  * Use [mode] = "append" (default) to append content after SDK-managed sections.
  * Use [mode] = "replace" to provide the entire system message.
+ * Use [mode] = "customize" to override individual sections of the system prompt.
  */
 @Serializable
 data class SystemMessageConfig(
     val mode: String? = null,
-    val content: String? = null
+    val content: String? = null,
+    val sections: Map<String, SectionOverride>? = null
 )
 
 // ============================================================================

@@ -220,6 +220,88 @@ class SystemMessageReplaceConfig
 }
 
 // ============================================================================
+// System Prompt Section Constants
+// ============================================================================
+
+/**
+ * Known system prompt section identifiers for the "customize" mode.
+ */
+final class SystemPromptSection
+{
+    public const IDENTITY = 'identity';
+    public const TONE = 'tone';
+    public const TOOL_EFFICIENCY = 'tool_efficiency';
+    public const ENVIRONMENT_CONTEXT = 'environment_context';
+    public const CODE_CHANGE_RULES = 'code_change_rules';
+    public const GUIDELINES = 'guidelines';
+    public const SAFETY = 'safety';
+    public const TOOL_INSTRUCTIONS = 'tool_instructions';
+    public const CUSTOM_INSTRUCTIONS = 'custom_instructions';
+    public const LAST_INSTRUCTIONS = 'last_instructions';
+}
+
+/**
+ * Override action for a system prompt section.
+ */
+final class SectionOverrideAction
+{
+    public const REPLACE = 'replace';
+    public const REMOVE = 'remove';
+    public const APPEND = 'append';
+    public const PREPEND = 'prepend';
+}
+
+/**
+ * Override operation for a single system prompt section.
+ */
+class SectionOverride
+{
+    public function __construct(
+        public readonly string $action,
+        public readonly ?string $content = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = ['action' => $this->action];
+        if ($this->content !== null) {
+            $result['content'] = $this->content;
+        }
+        return $result;
+    }
+}
+
+/**
+ * System message in customize mode - override individual sections.
+ */
+class SystemMessageCustomizeConfig
+{
+    /**
+     * @param array<string, SectionOverride>|null $sections
+     */
+    public function __construct(
+        public readonly ?array $sections = null,
+        public readonly ?string $content = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = ['mode' => 'customize'];
+        if ($this->sections !== null) {
+            $sectionsArray = [];
+            foreach ($this->sections as $key => $override) {
+                $sectionsArray[$key] = $override->toArray();
+            }
+            $result['sections'] = $sectionsArray;
+        }
+        if ($this->content !== null) {
+            $result['content'] = $this->content;
+        }
+        return $result;
+    }
+}
+
+// ============================================================================
 // Permission Types
 // ============================================================================
 
@@ -573,7 +655,7 @@ class SessionConfig
         public readonly ?ReasoningEffort $reasoningEffort = null,
         public readonly ?string $configDir = null,
         public readonly ?array $tools = null,
-        public readonly SystemMessageAppendConfig|SystemMessageReplaceConfig|null $systemMessage = null,
+        public readonly SystemMessageAppendConfig|SystemMessageReplaceConfig|SystemMessageCustomizeConfig|null $systemMessage = null,
         public readonly ?array $availableTools = null,
         public readonly ?array $excludedTools = null,
         public readonly ?ProviderConfig $provider = null,
@@ -699,7 +781,7 @@ class ResumeSessionConfig
         public readonly ?string $model = null,
         public readonly ?ReasoningEffort $reasoningEffort = null,
         public readonly ?array $tools = null,
-        public readonly SystemMessageAppendConfig|SystemMessageReplaceConfig|null $systemMessage = null,
+        public readonly SystemMessageAppendConfig|SystemMessageReplaceConfig|SystemMessageCustomizeConfig|null $systemMessage = null,
         public readonly ?array $availableTools = null,
         public readonly ?array $excludedTools = null,
         public readonly ?ProviderConfig $provider = null,

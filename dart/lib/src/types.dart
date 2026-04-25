@@ -215,6 +215,67 @@ class SystemMessageReplaceConfig {
 }
 
 // ---------------------------------------------------------------------------
+// System Prompt Section Constants
+// ---------------------------------------------------------------------------
+
+/// Known system prompt section identifiers for the "customize" mode.
+class SystemPromptSection {
+  static const String identity = 'identity';
+  static const String tone = 'tone';
+  static const String toolEfficiency = 'tool_efficiency';
+  static const String environmentContext = 'environment_context';
+  static const String codeChangeRules = 'code_change_rules';
+  static const String guidelines = 'guidelines';
+  static const String safety = 'safety';
+  static const String toolInstructions = 'tool_instructions';
+  static const String customInstructions = 'custom_instructions';
+  static const String lastInstructions = 'last_instructions';
+}
+
+/// Override action for a system prompt section.
+class SectionOverrideAction {
+  static const String replace = 'replace';
+  static const String remove = 'remove';
+  static const String append = 'append';
+  static const String prepend = 'prepend';
+}
+
+/// Override operation for a single system prompt section.
+class SectionOverride {
+  final String action;
+  final String? content;
+
+  const SectionOverride({required this.action, this.content});
+
+  Map<String, dynamic> toJson() => {
+        'action': action,
+        if (content != null) 'content': content,
+      };
+
+  factory SectionOverride.fromJson(Map<String, dynamic> json) {
+    return SectionOverride(
+      action: json['action'] as String,
+      content: json['content'] as String?,
+    );
+  }
+}
+
+/// System message in customize mode — section-level overrides.
+class SystemMessageCustomizeConfig {
+  final Map<String, SectionOverride>? sections;
+  final String? content;
+
+  const SystemMessageCustomizeConfig({this.sections, this.content});
+
+  Map<String, dynamic> toJson() => {
+        'mode': 'customize',
+        if (sections != null)
+          'sections': sections!.map((k, v) => MapEntry(k, v.toJson())),
+        if (content != null) 'content': content,
+      };
+}
+
+// ---------------------------------------------------------------------------
 // Permission Types
 // ---------------------------------------------------------------------------
 

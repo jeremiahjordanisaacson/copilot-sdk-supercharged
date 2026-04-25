@@ -99,6 +99,36 @@ case class Tool(
 // Session Configuration
 // ============================================================================
 
+/** Known system prompt section identifiers for the "customize" mode. */
+object SystemPromptSection:
+  val Identity            = "identity"
+  val Tone                = "tone"
+  val ToolEfficiency      = "tool_efficiency"
+  val EnvironmentContext  = "environment_context"
+  val CodeChangeRules     = "code_change_rules"
+  val Guidelines          = "guidelines"
+  val Safety              = "safety"
+  val ToolInstructions    = "tool_instructions"
+  val CustomInstructions  = "custom_instructions"
+  val LastInstructions    = "last_instructions"
+
+/** Override action for a system prompt section. */
+object SectionOverrideAction:
+  val Replace = "replace"
+  val Remove  = "remove"
+  val Append  = "append"
+  val Prepend = "prepend"
+
+/** Override operation for a single system prompt section. */
+case class SectionOverride(
+  action: String,
+  content: Option[String] = None
+)
+
+object SectionOverride:
+  given Encoder[SectionOverride] = deriveEncoder
+  given Decoder[SectionOverride] = deriveDecoder
+
 /** System message configuration -- append mode (default). */
 case class SystemMessageAppendConfig(
   mode: Option[String] = Some("append"),
@@ -122,7 +152,8 @@ object SystemMessageReplaceConfig:
 /** Unified system message config sent over the wire. */
 case class SystemMessageConfig(
   mode: Option[String] = None,
-  content: Option[String] = None
+  content: Option[String] = None,
+  sections: Option[Map[String, SectionOverride]] = None
 )
 
 object SystemMessageConfig:
@@ -134,6 +165,9 @@ object SystemMessageConfig:
 
   def replace(content: String): SystemMessageConfig =
     SystemMessageConfig(mode = Some("replace"), content = Some(content))
+
+  def customize(sections: Map[String, SectionOverride], content: Option[String] = None): SystemMessageConfig =
+    SystemMessageConfig(mode = Some("customize"), content = content, sections = Some(sections))
 
 // ============================================================================
 // Provider Configuration

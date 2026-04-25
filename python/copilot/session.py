@@ -17,7 +17,7 @@ import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, Required, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, Optional, Required, TypedDict, Union, cast
 
 from ._jsonrpc import JsonRpcError, ProcessExitedError
 from ._telemetry import get_trace_context, trace_context
@@ -132,6 +132,59 @@ class BlobAttachment(TypedDict):
 
 
 Attachment = FileAttachment | DirectoryAttachment | SelectionAttachment | BlobAttachment
+
+# ============================================================================
+# Response Format & Image Generation Types
+# ============================================================================
+
+ResponseFormat = Literal["text", "image", "json_object"]
+"""Desired response format for a message."""
+
+
+class ImageOptions(TypedDict, total=False):
+    """Options for image generation (used when response_format is ``"image"``)."""
+
+    size: str
+    """Image size, e.g. ``"1024x1024"``."""
+    quality: str
+    """Image quality: ``"hd"`` or ``"standard"``."""
+    style: str
+    """Image style: ``"natural"`` or ``"vivid"``."""
+
+
+class AssistantImageData(TypedDict, total=False):
+    """Image data returned by the assistant in an image response."""
+
+    format: Required[str]
+    """Image format: ``"png"``, ``"jpeg"``, or ``"webp"``."""
+    base64: Required[str]
+    """Base64-encoded image bytes."""
+    url: str
+    """Optional temporary URL for the image."""
+    revised_prompt: str
+    """The prompt the model actually used (may differ from the original)."""
+    width: Required[int]
+    """Image width in pixels."""
+    height: Required[int]
+    """Image height in pixels."""
+
+
+class TextBlock(TypedDict):
+    """A text content block in a mixed text+image response."""
+
+    type: Literal["text"]
+    text: str
+
+
+class ImageBlock(TypedDict):
+    """An image content block in a mixed text+image response."""
+
+    type: Literal["image"]
+    image: AssistantImageData
+
+
+ContentBlock = Union[TextBlock, ImageBlock]
+"""A content block in a mixed text+image response."""
 
 # ============================================================================
 # System Message Configuration
@@ -1094,6 +1147,8 @@ class CopilotSession:
         attachments: list[Attachment] | None = None,
         mode: Literal["enqueue", "immediate"] | None = None,
         request_headers: dict[str, str] | None = None,
+        response_format: Optional[ResponseFormat] = None,
+        image_options: Optional[ImageOptions] = None,
     ) -> str:
         """
         Send a message to this session.
@@ -1107,6 +1162,10 @@ class CopilotSession:
             attachments: Optional file, directory, or selection attachments.
             mode: Message delivery mode (``"enqueue"`` or ``"immediate"``).
             request_headers: Optional per-turn HTTP headers for outbound model requests.
+            response_format: Desired response format (``"text"``, ``"image"``, or
+                ``"json_object"``).
+            image_options: Options for image generation (only used when
+                *response_format* is ``"image"``).
 
         Returns:
             The message ID assigned by the server, which can be used to correlate events.
@@ -1130,6 +1189,10 @@ class CopilotSession:
             params["mode"] = mode
         if request_headers is not None:
             params["requestHeaders"] = request_headers
+        if response_format is not None:
+            params["responseFormat"] = response_format
+        if image_options is not None:
+            params["imageOptions"] = dict(image_options)
         params.update(get_trace_context())
 
         response = await self._client.request("session.send", params)
@@ -1142,6 +1205,8 @@ class CopilotSession:
         attachments: list[Attachment] | None = None,
         mode: Literal["enqueue", "immediate"] | None = None,
         request_headers: dict[str, str] | None = None,
+        response_format: Optional[ResponseFormat] = None,
+        image_options: Optional[ImageOptions] = None,
         timeout: float = 60.0,
     ) -> SessionEvent | None:
         """
@@ -1158,6 +1223,10 @@ class CopilotSession:
             attachments: Optional file, directory, or selection attachments.
             mode: Message delivery mode (``"enqueue"`` or ``"immediate"``).
             request_headers: Optional per-turn HTTP headers for outbound model requests.
+            response_format: Desired response format (``"text"``, ``"image"``, or
+                ``"json_object"``).
+            image_options: Options for image generation (only used when
+                *response_format* is ``"image"``).
             timeout: Timeout in seconds (default: 60). Controls how long to wait;
                 does not abort in-flight agent work.
 
@@ -1198,6 +1267,8 @@ class CopilotSession:
                 attachments=attachments,
                 mode=mode,
                 request_headers=request_headers,
+                response_format=response_format,
+                image_options=image_options,
             )
             await asyncio.wait_for(idle_event.wait(), timeout=timeout)
             if error_event:

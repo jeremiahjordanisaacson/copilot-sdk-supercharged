@@ -92,6 +92,49 @@ module Copilot
     end
   end
 
+  # Known system prompt section identifiers for "customize" mode.
+  module SystemPromptSection
+    IDENTITY             = "identity"
+    TONE                 = "tone"
+    TOOL_EFFICIENCY      = "tool_efficiency"
+    ENVIRONMENT_CONTEXT  = "environment_context"
+    CODE_CHANGE_RULES    = "code_change_rules"
+    GUIDELINES           = "guidelines"
+    SAFETY               = "safety"
+    TOOL_INSTRUCTIONS    = "tool_instructions"
+    CUSTOM_INSTRUCTIONS  = "custom_instructions"
+    LAST_INSTRUCTIONS    = "last_instructions"
+  end
+
+  # Override action for a system prompt section.
+  module SectionOverrideAction
+    REPLACE = "replace"
+    REMOVE  = "remove"
+    APPEND  = "append"
+    PREPEND = "prepend"
+  end
+
+  # Override operation for a single system prompt section.
+  SectionOverride = Struct.new(:action, :content, keyword_init: true) do
+    def to_h
+      h = { action: action }
+      h[:content] = content if content
+      h
+    end
+  end
+
+  # System message in customize mode - section-level overrides.
+  SystemMessageCustomizeConfig = Struct.new(:sections, :content, keyword_init: true) do
+    def to_h
+      h = { mode: "customize" }
+      if sections
+        h[:sections] = sections.transform_values(&:to_h)
+      end
+      h[:content] = content if content
+      h
+    end
+  end
+
   # Permission request from the server.
   PermissionRequest = Struct.new(:kind, :tool_call_id, :extra, keyword_init: true) do
     def self.from_hash(h)
