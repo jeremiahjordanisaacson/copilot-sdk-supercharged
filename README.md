@@ -42,11 +42,30 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 | **Perl** | [`perl/`](./perl/README.md) | | CPAN |
 | **Lua** | [`lua/`](./lua/README.md) | | `luarocks install copilot-sdk-supercharged` |
 | **Shell / Bash** | [`shell/`](./shell/README.md) | | Source |
-| **Elixir** | [`elixir/`](./elixir/README.md) | | `{:copilot_sdk_supercharged, "~> 1.0"}` |
+| **Elixir** | [`elixir/`](./elixir/README.md) | | `{:copilot_sdk_supercharged, "~> 2.0"}` |
 | **Haskell** | [`haskell/`](./haskell/README.md) | | Cabal |
 | **Clojure** | [`clojure/`](./clojure/README.md) | | `net.clojars.jeremiahisaacson/copilot-sdk-supercharged` |
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
+
+## What's New in v2.0.0
+
+Synced with upstream `github/copilot-sdk` v0.3.0 (public preview) and ported all features to all 21 SDKs:
+
+- **Per-session GitHub authentication** – Scope auth tokens per session for multi-tenant apps
+- **Session idle timeout** – Auto-cleanup inactive sessions with configurable timeout
+- **SessionFs** – Session-scoped filesystem provider with 10 I/O operations
+- **Commands & UI Elicitation** – Register slash commands and interactive prompts/dialogs
+- **System prompt customization** – Fine-grained control with append/replace/customize modes
+- **Per-agent skills** – Preload skill content into agent context at startup
+- **Per-agent tool visibility** – `excludedTools` to control tool access per agent
+- **Runtime request headers** – Custom HTTP headers per message turn
+- **Model capabilities override** – Deep-merge overrides for model feature flags
+- **Config discovery** – Auto-detect MCP servers and skill directories from workspace
+- **Sub-agent streaming events** – Control streaming event forwarding from sub-agents
+- **session.getMetadata()** – Retrieve session metadata via RPC
+- **MCP server config refactoring** – Separate stdio/HTTP server config types
+- **Image generation** – Response format and image options across all SDKs
 
 ## Getting Started
 

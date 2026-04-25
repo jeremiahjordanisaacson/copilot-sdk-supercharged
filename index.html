@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Copilot SDK — Supercharged</title>
-    <meta name="description" content="GitHub Copilot SDK expanded to 20 languages. Embed Copilot's agentic workflows in any application.">
+    <meta name="description" content="GitHub Copilot SDK expanded to 21 languages. Embed Copilot's agentic workflows in any application.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Mona+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -805,6 +805,26 @@
                 <h3>Custom Agents</h3>
                 <p>Define specialized AI personas with custom prompts, tools, and MCP servers. Build a fleet of purpose-built assistants.</p>
             </div>
+            <div class="feature-card">
+                <div class="feature-icon green">🔐</div>
+                <h3>Per-Session Auth</h3>
+                <p>Scope GitHub tokens per session for multi-tenant apps. Override client-level auth on a per-session basis.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon orange">📂</div>
+                <h3>SessionFs</h3>
+                <p>Session-scoped filesystem with 10 I/O operations. Plug in your own storage backend via the provider interface.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon purple">💬</div>
+                <h3>Commands & Elicitation</h3>
+                <p>Register slash commands and interactive UI prompts. Let agents ask users for input mid-conversation.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon blue">✏️</div>
+                <h3>Customize Mode</h3>
+                <p>Fine-grained system prompt control — append, replace, or override individual sections by ID.</p>
+            </div>
         </div>
     </div>
 </section>
@@ -1163,7 +1183,7 @@ main = <span class="token-kw">do</span>
         <div class="arch-diagram reveal">
             <div class="arch-layer">
                 <strong>Your Application</strong>
-                <span class="arch-label">Any of 20 languages</span>
+                <span class="arch-label">Any of 21 languages</span>
             </div>
             <div class="arch-arrow">&#8595;</div>
             <div class="arch-layer">
