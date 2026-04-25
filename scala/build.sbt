@@ -4,7 +4,7 @@ lazy val root = project
   .in(file("."))
   .settings(
     name := "copilot-sdk-supercharged",
-    version := "0.1.0",
+    version := "2.0.0",
     scalaVersion := scala3Version,
     organization := "com.github.copilot",
     description := "Scala SDK for the GitHub Copilot CLI",

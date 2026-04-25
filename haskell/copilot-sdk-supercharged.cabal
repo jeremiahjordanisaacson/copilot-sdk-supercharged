@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               copilot-sdk-supercharged
-version:            0.1.0.0
+version:            2.0.0.0
 synopsis:           Haskell SDK for the GitHub Copilot CLI
 description:
   A Haskell SDK for interacting with the GitHub Copilot CLI server
