@@ -2236,10 +2236,13 @@ public class ResumeSessionConfig
 [JsonConverter(typeof(JsonStringEnumConverter<ResponseFormat>))]
 public enum ResponseFormat
 {
+    /// <summary>Plain text response.</summary>
     [JsonStringEnumMemberName("text")]
     Text,
+    /// <summary>Image generation response.</summary>
     [JsonStringEnumMemberName("image")]
     Image,
+    /// <summary>Structured JSON response.</summary>
     [JsonStringEnumMemberName("json_object")]
     JsonObject
 }
