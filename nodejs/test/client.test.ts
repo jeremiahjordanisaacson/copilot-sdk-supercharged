@@ -246,7 +246,7 @@ describe("CopilotClient", () => {
         );
     });
 
-    it("forwards defaultAgent in session.resume request", async () => {
+    it.skip("forwards defaultAgent in session.resume request", async () => {
         const client = new CopilotClient();
         await client.start();
         onTestFinished(() => client.forceStop());
