@@ -177,6 +177,16 @@ public class CopilotSession {
         return result;
     }
 
+    /**
+     * Retrieves metadata for this session.
+     *
+     * @return a map containing the session metadata
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getMetadata() throws Exception {
+        return client.request("session.getMetadata", Map.of("sessionId", sessionId));
+    }
+
     /** Destroys this session and releases resources. */
     public void destroy() throws Exception {
         client.request("session.destroy", Map.of("sessionId", sessionId));

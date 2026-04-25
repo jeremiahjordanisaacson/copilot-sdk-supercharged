@@ -185,6 +185,14 @@ class CopilotSession(
         case Left(err) => Future.failed(new RuntimeException(s"Failed to decode messages: $err"))
     }
 
+  /**
+   * Retrieves metadata for this session.
+   *
+   * @return A Future with the session metadata
+   */
+  def getMetadata(): Future[Json] =
+    connection.sendRequest("session.getMetadata", Json.obj("sessionId" -> sessionId.asJson))
+
   // -------------------------------------------------------------------------
   // Session Lifecycle
   // -------------------------------------------------------------------------

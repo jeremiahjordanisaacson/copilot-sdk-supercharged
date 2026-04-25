@@ -272,6 +272,15 @@ CopilotSession <- R6::R6Class(
       )
     },
 
+    #' @description Retrieve metadata for this session.
+    #' @return A named list containing the session metadata.
+    get_metadata = function() {
+      private$client$request(
+        "session.getMetadata",
+        list(sessionId = self$session_id)
+      )
+    },
+
     #' @description Retrieve all events/messages from this session's history.
     #' @return A list of SessionEvent R6 objects.
     get_messages = function() {

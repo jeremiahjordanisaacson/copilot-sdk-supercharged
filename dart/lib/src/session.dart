@@ -161,6 +161,15 @@ class CopilotSession {
         .cast<Map<String, dynamic>>();
   }
 
+  /// Retrieves metadata for this session.
+  Future<Map<String, dynamic>> getMetadata() async {
+    final response = await _connection.sendRequest('session.getMetadata', {
+      'sessionId': sessionId,
+    }) as Map<String, dynamic>;
+
+    return response;
+  }
+
   /// Destroys this session and releases all resources.
   ///
   /// After calling this, the session can no longer be used. To continue the

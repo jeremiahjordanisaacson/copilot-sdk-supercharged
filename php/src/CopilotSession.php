@@ -372,6 +372,19 @@ class CopilotSession
     }
 
     /**
+     * Retrieves metadata for this session.
+     *
+     * @return array The session metadata
+     * @throws \RuntimeException If the connection fails
+     */
+    public function getMetadata(): array
+    {
+        return $this->connection->request('session.getMetadata', [
+            'sessionId' => $this->sessionId,
+        ]);
+    }
+
+    /**
      * Destroys this session and releases all associated resources.
      */
     public function destroy(): void

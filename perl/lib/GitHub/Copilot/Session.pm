@@ -286,6 +286,17 @@ sub _handle_hooks_invoke {
     return $result;
 }
 
+sub get_metadata {
+    my ($self) = @_;
+
+    my $response = $self->{_client}->request(
+        'session.getMetadata',
+        { sessionId => $self->{session_id} },
+    );
+
+    return $response;
+}
+
 # --------------------------------------------------------------------------
 # Session history
 # --------------------------------------------------------------------------
@@ -379,6 +390,10 @@ Get a registered tool handler by name.
 =head2 get_messages()
 
 Retrieve conversation history. Returns arrayref of SessionEvent objects.
+
+=head2 get_metadata()
+
+Retrieve session metadata. Returns a hashref of session metadata.
 
 =head2 destroy()
 

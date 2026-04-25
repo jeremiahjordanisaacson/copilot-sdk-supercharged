@@ -282,6 +282,11 @@ std::vector<SessionEvent> CopilotSession::getMessages() {
     return events;
 }
 
+nlohmann::json CopilotSession::getMetadata() {
+    auto result = client_->request("session.getMetadata", {{"sessionId", sessionId}});
+    return result;
+}
+
 void CopilotSession::destroy() {
     client_->request("session.destroy", {{"sessionId", sessionId}});
 

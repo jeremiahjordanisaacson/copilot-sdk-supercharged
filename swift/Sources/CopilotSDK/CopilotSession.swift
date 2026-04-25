@@ -369,6 +369,18 @@ public actor CopilotSession {
         }
     }
 
+    // MARK: - Get Metadata
+
+    /// Retrieves metadata for this session.
+    ///
+    /// - Returns: A dictionary containing the session metadata.
+    public func getMetadata() async throws -> [String: Any] {
+        return try await rpcClient.sendRequest(
+            method: "session.getMetadata",
+            params: ["sessionId": sessionId]
+        )
+    }
+
     // MARK: - Get Messages
 
     /// Retrieves all events and messages from this session's history.

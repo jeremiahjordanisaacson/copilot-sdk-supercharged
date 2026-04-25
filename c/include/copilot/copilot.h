@@ -253,9 +253,41 @@ typedef char * (*copilot_hook_handler_fn)(
  * System message configuration
  * ============================================================================ */
 
+/** Known system prompt section identifiers for the "customize" mode. */
+#define COPILOT_SECTION_IDENTITY            "identity"
+#define COPILOT_SECTION_TONE                "tone"
+#define COPILOT_SECTION_TOOL_EFFICIENCY     "tool_efficiency"
+#define COPILOT_SECTION_ENVIRONMENT_CONTEXT "environment_context"
+#define COPILOT_SECTION_CODE_CHANGE_RULES   "code_change_rules"
+#define COPILOT_SECTION_GUIDELINES          "guidelines"
+#define COPILOT_SECTION_SAFETY              "safety"
+#define COPILOT_SECTION_TOOL_INSTRUCTIONS   "tool_instructions"
+#define COPILOT_SECTION_CUSTOM_INSTRUCTIONS "custom_instructions"
+#define COPILOT_SECTION_LAST_INSTRUCTIONS   "last_instructions"
+
+/** Override action for a system prompt section. */
+#define COPILOT_OVERRIDE_REPLACE "replace"
+#define COPILOT_OVERRIDE_REMOVE  "remove"
+#define COPILOT_OVERRIDE_APPEND  "append"
+#define COPILOT_OVERRIDE_PREPEND "prepend"
+
+/** Override operation for a single system prompt section. */
 typedef struct {
-    const char *mode;       /**< "append" (default) or "replace" */
+    const char *action;     /**< "replace", "remove", "append", or "prepend" */
+    const char *content;    /**< Optional content for the override (NULL if none) */
+} copilot_section_override_t;
+
+/** A key-value pair mapping a section name to its override. */
+typedef struct {
+    const char *section;                    /**< Section identifier (use COPILOT_SECTION_* constants) */
+    copilot_section_override_t override;    /**< The override to apply */
+} copilot_section_override_entry_t;
+
+typedef struct {
+    const char *mode;       /**< "append" (default), "replace", or "customize" */
     const char *content;    /**< Additional/replacement content */
+    const copilot_section_override_entry_t *section_overrides; /**< Array of section overrides (customize mode), or NULL */
+    size_t section_overrides_count;                             /**< Number of section overrides */
 } copilot_system_message_config_t;
 
 /* ============================================================================
@@ -306,6 +338,49 @@ typedef struct {
     int end_line;
     int end_character;
 } copilot_attachment_t;
+
+/* ============================================================================
+ * MCP Server Configuration
+ * ============================================================================ */
+
+/**
+ * MCP server type.
+ */
+typedef enum {
+    COPILOT_MCP_SERVER_STDIO = 0,   /**< Local/stdio server */
+    COPILOT_MCP_SERVER_HTTP,        /**< Remote HTTP server */
+    COPILOT_MCP_SERVER_SSE,         /**< Remote SSE server */
+} copilot_mcp_server_type_t;
+
+/**
+ * MCP server configuration.
+ *
+ * For stdio servers: set command, args, args_count, and optionally env_*/cwd.
+ * For HTTP/SSE servers: set url and optionally headers_*.
+ * Both variants use tools, tools_count, and optionally timeout.
+ */
+typedef struct {
+    copilot_mcp_server_type_t type;
+
+    /* Base fields (all variants) */
+    const char **tools;            /**< NULL-terminated array of tool names, or NULL */
+    size_t tools_count;
+    int timeout;                   /**< Tool call timeout in ms (0 = not set) */
+    bool has_timeout;              /**< Whether timeout was explicitly set */
+
+    /* Stdio variant fields */
+    const char *command;           /**< Command to run (NULL for HTTP/SSE) */
+    const char **args;             /**< NULL-terminated array of args, or NULL */
+    size_t args_count;
+    const char **env_keys;         /**< NULL-terminated array of env var keys, or NULL */
+    const char **env_values;       /**< Parallel array of env var values, or NULL */
+    const char *cwd;               /**< Working directory, or NULL */
+
+    /* HTTP/SSE variant fields */
+    const char *url;               /**< Server URL (NULL for stdio) */
+    const char **headers_keys;     /**< NULL-terminated array of header keys, or NULL */
+    const char **headers_values;   /**< Parallel array of header values, or NULL */
+} copilot_mcp_server_config_t;
 
 /* ============================================================================
  * Client options
@@ -718,6 +793,18 @@ void copilot_session_free(copilot_session_t *session);
  * @return COPILOT_OK on success.
  */
 copilot_error_t copilot_session_abort(copilot_session_t *session);
+
+/**
+ * Retrieves metadata for this session.
+ *
+ * @param session    The session.
+ * @param out_json   Output: JSON string containing the metadata (caller must free), or NULL to ignore.
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_session_get_metadata(
+    copilot_session_t *session,
+    char **out_json
+);
 
 #ifdef __cplusplus
 }

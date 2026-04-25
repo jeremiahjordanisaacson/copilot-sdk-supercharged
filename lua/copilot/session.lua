@@ -177,6 +177,20 @@ function CopilotSession:get_messages()
     return {}, nil
 end
 
+--- Retrieve metadata for this session.
+-- @return table|nil  The session metadata
+-- @return string|nil error
+function CopilotSession:get_metadata()
+    local result, err = self._rpc_client:request("session.getMetadata", {
+        sessionId = self.session_id,
+    })
+    if err then
+        return nil, "failed to get metadata: " .. tostring(err)
+    end
+
+    return result, nil
+end
+
 --- Destroy this session and release resources.
 -- @return boolean success
 -- @return string|nil error

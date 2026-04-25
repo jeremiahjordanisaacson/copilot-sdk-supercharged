@@ -159,6 +159,17 @@ class CopilotSession internal constructor(
     }
 
     /**
+     * Retrieves metadata for this session.
+     *
+     * @return The session metadata as a JsonElement
+     */
+    suspend fun getMetadata(): JsonElement {
+        return client.request("session.getMetadata", buildJsonObject {
+            put("sessionId", sessionId)
+        })
+    }
+
+    /**
      * Retrieves all events and messages from this session's history.
      */
     suspend fun getMessages(): List<SessionEvent> {

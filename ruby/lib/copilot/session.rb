@@ -184,6 +184,13 @@ module Copilot
       events.map { |e| SessionEvent.from_hash(e) }
     end
 
+    # Retrieve metadata for this session.
+    #
+    # @return [Hash] the session metadata
+    def get_metadata
+      @rpc_client.request("session.getMetadata", { sessionId: @session_id })
+    end
+
     # Destroy this session and release associated resources.
     def destroy
       @rpc_client.request("session.destroy", { sessionId: @session_id })

@@ -42,6 +42,7 @@ module Copilot.Session
   , destroySession
   , abortSession
   , getMessages
+  , getMetadata
   ) where
 
 import           Control.Concurrent        (MVar, newEmptyMVar, putMVar, takeMVar, tryPutMVar, tryTakeMVar)
@@ -384,6 +385,15 @@ abortSession session = do
   case result of
     Left err -> throwIO $ SessionRpcError (jreMessage err)
     Right _  -> pure ()
+
+-- | Retrieve metadata for this session.
+getMetadata :: CopilotSession -> IO Value
+getMetadata session = do
+  let params = object [ "sessionId" .= csSessionId session ]
+  result <- sendRequest (csJsonRpc session) "session.getMetadata" params
+  case result of
+    Left err -> throwIO $ SessionRpcError (jreMessage err)
+    Right val -> pure val
 
 -- | Retrieve all events/messages from the session history.
 getMessages :: CopilotSession -> IO [SessionEvent]

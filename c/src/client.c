@@ -1822,3 +1822,35 @@ copilot_error_t copilot_session_abort(copilot_session_t *session)
 
     return COPILOT_OK;
 }
+
+copilot_error_t copilot_session_get_metadata(
+    copilot_session_t *session,
+    char **out_json)
+{
+    if (!session) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!session->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "sessionId", session->session_id);
+
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(session->rpc, "session.getMetadata", params, 10000,
+                                            &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        copilot_error_t err = err_code ? COPILOT_ERROR_RPC : COPILOT_ERROR_IO;
+        free(err_msg);
+        return err;
+    }
+
+    if (out_json) {
+        *out_json = cJSON_PrintUnformatted(result);
+    }
+
+    cJSON_Delete(result);
+    free(err_msg);
+
+    return COPILOT_OK;
+}

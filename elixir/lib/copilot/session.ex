@@ -125,6 +125,12 @@ defmodule Copilot.Session do
     GenServer.cast(session, {:unsubscribe, ref})
   end
 
+  @doc "Get metadata for this session."
+  @spec get_metadata(GenServer.server()) :: {:ok, map()} | {:error, any()}
+  def get_metadata(session) do
+    GenServer.call(session, :get_metadata, 30_000)
+  end
+
   @doc "Get all session messages/events from history."
   @spec get_messages(GenServer.server()) :: {:ok, [map()]} | {:error, any()}
   def get_messages(session) do
@@ -301,6 +307,13 @@ defmodule Copilot.Session do
     existing = Map.get(typed, event_type, [])
     typed = Map.put(typed, event_type, [{ref, handler} | existing])
     {:reply, ref, %{state | typed_event_handlers: typed}}
+  end
+
+  def handle_call(:get_metadata, _from, state) do
+    case JsonRpcClient.request(state.rpc, "session.getMetadata", %{"sessionId" => state.session_id}, 30_000) do
+      {:ok, result} -> {:reply, {:ok, result}, state}
+      {:error, _} = err -> {:reply, err, state}
+    end
   end
 
   def handle_call(:get_messages, _from, state) do

@@ -251,6 +251,15 @@
                                  {:sessionId (:session-id state)})]
     (:events response)))
 
+(defn get-metadata!
+  "Retrieve metadata for this session."
+  [session-atom]
+  (let [state      @session-atom
+        rpc-client (:rpc-client state)
+        response   (rpc/request! rpc-client "session.getMetadata"
+                                 {:sessionId (:session-id state)})]
+    response))
+
 (defn destroy!
   "Destroy this session and release resources.
 

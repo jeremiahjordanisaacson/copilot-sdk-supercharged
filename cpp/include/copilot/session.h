@@ -58,6 +58,9 @@ public:
     /// Get all events/messages from this session's history.
     std::vector<SessionEvent> getMessages();
 
+    /// Get metadata for this session.
+    nlohmann::json getMetadata();
+
     /// Destroy this session and release resources.
     void destroy();
 

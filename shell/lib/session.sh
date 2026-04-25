@@ -236,6 +236,38 @@ copilot_session_get_messages() {
     return 0
 }
 
+# Get metadata for the current session.
+#
+# Arguments:
+#   $1 - Optional session ID (defaults to COPILOT_SESSION_ID)
+#
+# Sets:
+#   COPILOT_JSONRPC_LAST_RESPONSE - The full getMetadata response
+#
+# Usage:
+#   copilot_session_get_metadata
+#   echo "$COPILOT_JSONRPC_LAST_RESPONSE" | jq '.result'
+#
+# Returns 0 on success, 1 on failure.
+copilot_session_get_metadata() {
+    local session_id="${1:-$COPILOT_SESSION_ID}"
+
+    if [[ -z "$session_id" ]]; then
+        echo "ERROR: No active session. Create or resume a session first." >&2
+        return 1
+    fi
+
+    local params
+    params=$(jq -c -n --arg sid "$session_id" '{"sessionId":$sid}')
+
+    if ! copilot_jsonrpc_request "session.getMetadata" "$params"; then
+        echo "ERROR: Failed to get metadata" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 # Abort the currently processing message in the session.
 #
 # Arguments:

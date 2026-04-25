@@ -508,6 +508,16 @@ impl CopilotSession {
         Ok(events)
     }
 
+    /// Retrieves metadata for this session.
+    pub async fn get_metadata(&self) -> Result<Value, CopilotError> {
+        let params = serde_json::json!({ "sessionId": self.session_id });
+        let response = self
+            .rpc_client
+            .request("session.getMetadata", params, None)
+            .await?;
+        Ok(response)
+    }
+
     /// Destroys this session and releases all associated resources.
     ///
     /// After calling this method, the session can no longer be used.
