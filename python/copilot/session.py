@@ -22,10 +22,8 @@ from typing import (
     Any,
     Literal,
     NotRequired,
-    Optional,
     Required,
     TypedDict,
-    Union,
     cast,
 )
 
@@ -193,7 +191,7 @@ class ImageBlock(TypedDict):
     image: AssistantImageData
 
 
-ContentBlock = Union[TextBlock, ImageBlock]
+ContentBlock = TextBlock | ImageBlock
 """A content block in a mixed text+image response."""
 
 # ============================================================================
@@ -1157,8 +1155,8 @@ class CopilotSession:
         attachments: list[Attachment] | None = None,
         mode: Literal["enqueue", "immediate"] | None = None,
         request_headers: dict[str, str] | None = None,
-        response_format: Optional[ResponseFormat] = None,
-        image_options: Optional[ImageOptions] = None,
+        response_format: ResponseFormat | None = None,
+        image_options: ImageOptions | None = None,
     ) -> str:
         """
         Send a message to this session.
@@ -1215,8 +1213,8 @@ class CopilotSession:
         attachments: list[Attachment] | None = None,
         mode: Literal["enqueue", "immediate"] | None = None,
         request_headers: dict[str, str] | None = None,
-        response_format: Optional[ResponseFormat] = None,
-        image_options: Optional[ImageOptions] = None,
+        response_format: ResponseFormat | None = None,
+        image_options: ImageOptions | None = None,
         timeout: float = 60.0,
     ) -> SessionEvent | None:
         """
