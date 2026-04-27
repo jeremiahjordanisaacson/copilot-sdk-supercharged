@@ -55,6 +55,29 @@
 
 - Tools: each SDK has helper APIs to expose functions as tools; prefer the language's `DefineTool`/`@define_tool`/`AIFunctionFactory.Create` patterns (see language READMEs).
 - Infinite sessions are enabled by default and persist workspace state to `~/.copilot/session-state/{sessionId}`; compaction events are emitted (`session.compaction_start`, `session.compaction_complete`). See language READMEs for usage.
+
+## On-session-start: Upstream sync check 🔔
+
+**IMPORTANT — Run this check at the START of every session in this repo:**
+
+1. Run `gh issue list --state open --json number,title,body --jq '.[] | select(.title | startswith("Upstream sync:"))'` to check for open upstream sync issues.
+2. Also run `git fetch upstream 2>/dev/null; git rev-list --count HEAD..upstream/main 2>/dev/null` to get a live count.
+3. If there are open sync issues OR upstream is ahead:
+   - Summarize what's new: list the commit titles from upstream that we don't have yet.
+   - Categorize: how many are feature commits vs dependency bumps.
+   - Present it like this:
+
+   > **🔔 Upstream sync available!** There are **N new commits** from `github/copilot-sdk:main`.
+   >
+   > Here's the changes:
+   > - `<commit summary 1>`
+   > - `<commit summary 2>`
+   > - ...
+   >
+   > **Want me to implement these, test, create a release, and update the README and ship everything?**
+
+4. Wait for the user's response before doing anything.
+5. If there are NO open sync issues and upstream is up to date, say nothing — proceed normally.
 - Streaming: when `streaming`/`Streaming=true` you receive delta events (`assistant.message_delta`, `assistant.reasoning_delta`) and final events (`assistant.message`, `assistant.reasoning`) — tests expect this behavior.
 - Type generation is centralized in `nodejs/scripts/generate-session-types.ts` and requires the `@github/copilot` schema to be present (often via `npm link` or installed package).
 
