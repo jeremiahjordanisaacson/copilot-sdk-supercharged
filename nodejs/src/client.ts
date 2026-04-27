@@ -231,6 +231,7 @@ export class CopilotClient {
     };
     private isExternalServer: boolean = false;
     private forceStopping: boolean = false;
+    private stopping: boolean = false;
     private onListModels?: () => Promise<ModelInfo[]> | ModelInfo[];
     private onGetTraceContext?: TraceContextProvider;
     private modelsCache: ModelInfo[] | null = null;
@@ -413,6 +414,8 @@ export class CopilotClient {
         }
 
         this.state = "connecting";
+        this.stopping = false;
+        this.forceStopping = false;
 
         try {
             // Only start CLI server process if not connecting to external server
@@ -466,6 +469,7 @@ export class CopilotClient {
      * ```
      */
     async stop(): Promise<Error[]> {
+        this.stopping = true;
         const errors: Error[] = [];
 
         // Disconnect all active sessions with retry logic
@@ -1514,10 +1518,16 @@ export class CopilotClient {
                 // Capture stderr for error messages
                 this.stderrBuffer += data.toString();
                 // Forward CLI stderr to parent's stderr so debug logs are visible
-                const lines = data.toString().split("\n");
-                for (const line of lines) {
-                    if (line.trim()) {
-                        process.stderr.write(`[CLI subprocess] ${line}\n`);
+                if (!process.stderr.destroyed && process.stderr.writable) {
+                    const lines = data.toString().split("\n");
+                    for (const line of lines) {
+                        if (line.trim()) {
+                            try {
+                                process.stderr.write(`[CLI subprocess] ${line}\n`);
+                            } catch {
+                                // Parent stderr may have been closed — suppress
+                            }
+                        }
                     }
                 }
             });
@@ -1608,10 +1618,25 @@ export class CopilotClient {
             throw new Error("CLI process not started");
         }
 
-        // Add error handler to stdin to prevent unhandled rejections during forceStop
-        this.cliProcess.stdin?.on("error", (err) => {
-            if (!this.forceStopping) {
-                throw err;
+        // Add error handler to stdin to suppress expected stream errors during shutdown.
+        // When the CLI process exits, pending JSON-RPC writes to stdin may trigger
+        // ERR_STREAM_DESTROYED or EPIPE. These are expected during cleanup and when the
+        // process has already exited; re-throwing from an event handler would cause
+        // uncaught exceptions.
+        this.cliProcess.stdin?.on("error", (err: NodeJS.ErrnoException) => {
+            const isShuttingDown = this.stopping || this.forceStopping;
+            const isProcessGone =
+                this.cliProcess?.exitCode !== null ||
+                this.cliProcess?.stdin?.destroyed ||
+                this.cliProcess?.stdin?.writableEnded;
+            const isStreamError =
+                err.code === "ERR_STREAM_DESTROYED" ||
+                err.code === "EPIPE" ||
+                err.code === "ERR_STREAM_WRITE_AFTER_END";
+
+            if (isShuttingDown || isProcessGone || isStreamError) {
+                // Expected during cleanup or process exit — suppress
+                return;
             }
         });
 
@@ -1632,6 +1657,34 @@ export class CopilotClient {
         if (this.cliProcess) {
             throw new Error("CLI child process was unexpectedly started in parent process mode");
         }
+
+        // Add error handler on stdout to handle parent pipe closure.
+        // In extension mode, if the parent process closes the pipe, this is a fatal
+        // transport loss — transition to disconnected state.
+        process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+            const isShuttingDown = this.stopping || this.forceStopping;
+            if (isShuttingDown) {
+                return;
+            }
+            const isStreamError =
+                err.code === "ERR_STREAM_DESTROYED" ||
+                err.code === "EPIPE" ||
+                err.code === "ERR_STREAM_WRITE_AFTER_END";
+            if (isStreamError) {
+                // Parent pipe closed — fatal transport loss, tear down connection
+                this.state = "disconnected";
+                if (this.connection) {
+                    try {
+                        this.connection.dispose();
+                    } catch {
+                        // Ignore errors during emergency teardown
+                    }
+                    this.connection = null;
+                    this._rpc = null;
+                }
+                return;
+            }
+        });
 
         // Create JSON-RPC connection over stdin/stdout
         this.connection = createMessageConnection(
