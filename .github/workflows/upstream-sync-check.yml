@@ -60,7 +60,7 @@ jobs:
         if: steps.check.outputs.has_updates == 'true'
         id: existing
         run: |
-          EXISTING=$(gh issue list --label "upstream-sync" --state open --json number --jq '.[0].number // empty')
+          EXISTING=$(gh issue list --search "Upstream sync" --state open --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
             echo "issue_exists=true" >> $GITHUB_OUTPUT
             echo "issue_number=$EXISTING" >> $GITHUB_OUTPUT
@@ -109,8 +109,7 @@ jobs:
           else
             gh issue create \
               --title "Upstream sync: $BEHIND new commits from github/copilot-sdk" \
-              --body-file /tmp/issue-body.md \
-              --label "upstream-sync"
+              --body-file /tmp/issue-body.md
             echo "Created new sync issue"
           fi
         env:
