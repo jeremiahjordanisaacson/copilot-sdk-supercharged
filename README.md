@@ -6,19 +6,37 @@
 [![PyPI](https://img.shields.io/pypi/v/copilot-sdk-supercharged?logo=python&label=PyPI&color=3775A9)](https://pypi.org/project/copilot-sdk-supercharged/)
 [![crates.io](https://img.shields.io/crates/v/copilot-sdk-supercharged?logo=rust&label=crates.io&color=dea584)](https://crates.io/crates/copilot-sdk-supercharged)
 [![NuGet](https://img.shields.io/nuget/v/CopilotSDK.Supercharged?logo=nuget&label=NuGet&color=004880)](https://www.nuget.org/packages/CopilotSDK.Supercharged)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.jeremiahjordanisaacson/copilot-sdk-supercharged?logo=apachemaven&label=Maven%20Central&color=C71A36)](https://central.sonatype.com/artifact/io.github.jeremiahjordanisaacson/copilot-sdk-supercharged)
 [![Gem](https://img.shields.io/gem/v/copilot-sdk-supercharged?logo=rubygems&label=RubyGems&color=E9573F)](https://rubygems.org/gems/copilot-sdk-supercharged)
 [![Hex](https://img.shields.io/hexpm/v/copilot_sdk_supercharged?logo=elixir&label=Hex&color=6e4a7e)](https://hex.pm/packages/copilot_sdk_supercharged)
 [![Clojars](https://img.shields.io/clojars/v/net.clojars.jeremiahisaacson/copilot-sdk-supercharged?logo=clojure&label=Clojars&color=63B132)](https://clojars.org/net.clojars.jeremiahisaacson/copilot-sdk-supercharged)
 [![LuaRocks](https://img.shields.io/badge/LuaRocks-latest-2C2D72?logo=lua)](https://luarocks.org/modules/jeremiahisaacson/copilot-sdk-supercharged)
 [![GitHub Stars](https://img.shields.io/github/stars/jeremiahjordanisaacson/copilot-sdk-supercharged?style=flat&logo=github&color=238636)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged)
-[![Registries](https://img.shields.io/badge/registries-8-f0883e?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
+[![Registries](https://img.shields.io/badge/registries-9-f0883e?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
 [![Languages](https://img.shields.io/badge/languages-21-58a6ff?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
 
 **21 languages. One SDK.** Agents for every app.
 
-Embed Copilot's agentic workflows in your application—now available in public preview as a programmable SDK for 21 languages.
+> **Trusted by 15,000+ developers globally and growing daily.**
 
-The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-tested agent runtime you can invoke programmatically. No need to build your own orchestration—you define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
+Embed Copilot's agentic workflows in your application - now available in public preview as a programmable SDK for 21 languages.
+
+The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-tested agent runtime you can invoke programmatically. No need to build your own orchestration - you define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
+
+### Download Stats
+
+| Registry | Downloads |
+|----------|----------:|
+| PyPI | 9,221 |
+| npm | 2,073 |
+| RubyGems | 1,842 |
+| crates.io | 1,633 |
+| NuGet | 779 |
+| Hex.pm | 216 |
+| Clojars | 49 |
+| Maven Central | *new* |
+| LuaRocks | *available* |
+| **Total** | **15,813+** |
 
 ## Available SDKs
 
