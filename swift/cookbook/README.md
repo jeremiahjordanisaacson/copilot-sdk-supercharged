@@ -8,6 +8,7 @@ Short, practical recipes for using the GitHub Copilot SDK with Swift. Each recip
 - [Multiple Sessions](multiple-sessions.md): Manage multiple independent conversations simultaneously.
 - [Persisting Sessions](persisting-sessions.md): Save and resume sessions across restarts.
 - [Tools and Skills](tools-and-skills.md): Define custom tools, register skills, and orchestrate sub-agents.
+- [Advanced v2.0 Features](advanced-features.md): Per-session auth, SessionFs, commands, system prompts, skills, config discovery, image generation, and more.
 
 ## Contributing
 
