@@ -29,17 +29,26 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           mvn versions:set -DnewVersion=$VERSION -DgenerateBackupPoms=false
 
-      - name: Build JAR and sources/javadoc
+      - name: Build JAR, sources, and javadoc
         run: mvn clean package source:jar javadoc:jar -DskipTests
 
       - name: Create bundle for Central Portal
         run: |
-          cd target
-          jar -cvf bundle.jar *.pom *.jar *.jar
+          VERSION=${GITHUB_REF_NAME#v}
+          ARTIFACT=copilot-sdk-supercharged
+          GROUP_DIR=io/github/jeremiahjordanisaacson
+          mkdir -p staging/$GROUP_DIR/$ARTIFACT/$VERSION
+          cp target/$ARTIFACT-$VERSION.jar staging/$GROUP_DIR/$ARTIFACT/$VERSION/
+          cp target/$ARTIFACT-$VERSION-sources.jar staging/$GROUP_DIR/$ARTIFACT/$VERSION/
+          cp target/$ARTIFACT-$VERSION-javadoc.jar staging/$GROUP_DIR/$ARTIFACT/$VERSION/
+          cp pom.xml staging/$GROUP_DIR/$ARTIFACT/$VERSION/$ARTIFACT-$VERSION.pom
+          cd staging
+          jar -cvf ../bundle.jar .
 
       - name: Upload to Maven Central Portal
         run: |
+          TOKEN=$(echo -n "${{ secrets.MAVEN_USERNAME }}:${{ secrets.MAVEN_PASSWORD }}" | base64 -w0)
           curl --fail -X POST \
             "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC&name=copilot-sdk-supercharged-${GITHUB_REF_NAME#v}" \
-            -H "Authorization: Bearer $(echo -n '${{ secrets.MAVEN_USERNAME }}:${{ secrets.MAVEN_PASSWORD }}' | base64)" \
-            -F "bundle=@target/bundle.jar"
+            -H "Authorization: UserToken $TOKEN" \
+            -F "bundle=@bundle.jar"

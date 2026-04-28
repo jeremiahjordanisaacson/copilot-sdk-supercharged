@@ -1,0 +1,10 @@
+Makefile.PL
+README.md
+MANIFEST
+examples/basic_example.pl
+lib/GitHub/Copilot/Client.pm
+lib/GitHub/Copilot/DefineTool.pm
+lib/GitHub/Copilot/JsonRpcClient.pm
+lib/GitHub/Copilot/SdkProtocolVersion.pm
+lib/GitHub/Copilot/Session.pm
+lib/GitHub/Copilot/Types.pm
