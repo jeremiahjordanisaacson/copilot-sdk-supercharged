@@ -15,7 +15,7 @@ The Kotlin SDK for the GitHub Copilot CLI provides a coroutine-based interface f
 
 ```kotlin
 dependencies {
-    implementation("com.github.copilot:copilot-sdk-supercharged-kotlin:0.1.0")
+    implementation("io.github.jeremiahjordanisaacson:copilot-sdk-supercharged-kotlin:2.0.2")
 }
 ```
 

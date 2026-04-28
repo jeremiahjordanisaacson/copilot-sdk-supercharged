@@ -19,16 +19,16 @@ Java SDK for programmatic control of GitHub Copilot CLI via JSON-RPC.
 
 ```xml
 <dependency>
-    <groupId>com.github.copilot.supercharged</groupId>
+    <groupId>io.github.jeremiahjordanisaacson</groupId>
     <artifactId>copilot-sdk-supercharged</artifactId>
-    <version>0.1.0</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'com.github.copilot.supercharged:copilot-sdk-supercharged:0.1.0'
+implementation 'io.github.jeremiahjordanisaacson:copilot-sdk-supercharged:2.0.2'
 ```
 
 ## Quick Start

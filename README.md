@@ -28,7 +28,7 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 | **Python** | [`python/`](./python/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/python/README.md) | `pip install copilot-sdk-supercharged` |
 | **Go** | [`go/`](./go/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/go/README.md) | `go get github.com/github/copilot-sdk/go` |
 | **.NET / C#** | [`dotnet/`](./dotnet/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/dotnet/README.md) | `dotnet add package CopilotSDK.Supercharged` |
-| **Java** | [`java/`](./java/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/java/README.md) | Maven / Gradle |
+| **Java** | [`java/`](./java/README.md) | [Cookbook](./java/cookbook/README.md) | `io.github.jeremiahjordanisaacson:copilot-sdk-supercharged` |
 | **Rust** | [`rust/`](./rust/README.md) | [Cookbook](./rust/cookbook/README.md) | `cargo add copilot-sdk-supercharged` |
 | **Ruby** | [`ruby/`](./ruby/README.md) | [Cookbook](./ruby/cookbook/README.md) | `gem install copilot-sdk-supercharged` |
 | **PHP** | [`php/`](./php/README.md) | [Cookbook](./php/cookbook/README.md) | Composer |
