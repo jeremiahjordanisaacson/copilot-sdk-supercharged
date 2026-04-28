@@ -29,22 +29,22 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 | **Go** | [`go/`](./go/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/go/README.md) | `go get github.com/github/copilot-sdk/go` |
 | **.NET / C#** | [`dotnet/`](./dotnet/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/dotnet/README.md) | `dotnet add package CopilotSDK.Supercharged` |
 | **Java** | [`java/`](./java/README.md) | [Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk/java/README.md) | Maven / Gradle |
-| **Rust** | [`rust/`](./rust/README.md) | | `cargo add copilot-sdk-supercharged` |
-| **Ruby** | [`ruby/`](./ruby/README.md) | | `gem install copilot-sdk-supercharged` |
-| **PHP** | [`php/`](./php/README.md) | | Composer |
-| **Swift** | [`swift/`](./swift/README.md) | | Swift Package Manager |
-| **Kotlin** | [`kotlin/`](./kotlin/README.md) | | Gradle |
-| **C++** | [`cpp/`](./cpp/README.md) | | CMake |
-| **C** | [`c/`](./c/README.md) | | CMake |
-| **Dart** | [`dart/`](./dart/README.md) | | pub |
-| **Scala** | [`scala/`](./scala/README.md) | | sbt |
-| **R** | [`r/`](./r/README.md) | | CRAN |
-| **Perl** | [`perl/`](./perl/README.md) | | CPAN |
-| **Lua** | [`lua/`](./lua/README.md) | | `luarocks install copilot-sdk-supercharged` |
-| **Shell / Bash** | [`shell/`](./shell/README.md) | | Source |
-| **Elixir** | [`elixir/`](./elixir/README.md) | | `{:copilot_sdk_supercharged, "~> 2.0"}` |
-| **Haskell** | [`haskell/`](./haskell/README.md) | | Cabal |
-| **Clojure** | [`clojure/`](./clojure/README.md) | | `net.clojars.jeremiahisaacson/copilot-sdk-supercharged` |
+| **Rust** | [`rust/`](./rust/README.md) | [Cookbook](./rust/cookbook/README.md) | `cargo add copilot-sdk-supercharged` |
+| **Ruby** | [`ruby/`](./ruby/README.md) | [Cookbook](./ruby/cookbook/README.md) | `gem install copilot-sdk-supercharged` |
+| **PHP** | [`php/`](./php/README.md) | [Cookbook](./php/cookbook/README.md) | Composer |
+| **Swift** | [`swift/`](./swift/README.md) | [Cookbook](./swift/cookbook/README.md) | Swift Package Manager |
+| **Kotlin** | [`kotlin/`](./kotlin/README.md) | [Cookbook](./kotlin/cookbook/README.md) | Gradle |
+| **C++** | [`cpp/`](./cpp/README.md) | [Cookbook](./cpp/cookbook/README.md) | CMake |
+| **C** | [`c/`](./c/README.md) | [Cookbook](./c/cookbook/README.md) | CMake |
+| **Dart** | [`dart/`](./dart/README.md) | [Cookbook](./dart/cookbook/README.md) | pub |
+| **Scala** | [`scala/`](./scala/README.md) | [Cookbook](./scala/cookbook/README.md) | sbt |
+| **R** | [`r/`](./r/README.md) | [Cookbook](./r/cookbook/README.md) | CRAN |
+| **Perl** | [`perl/`](./perl/README.md) | [Cookbook](./perl/cookbook/README.md) | CPAN |
+| **Lua** | [`lua/`](./lua/README.md) | [Cookbook](./lua/cookbook/README.md) | `luarocks install copilot-sdk-supercharged` |
+| **Shell / Bash** | [`shell/`](./shell/README.md) | [Cookbook](./shell/cookbook/README.md) | Source |
+| **Elixir** | [`elixir/`](./elixir/README.md) | [Cookbook](./elixir/cookbook/README.md) | `{:copilot_sdk_supercharged, "~> 2.0"}` |
+| **Haskell** | [`haskell/`](./haskell/README.md) | [Cookbook](./haskell/cookbook/README.md) | Cabal |
+| **Clojure** | [`clojure/`](./clojure/README.md) | [Cookbook](./clojure/cookbook/README.md) | `net.clojars.jeremiahisaacson/copilot-sdk-supercharged` |
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
