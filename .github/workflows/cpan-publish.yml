@@ -1,0 +1,39 @@
+name: Publish to CPAN
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: perl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.38'
+          install-modules-with: cpanm
+
+      - name: Install dependencies
+        run: cpanm --installdeps --notest .
+
+      - name: Set version and build dist
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          perl Makefile.PL
+          make dist
+
+      - name: Upload to CPAN
+        run: |
+          cpanm CPAN::Uploader
+          cpan-upload --user ${{ secrets.CPAN_USERNAME }} --password ${{ secrets.CPAN_PASSWORD }} GitHub-Copilot-*.tar.gz

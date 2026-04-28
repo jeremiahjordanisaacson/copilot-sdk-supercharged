@@ -1,0 +1,41 @@
+name: Publish to Hackage
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: haskell
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Haskell
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.6'
+          cabal-version: '3.10'
+
+      - name: Set version from tag
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          CABAL_VERSION=$(echo $VERSION | sed 's/\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\1.\2.\3.0/')
+          sed -i "s/^version: .*/version:            $CABAL_VERSION/" copilot-sdk-supercharged.cabal
+
+      - name: Build sdist
+        run: cabal sdist
+
+      - name: Upload to Hackage
+        run: |
+          cabal upload dist-newstyle/sdist/copilot-sdk-supercharged-*.tar.gz \
+            --username=${{ secrets.HACKAGE_USERNAME }} \
+            --password=${{ secrets.HACKAGE_PASSWORD }} \
+            --publish
