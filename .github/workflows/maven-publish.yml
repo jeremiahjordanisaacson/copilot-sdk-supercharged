@@ -37,11 +37,25 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           ARTIFACT=copilot-sdk-supercharged
           GROUP_DIR=io/github/jeremiahjordanisaacson
-          mkdir -p staging/$GROUP_DIR/$ARTIFACT/$VERSION
-          cp target/$ARTIFACT-$VERSION.jar staging/$GROUP_DIR/$ARTIFACT/$VERSION/
-          cp target/$ARTIFACT-$VERSION-sources.jar staging/$GROUP_DIR/$ARTIFACT/$VERSION/
-          cp target/$ARTIFACT-$VERSION-javadoc.jar staging/$GROUP_DIR/$ARTIFACT/$VERSION/
-          cp pom.xml staging/$GROUP_DIR/$ARTIFACT/$VERSION/$ARTIFACT-$VERSION.pom
+          DIR=staging/$GROUP_DIR/$ARTIFACT/$VERSION
+          mkdir -p $DIR
+
+          # Copy artifacts
+          cp target/$ARTIFACT-$VERSION.jar $DIR/
+          cp target/$ARTIFACT-$VERSION-sources.jar $DIR/
+          cp target/$ARTIFACT-$VERSION-javadoc.jar $DIR/
+          cp pom.xml $DIR/$ARTIFACT-$VERSION.pom
+
+          # Generate checksums (required by Central Portal)
+          cd $DIR
+          for f in *.jar *.pom; do
+            md5sum "$f" | cut -d' ' -f1 > "$f.md5"
+            sha1sum "$f" | cut -d' ' -f1 > "$f.sha1"
+            sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"
+          done
+          cd -
+
+          # Create bundle zip
           cd staging
           jar -cvf ../bundle.jar .
 
