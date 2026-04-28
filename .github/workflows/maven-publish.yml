@@ -55,9 +55,9 @@ jobs:
           done
           cd -
 
-          # Create bundle zip
+          # Create bundle zip (use zip, not jar, to avoid META-INF)
           cd staging
-          jar -cvf ../bundle.jar .
+          zip -r ../bundle.jar .
 
       - name: Upload to Maven Central Portal
         run: |
