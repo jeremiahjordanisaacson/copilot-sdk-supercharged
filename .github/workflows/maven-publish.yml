@@ -23,20 +23,23 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          server-id: ossrh
-          server-username: MAVEN_USERNAME
-          server-password: MAVEN_PASSWORD
-          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
-          gpg-passphrase: MAVEN_GPG_PASSPHRASE
 
       - name: Set version from tag
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           mvn versions:set -DnewVersion=$VERSION -DgenerateBackupPoms=false
 
-      - name: Build and publish
-        run: mvn clean deploy -P release
-        env:
-          MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
-          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
-          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+      - name: Build JAR and sources/javadoc
+        run: mvn clean package source:jar javadoc:jar -DskipTests
+
+      - name: Create bundle for Central Portal
+        run: |
+          cd target
+          jar -cvf bundle.jar *.pom *.jar *.jar
+
+      - name: Upload to Maven Central Portal
+        run: |
+          curl --fail -X POST \
+            "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC&name=copilot-sdk-supercharged-${GITHUB_REF_NAME#v}" \
+            -H "Authorization: Bearer $(echo -n '${{ secrets.MAVEN_USERNAME }}:${{ secrets.MAVEN_PASSWORD }}' | base64)" \
+            -F "bundle=@target/bundle.jar"
