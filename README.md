@@ -25,18 +25,7 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 
 ### Download Stats
 
-| Registry | Downloads |
-|----------|----------:|
-| PyPI | 9,221 |
-| npm | 2,073 |
-| RubyGems | 1,842 |
-| crates.io | 1,633 |
-| NuGet | 779 |
-| Hex.pm | 216 |
-| Clojars | 49 |
-| Maven Central | *new* |
-| LuaRocks | *available* |
-| **Total** | **15,813+** |
+> **Trusted by 15,000+ developers globally and growing daily.**
 
 ## Available SDKs
 
