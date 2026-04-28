@@ -77,7 +77,7 @@ func main() {
 	// Session Metadata
 	meta, err := client.GetSessionMetadata(ctx, session.SessionID())
 	if err == nil && meta != nil {
-		fmt.Printf("Session model: %s\n", meta.Model)
+		fmt.Printf("Session ID: %s, Summary: %s\n", meta.SessionID, meta.Summary)
 	}
 
 	// Skills (uncomment to use)

@@ -243,7 +243,7 @@ int main(int argc, char *argv[])
     /* Session Metadata */
     copilot_session_metadata_t *meta = copilot_get_session_metadata(client, copilot_session_get_id(session));
     if (meta) {
-        printf("Session model: %s\n", meta->model);
+        printf("Session ID: %s\n", meta->session_id);
         copilot_free_metadata(meta);
     }
 

@@ -130,7 +130,7 @@ int main() {
         // Session Metadata
         auto meta = client.getSessionMetadata(session->sessionId);
         if (meta) {
-            std::cout << "Session model: " << meta->model << std::endl;
+            std::cout << "Session ID: " << meta->sessionId << std::endl;
         }
 
         // Skills (uncomment to use)

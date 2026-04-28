@@ -135,7 +135,7 @@ end
 # Session Metadata
 {:ok, meta} = CopilotClient.get_session_metadata(client, session.session_id)
 if meta do
-  IO.puts("Session model: #{meta.model}")
+  IO.puts("Session ID: #{meta.session_id}")
 end
 
 # Skills (uncomment to use)

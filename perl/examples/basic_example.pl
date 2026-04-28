@@ -183,7 +183,7 @@ for my $event (@$messages) {
 # Session Metadata
 my $meta = $client->get_session_metadata($session->session_id);
 if ($meta) {
-    print "Session model: " . $meta->{model} . "\n";
+    print "Session ID: " . $meta->{session_id} . "\n";
 }
 
 # Skills (uncomment to use)

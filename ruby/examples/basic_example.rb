@@ -150,7 +150,7 @@ begin
 
   # Session Metadata
   meta = client.get_session_metadata(session.session_id)
-  puts "Session model: #{meta.model}" if meta
+  puts "Session ID: #{meta.session_id}" if meta
 
   # Skills (uncomment to use)
   # skill_session = client.create_session(

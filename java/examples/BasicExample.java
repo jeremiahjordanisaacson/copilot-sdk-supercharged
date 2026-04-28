@@ -79,7 +79,7 @@ public class BasicExample {
         // Session Metadata
         SessionMetadata meta = client.getSessionMetadata(session.getSessionId());
         if (meta != null) {
-            System.out.println("Session model: " + meta.getModel());
+            System.out.println("Session ID: " + meta.getSessionId());
         }
 
         // Skills (uncomment to use)

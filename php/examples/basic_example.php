@@ -239,7 +239,7 @@ try {
     // Session Metadata
     $meta = $client->getSessionMetadata($session->getSessionId());
     if ($meta) {
-        echo "Session model: " . $meta->getModel() . "\n";
+        echo "Session ID: " . $meta->getSessionId() . "\n";
     }
 
     // Skills (uncomment to use)

@@ -53,7 +53,7 @@ async def main():
     # Session Metadata
     meta = await client.get_session_metadata(session.session_id)
     if meta:
-        print(f"Session model: {meta.model}")
+        print(f"Session ID: {meta.session_id}, Summary: {meta.summary}")
 
     # Skills (uncomment to use)
     # skill_session = await client.create_session(

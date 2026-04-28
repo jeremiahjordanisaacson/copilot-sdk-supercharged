@@ -112,7 +112,7 @@ tryCatch(
 # Session Metadata
 meta <- get_session_metadata(client, session$session_id)
 if (!is.null(meta)) {
-  cat("Session model:", meta$model, "\n")
+  cat("Session ID:", meta$session_id, "\n")
 }
 
 # Skills (uncomment to use)

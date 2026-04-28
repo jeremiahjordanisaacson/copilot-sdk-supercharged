@@ -156,7 +156,7 @@ import scala.concurrent.duration.*
 
     // Session Metadata
     val meta = Await.result(client.getSessionMetadata(session.sessionId), 10.seconds)
-    meta.foreach(m => println(s"Session model: ${m.model}"))
+    meta.foreach(m => println(s"Session ID: ${m.sessionId}"))
 
     // Skills (uncomment to use)
     // val skillSession = Await.result(client.createSession(SessionConfig(

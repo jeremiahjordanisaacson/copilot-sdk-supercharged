@@ -43,7 +43,7 @@ while (true)
 var meta = await client.GetSessionMetadataAsync(session.SessionId);
 if (meta is not null)
 {
-    Console.WriteLine($"Session model: {meta.Model}");
+    Console.WriteLine($"Session ID: {meta.SessionId}, Summary: {meta.Summary}");
 }
 
 // Skills (uncomment to use)

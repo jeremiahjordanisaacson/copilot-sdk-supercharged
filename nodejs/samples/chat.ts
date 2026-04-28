@@ -38,7 +38,7 @@ async function main() {
     // Session Metadata
     const meta = await client.getSessionMetadata(session.sessionId);
     if (meta) {
-        console.log(`Session model: ${meta.model}`);
+        console.log(`Session ID: ${meta.sessionId}, Summary: ${meta.summary}`);
     }
 
     // Skills (uncomment to use)

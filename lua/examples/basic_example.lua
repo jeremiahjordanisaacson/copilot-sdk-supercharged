@@ -156,7 +156,7 @@ local function main()
     -- Session Metadata
     local meta = client:get_session_metadata(session.session_id)
     if meta then
-        print("Session model: " .. meta.model)
+        print("Session ID: " .. meta.session_id)
     end
 
     -- Skills (uncomment to use)

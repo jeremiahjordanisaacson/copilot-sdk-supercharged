@@ -98,7 +98,7 @@ fun main() = runBlocking {
         // Session Metadata
         val meta = client.getSessionMetadata(session.sessionId)
         if (meta != null) {
-            println("Session model: ${meta.model}")
+            println("Session ID: ${meta.sessionId}")
         }
 
         // Skills (uncomment to use)
