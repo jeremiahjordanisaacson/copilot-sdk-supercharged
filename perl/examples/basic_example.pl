@@ -178,6 +178,20 @@ for my $event (@$messages) {
     }
 }
 
+# --- v2.0 Features ---
+
+# Session Metadata
+my $meta = $client->get_session_metadata($session->session_id);
+if ($meta) {
+    print "Session model: " . $meta->{model} . "\n";
+}
+
+# Skills (uncomment to use)
+# my $skill_session = $client->create_session(
+#     skill_directories => ['./skills'],
+#     include_sub_agent_streaming_events => 1,
+# );
+
 # ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------

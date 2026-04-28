@@ -152,6 +152,18 @@ import scala.concurrent.duration.*
     val messages = Await.result(session.getMessages(), 10.seconds)
     println(s"\nSession has ${messages.size} events in history.")
 
+    // --- v2.0 Features ---
+
+    // Session Metadata
+    val meta = Await.result(client.getSessionMetadata(session.sessionId), 10.seconds)
+    meta.foreach(m => println(s"Session model: ${m.model}"))
+
+    // Skills (uncomment to use)
+    // val skillSession = Await.result(client.createSession(SessionConfig(
+    //   skillDirectories = Seq("./skills"),
+    //   includeSubAgentStreamingEvents = Some(true)
+    // )), 30.seconds)
+
     // -----------------------------------------------------------------------
     // 10. Clean up
     // -----------------------------------------------------------------------

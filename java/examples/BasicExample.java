@@ -71,6 +71,22 @@ public class BasicExample {
             System.out.println("Response: " + result2.data.get("content") + "\n");
         }
 
+        // --- v2.0 Features ---
+
+        // Session idle timeout (add to client options)
+        // client = new CopilotClient(new CopilotClientOptions().setSessionIdleTimeoutSeconds(600));
+
+        // Session Metadata
+        SessionMetadata meta = client.getSessionMetadata(session.getSessionId());
+        if (meta != null) {
+            System.out.println("Session model: " + meta.getModel());
+        }
+
+        // Skills (uncomment to use)
+        // SessionConfig skillConfig = new SessionConfig()
+        //     .setSkillDirectories(List.of("./skills"))
+        //     .setIncludeSubAgentStreamingEvents(true);
+
         // Clean up
         session.destroy();
         client.stop();

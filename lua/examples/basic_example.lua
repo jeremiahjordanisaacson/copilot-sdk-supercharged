@@ -151,6 +151,20 @@ local function main()
         print(string.format("Conversation history: %d events", #messages))
     end
 
+    -- --- v2.0 Features ---
+
+    -- Session Metadata
+    local meta = client:get_session_metadata(session.session_id)
+    if meta then
+        print("Session model: " .. meta.model)
+    end
+
+    -- Skills (uncomment to use)
+    -- local skill_session = client:create_session({
+    --     skill_directories = { "./skills" },
+    --     include_sub_agent_streaming_events = true,
+    -- })
+
     -- Clean up
     print("Destroying session...")
     session:destroy()

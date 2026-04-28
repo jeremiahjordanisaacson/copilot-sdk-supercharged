@@ -276,6 +276,49 @@ config.mcpServers = std::map<std::string, copilot::MCPServerConfig>{
 };
 ```
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```cpp
+CopilotClientOptions opts;
+opts.sessionIdleTimeoutSeconds = 300;
+CopilotClient client(opts);
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```cpp
+CopilotClientOptions opts;
+opts.sessionFs = SessionFsConfig{"/repo", "/state", "posix"};
+CopilotClient client(opts);
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```cpp
+auto meta = client.getSessionMetadata("session-123");
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```cpp
+SessionConfig config;
+config.skillDirectories = {"./skills"};
+config.disabledSkills = {"test-skill"};
+config.includeSubAgentStreamingEvents = true;
+```
+
+- `skillDirectories` - list of directories containing skill definitions to register with the session
+- `disabledSkills` - list of skill names to explicitly disable
+- `includeSubAgentStreamingEvents` - when true, surfaces streaming events from sub-agents in the event stream
+
 ## Thread Safety
 
 - All public methods on `CopilotClient` and `CopilotSession` are thread-safe.

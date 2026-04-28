@@ -2,7 +2,9 @@ import { CopilotClient, approveAll, type SessionEvent } from "@github/copilot-sd
 import * as readline from "node:readline";
 
 async function main() {
-    const client = new CopilotClient();
+    const client = new CopilotClient({
+        sessionIdleTimeoutSeconds: 600, // 10 minute idle timeout
+    });
     const session = await client.createSession({
         onPermissionRequest: approveAll,
     });
@@ -30,6 +32,21 @@ async function main() {
         const reply = await session.sendAndWait({ prompt: input });
         console.log(`\nAssistant: ${reply?.data.content}\n`);
     }
+
+    // --- v2.0 Features ---
+
+    // Session Metadata
+    const meta = await client.getSessionMetadata(session.sessionId);
+    if (meta) {
+        console.log(`Session model: ${meta.model}`);
+    }
+
+    // Skills (uncomment to use)
+    // const skillSession = await client.createSession({
+    //     onPermissionRequest: approveAll,
+    //     skillDirectories: ["./skills"],
+    //     includeSubAgentStreamingEvents: true,
+    // });
 }
 
 main().catch(console.error);

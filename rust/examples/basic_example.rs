@@ -220,7 +220,23 @@ async fn main() -> Result<(), CopilotError> {
     }
 
     // ========================================================================
-    // 7. Clean up
+    // 7. v2.0 Features
+    // ========================================================================
+
+    // Session Metadata
+    if let Ok(Some(meta)) = client.get_session_metadata(&session.session_id()).await {
+        println!("Session model: {}", meta.model);
+    }
+
+    // Skills (uncomment to use)
+    // let skill_config = SessionConfig {
+    //     skill_directories: vec!["./skills".into()],
+    //     include_sub_agent_streaming_events: Some(true),
+    //     ..Default::default()
+    // };
+
+    // ========================================================================
+    // 8. Clean up
     // ========================================================================
     println!("\nCleaning up...");
     session.destroy().await?;

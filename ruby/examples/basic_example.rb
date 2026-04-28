@@ -145,7 +145,21 @@ begin
   end
 
   # ------------------------------------------------------------------
-  # 5. Cleanup
+  # 5. v2.0 Features
+  # ------------------------------------------------------------------
+
+  # Session Metadata
+  meta = client.get_session_metadata(session.session_id)
+  puts "Session model: #{meta.model}" if meta
+
+  # Skills (uncomment to use)
+  # skill_session = client.create_session(
+  #   skill_directories: ["./skills"],
+  #   include_sub_agent_streaming_events: true
+  # )
+
+  # ------------------------------------------------------------------
+  # 6. Cleanup
   # ------------------------------------------------------------------
 
   unsub.call

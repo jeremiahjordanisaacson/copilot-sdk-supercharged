@@ -224,6 +224,54 @@ val client = CopilotClient(CopilotClientOptions(
 ))
 ```
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```scala
+val client = CopilotClient(CopilotClientOptions(
+  sessionIdleTimeoutSeconds = Some(300)
+))
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```scala
+val client = CopilotClient(CopilotClientOptions(
+  sessionFs = Some(SessionFsConfig(
+    initialCwd = "/repo",
+    sessionStatePath = "/state",
+    conventions = "posix"
+  ))
+))
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```scala
+val meta = client.getSessionMetadata("session-123")
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```scala
+val session = client.createSession(SessionConfig(
+  skillDirectories = Seq("./skills"),
+  disabledSkills = Seq("test-skill"),
+  includeSubAgentStreamingEvents = Some(true)
+))
+```
+
+- `skillDirectories` - list of directories containing skill definitions to register with the session
+- `disabledSkills` - list of skill names to explicitly disable
+- `includeSubAgentStreamingEvents` - when true, surfaces streaming events from sub-agents in the event stream
+
 ### Custom Providers (BYOK)
 
 ```scala

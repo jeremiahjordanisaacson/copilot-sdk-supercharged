@@ -17,7 +17,10 @@ const reset = "\033[0m"
 func main() {
 	ctx := context.Background()
 	cliPath := filepath.Join("..", "..", "nodejs", "node_modules", "@github", "copilot", "index.js")
-	client := copilot.NewClient(&copilot.ClientOptions{CLIPath: cliPath})
+	client := copilot.NewClient(&copilot.ClientOptions{
+		CLIPath:                   cliPath,
+		SessionIdleTimeoutSeconds: 600,
+	})
 	if err := client.Start(ctx); err != nil {
 		panic(err)
 	}
@@ -68,4 +71,19 @@ func main() {
 		}
 		fmt.Printf("\nAssistant: %s\n\n", content)
 	}
+
+	// --- v2.0 Features ---
+
+	// Session Metadata
+	meta, err := client.GetSessionMetadata(ctx, session.SessionID())
+	if err == nil && meta != nil {
+		fmt.Printf("Session model: %s\n", meta.Model)
+	}
+
+	// Skills (uncomment to use)
+	// skillSession, _ := client.CreateSession(ctx, &copilot.SessionConfig{
+	//     OnPermissionRequest:           copilot.ApproveAll,
+	//     SkillDirectories:              []string{"./skills"},
+	//     IncludeSubAgentStreamingEvents: true,
+	// })
 }

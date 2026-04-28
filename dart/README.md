@@ -247,6 +247,54 @@ final lastId = await client.getLastSessionId();
 await client.deleteSession('session-id-here');
 ```
 
+## Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```dart
+final client = CopilotClient(options: CopilotClientOptions(
+  sessionIdleTimeoutSeconds: 300,
+));
+```
+
+## SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```dart
+final client = CopilotClient(options: CopilotClientOptions(
+  sessionFs: SessionFsConfig(
+    initialCwd: '/repo',
+    sessionStatePath: '/state',
+    conventions: 'posix',
+  ),
+));
+```
+
+## Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```dart
+final meta = await client.getSessionMetadata('session-123');
+```
+
+## Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```dart
+final session = await client.createSession(config: SessionConfig(
+  skillDirectories: ['./skills'],
+  disabledSkills: ['test-skill'],
+  includeSubAgentStreamingEvents: true,
+));
+```
+
+- `skillDirectories` - list of directories containing skill definitions to register with the session
+- `disabledSkills` - list of skill names to explicitly disable
+- `includeSubAgentStreamingEvents` - when true, surfaces streaming events from sub-agents in the event stream
+
 ## Custom Providers (BYOK)
 
 Use your own API endpoint:

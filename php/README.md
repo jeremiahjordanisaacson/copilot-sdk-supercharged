@@ -324,6 +324,52 @@ $session = $client->createSession(new SessionConfig(
 ));
 ```
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```php
+$client = new CopilotClient(['sessionIdleTimeoutSeconds' => 300]);
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```php
+$client = new CopilotClient([
+    'sessionFs' => [
+        'initialCwd' => '/repo',
+        'sessionStatePath' => '/tmp/state',
+        'conventions' => 'posix',
+    ],
+]);
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```php
+$meta = $client->getSessionMetadata('session-123');
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```php
+$session = $client->createSession([
+    'skillDirectories' => ['./skills'],
+    'disabledSkills' => ['test-skill'],
+    'includeSubAgentStreamingEvents' => true,
+]);
+```
+
+- `skillDirectories` - Paths to directories containing skill definitions
+- `disabledSkills` - Skills to exclude from the session
+- `includeSubAgentStreamingEvents` - When `true`, receive streaming events from sub-agents
+
 ### Custom Providers (BYOK)
 
 Use your own API endpoint instead of the Copilot API:

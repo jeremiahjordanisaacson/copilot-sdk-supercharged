@@ -125,6 +125,15 @@ if copilot_client_list_sessions; then
 fi
 echo ""
 
+# --- v2.0 Features ---
+
+# Session Metadata
+META=$(copilot_get_session_metadata "$COPILOT_SESSION_ID")
+echo "Session metadata: $META"
+
+# Skills (uncomment to use)
+# copilot_create_session --skill-directories "./skills"
+
 # 8. Destroy the session (cleanup trap also handles this)
 echo "Destroying session $COPILOT_SESSION_ID..."
 if copilot_session_destroy; then

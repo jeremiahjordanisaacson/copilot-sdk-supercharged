@@ -107,6 +107,20 @@ tryCatch(
   }
 )
 
+# --- v2.0 Features ---
+
+# Session Metadata
+meta <- get_session_metadata(client, session$session_id)
+if (!is.null(meta)) {
+  cat("Session model:", meta$model, "\n")
+}
+
+# Skills (uncomment to use)
+# skill_session <- create_session(client,
+#   skill_directories = c("./skills"),
+#   include_sub_agent_streaming_events = TRUE
+# )
+
 # --- Cleanup -----------------------------------------------------------------
 
 unsubscribe()

@@ -217,6 +217,57 @@ sub.unsubscribe();
 | `tool.execution_progress` | Tool execution progress |
 | `abort` | Session aborted |
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```rust
+let client = CopilotClient::new(CopilotClientOptions {
+    session_idle_timeout_seconds: Some(300),
+    ..Default::default()
+});
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```rust
+let opts = CopilotClientOptions {
+    session_fs: Some(SessionFsConfig {
+        initial_cwd: "/repo".into(),
+        session_state_path: "/tmp/state".into(),
+        conventions: "posix".into(),
+    }),
+    ..Default::default()
+};
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```rust
+let meta = client.get_session_metadata("session-123").await?;
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```rust
+let config = SessionConfig {
+    skill_directories: vec!["./skills".into()],
+    disabled_skills: vec!["test-skill".into()],
+    include_sub_agent_streaming_events: Some(true),
+    ..Default::default()
+};
+```
+
+- `skill_directories` - Paths to directories containing skill definitions
+- `disabled_skills` - Skills to exclude from the session
+- `include_sub_agent_streaming_events` - When `Some(true)`, receive streaming events from sub-agents
+
 ## API Reference
 
 ### CopilotClient

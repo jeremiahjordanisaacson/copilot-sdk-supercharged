@@ -130,6 +130,20 @@ case Session.send_and_wait(
     IO.puts("Error: #{inspect(reason)}")
 end
 
+# --- v2.0 Features ---
+
+# Session Metadata
+{:ok, meta} = CopilotClient.get_session_metadata(client, session.session_id)
+if meta do
+  IO.puts("Session model: #{meta.model}")
+end
+
+# Skills (uncomment to use)
+# {:ok, skill_session} = CopilotClient.create_session(client,
+#   skill_directories: ["./skills"],
+#   include_sub_agent_streaming_events: true
+# )
+
 # --------------------------------------------------------------------------
 # Clean up
 # --------------------------------------------------------------------------

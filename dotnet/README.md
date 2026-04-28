@@ -424,6 +424,83 @@ When enabled, sessions emit compaction events:
 - `SessionCompactionStartEvent` - Background compaction started
 - `SessionCompactionCompleteEvent` - Compaction finished (includes token counts)
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```csharp
+var client = new CopilotClient(new CopilotClientOptions
+{
+    SessionIdleTimeoutSeconds = 300, // 5 minutes
+});
+```
+
+When a session has no activity for the configured duration, the CLI will automatically clean it up.
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```csharp
+var client = new CopilotClient(new CopilotClientOptions
+{
+    SessionFs = new SessionFsConfig
+    {
+        InitialCwd = "/repo",
+        SessionStatePath = "/tmp/copilot-state",
+        Conventions = SessionFsSetProviderConventions.Posix,
+    },
+});
+```
+
+Subclass `SessionFsProvider` to handle filesystem operations:
+
+```csharp
+public class MySessionFsProvider : SessionFsProvider
+{
+    public override Task<string> ReadFileAsync(string path, CancellationToken ct) => ...;
+    public override Task WriteFileAsync(string path, string content, string? mode, CancellationToken ct) => ...;
+    public override Task AppendFileAsync(string path, string content, CancellationToken ct) => ...;
+    public override Task<bool> ExistsAsync(string path, CancellationToken ct) => ...;
+    public override Task<StatResult> StatAsync(string path, CancellationToken ct) => ...;
+    public override Task MkdirAsync(string path, CancellationToken ct) => ...;
+    public override Task<string[]> ReaddirAsync(string path, CancellationToken ct) => ...;
+    public override Task<DirEntry[]> ReaddirWithTypesAsync(string path, CancellationToken ct) => ...;
+    public override Task RmAsync(string path, CancellationToken ct) => ...;
+    public override Task RenameAsync(string oldPath, string newPath, CancellationToken ct) => ...;
+}
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```csharp
+var meta = await client.GetSessionMetadataAsync("session-123");
+if (meta is not null)
+{
+    Console.WriteLine($"Model: {meta.Model}, Created: {meta.CreatedAt}");
+}
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```csharp
+var session = await client.CreateSessionAsync(new SessionConfig
+{
+    OnPermissionRequest = PermissionHandler.ApproveAll,
+    SkillDirectories = ["./skills"],
+    DisabledSkills = ["test-skill"],
+    IncludeSubAgentStreamingEvents = true,
+});
+```
+
+- `SkillDirectories` - Paths to directories containing skill definitions
+- `DisabledSkills` - Skills to exclude from the session
+- `IncludeSubAgentStreamingEvents` - When `true`, receive streaming events from sub-agents
+
 ## Advanced Usage
 
 ### Manual Server Control

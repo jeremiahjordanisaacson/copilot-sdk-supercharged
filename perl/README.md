@@ -217,6 +217,54 @@ $client->delete_session($session_id);
 my $sessions = $client->list_sessions();
 ```
 
+## Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```perl
+my $client = GitHub::Copilot::Client->new(
+    session_idle_timeout_seconds => 300,
+);
+```
+
+## SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```perl
+my $client = GitHub::Copilot::Client->new(
+    session_fs => {
+        initial_cwd        => '/repo',
+        session_state_path => '/state',
+        conventions        => 'posix',
+    },
+);
+```
+
+## Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```perl
+my $meta = $client->get_session_metadata('session-123');
+```
+
+## Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```perl
+my $session = $client->create_session(
+    skill_directories                  => ['./skills'],
+    disabled_skills                    => ['test-skill'],
+    include_sub_agent_streaming_events => 1,
+);
+```
+
+- `skill_directories` - arrayref of directories containing skill definitions to register with the session
+- `disabled_skills` - arrayref of skill names to explicitly disable
+- `include_sub_agent_streaming_events` - when true (1), surfaces streaming events from sub-agents in the event stream
+
 ## Wire Protocol
 
 The SDK communicates with the Copilot CLI using JSON-RPC 2.0 over stdio with

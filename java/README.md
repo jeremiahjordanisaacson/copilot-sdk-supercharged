@@ -97,6 +97,48 @@ CopilotSession session = client.createSession(
 );
 ```
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```java
+CopilotClient client = new CopilotClient(
+    new CopilotClientOptions().setSessionIdleTimeoutSeconds(300)
+);
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```java
+CopilotClientOptions opts = new CopilotClientOptions()
+    .setSessionFs(new SessionFsConfig("/repo", "/tmp/state", "posix"));
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```java
+SessionMetadata meta = client.getSessionMetadata("session-123");
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```java
+SessionConfig config = new SessionConfig()
+    .setSkillDirectories(List.of("./skills"))
+    .setDisabledSkills(List.of("test-skill"))
+    .setIncludeSubAgentStreamingEvents(true);
+```
+
+- `skillDirectories` - Paths to directories containing skill definitions
+- `disabledSkills` - Skills to exclude from the session
+- `includeSubAgentStreamingEvents` - When `true`, receive streaming events from sub-agents
+
 ## Custom Provider (BYOK)
 
 ```java

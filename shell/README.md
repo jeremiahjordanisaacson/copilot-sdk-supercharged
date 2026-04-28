@@ -284,6 +284,42 @@ copilot --headless --no-auto-update --log-level info --stdio
 
 See `examples/basic_example.sh` for a complete working example that demonstrates all major SDK features.
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```bash
+copilot_init --session-idle-timeout 300
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```bash
+copilot_init --session-fs-cwd "/repo" --session-fs-state-path "/tmp/state"
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```bash
+meta=$(copilot_get_session_metadata "$SESSION_ID")
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```bash
+copilot_create_session --skill-directories "./skills" --disabled-skills "test-skill"
+```
+
+- `--skill-directories` - directories to scan for skill definitions
+- `--disabled-skills` - skills to exclude from the session
+- `--include-sub-agent-streaming-events` - receive streaming events from sub-agents
+
 ## Image Generation
 
 Request image responses using response format constants:

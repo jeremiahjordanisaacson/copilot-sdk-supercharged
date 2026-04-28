@@ -93,6 +93,20 @@ fun main() = runBlocking {
             println("Response: $content\n")
         }
 
+        // --- v2.0 Features ---
+
+        // Session Metadata
+        val meta = client.getSessionMetadata(session.sessionId)
+        if (meta != null) {
+            println("Session model: ${meta.model}")
+        }
+
+        // Skills (uncomment to use)
+        // val skillSession = client.createSession(SessionConfig(
+        //     skillDirectories = listOf("./skills"),
+        //     includeSubAgentStreamingEvents = true
+        // ))
+
         // Unsubscribe from events and clean up
         unsubscribe()
         session.destroy()

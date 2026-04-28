@@ -441,6 +441,76 @@ When enabled, sessions emit compaction events:
 - `session.compaction_start` - Background compaction started
 - `session.compaction_complete` - Compaction finished (includes token counts)
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```python
+cfg = SubprocessConfig(session_idle_timeout_seconds=300)  # 5 minutes
+client = CopilotClient(cfg)
+```
+
+When a session has no activity for the configured duration, the CLI will automatically clean it up.
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```python
+from copilot import CopilotClient, SubprocessConfig
+
+cfg = SubprocessConfig(
+    session_fs={
+        "initial_cwd": "/repo",
+        "session_state_path": "/tmp/copilot-state",
+        "conventions": "posix",
+    },
+)
+client = CopilotClient(cfg)
+```
+
+Implement a provider to handle filesystem operations:
+
+```python
+class MySessionFsProvider:
+    async def read_file(self, path: str) -> str: ...
+    async def write_file(self, path: str, content: str, mode: str | None = None) -> None: ...
+    async def append_file(self, path: str, content: str) -> None: ...
+    async def exists(self, path: str) -> bool: ...
+    async def stat(self, path: str) -> dict: ...
+    async def mkdir(self, path: str) -> None: ...
+    async def readdir(self, path: str) -> list[str]: ...
+    async def readdir_with_types(self, path: str) -> list[dict]: ...
+    async def rm(self, path: str) -> None: ...
+    async def rename(self, old_path: str, new_path: str) -> None: ...
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```python
+meta = await client.get_session_metadata("session-123")
+if meta:
+    print(f"Model: {meta.model}, Created: {meta.created_at}")
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```python
+session = await client.create_session(
+    skill_directories=["./skills"],
+    disabled_skills=["test-skill"],
+    include_sub_agent_streaming_events=True,
+)
+```
+
+- `skill_directories` - Paths to directories containing skill definitions
+- `disabled_skills` - Skills to exclude from the session
+- `include_sub_agent_streaming_events` - When `True`, receive streaming events from sub-agents
+
 ## Custom Providers
 
 The SDK supports custom OpenAI-compatible API providers (BYOK - Bring Your Own Key), including local providers like Ollama. When using a custom provider, you must specify the `model` explicitly.

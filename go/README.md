@@ -477,8 +477,77 @@ session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
 
 When enabled, sessions emit compaction events:
 
-- `session.compaction_start` - Background compaction started
+- `session.compaction_complete` - Background compaction started
 - `session.compaction_complete` - Compaction finished (includes token counts)
+
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```go
+client := copilot.NewClient(&copilot.ClientOptions{
+    SessionIdleTimeoutSeconds: 300, // 5 minutes
+})
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```go
+client := copilot.NewClient(&copilot.ClientOptions{
+    SessionFs: &copilot.SessionFsConfig{
+        InitialCwd:       "/repo",
+        SessionStatePath: "/tmp/copilot-state",
+        Conventions:      rpc.SessionFSSetProviderConventionsPosix,
+    },
+})
+```
+
+Implement the `SessionFsProvider` interface to handle filesystem operations:
+
+```go
+type SessionFsProvider interface {
+    ReadFile(path string) (string, error)
+    WriteFile(path string, content string, mode *string) error
+    AppendFile(path string, content string) error
+    Exists(path string) (bool, error)
+    Stat(path string) (*StatResult, error)
+    Mkdir(path string) error
+    Readdir(path string) ([]string, error)
+    ReaddirWithTypes(path string) ([]DirEntry, error)
+    Rm(path string) error
+    Rename(oldPath string, newPath string) error
+}
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```go
+meta, err := client.GetSessionMetadata(ctx, "session-123")
+if err == nil && meta != nil {
+    fmt.Printf("Model: %s\n", meta.Model)
+}
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```go
+session, err := client.CreateSession(ctx, &copilot.SessionConfig{
+    OnPermissionRequest:           copilot.ApproveAll,
+    SkillDirectories:              []string{"./skills"},
+    DisabledSkills:                []string{"test-skill"},
+    IncludeSubAgentStreamingEvents: true,
+})
+```
+
+- `SkillDirectories` - Paths to directories containing skill definitions
+- `DisabledSkills` - Skills to exclude from the session
+- `IncludeSubAgentStreamingEvents` - When `true`, receive streaming events from sub-agents
 
 ## Custom Providers
 

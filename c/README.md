@@ -201,6 +201,53 @@ if (strcmp(event->type, "assistant.message_delta") == 0) {
 }
 ```
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```c
+copilot_client_options_t opts = copilot_client_options_default();
+opts.session_idle_timeout_seconds = 300;
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```c
+copilot_client_options_t opts = copilot_client_options_default();
+opts.session_fs.initial_cwd = "/repo";
+opts.session_fs.session_state_path = "/state";
+opts.session_fs.conventions = "posix";
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```c
+copilot_session_metadata_t *meta = copilot_get_session_metadata(client, "session-123");
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```c
+copilot_session_config_t config = copilot_session_config_default();
+const char *skills[] = {"./skills"};
+config.skill_directories = skills;
+config.skill_directory_count = 1;
+const char *disabled[] = {"test-skill"};
+config.disabled_skills = disabled;
+config.disabled_skill_count = 1;
+config.include_sub_agent_streaming_events = true;
+```
+
+- `skill_directories` - array of directories containing skill definitions to register with the session
+- `disabled_skills` - array of skill names to explicitly disable
+- `include_sub_agent_streaming_events` - when true, surfaces streaming events from sub-agents in the event stream
+
 ### Custom Provider (BYOK)
 
 ```c

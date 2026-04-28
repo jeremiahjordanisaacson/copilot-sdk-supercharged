@@ -392,6 +392,48 @@ Enable streaming to receive response chunks incrementally:
 (session/send-and-wait! sess {:prompt "Tell me a short story"})
 ```
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```clojure
+(def client (copilot/create-client {:session-idle-timeout-seconds 300}))
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```clojure
+(def client (copilot/create-client
+  {:session-fs {:initial-cwd "/repo"
+                :session-state-path "/tmp/state"
+                :conventions "posix"}}))
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```clojure
+(def meta (copilot/get-session-metadata client "session-123"))
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```clojure
+(def session (copilot/create-session client
+  {:skill-directories ["./skills"]
+   :disabled-skills ["test-skill"]
+   :include-sub-agent-streaming-events true}))
+```
+
+- `:skill-directories` - directories to scan for skill definitions
+- `:disabled-skills` - skills to exclude from the session
+- `:include-sub-agent-streaming-events` - receive streaming events from sub-agents
+
 ## Custom Providers (BYOK)
 
 ```clojure

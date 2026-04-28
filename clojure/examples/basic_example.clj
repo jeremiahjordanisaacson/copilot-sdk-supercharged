@@ -78,6 +78,18 @@
                           (get-in result [:data :content])
                           "\n")))
 
+          ;; --- v2.0 Features ---
+
+          ;; Session Metadata
+          (let [meta (client/get-session-metadata client (session/session-id sess))]
+            (when meta
+              (println "Session model:" (:model meta))))
+
+          ;; Skills (uncomment to use)
+          ;; (def skill-session (client/create-session! client
+          ;;   {:skill-directories ["./skills"]
+          ;;    :include-sub-agent-streaming-events true}))
+
           ;; Unsubscribe event handler
           (unsub))
 

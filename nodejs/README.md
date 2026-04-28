@@ -691,6 +691,77 @@ When enabled, sessions emit compaction events:
 - `session.compaction_start` - Background compaction started
 - `session.compaction_complete` - Compaction finished (includes token counts)
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```typescript
+const client = new CopilotClient({
+    sessionIdleTimeoutSeconds: 300, // 5 minutes
+});
+```
+
+When a session has no activity for the configured duration, the CLI will automatically clean it up. This is useful for long-running server applications that create many sessions.
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```typescript
+const client = new CopilotClient({
+    sessionFs: {
+        initialCwd: "/repo",
+        sessionStatePath: "/tmp/copilot-state",
+        conventions: "posix",
+    },
+});
+await client.start();
+
+const session = await client.createSession({
+    onPermissionRequest: approveAll,
+    createSessionFsHandler: () => ({
+        readFile: async (path) => fs.promises.readFile(path, "utf-8"),
+        writeFile: async (path, content) => fs.promises.writeFile(path, content),
+        exists: async (path) => fs.existsSync(path),
+        stat: async (path) => fs.promises.stat(path),
+        mkdir: async (path) => fs.promises.mkdir(path, { recursive: true }),
+        readdir: async (path) => fs.promises.readdir(path),
+        rm: async (path) => fs.promises.rm(path, { recursive: true }),
+        rename: async (oldPath, newPath) => fs.promises.rename(oldPath, newPath),
+    }),
+});
+```
+
+The provider methods (`readFile`, `writeFile`, `appendFile`, `exists`, `stat`, `mkdir`, `readdir`, `readdirWithTypes`, `rm`, `rename`) let the CLI read and write files through your application's filesystem layer.
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```typescript
+const meta = await client.getSessionMetadata("session-123");
+if (meta) {
+    console.log(`Model: ${meta.model}, Created: ${meta.createdAt}`);
+}
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```typescript
+const session = await client.createSession({
+    onPermissionRequest: approveAll,
+    skillDirectories: ["./skills"],
+    disabledSkills: ["test-skill"],
+    includeSubAgentStreamingEvents: true,
+});
+```
+
+- `skillDirectories` - Paths to directories containing skill definitions
+- `disabledSkills` - Skills to exclude from the session
+- `includeSubAgentStreamingEvents` - When `true`, receive streaming events from sub-agents (deltas, reasoning)
+
 ### Multiple Sessions
 
 ```typescript

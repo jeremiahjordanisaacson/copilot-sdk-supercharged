@@ -213,6 +213,52 @@ config = %SessionConfig{
 {:ok, models} = Client.list_models(client)
 ```
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```elixir
+{:ok, client} = CopilotClient.start_link(session_idle_timeout_seconds: 300)
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```elixir
+{:ok, client} = CopilotClient.start_link(
+  session_fs: %{
+    initial_cwd: "/repo",
+    session_state_path: "/tmp/state",
+    conventions: "posix"
+  }
+)
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```elixir
+{:ok, meta} = CopilotClient.get_session_metadata(client, "session-123")
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```elixir
+{:ok, session} = CopilotClient.create_session(client,
+  skill_directories: ["./skills"],
+  disabled_skills: ["test-skill"],
+  include_sub_agent_streaming_events: true
+)
+```
+
+- `skill_directories` - directories to scan for skill definitions
+- `disabled_skills` - skills to exclude from the session
+- `include_sub_agent_streaming_events` - receive streaming events from sub-agents
+
 ## Custom Providers (BYOK)
 
 Use your own API endpoint:

@@ -258,6 +258,52 @@ local session = client:create_session({
 })
 ```
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```lua
+local client = CopilotClient:new({ session_idle_timeout_seconds = 300 })
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```lua
+local client = CopilotClient:new({
+    session_fs = {
+        initial_cwd = "/repo",
+        session_state_path = "/tmp/state",
+        conventions = "posix",
+    },
+})
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```lua
+local meta = client:get_session_metadata("session-123")
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```lua
+local session = client:create_session({
+    skill_directories = { "./skills" },
+    disabled_skills = { "test-skill" },
+    include_sub_agent_streaming_events = true,
+})
+```
+
+- `skill_directories` - directories to scan for skill definitions
+- `disabled_skills` - skills to exclude from the session
+- `include_sub_agent_streaming_events` - receive streaming events from sub-agents
+
 ## Session Event Types
 
 All event type constants are available in `types.SessionEventType`:

@@ -125,6 +125,19 @@ int main() {
         auto messages = session->getMessages();
         std::cout << "\nSession has " << messages.size() << " events in history." << std::endl;
 
+        // --- v2.0 Features ---
+
+        // Session Metadata
+        auto meta = client.getSessionMetadata(session->sessionId);
+        if (meta) {
+            std::cout << "Session model: " << meta->model << std::endl;
+        }
+
+        // Skills (uncomment to use)
+        // copilot::SessionConfig skillConfig;
+        // skillConfig.skillDirectories = {"./skills"};
+        // skillConfig.includeSubAgentStreamingEvents = true;
+
         // Clean up
         std::cout << "\nCleaning up..." << std::endl;
         session->off(handlerId);

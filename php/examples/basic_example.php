@@ -233,7 +233,23 @@ try {
     echo "\nConversation history: " . count($messages) . " events\n";
 
     // ========================================================================
-    // 10. Clean up
+    // 10. v2.0 Features
+    // ========================================================================
+
+    // Session Metadata
+    $meta = $client->getSessionMetadata($session->getSessionId());
+    if ($meta) {
+        echo "Session model: " . $meta->getModel() . "\n";
+    }
+
+    // Skills (uncomment to use)
+    // $skillSession = $client->createSession([
+    //     'skillDirectories' => ['./skills'],
+    //     'includeSubAgentStreamingEvents' => true,
+    // ]);
+
+    // ========================================================================
+    // 11. Clean up
     // ========================================================================
     echo "\nDestroying session...\n";
     $session->destroy();

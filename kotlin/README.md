@@ -331,6 +331,48 @@ val unsub2 = client.onLifecycle("session.created") { event ->
 }
 ```
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```kotlin
+val client = CopilotClient(CopilotClientOptions(sessionIdleTimeoutSeconds = 300))
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```kotlin
+val client = CopilotClient(CopilotClientOptions(
+    sessionFs = SessionFsConfig(initialCwd = "/repo", sessionStatePath = "/tmp/state", conventions = "posix")
+))
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```kotlin
+val meta = client.getSessionMetadata("session-123")
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```kotlin
+val session = client.createSession(SessionConfig(
+    skillDirectories = listOf("./skills"),
+    disabledSkills = listOf("test-skill"),
+    includeSubAgentStreamingEvents = true
+))
+```
+
+- `skillDirectories` - Paths to directories containing skill definitions
+- `disabledSkills` - Skills to exclude from the session
+- `includeSubAgentStreamingEvents` - When `true`, receive streaming events from sub-agents
+
 ## Custom Provider (BYOK)
 
 ```kotlin

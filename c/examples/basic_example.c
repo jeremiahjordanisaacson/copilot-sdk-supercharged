@@ -238,7 +238,22 @@ int main(int argc, char *argv[])
         fprintf(stderr, "\nError: %s\n", copilot_error_string(err));
     }
 
-    /* ---- 8. Clean up ---- */
+    /* ---- 8. v2.0 Features ---- */
+
+    /* Session Metadata */
+    copilot_session_metadata_t *meta = copilot_get_session_metadata(client, copilot_session_get_id(session));
+    if (meta) {
+        printf("Session model: %s\n", meta->model);
+        copilot_free_metadata(meta);
+    }
+
+    /* Skills (uncomment to use) */
+    /* copilot_session_config_t skill_config = copilot_session_config_default(); */
+    /* const char* skills[] = {"./skills"}; */
+    /* skill_config.skill_directories = skills; */
+    /* skill_config.skill_directory_count = 1; */
+
+    /* ---- 9. Clean up ---- */
     printf("\nCleaning up...\n");
     copilot_session_off(session, handler_id);
     copilot_session_destroy(session);

@@ -356,6 +356,50 @@ session <- client$create_session(
 )
 ```
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```r
+client <- copilot_client(session_idle_timeout_seconds = 300)
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```r
+client <- copilot_client(session_fs = list(
+  initial_cwd = "/repo",
+  session_state_path = "/state",
+  conventions = "posix"
+))
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```r
+meta <- get_session_metadata(client, "session-123")
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```r
+session <- create_session(client,
+  skill_directories = c("./skills"),
+  disabled_skills = c("test-skill"),
+  include_sub_agent_streaming_events = TRUE
+)
+```
+
+- `skill_directories` - character vector of directories containing skill definitions to register with the session
+- `disabled_skills` - character vector of skill names to explicitly disable
+- `include_sub_agent_streaming_events` - when TRUE, surfaces streaming events from sub-agents in the event stream
+
 ## Polling Model
 
 R is single-threaded, so the SDK uses a **polling model** rather than true async/await.

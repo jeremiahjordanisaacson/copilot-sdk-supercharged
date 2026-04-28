@@ -13,7 +13,10 @@ RESET = "\033[0m"
 
 
 async def main():
-    client = CopilotClient()
+    from copilot.config import SubprocessConfig
+
+    cfg = SubprocessConfig(session_idle_timeout_seconds=600)
+    client = CopilotClient(config=cfg)
     await client.start()
     session = await client.create_session(on_permission_request=PermissionHandler.approve_all)
 
@@ -44,6 +47,19 @@ async def main():
                 case AssistantMessageData() as data:
                     assistant_output = data.content
         print(f"\nAssistant: {assistant_output}\n")
+
+    # --- v2.0 Features ---
+
+    # Session Metadata
+    meta = await client.get_session_metadata(session.session_id)
+    if meta:
+        print(f"Session model: {meta.model}")
+
+    # Skills (uncomment to use)
+    # skill_session = await client.create_session(
+    #     skill_directories=["./skills"],
+    #     include_sub_agent_streaming_events=True,
+    # )
 
 
 if __name__ == "__main__":

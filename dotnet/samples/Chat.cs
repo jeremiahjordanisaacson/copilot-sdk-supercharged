@@ -1,6 +1,9 @@
 using GitHub.Copilot.SDK;
 
-await using var client = new CopilotClient();
+await using var client = new CopilotClient(new CopilotClientOptions
+{
+    SessionIdleTimeoutSeconds = 600,
+});
 await using var session = await client.CreateSessionAsync(new SessionConfig
 {
     OnPermissionRequest = PermissionHandler.ApproveAll
@@ -33,3 +36,20 @@ while (true)
     var reply = await session.SendAndWaitAsync(new MessageOptions { Prompt = input });
     Console.WriteLine($"\nAssistant: {reply?.Data.Content}\n");
 }
+
+// --- v2.0 Features ---
+
+// Session Metadata
+var meta = await client.GetSessionMetadataAsync(session.SessionId);
+if (meta is not null)
+{
+    Console.WriteLine($"Session model: {meta.Model}");
+}
+
+// Skills (uncomment to use)
+// var skillSession = await client.CreateSessionAsync(new SessionConfig
+// {
+//     OnPermissionRequest = PermissionHandler.ApproveAll,
+//     SkillDirectories = ["./skills"],
+//     IncludeSubAgentStreamingEvents = true,
+// });

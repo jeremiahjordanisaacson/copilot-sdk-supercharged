@@ -216,6 +216,52 @@ unsubscribe <- onSessionEvent session $ \evt ->
     _                         -> pure ()
 ```
 
+### Session Idle Timeout
+
+Configure automatic session cleanup after a period of inactivity:
+
+```haskell
+client <- newCopilotClient defaultOptions { sessionIdleTimeoutSeconds = Just 300 }
+```
+
+### SessionFs (Persistent Session Filesystem)
+
+SessionFs provides a virtual filesystem scoped to each session, enabling persistent state across compaction boundaries and session resumes.
+
+```haskell
+client <- newCopilotClient defaultOptions
+    { sessionFs = Just SessionFsConfig
+        { initialCwd = "/repo"
+        , sessionStatePath = "/tmp/state"
+        , conventions = Posix
+        }
+    }
+```
+
+### Session Metadata
+
+Retrieve metadata about a session (model, creation time, status):
+
+```haskell
+meta <- getSessionMetadata client "session-123"
+```
+
+### Skills and Sub-Agent Orchestration
+
+Register skill directories and control sub-agent behavior:
+
+```haskell
+session <- createSession client SessionConfig
+    { skillDirectories = ["./skills"]
+    , disabledSkills = ["test-skill"]
+    , includeSubAgentStreamingEvents = Just True
+    }
+```
+
+- `skillDirectories` - directories to scan for skill definitions
+- `disabledSkills` - skills to exclude from the session
+- `includeSubAgentStreamingEvents` - receive streaming events from sub-agents
+
 ## Client Options
 
 ```haskell
