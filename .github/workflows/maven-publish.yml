@@ -24,6 +24,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.MAVEN_GPG_PRIVATE_KEY }}" | gpg --batch --import
+          GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format long | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+          echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
+
       - name: Set version from tag
         run: |
           VERSION=${GITHUB_REF_NAME#v}
@@ -32,7 +38,7 @@ jobs:
       - name: Build JAR, sources, and javadoc
         run: mvn clean package source:jar javadoc:jar -DskipTests
 
-      - name: Create bundle for Central Portal
+      - name: Create signed bundle for Central Portal
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           ARTIFACT=copilot-sdk-supercharged
@@ -46,16 +52,16 @@ jobs:
           cp target/$ARTIFACT-$VERSION-javadoc.jar $DIR/
           cp pom.xml $DIR/$ARTIFACT-$VERSION.pom
 
-          # Generate checksums (required by Central Portal)
+          # Sign and generate checksums
           cd $DIR
           for f in *.jar *.pom; do
+            gpg --batch --pinentry-mode loopback --passphrase "${{ secrets.MAVEN_GPG_PASSPHRASE }}" -ab "$f"
             md5sum "$f" | cut -d' ' -f1 > "$f.md5"
             sha1sum "$f" | cut -d' ' -f1 > "$f.sha1"
-            sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"
           done
           cd -
 
-          # Create bundle zip (use zip, not jar, to avoid META-INF)
+          # Create bundle zip
           cd staging
           zip -r ../bundle.jar .
 
