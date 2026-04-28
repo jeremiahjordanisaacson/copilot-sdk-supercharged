@@ -6,7 +6,7 @@ lazy val root = project
     name := "copilot-sdk-supercharged",
     version := "2.0.0",
     scalaVersion := scala3Version,
-    organization := "com.github.copilot",
+    organization := "io.github.jeremiahjordanisaacson",
     description := "Scala SDK for the GitHub Copilot CLI",
 
     libraryDependencies ++= Seq(

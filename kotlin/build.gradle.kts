@@ -9,7 +9,7 @@ plugins {
     `maven-publish`
 }
 
-group = "com.github.copilot"
+group = "io.github.jeremiahjordanisaacson"
 version = "2.0.0"
 
 repositories {
