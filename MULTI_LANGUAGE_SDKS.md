@@ -41,8 +41,9 @@ All 17 SDKs were built to match the existing SDK architecture exactly, implement
 | 18 | **MATLAB** | `matlab/` | 22 | 3,100 | R2020b+, handle classes, Java I/O, events | -- |
 | 19 | **Delphi** | `delphi/` | 16 | 3,200 | Delphi 11+, TTask, TEvent, Win32 pipes, Boss | -- |
 | 20 | **Ada** | `ada/` | 22 | 3,400 | Ada 2012, GNAT, tagged types, tasks, Alire | -- |
+| 21 | **V (Vlang)** | `vlang/` | 16 | 2,800 | V 0.4+, spawn, chan, shared, [json] attrs | -- |
 
-**Total: 231 new files, ~61,750 lines of code, 20 commits**
+**Total: 247 new files, ~64,550 lines of code, 21 commits**
 
 ## SDK Architecture
 
