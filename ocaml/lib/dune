@@ -1,0 +1,6 @@
+(library
+ (name copilot_sdk)
+ (public_name copilot-sdk-supercharged)
+ (libraries lwt lwt.unix yojson)
+ (preprocess
+  (pps lwt_ppx)))

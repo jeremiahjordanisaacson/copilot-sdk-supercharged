@@ -1,0 +1,33 @@
+{
+    "name": "copilot-sdk",
+    "description": "D language SDK for the GitHub Copilot CLI",
+    "version": "0.1.0",
+    "authors": ["GitHub"],
+    "license": "MIT",
+
+    "targetType": "library",
+    "sourcePaths": ["source"],
+    "importPaths": ["source"],
+
+    "configurations": [
+        {
+            "name": "library",
+            "targetType": "library"
+        },
+        {
+            "name": "unittest",
+            "targetType": "executable",
+            "mainSourceFile": "source/copilot/client_test.d",
+            "dflags": ["-unittest"]
+        }
+    ],
+
+    "buildTypes": {
+        "release": {
+            "dflags": ["-O", "-release"]
+        },
+        "debug": {
+            "dflags": ["-g", "-debug"]
+        }
+    }
+}

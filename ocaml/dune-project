@@ -1,0 +1,30 @@
+(lang dune 3.0)
+
+(name copilot-sdk-supercharged)
+
+(version 0.1.0)
+
+(generate_opam_files true)
+
+(license MIT)
+
+(authors "Microsoft Corporation")
+
+(maintainers "Microsoft Corporation")
+
+(source
+ (github jeremiahjordanisaacson/copilot-sdk-supercharged))
+
+(package
+ (name copilot-sdk-supercharged)
+ (synopsis "OCaml SDK for GitHub Copilot CLI via JSON-RPC")
+ (description
+  "A client library for programmatic control of GitHub Copilot CLI via JSON-RPC 2.0 over stdio or TCP, with Content-Length header framing (LSP protocol style).")
+ (depends
+  (ocaml (>= 4.14))
+  (dune (>= 3.0))
+  (lwt (>= 5.6))
+  (lwt_ppx (>= 2.1))
+  (yojson (>= 2.0))
+  (alcotest (and :with-test (>= 1.7)))
+  (alcotest-lwt (and :with-test (>= 1.7)))))

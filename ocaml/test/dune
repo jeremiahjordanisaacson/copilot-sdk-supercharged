@@ -1,0 +1,5 @@
+(test
+ (name test_client)
+ (libraries copilot-sdk-supercharged alcotest alcotest-lwt lwt lwt.unix yojson)
+ (preprocess
+  (pps lwt_ppx)))

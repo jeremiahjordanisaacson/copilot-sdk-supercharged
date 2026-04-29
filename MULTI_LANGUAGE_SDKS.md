@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document records the expansion of the GitHub Copilot SDK Supercharged from 4 languages to 22 languages, adding full SDK implementations for 18 additional programming languages.
+This document records the expansion of the GitHub Copilot SDK Supercharged from 4 languages to 28 languages, adding full SDK implementations for 24 additional programming languages.
 
 ## Base SDKs (4 languages)
 
@@ -42,8 +42,12 @@ All 17 SDKs were built to match the existing SDK architecture exactly, implement
 | 19 | **Delphi** | `delphi/` | 16 | 3,200 | Delphi 11+, TTask, TEvent, Win32 pipes, Boss | -- |
 | 20 | **Ada** | `ada/` | 22 | 3,400 | Ada 2012, GNAT, tagged types, tasks, Alire | -- |
 | 21 | **V (Vlang)** | `vlang/` | 16 | 2,800 | V 0.4+, spawn, chan, shared, [json] attrs | -- |
+| 22 | **Crystal** | `crystal/` | 17 | 2,900 | Crystal 1.10+, fibers, channels, JSON::Serializable, shards | -- |
+| 23 | **OCaml** | `ocaml/` | 21 | 2,400 | OCaml 4.14+, Lwt, Yojson, Dune, Alcotest | -- |
+| 24 | **D** | `dlang/` | 16 | 2,400 | DMD/LDC, std.json, std.process, Nullable, DUB | -- |
+| 25 | **COBOL** | `cobol/` | 16 | 2,600 | GnuCOBOL 3+, STRING/UNSTRING, CALL, copybooks | -- |
 
-**Total: 247 new files, ~64,550 lines of code, 21 commits**
+**Total: 317 new files, ~74,850 lines of code, 25 commits**
 
 ## SDK Architecture
 
@@ -139,3 +143,4 @@ February 11, 2026
 ## Credits
 
 Built with Claude Opus 4.6 (1M context) using parallel agent orchestration.
+nt orchestration.
