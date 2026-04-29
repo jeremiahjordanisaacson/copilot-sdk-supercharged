@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document records the expansion of the GitHub Copilot SDK Supercharged from 4 languages to 21 languages, adding full SDK implementations for 17 additional programming languages.
+This document records the expansion of the GitHub Copilot SDK Supercharged from 4 languages to 22 languages, adding full SDK implementations for 18 additional programming languages.
 
 ## Base SDKs (4 languages)
 
@@ -15,7 +15,7 @@ The repository started with SDKs for:
 | Go | `go/` | `github.com/github/copilot-sdk/go` |
 | .NET / C# | `dotnet/` | `GitHub.Copilot.SDK` |
 
-## Added SDKs (17 languages)
+## Added SDKs (18 languages)
 
 All 17 SDKs were built to match the existing SDK architecture exactly, implementing the same JSON-RPC 2.0 protocol, the same CLI spawn pattern, and the same core API surface.
 
@@ -38,8 +38,11 @@ All 17 SDKs were built to match the existing SDK architecture exactly, implement
 | 15 | **Shell/Bash** | `shell/` | 7 | 1,334 | coproc, jq, bash 4+ | `d5a36aa` |
 | 16 | **Haskell** | `haskell/` | 9 | 3,275 | STM, async, aeson, Cabal | `6442c09` |
 | 17 | **Clojure** | `clojure/` | 9 | 2,450 | Clojure 1.12, deps.edn, core.async | `a1b2c3d` |
+| 18 | **MATLAB** | `matlab/` | 22 | 3,100 | R2020b+, handle classes, Java I/O, events | -- |
+| 19 | **Delphi** | `delphi/` | 16 | 3,200 | Delphi 11+, TTask, TEvent, Win32 pipes, Boss | -- |
+| 20 | **Ada** | `ada/` | 22 | 3,400 | Ada 2012, GNAT, tagged types, tasks, Alire | -- |
 
-**Total: 171 new files, ~52,050 lines of code, 17 commits**
+**Total: 231 new files, ~61,750 lines of code, 20 commits**
 
 ## SDK Architecture
 
