@@ -138,7 +138,7 @@ Please use the [GitHub Issues](https://github.com/github/copilot-sdk/issues) pag
 | **Rust**    | [copilot-community-sdk/copilot-sdk-rust][sdk-rust]       |
 | **Clojure** | [copilot-community-sdk/copilot-sdk-clojure][sdk-clojure] |
 | **C++**     | [0xeb/copilot-sdk-cpp][sdk-cpp]                          |
-| **17+ languages** (Ruby, PHP, Swift, Kotlin, Dart, Scala, R, Perl, Lua, Shell, Elixir, Haskell, C, and more) | [jeremiahjordanisaacson/copilot-sdk-supercharged][sdk-supercharged] |
+| **40 languages** (Java, Ruby, PHP, Swift, Kotlin, C++, C, Dart, Scala, R, Perl, Lua, Shell, Elixir, Haskell, Clojure, F#, Rust, and 22 more) | [jeremiahjordanisaacson/copilot-sdk-supercharged][sdk-supercharged] |
 
 [sdk-rust]: https://github.com/copilot-community-sdk/copilot-sdk-rust
 [sdk-cpp]: https://github.com/0xeb/copilot-sdk-cpp
