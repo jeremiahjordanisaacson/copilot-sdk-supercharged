@@ -192,6 +192,8 @@ try (var client = new CopilotClient()) {
 
 </details>
 
+> **40 languages supported.** See the [full SDK list](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks) with cookbooks for Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V, and 18 more.
+
 ## Hook Invocation Context
 
 Every hook receives an `invocation` parameter with context about the current session:

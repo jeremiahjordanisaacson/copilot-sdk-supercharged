@@ -84,6 +84,8 @@ var client = new CopilotClient(new CopilotClientOptions()
 
 </details>
 
+> **40 languages supported.** See the [full SDK list](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks) with cookbooks for Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V, and 18 more.
+
 ### TelemetryConfig Options
 
 | Option | Node.js | Python | Go | .NET | Java | Description |

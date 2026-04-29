@@ -333,7 +333,9 @@ auto session = client.createSession({
 
 </details>
 
-> **Tip:** Every hook handler receives an `invocation` parameter containing the `sessionId`, which is useful for correlating logs and maintaining per-session state.
+> **40 languages supported.** See the [full SDK list](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks) with cookbooks for Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V, and 18 more.
+
+> **Tip:** Every hook handler receives an `invocation` parametercontaining the `sessionId`, which is useful for correlating logs and maintaining per-session state.
 
 ---
 

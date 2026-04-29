@@ -200,6 +200,8 @@ See the individual SDK READMEs for installation instructions:
 
 </details>
 
+> **40 languages supported.** See the [full SDK list](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks) with cookbooks for Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V, and 18 more.
+
 ## Step 2: Send Your First Message
 
 Create a new file and add the following code. This is the simplest way to use the SDK—about 5 lines of code.
