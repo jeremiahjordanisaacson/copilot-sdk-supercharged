@@ -15,6 +15,13 @@
 [![Registries](https://img.shields.io/badge/registries-9-f0883e?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
 [![Languages](https://img.shields.io/badge/languages-40-58a6ff?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
 
+[![npm downloads](https://img.shields.io/npm/dt/copilot-sdk-supercharged?logo=npm&label=npm&color=CB3837)](https://www.npmjs.com/package/copilot-sdk-supercharged)
+[![PyPI downloads](https://img.shields.io/pepy/dt/copilot-sdk-supercharged?logo=python&label=PyPI&color=3775A9)](https://pepy.tech/project/copilot-sdk-supercharged)
+[![crates.io downloads](https://img.shields.io/crates/d/copilot-sdk-supercharged?logo=rust&label=crates.io&color=dea584)](https://crates.io/crates/copilot-sdk-supercharged)
+[![NuGet downloads](https://img.shields.io/nuget/dt/CopilotSDK.Supercharged?logo=nuget&label=NuGet&color=004880)](https://www.nuget.org/packages/CopilotSDK.Supercharged)
+[![RubyGems downloads](https://img.shields.io/gem/dt/copilot-sdk-supercharged?logo=rubygems&label=RubyGems&color=E9573F)](https://rubygems.org/gems/copilot-sdk-supercharged)
+[![Hex.pm downloads](https://img.shields.io/hexpm/dt/copilot_sdk_supercharged?logo=elixir&label=Hex.pm&color=6e4a7e)](https://hex.pm/packages/copilot_sdk_supercharged)
+
 **40 languages. One SDK.** Agents for every app.
 
 > **Trusted by 15,000+ developers globally and growing daily.**
