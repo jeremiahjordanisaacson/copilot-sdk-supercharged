@@ -21,6 +21,174 @@
         ".go": "go"
       },
       "rootUri": "go"
+    },
+    "rust": {
+      "command": "rust-analyzer",
+      "args": [],
+      "fileExtensions": {
+        ".rs": "rust"
+      },
+      "rootUri": "rust"
+    },
+    "python": {
+      "command": "pylsp",
+      "args": [],
+      "fileExtensions": {
+        ".py": "python"
+      },
+      "rootUri": "python"
+    },
+    "java": {
+      "command": "jdtls",
+      "args": [],
+      "fileExtensions": {
+        ".java": "java"
+      },
+      "rootUri": "java"
+    },
+    "kotlin": {
+      "command": "kotlin-language-server",
+      "args": [],
+      "fileExtensions": {
+        ".kt": "kotlin",
+        ".kts": "kotlin"
+      },
+      "rootUri": "kotlin"
+    },
+    "ruby": {
+      "command": "solargraph",
+      "args": ["stdio"],
+      "fileExtensions": {
+        ".rb": "ruby"
+      },
+      "rootUri": "ruby"
+    },
+    "swift": {
+      "command": "sourcekit-lsp",
+      "args": [],
+      "fileExtensions": {
+        ".swift": "swift"
+      },
+      "rootUri": "swift"
+    },
+    "elixir": {
+      "command": "elixir-ls",
+      "args": [],
+      "fileExtensions": {
+        ".ex": "elixir",
+        ".exs": "elixir"
+      },
+      "rootUri": "elixir"
+    },
+    "haskell": {
+      "command": "haskell-language-server-wrapper",
+      "args": ["--lsp"],
+      "fileExtensions": {
+        ".hs": "haskell"
+      },
+      "rootUri": "haskell"
+    },
+    "ocaml": {
+      "command": "ocamllsp",
+      "args": [],
+      "fileExtensions": {
+        ".ml": "ocaml",
+        ".mli": "ocaml"
+      },
+      "rootUri": "ocaml"
+    },
+    "zig": {
+      "command": "zls",
+      "args": [],
+      "fileExtensions": {
+        ".zig": "zig"
+      },
+      "rootUri": "zig"
+    },
+    "erlang": {
+      "command": "erlang_ls",
+      "args": [],
+      "fileExtensions": {
+        ".erl": "erlang"
+      },
+      "rootUri": "erlang"
+    },
+    "nim": {
+      "command": "nimlangserver",
+      "args": [],
+      "fileExtensions": {
+        ".nim": "nim"
+      },
+      "rootUri": "nim"
+    },
+    "fsharp": {
+      "command": "fsautocomplete",
+      "args": ["--adaptive-lsp-server-enabled"],
+      "fileExtensions": {
+        ".fs": "fsharp",
+        ".fsx": "fsharp"
+      },
+      "rootUri": "fsharp"
+    },
+    "dlang": {
+      "command": "serve-d",
+      "args": [],
+      "fileExtensions": {
+        ".d": "d"
+      },
+      "rootUri": "dlang"
+    },
+    "dart": {
+      "command": "dart",
+      "args": ["language-server", "--protocol=lsp"],
+      "fileExtensions": {
+        ".dart": "dart"
+      },
+      "rootUri": "dart"
+    },
+    "lua": {
+      "command": "lua-language-server",
+      "args": [],
+      "fileExtensions": {
+        ".lua": "lua"
+      },
+      "rootUri": "lua"
+    },
+    "scala": {
+      "command": "metals",
+      "args": [],
+      "fileExtensions": {
+        ".scala": "scala",
+        ".sbt": "scala"
+      },
+      "rootUri": "scala"
+    },
+    "crystal": {
+      "command": "crystalline",
+      "args": [],
+      "fileExtensions": {
+        ".cr": "crystal"
+      },
+      "rootUri": "crystal"
+    },
+    "ada": {
+      "command": "ada_language_server",
+      "args": [],
+      "fileExtensions": {
+        ".ads": "ada",
+        ".adb": "ada"
+      },
+      "rootUri": "ada"
+    },
+    "fortran": {
+      "command": "fortls",
+      "args": [],
+      "fileExtensions": {
+        ".f90": "fortran",
+        ".f95": "fortran",
+        ".f03": "fortran"
+      },
+      "rootUri": "fortran"
     }
   }
 }
