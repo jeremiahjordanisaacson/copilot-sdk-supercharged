@@ -263,6 +263,12 @@ func (e *SessionEvent) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		e.Data = &d
+	case SessionEventTypeModelCallFailure:
+		var d ModelCallFailureData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		e.Data = &d
 	case SessionEventTypeAbort:
 		var d AbortData
 		if err := json.Unmarshal(raw.Data, &d); err != nil {
@@ -588,6 +594,7 @@ const (
 	SessionEventTypeAssistantMessageDelta         SessionEventType = "assistant.message_delta"
 	SessionEventTypeAssistantTurnEnd              SessionEventType = "assistant.turn_end"
 	SessionEventTypeAssistantUsage                SessionEventType = "assistant.usage"
+	SessionEventTypeModelCallFailure              SessionEventType = "model.call_failure"
 	SessionEventTypeAbort                         SessionEventType = "abort"
 	SessionEventTypeToolUserRequested             SessionEventType = "tool.user_requested"
 	SessionEventTypeToolExecutionStart            SessionEventType = "tool.execution_start"
@@ -707,6 +714,8 @@ type AutoModeSwitchRequestedData struct {
 	ErrorCode *string `json:"errorCode,omitempty"`
 	// Unique identifier for this request; used to respond via session.respondToAutoModeSwitch()
 	RequestID string `json:"requestId"`
+	// Seconds until the rate limit resets, when known. Lets clients render a humanized reset time alongside the prompt.
+	RetryAfterSeconds *float64 `json:"retryAfterSeconds,omitempty"`
 }
 
 func (*AutoModeSwitchRequestedData) sessionEventData() {}
@@ -859,6 +868,10 @@ func (*PendingMessagesModifiedData) sessionEventData() {}
 
 // Error details for timeline display including message and optional diagnostic information
 type SessionErrorData struct {
+	// Only set on `errorType: "rate_limit"`. When `true`, the runtime will follow this error with an `auto_mode_switch.requested` event (or silently switch if `continueOnAutoMode` is enabled). UI clients can use this flag to suppress duplicate rendering of the rate-limit error when they show their own auto-mode-switch prompt.
+	EligibleForAutoSwitch *bool `json:"eligibleForAutoSwitch,omitempty"`
+	// Fine-grained error code from the upstream provider, when available. For `errorType: "rate_limit"`, this is one of the `RateLimitErrorCode` values (e.g., `"user_weekly_rate_limited"`, `"user_global_rate_limited"`, `"rate_limited"`, `"user_model_rate_limited"`, `"integration_rate_limited"`).
+	ErrorCode *string `json:"errorCode,omitempty"`
 	// Category of error (e.g., "authentication", "authorization", "quota", "rate_limit", "context_limit", "query")
 	ErrorType string `json:"errorType"`
 	// Human-readable error message
@@ -903,6 +916,28 @@ type ExternalToolRequestedData struct {
 
 func (*ExternalToolRequestedData) sessionEventData() {}
 
+// Failed LLM API call metadata for telemetry
+type ModelCallFailureData struct {
+	// Completion ID from the model provider (e.g., chatcmpl-abc123)
+	APICallID *string `json:"apiCallId,omitempty"`
+	// Duration of the failed API call in milliseconds
+	DurationMs *float64 `json:"durationMs,omitempty"`
+	// Raw provider/runtime error message for restricted telemetry
+	ErrorMessage *string `json:"errorMessage,omitempty"`
+	// What initiated this API call (e.g., "sub-agent", "mcp-sampling"); absent for user-initiated calls
+	Initiator *string `json:"initiator,omitempty"`
+	// Model identifier used for the failed API call
+	Model *string `json:"model,omitempty"`
+	// GitHub request tracing ID (x-github-request-id header) for server-side log correlation
+	ProviderCallID *string `json:"providerCallId,omitempty"`
+	// Where the failed model call originated
+	Source ModelCallFailureSource `json:"source"`
+	// HTTP status code from the failed request
+	StatusCode *int64 `json:"statusCode,omitempty"`
+}
+
+func (*ModelCallFailureData) sessionEventData() {}
+
 // Hook invocation completion details including output, success status, and error information
 type HookEndData struct {
 	// Error details when the hook failed
@@ -937,6 +972,8 @@ type SessionInfoData struct {
 	InfoType string `json:"infoType"`
 	// Human-readable informational message for display in the timeline
 	Message string `json:"message"`
+	// Optional actionable tip displayed with this message
+	Tip *string `json:"tip,omitempty"`
 	// Optional URL associated with this message that the user can open in a browser
 	URL *string `json:"url,omitempty"`
 }
@@ -994,6 +1031,8 @@ func (*McpOauthCompletedData) sessionEventData() {}
 
 // Model change details including previous and new model identifiers
 type SessionModelChangeData struct {
+	// Reason the change happened, when not user-initiated. Currently `"rate_limit_auto_switch"` for changes triggered by the auto-mode-switch rate-limit recovery path. UI clients can use this to render contextual copy.
+	Cause *string `json:"cause,omitempty"`
 	// Newly selected model identifier
 	NewModel string `json:"newModel"`
 	// Model that was previously selected, if any
@@ -2028,7 +2067,7 @@ type SystemNotification struct {
 	Prompt *string `json:"prompt,omitempty"`
 	// Human-readable name of the sender
 	SenderName *string `json:"senderName,omitempty"`
-	// Category of the sender (e.g., ambient-agent, plugin, hook)
+	// Category of the sender (e.g., sidekick-agent, plugin, hook)
 	SenderType *string `json:"senderType,omitempty"`
 	// Unique identifier of the shell session
 	ShellID *string `json:"shellId,omitempty"`
@@ -2462,6 +2501,15 @@ type PermissionRequestMemoryDirection string
 const (
 	PermissionRequestMemoryDirectionUpvote   PermissionRequestMemoryDirection = "upvote"
 	PermissionRequestMemoryDirectionDownvote PermissionRequestMemoryDirection = "downvote"
+)
+
+// Where the failed model call originated
+type ModelCallFailureSource string
+
+const (
+	ModelCallFailureSourceTopLevel    ModelCallFailureSource = "top_level"
+	ModelCallFailureSourceSubagent    ModelCallFailureSource = "subagent"
+	ModelCallFailureSourceMcpSampling ModelCallFailureSource = "mcp_sampling"
 )
 
 // Whether the agent completed successfully or failed
