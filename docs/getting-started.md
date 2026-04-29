@@ -379,6 +379,203 @@ javac -cp copilot-sdk.jar HelloCopilot.java && java -cp .:copilot-sdk.jar HelloC
 
 </details>
 
+<details>
+<summary><strong>Rust</strong></summary>
+
+Create `src/main.rs`:
+
+```rust
+use copilot_sdk::{CopilotClient, SessionConfig, MessageOptions};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = CopilotClient::new(None);
+    client.start().await?;
+
+    let session = client.create_session(&SessionConfig {
+        model: "gpt-4.1".into(),
+        ..Default::default()
+    }).await?;
+
+    let response = session.send_and_wait(&MessageOptions {
+        prompt: "What is 2 + 2?".into(),
+        ..Default::default()
+    }).await?;
+
+    if let Some(resp) = response {
+        println!("{}", resp.data.content);
+    }
+
+    client.stop().await?;
+    Ok(())
+}
+```
+
+Run it:
+
+```bash
+cargo run
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+Create `main.rb`:
+
+```ruby
+require "copilot_sdk"
+
+client = CopilotSDK::Client.new
+client.start
+
+session = client.create_session(model: "gpt-4.1")
+
+response = session.send_and_wait(prompt: "What is 2 + 2?")
+puts response.data.content
+
+client.stop
+```
+
+Run it:
+
+```bash
+ruby main.rb
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+Create `main.php`:
+
+```php
+<?php
+require_once 'vendor/autoload.php';
+
+use CopilotSDK\CopilotClient;
+
+$client = new CopilotClient();
+$client->start();
+
+$session = $client->createSession(['model' => 'gpt-4.1']);
+
+$response = $session->sendAndWait(['prompt' => 'What is 2 + 2?']);
+echo $response->data->content . "\n";
+
+$client->stop();
+```
+
+Run it:
+
+```bash
+php main.php
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+Create `main.swift`:
+
+```swift
+import CopilotSDK
+
+let client = CopilotClient()
+try await client.start()
+
+let session = try await client.createSession(config: SessionConfig(
+    model: "gpt-4.1"
+))
+
+let response = try await session.sendAndWait(prompt: "What is 2 + 2?")
+if let content = response?.data.content {
+    print(content)
+}
+
+try await client.stop()
+```
+
+Run it:
+
+```bash
+swift run
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+Create `HelloCopilot.kt`:
+
+```kotlin
+import com.github.copilot.sdk.CopilotClient
+import com.github.copilot.sdk.SessionConfig
+import com.github.copilot.sdk.MessageOptions
+
+suspend fun main() {
+    val client = CopilotClient()
+    client.start()
+
+    val session = client.createSession(SessionConfig(model = "gpt-4.1"))
+
+    val response = session.sendAndWait(MessageOptions(prompt = "What is 2 + 2?"))
+    println(response?.data?.content)
+
+    client.stop()
+}
+```
+
+Run it:
+
+```bash
+kotlinc -cp copilot-sdk.jar HelloCopilot.kt -include-runtime -d hello.jar && java -jar hello.jar
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+Create `main.cpp`:
+
+```cpp
+#include <copilot/client.h>
+#include <iostream>
+
+int main() {
+    copilot::CopilotClient client;
+    client.start();
+
+    auto session = client.createSession({
+        .model = "gpt-4.1"
+    });
+
+    auto response = session.sendAndWait({
+        .prompt = "What is 2 + 2?"
+    });
+
+    if (response) {
+        std::cout << response->data.content << std::endl;
+    }
+
+    client.stop();
+    return 0;
+}
+```
+
+Build and run:
+
+```bash
+cmake -B build && cmake --build build && ./build/main
+```
+
+</details>
+
 **You should see:**
 
 ```
@@ -583,6 +780,222 @@ public class HelloCopilot {
             client.stop().get();
         }
     }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+Update `src/main.rs`:
+
+```rust
+use copilot_sdk::{CopilotClient, SessionConfig, MessageOptions};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = CopilotClient::new(None);
+    client.start().await?;
+
+    let session = client.create_session(&SessionConfig {
+        model: "gpt-4.1".into(),
+        streaming: true,
+        ..Default::default()
+    }).await?;
+
+    // Listen for response chunks
+    session.on(|event| {
+        match event.event_type.as_str() {
+            "assistant.message_delta" => {
+                print!("{}", event.data.delta_content);
+            }
+            "session.idle" => {
+                println!();
+            }
+            _ => {}
+        }
+    });
+
+    session.send_and_wait(&MessageOptions {
+        prompt: "Tell me a short joke".into(),
+        ..Default::default()
+    }).await?;
+
+    client.stop().await?;
+    Ok(())
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+Update `main.rb`:
+
+```ruby
+require "copilot_sdk"
+
+client = CopilotSDK::Client.new
+client.start
+
+session = client.create_session(model: "gpt-4.1", streaming: true)
+
+# Listen for response chunks
+session.on do |event|
+  case event.type
+  when "assistant.message_delta"
+    $stdout.write(event.data.delta_content)
+  when "session.idle"
+    puts
+  end
+end
+
+session.send_and_wait(prompt: "Tell me a short joke")
+
+client.stop
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+Update `main.php`:
+
+```php
+<?php
+require_once 'vendor/autoload.php';
+
+use CopilotSDK\CopilotClient;
+
+$client = new CopilotClient();
+$client->start();
+
+$session = $client->createSession([
+    'model' => 'gpt-4.1',
+    'streaming' => true,
+]);
+
+// Listen for response chunks
+$session->on(function ($event) {
+    if ($event->type === 'assistant.message_delta') {
+        echo $event->data->deltaContent;
+    }
+    if ($event->type === 'session.idle') {
+        echo "\n";
+    }
+});
+
+$session->sendAndWait(['prompt' => 'Tell me a short joke']);
+
+$client->stop();
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+Update `main.swift`:
+
+```swift
+import CopilotSDK
+
+let client = CopilotClient()
+try await client.start()
+
+let session = try await client.createSession(config: SessionConfig(
+    model: "gpt-4.1",
+    streaming: true
+))
+
+// Listen for response chunks
+session.on { event in
+    if let delta = event as? AssistantMessageDeltaEvent {
+        print(delta.data.deltaContent, terminator: "")
+    }
+    if event is SessionIdleEvent {
+        print()
+    }
+}
+
+try await session.sendAndWait(prompt: "Tell me a short joke")
+
+try await client.stop()
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+Update `HelloCopilot.kt`:
+
+```kotlin
+import com.github.copilot.sdk.CopilotClient
+import com.github.copilot.sdk.SessionConfig
+import com.github.copilot.sdk.MessageOptions
+import com.github.copilot.sdk.events.*
+
+suspend fun main() {
+    val client = CopilotClient()
+    client.start()
+
+    val session = client.createSession(SessionConfig(
+        model = "gpt-4.1",
+        streaming = true
+    ))
+
+    // Listen for response chunks
+    session.on { event ->
+        when (event) {
+            is AssistantMessageDeltaEvent -> print(event.data.deltaContent)
+            is SessionIdleEvent -> println()
+        }
+    }
+
+    session.sendAndWait(MessageOptions(prompt = "Tell me a short joke"))
+
+    client.stop()
+}
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+Update `main.cpp`:
+
+```cpp
+#include <copilot/client.h>
+#include <iostream>
+
+int main() {
+    copilot::CopilotClient client;
+    client.start();
+
+    auto session = client.createSession({
+        .model = "gpt-4.1",
+        .streaming = true
+    });
+
+    // Listen for response chunks
+    session.on([](const auto& event) {
+        if (event.type == "assistant.message_delta") {
+            std::cout << event.data.deltaContent;
+        }
+        if (event.type == "session.idle") {
+            std::cout << std::endl;
+        }
+    });
+
+    session.sendAndWait({.prompt = "Tell me a short joke"});
+
+    client.stop();
+    return 0;
 }
 ```
 
@@ -809,6 +1222,151 @@ session.on(SessionIdleEvent.class, idle -> {
 
 // Later, to unsubscribe:
 unsubscribe.close();
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+// Subscribe to all events
+let unsubscribe = session.on(|event| {
+    println!("Event: {}", event.event_type);
+});
+
+// Filter by event type in your handler
+session.on(|event| {
+    match event.event_type.as_str() {
+        "session.idle" => println!("Session is idle"),
+        "assistant.message" => {
+            println!("Message: {}", event.data.content);
+        }
+        _ => {}
+    }
+});
+
+// Later, to unsubscribe:
+unsubscribe();
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+```ruby
+# Subscribe to all events
+unsubscribe = session.on { |event| puts "Event: #{event.type}" }
+
+# Filter by event type in your handler
+session.on do |event|
+  case event.type
+  when "session.idle"
+    puts "Session is idle"
+  when "assistant.message"
+    puts "Message: #{event.data.content}"
+  end
+end
+
+# Later, to unsubscribe:
+unsubscribe.call
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+```php
+// Subscribe to all events
+$unsubscribe = $session->on(function ($event) {
+    echo "Event: " . $event->type . "\n";
+});
+
+// Filter by event type in your handler
+$session->on(function ($event) {
+    if ($event->type === 'session.idle') {
+        echo "Session is idle\n";
+    } elseif ($event->type === 'assistant.message') {
+        echo "Message: " . $event->data->content . "\n";
+    }
+});
+
+// Later, to unsubscribe:
+$unsubscribe();
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+```swift
+// Subscribe to all events
+let unsubscribe = session.on { event in
+    print("Event: \(event.type)")
+}
+
+// Filter by event type in your handler
+session.on { event in
+    if event is SessionIdleEvent {
+        print("Session is idle")
+    }
+    if let msg = event as? AssistantMessageEvent {
+        print("Message: \(msg.data.content)")
+    }
+}
+
+// Later, to unsubscribe:
+unsubscribe()
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+```kotlin
+// Subscribe to all events
+val unsubscribe = session.on { event ->
+    println("Event: ${event.type}")
+}
+
+// Filter by event type in your handler
+session.on { event ->
+    when (event) {
+        is SessionIdleEvent -> println("Session is idle")
+        is AssistantMessageEvent -> println("Message: ${event.data.content}")
+    }
+}
+
+// Later, to unsubscribe:
+unsubscribe()
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+```cpp
+// Subscribe to all events
+auto unsubscribe = session.on([](const auto& event) {
+    std::cout << "Event: " << event.type << std::endl;
+});
+
+// Filter by event type in your handler
+session.on([](const auto& event) {
+    if (event.type == "session.idle") {
+        std::cout << "Session is idle" << std::endl;
+    } else if (event.type == "assistant.message") {
+        std::cout << "Message: " << event.data.content << std::endl;
+    }
+});
+
+// Later, to unsubscribe:
+unsubscribe();
 ```
 
 </details>
@@ -1132,6 +1690,359 @@ public class HelloCopilot {
             client.stop().get();
         }
     }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+Update `src/main.rs`:
+
+```rust
+use copilot_sdk::{CopilotClient, SessionConfig, MessageOptions, ToolDefinition};
+use serde::{Deserialize, Serialize};
+use rand::Rng;
+
+#[derive(Deserialize)]
+struct WeatherParams {
+    city: String,
+}
+
+#[derive(Serialize)]
+struct WeatherResult {
+    city: String,
+    temperature: String,
+    condition: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Define a tool that Copilot can call
+    let get_weather = ToolDefinition::new(
+        "get_weather",
+        "Get the current weather for a city",
+        |params: WeatherParams| async move {
+            let mut rng = rand::thread_rng();
+            let conditions = ["sunny", "cloudy", "rainy", "partly cloudy"];
+            let temp = rng.gen_range(50..80);
+            let condition = conditions[rng.gen_range(0..conditions.len())];
+            Ok(WeatherResult {
+                city: params.city,
+                temperature: format!("{}F", temp),
+                condition: condition.to_string(),
+            })
+        },
+    );
+
+    let client = CopilotClient::new(None);
+    client.start().await?;
+
+    let session = client.create_session(&SessionConfig {
+        model: "gpt-4.1".into(),
+        streaming: true,
+        tools: vec![get_weather],
+        ..Default::default()
+    }).await?;
+
+    session.on(|event| {
+        match event.event_type.as_str() {
+            "assistant.message_delta" => print!("{}", event.data.delta_content),
+            "session.idle" => println!(),
+            _ => {}
+        }
+    });
+
+    session.send_and_wait(&MessageOptions {
+        prompt: "What's the weather like in Seattle and Tokyo?".into(),
+        ..Default::default()
+    }).await?;
+
+    client.stop().await?;
+    Ok(())
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+Update `main.rb`:
+
+```ruby
+require "copilot_sdk"
+
+# Define a tool that Copilot can call
+get_weather = CopilotSDK.define_tool(
+  "get_weather",
+  description: "Get the current weather for a city",
+  parameters: {
+    type: "object",
+    properties: {
+      city: { type: "string", description: "The city name" }
+    },
+    required: ["city"]
+  }
+) do |params|
+  conditions = ["sunny", "cloudy", "rainy", "partly cloudy"]
+  temp = rand(50..80)
+  condition = conditions.sample
+  { city: params["city"], temperature: "#{temp}F", condition: condition }
+end
+
+client = CopilotSDK::Client.new
+client.start
+
+session = client.create_session(
+  model: "gpt-4.1",
+  streaming: true,
+  tools: [get_weather]
+)
+
+session.on do |event|
+  case event.type
+  when "assistant.message_delta"
+    $stdout.write(event.data.delta_content)
+  when "session.idle"
+    puts
+  end
+end
+
+session.send_and_wait(prompt: "What's the weather like in Seattle and Tokyo?")
+
+client.stop
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+Update `main.php`:
+
+```php
+<?php
+require_once 'vendor/autoload.php';
+
+use CopilotSDK\CopilotClient;
+use CopilotSDK\ToolDefinition;
+
+// Define a tool that Copilot can call
+$getWeather = ToolDefinition::create(
+    'get_weather',
+    'Get the current weather for a city',
+    [
+        'type' => 'object',
+        'properties' => [
+            'city' => ['type' => 'string', 'description' => 'The city name'],
+        ],
+        'required' => ['city'],
+    ],
+    function ($params) {
+        $conditions = ['sunny', 'cloudy', 'rainy', 'partly cloudy'];
+        $temp = rand(50, 80);
+        $condition = $conditions[array_rand($conditions)];
+        return [
+            'city' => $params['city'],
+            'temperature' => "{$temp}F",
+            'condition' => $condition,
+        ];
+    }
+);
+
+$client = new CopilotClient();
+$client->start();
+
+$session = $client->createSession([
+    'model' => 'gpt-4.1',
+    'streaming' => true,
+    'tools' => [$getWeather],
+]);
+
+$session->on(function ($event) {
+    if ($event->type === 'assistant.message_delta') {
+        echo $event->data->deltaContent;
+    }
+    if ($event->type === 'session.idle') {
+        echo "\n";
+    }
+});
+
+$session->sendAndWait(['prompt' => "What's the weather like in Seattle and Tokyo?"]);
+
+$client->stop();
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+Update `main.swift`:
+
+```swift
+import CopilotSDK
+import Foundation
+
+// Define a tool that Copilot can call
+let getWeather = ToolDefinition(
+    name: "get_weather",
+    description: "Get the current weather for a city",
+    parameters: [
+        "type": "object",
+        "properties": [
+            "city": ["type": "string", "description": "The city name"]
+        ],
+        "required": ["city"]
+    ]
+) { params in
+    let city = params["city"] as! String
+    let conditions = ["sunny", "cloudy", "rainy", "partly cloudy"]
+    let temp = Int.random(in: 50...80)
+    let condition = conditions.randomElement()!
+    return ["city": city, "temperature": "\(temp)F", "condition": condition]
+}
+
+let client = CopilotClient()
+try await client.start()
+
+let session = try await client.createSession(config: SessionConfig(
+    model: "gpt-4.1",
+    streaming: true,
+    tools: [getWeather]
+))
+
+session.on { event in
+    if let delta = event as? AssistantMessageDeltaEvent {
+        print(delta.data.deltaContent, terminator: "")
+    }
+    if event is SessionIdleEvent {
+        print()
+    }
+}
+
+try await session.sendAndWait(prompt: "What's the weather like in Seattle and Tokyo?")
+
+try await client.stop()
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+Update `HelloCopilot.kt`:
+
+```kotlin
+import com.github.copilot.sdk.CopilotClient
+import com.github.copilot.sdk.SessionConfig
+import com.github.copilot.sdk.MessageOptions
+import com.github.copilot.sdk.ToolDefinition
+import com.github.copilot.sdk.events.*
+
+suspend fun main() {
+    val conditions = listOf("sunny", "cloudy", "rainy", "partly cloudy")
+
+    // Define a tool that Copilot can call
+    val getWeather = ToolDefinition.create(
+        name = "get_weather",
+        description = "Get the current weather for a city",
+        parameters = mapOf(
+            "type" to "object",
+            "properties" to mapOf(
+                "city" to mapOf("type" to "string", "description" to "The city name")
+            ),
+            "required" to listOf("city")
+        )
+    ) { params ->
+        val city = params["city"] as String
+        val temp = (50..80).random()
+        val condition = conditions.random()
+        mapOf("city" to city, "temperature" to "${temp}F", "condition" to condition)
+    }
+
+    val client = CopilotClient()
+    client.start()
+
+    val session = client.createSession(SessionConfig(
+        model = "gpt-4.1",
+        streaming = true,
+        tools = listOf(getWeather)
+    ))
+
+    session.on { event ->
+        when (event) {
+            is AssistantMessageDeltaEvent -> print(event.data.deltaContent)
+            is SessionIdleEvent -> println()
+        }
+    }
+
+    session.sendAndWait(MessageOptions(
+        prompt = "What's the weather like in Seattle and Tokyo?"
+    ))
+
+    client.stop()
+}
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+Update `main.cpp`:
+
+```cpp
+#include <copilot/client.h>
+#include <copilot/tools.h>
+#include <iostream>
+#include <random>
+
+int main() {
+    std::mt19937 rng(std::random_device{}());
+    std::vector<std::string> conditions = {"sunny", "cloudy", "rainy", "partly cloudy"};
+
+    // Define a tool that Copilot can call
+    auto getWeather = copilot::defineTool(
+        "get_weather",
+        "Get the current weather for a city",
+        {{"type", "object"},
+         {"properties", {{"city", {{"type", "string"}, {"description", "The city name"}}}}},
+         {"required", {"city"}}},
+        [&](const auto& params) {
+            auto city = params["city"].get<std::string>();
+            int temp = std::uniform_int_distribution<>(50, 80)(rng);
+            auto condition = conditions[std::uniform_int_distribution<>(0, conditions.size() - 1)(rng)];
+            return copilot::json{
+                {"city", city}, {"temperature", std::to_string(temp) + "F"}, {"condition", condition}
+            };
+        }
+    );
+
+    copilot::CopilotClient client;
+    client.start();
+
+    auto session = client.createSession({
+        .model = "gpt-4.1",
+        .streaming = true,
+        .tools = {getWeather}
+    });
+
+    session.on([](const auto& event) {
+        if (event.type == "assistant.message_delta") {
+            std::cout << event.data.deltaContent;
+        }
+        if (event.type == "session.idle") {
+            std::cout << std::endl;
+        }
+    });
+
+    session.sendAndWait({.prompt = "What's the weather like in Seattle and Tokyo?"});
+
+    client.stop();
+    return 0;
 }
 ```
 
@@ -1550,6 +2461,468 @@ Run with:
 
 ```bash
 javac -cp copilot-sdk.jar WeatherAssistant.java && java -cp .:copilot-sdk.jar WeatherAssistant
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+Create `src/main.rs`:
+
+```rust
+use copilot_sdk::{CopilotClient, SessionConfig, MessageOptions, ToolDefinition};
+use serde::{Deserialize, Serialize};
+use rand::Rng;
+use std::io::{self, BufRead, Write};
+
+#[derive(Deserialize)]
+struct WeatherParams {
+    city: String,
+}
+
+#[derive(Serialize)]
+struct WeatherResult {
+    city: String,
+    temperature: String,
+    condition: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let get_weather = ToolDefinition::new(
+        "get_weather",
+        "Get the current weather for a city",
+        |params: WeatherParams| async move {
+            let mut rng = rand::thread_rng();
+            let conditions = ["sunny", "cloudy", "rainy", "partly cloudy"];
+            let temp = rng.gen_range(50..80);
+            let condition = conditions[rng.gen_range(0..conditions.len())];
+            Ok(WeatherResult {
+                city: params.city,
+                temperature: format!("{}F", temp),
+                condition: condition.to_string(),
+            })
+        },
+    );
+
+    let client = CopilotClient::new(None);
+    client.start().await?;
+
+    let session = client.create_session(&SessionConfig {
+        model: "gpt-4.1".into(),
+        streaming: true,
+        tools: vec![get_weather],
+        ..Default::default()
+    }).await?;
+
+    session.on(|event| {
+        match event.event_type.as_str() {
+            "assistant.message_delta" => print!("{}", event.data.delta_content),
+            "session.idle" => println!(),
+            _ => {}
+        }
+    });
+
+    println!("Weather Assistant (type 'exit' to quit)");
+    println!("   Try: 'What's the weather in Paris?'\n");
+
+    let stdin = io::stdin();
+    loop {
+        print!("You: ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        if stdin.lock().read_line(&mut input)? == 0 {
+            break;
+        }
+        let input = input.trim();
+        if input.eq_ignore_ascii_case("exit") {
+            break;
+        }
+
+        print!("Assistant: ");
+        session.send_and_wait(&MessageOptions {
+            prompt: input.to_string(),
+            ..Default::default()
+        }).await?;
+        println!("\n");
+    }
+
+    client.stop().await?;
+    Ok(())
+}
+```
+
+Run with:
+
+```bash
+cargo run
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+Create `weather_assistant.rb`:
+
+```ruby
+require "copilot_sdk"
+
+get_weather = CopilotSDK.define_tool(
+  "get_weather",
+  description: "Get the current weather for a city",
+  parameters: {
+    type: "object",
+    properties: {
+      city: { type: "string", description: "The city name" }
+    },
+    required: ["city"]
+  }
+) do |params|
+  conditions = ["sunny", "cloudy", "rainy", "partly cloudy"]
+  temp = rand(50..80)
+  condition = conditions.sample
+  { city: params["city"], temperature: "#{temp}F", condition: condition }
+end
+
+client = CopilotSDK::Client.new
+client.start
+
+session = client.create_session(
+  model: "gpt-4.1",
+  streaming: true,
+  tools: [get_weather]
+)
+
+session.on do |event|
+  case event.type
+  when "assistant.message_delta"
+    $stdout.write(event.data.delta_content)
+  when "session.idle"
+    puts
+  end
+end
+
+puts "Weather Assistant (type 'exit' to quit)"
+puts "   Try: 'What's the weather in Paris?'\n\n"
+
+loop do
+  print "You: "
+  input = $stdin.gets&.chomp
+  break if input.nil? || input.downcase == "exit"
+
+  $stdout.write "Assistant: "
+  session.send_and_wait(prompt: input)
+  puts "\n"
+end
+
+client.stop
+```
+
+Run with:
+
+```bash
+ruby weather_assistant.rb
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+Create `weather_assistant.php`:
+
+```php
+<?php
+require_once 'vendor/autoload.php';
+
+use CopilotSDK\CopilotClient;
+use CopilotSDK\ToolDefinition;
+
+$getWeather = ToolDefinition::create(
+    'get_weather',
+    'Get the current weather for a city',
+    [
+        'type' => 'object',
+        'properties' => [
+            'city' => ['type' => 'string', 'description' => 'The city name'],
+        ],
+        'required' => ['city'],
+    ],
+    function ($params) {
+        $conditions = ['sunny', 'cloudy', 'rainy', 'partly cloudy'];
+        $temp = rand(50, 80);
+        $condition = $conditions[array_rand($conditions)];
+        return [
+            'city' => $params['city'],
+            'temperature' => "{$temp}F",
+            'condition' => $condition,
+        ];
+    }
+);
+
+$client = new CopilotClient();
+$client->start();
+
+$session = $client->createSession([
+    'model' => 'gpt-4.1',
+    'streaming' => true,
+    'tools' => [$getWeather],
+]);
+
+$session->on(function ($event) {
+    if ($event->type === 'assistant.message_delta') {
+        echo $event->data->deltaContent;
+    }
+    if ($event->type === 'session.idle') {
+        echo "\n";
+    }
+});
+
+echo "Weather Assistant (type 'exit' to quit)\n";
+echo "   Try: 'What's the weather in Paris?'\n\n";
+
+while (true) {
+    echo "You: ";
+    $input = trim(fgets(STDIN));
+    if ($input === false || strtolower($input) === 'exit') {
+        break;
+    }
+
+    echo "Assistant: ";
+    $session->sendAndWait(['prompt' => $input]);
+    echo "\n\n";
+}
+
+$client->stop();
+```
+
+Run with:
+
+```bash
+php weather_assistant.php
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+Create `WeatherAssistant.swift`:
+
+```swift
+import CopilotSDK
+import Foundation
+
+let getWeather = ToolDefinition(
+    name: "get_weather",
+    description: "Get the current weather for a city",
+    parameters: [
+        "type": "object",
+        "properties": [
+            "city": ["type": "string", "description": "The city name"]
+        ],
+        "required": ["city"]
+    ]
+) { params in
+    let city = params["city"] as! String
+    let conditions = ["sunny", "cloudy", "rainy", "partly cloudy"]
+    let temp = Int.random(in: 50...80)
+    let condition = conditions.randomElement()!
+    return ["city": city, "temperature": "\(temp)F", "condition": condition]
+}
+
+let client = CopilotClient()
+try await client.start()
+
+let session = try await client.createSession(config: SessionConfig(
+    model: "gpt-4.1",
+    streaming: true,
+    tools: [getWeather]
+))
+
+session.on { event in
+    if let delta = event as? AssistantMessageDeltaEvent {
+        print(delta.data.deltaContent, terminator: "")
+    }
+    if event is SessionIdleEvent {
+        print()
+    }
+}
+
+print("Weather Assistant (type 'exit' to quit)")
+print("   Try: 'What's the weather in Paris?'\n")
+
+while true {
+    print("You: ", terminator: "")
+    guard let input = readLine(), !input.isEmpty else { break }
+    if input.lowercased() == "exit" { break }
+
+    print("Assistant: ", terminator: "")
+    try await session.sendAndWait(prompt: input)
+    print("\n")
+}
+
+try await client.stop()
+```
+
+Run with:
+
+```bash
+swift run
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+Create `WeatherAssistant.kt`:
+
+```kotlin
+import com.github.copilot.sdk.CopilotClient
+import com.github.copilot.sdk.SessionConfig
+import com.github.copilot.sdk.MessageOptions
+import com.github.copilot.sdk.ToolDefinition
+import com.github.copilot.sdk.events.*
+
+suspend fun main() {
+    val conditions = listOf("sunny", "cloudy", "rainy", "partly cloudy")
+
+    val getWeather = ToolDefinition.create(
+        name = "get_weather",
+        description = "Get the current weather for a city",
+        parameters = mapOf(
+            "type" to "object",
+            "properties" to mapOf(
+                "city" to mapOf("type" to "string", "description" to "The city name")
+            ),
+            "required" to listOf("city")
+        )
+    ) { params ->
+        val city = params["city"] as String
+        val temp = (50..80).random()
+        val condition = conditions.random()
+        mapOf("city" to city, "temperature" to "${temp}F", "condition" to condition)
+    }
+
+    val client = CopilotClient()
+    client.start()
+
+    val session = client.createSession(SessionConfig(
+        model = "gpt-4.1",
+        streaming = true,
+        tools = listOf(getWeather)
+    ))
+
+    session.on { event ->
+        when (event) {
+            is AssistantMessageDeltaEvent -> print(event.data.deltaContent)
+            is SessionIdleEvent -> println()
+        }
+    }
+
+    println("Weather Assistant (type 'exit' to quit)")
+    println("   Try: 'What's the weather in Paris?'\n")
+
+    while (true) {
+        print("You: ")
+        val input = readLine() ?: break
+        if (input.equals("exit", ignoreCase = true)) break
+
+        print("Assistant: ")
+        session.sendAndWait(MessageOptions(prompt = input))
+        println("\n")
+    }
+
+    client.stop()
+}
+```
+
+Run with:
+
+```bash
+kotlinc -cp copilot-sdk.jar WeatherAssistant.kt -include-runtime -d weather.jar && java -jar weather.jar
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+Create `weather_assistant.cpp`:
+
+```cpp
+#include <copilot/client.h>
+#include <copilot/tools.h>
+#include <iostream>
+#include <random>
+#include <string>
+
+int main() {
+    std::mt19937 rng(std::random_device{}());
+    std::vector<std::string> conditions = {"sunny", "cloudy", "rainy", "partly cloudy"};
+
+    auto getWeather = copilot::defineTool(
+        "get_weather",
+        "Get the current weather for a city",
+        {{"type", "object"},
+         {"properties", {{"city", {{"type", "string"}, {"description", "The city name"}}}}},
+         {"required", {"city"}}},
+        [&](const auto& params) {
+            auto city = params["city"].get<std::string>();
+            int temp = std::uniform_int_distribution<>(50, 80)(rng);
+            auto condition = conditions[std::uniform_int_distribution<>(0, conditions.size() - 1)(rng)];
+            return copilot::json{
+                {"city", city}, {"temperature", std::to_string(temp) + "F"}, {"condition", condition}
+            };
+        }
+    );
+
+    copilot::CopilotClient client;
+    client.start();
+
+    auto session = client.createSession({
+        .model = "gpt-4.1",
+        .streaming = true,
+        .tools = {getWeather}
+    });
+
+    session.on([](const auto& event) {
+        if (event.type == "assistant.message_delta") {
+            std::cout << event.data.deltaContent;
+        }
+        if (event.type == "session.idle") {
+            std::cout << std::endl;
+        }
+    });
+
+    std::cout << "Weather Assistant (type 'exit' to quit)" << std::endl;
+    std::cout << "   Try: 'What's the weather in Paris?'\n" << std::endl;
+
+    std::string input;
+    while (true) {
+        std::cout << "You: ";
+        if (!std::getline(std::cin, input) || input == "exit") {
+            break;
+        }
+
+        std::cout << "Assistant: ";
+        session.sendAndWait({.prompt = input});
+        std::cout << "\n" << std::endl;
+    }
+
+    client.stop();
+    return 0;
+}
+```
+
+Build and run:
+
+```bash
+cmake -B build && cmake --build build && ./build/weather_assistant
 ```
 
 </details>

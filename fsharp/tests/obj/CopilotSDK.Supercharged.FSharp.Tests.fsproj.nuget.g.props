@@ -1,0 +1,31 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <RestoreSuccess Condition=" '$(RestoreSuccess)' == '' ">True</RestoreSuccess>
+    <RestoreTool Condition=" '$(RestoreTool)' == '' ">NuGet</RestoreTool>
+    <ProjectAssetsFile Condition=" '$(ProjectAssetsFile)' == '' ">$(MSBuildThisFileDirectory)project.assets.json</ProjectAssetsFile>
+    <NuGetPackageRoot Condition=" '$(NuGetPackageRoot)' == '' ">$(UserProfile)\.nuget\packages\</NuGetPackageRoot>
+    <NuGetPackageFolders Condition=" '$(NuGetPackageFolders)' == '' ">C:\Users\jeisaacs\.nuget\packages\;C:\Program Files (x86)\Microsoft Visual Studio\Shared\NuGetPackages</NuGetPackageFolders>
+    <NuGetProjectStyle Condition=" '$(NuGetProjectStyle)' == '' ">PackageReference</NuGetProjectStyle>
+    <NuGetToolVersion Condition=" '$(NuGetToolVersion)' == '' ">6.14.3</NuGetToolVersion>
+  </PropertyGroup>
+  <ItemGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <SourceRoot Include="C:\Users\jeisaacs\.nuget\packages\" />
+    <SourceRoot Include="C:\Program Files (x86)\Microsoft Visual Studio\Shared\NuGetPackages\" />
+  </ItemGroup>
+  <ImportGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <Import Project="$(NuGetPackageRoot)xunit.runner.visualstudio\2.8.2\build\net6.0\xunit.runner.visualstudio.props" Condition="Exists('$(NuGetPackageRoot)xunit.runner.visualstudio\2.8.2\build\net6.0\xunit.runner.visualstudio.props')" />
+    <Import Project="$(NuGetPackageRoot)xunit.core\2.9.3\build\xunit.core.props" Condition="Exists('$(NuGetPackageRoot)xunit.core\2.9.3\build\xunit.core.props')" />
+    <Import Project="$(NuGetPackageRoot)microsoft.testplatform.testhost\17.14.1\build\net8.0\Microsoft.TestPlatform.TestHost.props" Condition="Exists('$(NuGetPackageRoot)microsoft.testplatform.testhost\17.14.1\build\net8.0\Microsoft.TestPlatform.TestHost.props')" />
+    <Import Project="$(NuGetPackageRoot)microsoft.codecoverage\17.14.1\build\netstandard2.0\Microsoft.CodeCoverage.props" Condition="Exists('$(NuGetPackageRoot)microsoft.codecoverage\17.14.1\build\netstandard2.0\Microsoft.CodeCoverage.props')" />
+    <Import Project="$(NuGetPackageRoot)microsoft.net.test.sdk\17.14.1\build\net8.0\Microsoft.NET.Test.Sdk.props" Condition="Exists('$(NuGetPackageRoot)microsoft.net.test.sdk\17.14.1\build\net8.0\Microsoft.NET.Test.Sdk.props')" />
+  </ImportGroup>
+  <PropertyGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <Pkgxunit_runner_visualstudio Condition=" '$(Pkgxunit_runner_visualstudio)' == '' ">C:\Users\jeisaacs\.nuget\packages\xunit.runner.visualstudio\2.8.2</Pkgxunit_runner_visualstudio>
+    <Pkgxunit_analyzers Condition=" '$(Pkgxunit_analyzers)' == '' ">C:\Users\jeisaacs\.nuget\packages\xunit.analyzers\1.18.0</Pkgxunit_analyzers>
+    <Pkgxunit Condition=" '$(Pkgxunit)' == '' ">C:\Users\jeisaacs\.nuget\packages\xunit\2.9.3</Pkgxunit>
+    <PkgMicrosoft_NET_Test_Sdk Condition=" '$(PkgMicrosoft_NET_Test_Sdk)' == '' ">C:\Users\jeisaacs\.nuget\packages\microsoft.net.test.sdk\17.14.1</PkgMicrosoft_NET_Test_Sdk>
+    <PkgFSharp_Core Condition=" '$(PkgFSharp_Core)' == '' ">C:\Users\jeisaacs\.nuget\packages\fsharp.core\9.0.303</PkgFSharp_Core>
+    <PkgFsUnit_xUnit Condition=" '$(PkgFsUnit_xUnit)' == '' ">C:\Users\jeisaacs\.nuget\packages\fsunit.xunit\6.0.1</PkgFsUnit_xUnit>
+  </PropertyGroup>
+</Project>

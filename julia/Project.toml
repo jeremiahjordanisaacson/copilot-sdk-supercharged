@@ -1,0 +1,13 @@
+name = "CopilotSDK"
+uuid = "c7e3a1d0-5f2b-4e8a-9c1d-3b6f7a8e9d0c"
+version = "2.0.2"
+authors = ["Microsoft Corporation"]
+description = "Julia SDK for the GitHub Copilot CLI"
+
+[deps]
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
+
+[compat]
+julia = "1.8"
+JSON3 = "1"

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>CopilotSDK.Supercharged.FSharp</RootNamespace>
+    <AssemblyName>CopilotSDK.Supercharged.FSharp</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>F# SDK for programmatic control of GitHub Copilot CLI via JSON-RPC</Description>
+    <Authors>Microsoft</Authors>
+    <PackageId>CopilotSDK.Supercharged.FSharp</PackageId>
+    <Version>0.1.0</Version>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged</RepositoryUrl>
+    <PackageTags>copilot;github;ai;fsharp;sdk</PackageTags>
+  </PropertyGroup>
+
+  <!-- F# files must be listed in compilation order -->
+  <ItemGroup>
+    <Compile Include="SdkProtocolVersion.fs" />
+    <Compile Include="Types.fs" />
+    <Compile Include="JsonRpc.fs" />
+    <Compile Include="DefineTool.fs" />
+    <Compile Include="Session.fs" />
+    <Compile Include="Client.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="8.*" />
+  </ItemGroup>
+
+</Project>

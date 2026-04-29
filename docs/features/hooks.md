@@ -223,6 +223,116 @@ try (var client = new CopilotClient()) {
 
 </details>
 
+<details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+let session = client.create_session(&SessionConfig {
+    hooks: Some(SessionHooks {
+        on_session_start: Some(Box::new(|input, inv| Box::pin(async { None }))),
+        on_pre_tool_use: Some(Box::new(|input, inv| Box::pin(async { None }))),
+        on_post_tool_use: Some(Box::new(|input, inv| Box::pin(async { None }))),
+        // ... add only the hooks you need
+        ..Default::default()
+    }),
+    on_permission_request: Some(Box::new(|_req, _inv| {
+        Box::pin(async { PermissionRequestResult { kind: "approved".into() } })
+    })),
+    ..Default::default()
+}).await?;
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+```ruby
+session = client.create_session(
+  on_permission_request: ->(_req, _inv) { { kind: "approved" } },
+  hooks: {
+    on_session_start: ->(input, inv) { nil },
+    on_pre_tool_use:  ->(input, inv) { nil },
+    on_post_tool_use: ->(input, inv) { nil },
+    # ... add only the hooks you need
+  }
+)
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+```php
+$session = $client->createSession([
+    'hooks' => [
+        'onSessionStart' => function ($input, $invocation) { return null; },
+        'onPreToolUse'   => function ($input, $invocation) { return null; },
+        'onPostToolUse'  => function ($input, $invocation) { return null; },
+        // ... add only the hooks you need
+    ],
+    'onPermissionRequest' => function ($req, $inv) {
+        return ['kind' => 'approved'];
+    },
+]);
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+```swift
+let session = try await client.createSession(config: SessionConfig(
+    hooks: SessionHooks(
+        onSessionStart: { input, invocation in nil },
+        onPreToolUse:   { input, invocation in nil },
+        onPostToolUse:  { input, invocation in nil }
+        // ... add only the hooks you need
+    ),
+    onPermissionRequest: { _, _ in PermissionRequestResult(kind: .approved) }
+))
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+```kotlin
+val session = client.createSession(SessionConfig(
+    hooks = SessionHooks(
+        onSessionStart = { input, invocation -> null },
+        onPreToolUse   = { input, invocation -> null },
+        onPostToolUse  = { input, invocation -> null },
+        // ... add only the hooks you need
+    ),
+    onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approved") }
+))
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+```cpp
+auto session = client.createSession({
+    .hooks = {
+        .onSessionStart = [](auto& input, auto& inv) -> std::optional<SessionStartHookOutput> { return std::nullopt; },
+        .onPreToolUse   = [](auto& input, auto& inv) -> std::optional<PreToolUseHookOutput> { return std::nullopt; },
+        .onPostToolUse  = [](auto& input, auto& inv) -> std::optional<PostToolUseHookOutput> { return std::nullopt; },
+        // ... add only the hooks you need
+    },
+    .onPermissionRequest = [](auto& req, auto& inv) {
+        return PermissionRequestResult{.kind = "approved"};
+    },
+});
+```
+
+</details>
+
 > **Tip:** Every hook handler receives an `invocation` parameter containing the `sessionId`, which is useful for correlating logs and maintaining per-session state.
 
 ---
@@ -437,6 +547,168 @@ var session = client.createSession(
         .setHooks(hooks)
         .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
 ).get();
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+let read_only_tools: HashSet<&str> = ["read_file", "glob", "grep", "view"].into();
+
+let session = client.create_session(&SessionConfig {
+    hooks: Some(SessionHooks {
+        on_pre_tool_use: Some(Box::new(move |input, _inv| {
+            let allowed = read_only_tools.contains(input.tool_name.as_str());
+            Box::pin(async move {
+                if !allowed {
+                    Some(PreToolUseHookOutput {
+                        permission_decision: "deny".into(),
+                        permission_decision_reason: Some(format!(
+                            "Only read-only tools are allowed. \"{}\" was blocked.", input.tool_name
+                        )),
+                        ..Default::default()
+                    })
+                } else {
+                    Some(PreToolUseHookOutput { permission_decision: "allow".into(), ..Default::default() })
+                }
+            })
+        })),
+        ..Default::default()
+    }),
+    ..Default::default()
+}).await?;
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+```ruby
+READ_ONLY_TOOLS = %w[read_file glob grep view].freeze
+
+session = client.create_session(
+  on_permission_request: ->(_req, _inv) { { kind: "approved" } },
+  hooks: {
+    on_pre_tool_use: ->(input, _invocation) {
+      unless READ_ONLY_TOOLS.include?(input[:toolName])
+        return {
+          permissionDecision: "deny",
+          permissionDecisionReason:
+            "Only read-only tools are allowed. \"#{input[:toolName]}\" was blocked."
+        }
+      end
+      { permissionDecision: "allow" }
+    }
+  }
+)
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+```php
+$readOnlyTools = ['read_file', 'glob', 'grep', 'view'];
+
+$session = $client->createSession([
+    'hooks' => [
+        'onPreToolUse' => function (array $input, array $invocation) use ($readOnlyTools): array {
+            if (!in_array($input['toolName'], $readOnlyTools, true)) {
+                return [
+                    'permissionDecision' => 'deny',
+                    'permissionDecisionReason' =>
+                        "Only read-only tools are allowed. \"{$input['toolName']}\" was blocked.",
+                ];
+            }
+            return ['permissionDecision' => 'allow'];
+        },
+    ],
+    'onPermissionRequest' => fn($req, $inv) => ['kind' => 'approved'],
+]);
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+```swift
+let readOnlyTools: Set<String> = ["read_file", "glob", "grep", "view"]
+
+let session = try await client.createSession(config: SessionConfig(
+    hooks: SessionHooks(
+        onPreToolUse: { input, invocation in
+            guard readOnlyTools.contains(input.toolName) else {
+                return PreToolUseHookOutput(
+                    permissionDecision: "deny",
+                    permissionDecisionReason:
+                        "Only read-only tools are allowed. \"\(input.toolName)\" was blocked."
+                )
+            }
+            return PreToolUseHookOutput(permissionDecision: "allow")
+        }
+    ),
+    onPermissionRequest: { _, _ in PermissionRequestResult(kind: .approved) }
+))
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+```kotlin
+val readOnlyTools = setOf("read_file", "glob", "grep", "view")
+
+val session = client.createSession(SessionConfig(
+    hooks = SessionHooks(
+        onPreToolUse = { input, invocation ->
+            if (input.toolName !in readOnlyTools) {
+                PreToolUseHookOutput(
+                    permissionDecision = "deny",
+                    permissionDecisionReason =
+                        "Only read-only tools are allowed. \"${input.toolName}\" was blocked."
+                )
+            } else {
+                PreToolUseHookOutput(permissionDecision = "allow")
+            }
+        }
+    ),
+    onPermissionRequest = { _, _ -> PermissionRequestResult(kind = "approved") }
+))
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+```cpp
+std::unordered_set<std::string> readOnlyTools = {"read_file", "glob", "grep", "view"};
+
+auto session = client.createSession({
+    .hooks = {
+        .onPreToolUse = [&readOnlyTools](const PreToolUseHookInput& input,
+                                          const HookInvocation& inv)
+            -> std::optional<PreToolUseHookOutput> {
+            if (readOnlyTools.find(input.toolName) == readOnlyTools.end()) {
+                return PreToolUseHookOutput{
+                    .permissionDecision = "deny",
+                    .permissionDecisionReason =
+                        "Only read-only tools are allowed. \"" + input.toolName + "\" was blocked.",
+                };
+            }
+            return PreToolUseHookOutput{.permissionDecision = "allow"};
+        },
+    },
+    .onPermissionRequest = [](auto& req, auto& inv) {
+        return PermissionRequestResult{.kind = "approved"};
+    },
+});
 ```
 
 </details>

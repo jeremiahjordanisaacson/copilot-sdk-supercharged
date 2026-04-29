@@ -171,6 +171,160 @@ try (var client = new CopilotClient()) {
 
 </details>
 
+<details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+use copilot_sdk::{CopilotClient, SessionConfig, MessageOptions};
+
+let client = CopilotClient::new(None);
+client.start().await?;
+
+let session = client.create_session(&SessionConfig {
+    model: "gpt-4.1".into(),
+    skill_directories: vec![
+        "./skills/code-review".into(),
+        "./skills/documentation".into(),
+    ],
+    ..Default::default()
+}).await?;
+
+// Copilot now has access to skills in those directories
+session.send_and_wait(&MessageOptions {
+    prompt: "Review this code for security issues".into(),
+    ..Default::default()
+}).await?;
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+```ruby
+require 'copilot_sdk'
+
+client = CopilotSdk::Client.new
+client.start
+
+session = client.create_session(
+  model: "gpt-4.1",
+  skill_directories: [
+    "./skills/code-review",
+    "./skills/documentation"
+  ]
+)
+
+# Copilot now has access to skills in those directories
+session.send_and_wait(prompt: "Review this code for security issues")
+
+client.stop
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+```php
+use GitHub\Copilot\SDK\CopilotClient;
+
+$client = new CopilotClient();
+$client->start();
+
+$session = $client->createSession([
+    'model' => 'gpt-4.1',
+    'skillDirectories' => [
+        './skills/code-review',
+        './skills/documentation',
+    ],
+]);
+
+// Copilot now has access to skills in those directories
+$session->sendAndWait(['prompt' => 'Review this code for security issues']);
+
+$client->stop();
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+```swift
+import CopilotSDK
+
+let client = CopilotClient()
+try await client.start()
+
+let session = try await client.createSession(config: SessionConfig(
+    model: "gpt-4.1",
+    skillDirectories: [
+        "./skills/code-review",
+        "./skills/documentation"
+    ]
+))
+
+// Copilot now has access to skills in those directories
+try await session.sendAndWait(prompt: "Review this code for security issues")
+
+try await client.stop()
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+```kotlin
+import com.github.copilot.sdk.CopilotClient
+import com.github.copilot.sdk.SessionConfig
+import com.github.copilot.sdk.MessageOptions
+
+val client = CopilotClient()
+client.start()
+
+val session = client.createSession(SessionConfig(
+    model = "gpt-4.1",
+    skillDirectories = listOf(
+        "./skills/code-review",
+        "./skills/documentation"
+    )
+))
+
+// Copilot now has access to skills in those directories
+session.sendAndWait(MessageOptions(prompt = "Review this code for security issues"))
+
+client.stop()
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+```cpp
+#include <copilot/client.h>
+
+auto client = copilot::CopilotClient();
+client.start();
+
+auto session = client.createSession({
+    .model = "gpt-4.1",
+    .skillDirectories = {
+        "./skills/code-review",
+        "./skills/documentation",
+    },
+});
+
+// Copilot now has access to skills in those directories
+session.sendAndWait({.prompt = "Review this code for security issues"});
+
+client.stop();
+```
+
+</details>
+
 ## Disabling Skills
 
 Disable specific skills while keeping others active:
@@ -287,6 +441,79 @@ var session = client.createSession(
         .setDisabledSkills(List.of("experimental-feature", "deprecated-tool"))
         .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
 ).get();
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+let session = client.create_session(&SessionConfig {
+    skill_directories: vec!["./skills".into()],
+    disabled_skills: vec!["experimental-feature".into(), "deprecated-tool".into()],
+    ..Default::default()
+}).await?;
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+```ruby
+session = client.create_session(
+  skill_directories: ["./skills"],
+  disabled_skills: ["experimental-feature", "deprecated-tool"]
+)
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+```php
+$session = $client->createSession([
+    'skillDirectories' => ['./skills'],
+    'disabledSkills' => ['experimental-feature', 'deprecated-tool'],
+]);
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+```swift
+let session = try await client.createSession(config: SessionConfig(
+    skillDirectories: ["./skills"],
+    disabledSkills: ["experimental-feature", "deprecated-tool"]
+))
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+```kotlin
+val session = client.createSession(SessionConfig(
+    skillDirectories = listOf("./skills"),
+    disabledSkills = listOf("experimental-feature", "deprecated-tool")
+))
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+```cpp
+auto session = client.createSession({
+    .skillDirectories = {"./skills"},
+    .disabledSkills = {"experimental-feature", "deprecated-tool"},
+});
 ```
 
 </details>

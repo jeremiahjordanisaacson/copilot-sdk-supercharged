@@ -1,0 +1,91 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "CopilotSDK.Supercharged.FSharp/0.1.0": {
+        "dependencies": {
+          "FSharp.Core": "9.0.303",
+          "System.Text.Json": "8.0.6"
+        },
+        "runtime": {
+          "CopilotSDK.Supercharged.FSharp.dll": {}
+        }
+      },
+      "FSharp.Core/9.0.303": {
+        "runtime": {
+          "lib/netstandard2.1/FSharp.Core.dll": {
+            "assemblyVersion": "9.0.0.0",
+            "fileVersion": "9.3.325.36101"
+          }
+        },
+        "resources": {
+          "lib/netstandard2.1/cs/FSharp.Core.resources.dll": {
+            "locale": "cs"
+          },
+          "lib/netstandard2.1/de/FSharp.Core.resources.dll": {
+            "locale": "de"
+          },
+          "lib/netstandard2.1/es/FSharp.Core.resources.dll": {
+            "locale": "es"
+          },
+          "lib/netstandard2.1/fr/FSharp.Core.resources.dll": {
+            "locale": "fr"
+          },
+          "lib/netstandard2.1/it/FSharp.Core.resources.dll": {
+            "locale": "it"
+          },
+          "lib/netstandard2.1/ja/FSharp.Core.resources.dll": {
+            "locale": "ja"
+          },
+          "lib/netstandard2.1/ko/FSharp.Core.resources.dll": {
+            "locale": "ko"
+          },
+          "lib/netstandard2.1/pl/FSharp.Core.resources.dll": {
+            "locale": "pl"
+          },
+          "lib/netstandard2.1/pt-BR/FSharp.Core.resources.dll": {
+            "locale": "pt-BR"
+          },
+          "lib/netstandard2.1/ru/FSharp.Core.resources.dll": {
+            "locale": "ru"
+          },
+          "lib/netstandard2.1/tr/FSharp.Core.resources.dll": {
+            "locale": "tr"
+          },
+          "lib/netstandard2.1/zh-Hans/FSharp.Core.resources.dll": {
+            "locale": "zh-Hans"
+          },
+          "lib/netstandard2.1/zh-Hant/FSharp.Core.resources.dll": {
+            "locale": "zh-Hant"
+          }
+        }
+      },
+      "System.Text.Json/8.0.6": {}
+    }
+  },
+  "libraries": {
+    "CopilotSDK.Supercharged.FSharp/0.1.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "FSharp.Core/9.0.303": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-6JlV8aD8qQvcmfoe/PMOxCHXc0uX4lR23u0fAyQtnVQxYULLoTZgwgZHSnRcuUHOvS3wULFWcwdnP1iwslH60g==",
+      "path": "fsharp.core/9.0.303",
+      "hashPath": "fsharp.core.9.0.303.nupkg.sha512"
+    },
+    "System.Text.Json/8.0.6": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-BvSpVBsVN9b+Y+wONbvJOHd1HjXQf33+XiC28ZMOwRsYb42mz3Q8YHnpTSwpwJLqYCMqM+0UUVC3V+pi25XfkQ==",
+      "path": "system.text.json/8.0.6",
+      "hashPath": "system.text.json.8.0.6.nupkg.sha512"
+    }
+  }
+}

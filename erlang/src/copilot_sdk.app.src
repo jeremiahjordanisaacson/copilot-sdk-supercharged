@@ -1,0 +1,22 @@
+{application, copilot_sdk, [
+    {description, "Erlang SDK for the GitHub Copilot CLI"},
+    {vsn, "2.0.0"},
+    {registered, []},
+    {applications, [
+        kernel,
+        stdlib,
+        jsx
+    ]},
+    {modules, [
+        copilot_client,
+        copilot_jsonrpc,
+        copilot_session,
+        copilot_types,
+        copilot_tools
+    ]},
+    {env, []},
+    {licenses, ["MIT"]},
+    {links, [
+        {"GitHub", "https://github.com/github/copilot-sdk"}
+    ]}
+]}.

@@ -1,0 +1,55 @@
+{
+    "name": "copilot-sdk-supercharged-solidity",
+    "version": "2.0.0",
+    "description": "Solidity / Web3 SDK for GitHub Copilot CLI - smart contract auditing, gas optimization, and test generation",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "type": "module",
+    "exports": {
+        ".": {
+            "import": {
+                "types": "./dist/index.d.ts",
+                "default": "./dist/index.js"
+            }
+        }
+    },
+    "scripts": {
+        "build": "tsc",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "lint": "tsc --noEmit",
+        "clean": "rimraf dist"
+    },
+    "keywords": [
+        "github",
+        "copilot",
+        "solidity",
+        "web3",
+        "ethereum",
+        "evm",
+        "smart-contract",
+        "audit",
+        "security",
+        "hardhat",
+        "foundry",
+        "gas-optimization"
+    ],
+    "author": "jeremiahjordanisaacson",
+    "license": "MIT",
+    "peerDependencies": {
+        "copilot-sdk-supercharged": ">=2.0.0"
+    },
+    "devDependencies": {
+        "copilot-sdk-supercharged": "file:../nodejs",
+        "rimraf": "^6.1.2",
+        "typescript": "^5.0.0",
+        "vitest": "^4.0.18"
+    },
+    "engines": {
+        "node": ">=20.0.0"
+    },
+    "files": [
+        "dist/**/*",
+        "README.md"
+    ]
+}

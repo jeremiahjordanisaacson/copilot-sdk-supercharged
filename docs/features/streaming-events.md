@@ -206,6 +206,85 @@ session.on(AssistantMessageDeltaEvent.class, event ->
 
 </details>
 
+<details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+session.on(|event| {
+    if let Some(delta) = event.data.delta_content.as_ref() {
+        print!("{}", delta);
+    }
+});
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+```ruby
+session.on do |event|
+  if event.type == "assistant.message_delta"
+    print event.data.delta_content
+  end
+end
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+```php
+$session->on(function ($event) {
+    if ($event->type === 'assistant.message_delta') {
+        echo $event->data->deltaContent;
+    }
+});
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+```swift
+session.on { event in
+    if case .assistantMessageDelta(let delta) = event {
+        print(delta.data.deltaContent, terminator: "")
+    }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+```kotlin
+session.on { event ->
+    when (event) {
+        is AssistantMessageDeltaEvent ->
+            print(event.data.deltaContent)
+    }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+```cpp
+session.on([](const SessionEvent& event) {
+    if (auto* delta = std::get_if<AssistantMessageDeltaData>(&event.data)) {
+        std::cout << delta->deltaContent;
+    }
+});
+```
+
+</details>
+
 > **Tip (Python / Go):** These SDKs use a single `Data` class/struct with all possible fields as optional/nullable. Only the fields listed in the tables below are populated for each event type — the rest will be `None` / `nil`.
 >
 > **Tip (.NET):** The .NET SDK uses separate, strongly-typed data classes per event (e.g., `AssistantMessageDeltaData`), so only the relevant fields exist on each type.

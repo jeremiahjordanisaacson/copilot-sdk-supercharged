@@ -241,6 +241,171 @@ try (var client = new CopilotClient()) {
 
 </details>
 
+<details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+let session = client.create_session(&SessionConfig {
+    model: "gpt-4.1".into(),
+    custom_agents: vec![
+        CustomAgentConfig {
+            name: "researcher".into(),
+            display_name: Some("Research Agent".into()),
+            description: Some("Explores codebases and answers questions using read-only tools".into()),
+            tools: Some(vec!["grep".into(), "glob".into(), "view".into()]),
+            prompt: "You are a research assistant. Analyze code and answer questions. Do not modify any files.".into(),
+            ..Default::default()
+        },
+        CustomAgentConfig {
+            name: "editor".into(),
+            display_name: Some("Editor Agent".into()),
+            description: Some("Makes targeted code changes".into()),
+            tools: Some(vec!["view".into(), "edit".into(), "bash".into()]),
+            prompt: "You are a code editor. Make minimal, surgical changes to files as requested.".into(),
+            ..Default::default()
+        },
+    ],
+    ..Default::default()
+}).await?;
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+```ruby
+session = client.create_session(
+  model: "gpt-4.1",
+  custom_agents: [
+    {
+      name: "researcher",
+      display_name: "Research Agent",
+      description: "Explores codebases and answers questions using read-only tools",
+      tools: %w[grep glob view],
+      prompt: "You are a research assistant. Analyze code and answer questions. Do not modify any files."
+    },
+    {
+      name: "editor",
+      display_name: "Editor Agent",
+      description: "Makes targeted code changes",
+      tools: %w[view edit bash],
+      prompt: "You are a code editor. Make minimal, surgical changes to files as requested."
+    }
+  ]
+)
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+```php
+$session = $client->createSession([
+    'model' => 'gpt-4.1',
+    'customAgents' => [
+        [
+            'name' => 'researcher',
+            'displayName' => 'Research Agent',
+            'description' => 'Explores codebases and answers questions using read-only tools',
+            'tools' => ['grep', 'glob', 'view'],
+            'prompt' => 'You are a research assistant. Analyze code and answer questions. Do not modify any files.',
+        ],
+        [
+            'name' => 'editor',
+            'displayName' => 'Editor Agent',
+            'description' => 'Makes targeted code changes',
+            'tools' => ['view', 'edit', 'bash'],
+            'prompt' => 'You are a code editor. Make minimal, surgical changes to files as requested.',
+        ],
+    ],
+]);
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+```swift
+let session = try await client.createSession(config: SessionConfig(
+    model: "gpt-4.1",
+    customAgents: [
+        CustomAgentConfig(
+            name: "researcher",
+            displayName: "Research Agent",
+            description: "Explores codebases and answers questions using read-only tools",
+            tools: ["grep", "glob", "view"],
+            prompt: "You are a research assistant. Analyze code and answer questions. Do not modify any files."
+        ),
+        CustomAgentConfig(
+            name: "editor",
+            displayName: "Editor Agent",
+            description: "Makes targeted code changes",
+            tools: ["view", "edit", "bash"],
+            prompt: "You are a code editor. Make minimal, surgical changes to files as requested."
+        ),
+    ]
+))
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+```kotlin
+val session = client.createSession(SessionConfig(
+    model = "gpt-4.1",
+    customAgents = listOf(
+        CustomAgentConfig(
+            name = "researcher",
+            displayName = "Research Agent",
+            description = "Explores codebases and answers questions using read-only tools",
+            tools = listOf("grep", "glob", "view"),
+            prompt = "You are a research assistant. Analyze code and answer questions. Do not modify any files."
+        ),
+        CustomAgentConfig(
+            name = "editor",
+            displayName = "Editor Agent",
+            description = "Makes targeted code changes",
+            tools = listOf("view", "edit", "bash"),
+            prompt = "You are a code editor. Make minimal, surgical changes to files as requested."
+        )
+    )
+))
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+```cpp
+auto session = client.createSession({
+    .model = "gpt-4.1",
+    .customAgents = {
+        {
+            .name = "researcher",
+            .displayName = "Research Agent",
+            .description = "Explores codebases and answers questions using read-only tools",
+            .tools = {"grep", "glob", "view"},
+            .prompt = "You are a research assistant. Analyze code and answer questions. Do not modify any files.",
+        },
+        {
+            .name = "editor",
+            .displayName = "Editor Agent",
+            .description = "Makes targeted code changes",
+            .tools = {"view", "edit", "bash"},
+            .prompt = "You are a code editor. Make minimal, surgical changes to files as requested.",
+        },
+    },
+});
+```
+
+</details>
+
 ## Configuration Reference
 
 | Property | Type | Required | Description |
@@ -401,6 +566,103 @@ var session = client.createSession(
         .setAgent("researcher") // Pre-select the researcher agent
         .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
 ).get();
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+<!-- docs-validate: skip -->
+```rust
+let session = client.create_session(&SessionConfig {
+    custom_agents: vec![
+        CustomAgentConfig { name: "researcher".into(), prompt: "You are a research assistant. Analyze code and answer questions.".into(), ..Default::default() },
+        CustomAgentConfig { name: "editor".into(), prompt: "You are a code editor. Make minimal, surgical changes.".into(), ..Default::default() },
+    ],
+    agent: Some("researcher".into()), // Pre-select the researcher agent
+    ..Default::default()
+}).await?;
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+<!-- docs-validate: skip -->
+```ruby
+session = client.create_session(
+  custom_agents: [
+    { name: "researcher", prompt: "You are a research assistant. Analyze code and answer questions." },
+    { name: "editor", prompt: "You are a code editor. Make minimal, surgical changes." },
+  ],
+  agent: "researcher" # Pre-select the researcher agent
+)
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+<!-- docs-validate: skip -->
+```php
+$session = $client->createSession([
+    'customAgents' => [
+        ['name' => 'researcher', 'prompt' => 'You are a research assistant. Analyze code and answer questions.'],
+        ['name' => 'editor', 'prompt' => 'You are a code editor. Make minimal, surgical changes.'],
+    ],
+    'agent' => 'researcher', // Pre-select the researcher agent
+]);
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+<!-- docs-validate: skip -->
+```swift
+let session = try await client.createSession(config: SessionConfig(
+    customAgents: [
+        CustomAgentConfig(name: "researcher", prompt: "You are a research assistant. Analyze code and answer questions."),
+        CustomAgentConfig(name: "editor", prompt: "You are a code editor. Make minimal, surgical changes."),
+    ],
+    agent: "researcher" // Pre-select the researcher agent
+))
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+<!-- docs-validate: skip -->
+```kotlin
+val session = client.createSession(SessionConfig(
+    customAgents = listOf(
+        CustomAgentConfig(name = "researcher", prompt = "You are a research assistant. Analyze code and answer questions."),
+        CustomAgentConfig(name = "editor", prompt = "You are a code editor. Make minimal, surgical changes."),
+    ),
+    agent = "researcher" // Pre-select the researcher agent
+))
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+<!-- docs-validate: skip -->
+```cpp
+auto session = client.createSession({
+    .customAgents = {
+        {.name = "researcher", .prompt = "You are a research assistant. Analyze code and answer questions."},
+        {.name = "editor", .prompt = "You are a code editor. Make minimal, surgical changes."},
+    },
+    .agent = "researcher", // Pre-select the researcher agent
+});
 ```
 
 </details>
@@ -674,6 +936,169 @@ session.on(event -> {
 var response = session.sendAndWait(
     new MessageOptions().setPrompt("Research how authentication works in this codebase")
 ).get();
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+session.on(|event| {
+    match &event.data {
+        SessionEventData::SubagentStarted(d) => {
+            println!("▶ Sub-agent started: {}", d.agent_display_name);
+            println!("  Description: {}", d.agent_description);
+            println!("  Tool call ID: {}", d.tool_call_id);
+        }
+        SessionEventData::SubagentCompleted(d) => {
+            println!("✅ Sub-agent completed: {}", d.agent_display_name);
+        }
+        SessionEventData::SubagentFailed(d) => {
+            println!("❌ Sub-agent failed: {} - {}", d.agent_display_name, d.error);
+        }
+        SessionEventData::SubagentSelected(d) => {
+            println!("🎯 Agent selected: {}", d.agent_display_name);
+        }
+        _ => {}
+    }
+});
+
+let response = session.send_and_wait(&MessageOptions {
+    prompt: "Research how authentication works in this codebase".into(),
+    ..Default::default()
+}).await?;
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+```ruby
+session.on do |event|
+  case event.type
+  when "subagent.started"
+    puts "▶ Sub-agent started: #{event.data[:agentDisplayName]}"
+    puts "  Description: #{event.data[:agentDescription]}"
+  when "subagent.completed"
+    puts "✅ Sub-agent completed: #{event.data[:agentDisplayName]}"
+  when "subagent.failed"
+    puts "❌ Sub-agent failed: #{event.data[:agentDisplayName]}"
+    puts "  Error: #{event.data[:error]}"
+  when "subagent.selected"
+    puts "🎯 Agent selected: #{event.data[:agentDisplayName]}"
+  end
+end
+
+response = session.send_and_wait(prompt: "Research how authentication works in this codebase")
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+```php
+$session->on(function ($event) {
+    switch ($event->type) {
+        case 'subagent.started':
+            echo "▶ Sub-agent started: {$event->data->agentDisplayName}\n";
+            echo "  Description: {$event->data->agentDescription}\n";
+            break;
+        case 'subagent.completed':
+            echo "✅ Sub-agent completed: {$event->data->agentDisplayName}\n";
+            break;
+        case 'subagent.failed':
+            echo "❌ Sub-agent failed: {$event->data->agentDisplayName}\n";
+            echo "  Error: {$event->data->error}\n";
+            break;
+        case 'subagent.selected':
+            echo "🎯 Agent selected: {$event->data->agentDisplayName}\n";
+            break;
+    }
+});
+
+$response = $session->sendAndWait(['prompt' => 'Research how authentication works in this codebase']);
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+```swift
+session.on { event in
+    switch event.type {
+    case "subagent.started":
+        print("▶ Sub-agent started: \(event.data.agentDisplayName ?? "")")
+        print("  Description: \(event.data.agentDescription ?? "")")
+    case "subagent.completed":
+        print("✅ Sub-agent completed: \(event.data.agentDisplayName ?? "")")
+    case "subagent.failed":
+        print("❌ Sub-agent failed: \(event.data.agentDisplayName ?? "")")
+        print("  Error: \(event.data.error ?? "")")
+    case "subagent.selected":
+        print("🎯 Agent selected: \(event.data.agentDisplayName ?? "")")
+    default:
+        break
+    }
+}
+
+let response = try await session.sendAndWait(prompt: "Research how authentication works in this codebase")
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+```kotlin
+session.on { event ->
+    when (event) {
+        is SubagentStartedEvent -> {
+            println("▶ Sub-agent started: ${event.data.agentDisplayName}")
+            println("  Description: ${event.data.agentDescription}")
+        }
+        is SubagentCompletedEvent ->
+            println("✅ Sub-agent completed: ${event.data.agentDisplayName}")
+        is SubagentFailedEvent -> {
+            println("❌ Sub-agent failed: ${event.data.agentDisplayName}")
+            println("  Error: ${event.data.error}")
+        }
+        is SubagentSelectedEvent ->
+            println("🎯 Agent selected: ${event.data.agentDisplayName}")
+    }
+}
+
+val response = session.sendAndWait(MessageOptions(
+    prompt = "Research how authentication works in this codebase"
+))
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+```cpp
+session.on([](const SessionEvent& event) {
+    if (auto* d = std::get_if<SubagentStartedData>(&event.data)) {
+        std::cout << "▶ Sub-agent started: " << d->agentDisplayName << "\n";
+        std::cout << "  Description: " << d->agentDescription << "\n";
+    } else if (auto* d = std::get_if<SubagentCompletedData>(&event.data)) {
+        std::cout << "✅ Sub-agent completed: " << d->agentDisplayName << "\n";
+    } else if (auto* d = std::get_if<SubagentFailedData>(&event.data)) {
+        std::cout << "❌ Sub-agent failed: " << d->agentDisplayName << "\n";
+        std::cout << "  Error: " << d->error << "\n";
+    } else if (auto* d = std::get_if<SubagentSelectedData>(&event.data)) {
+        std::cout << "🎯 Agent selected: " << d->agentDisplayName << "\n";
+    }
+});
+
+auto response = session.sendAndWait({
+    .prompt = "Research how authentication works in this codebase",
+});
 ```
 
 </details>

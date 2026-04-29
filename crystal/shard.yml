@@ -1,0 +1,23 @@
+name: copilot-sdk-supercharged
+version: 0.1.0
+description: |
+  Crystal SDK for the GitHub Copilot CLI. Communicates via JSON-RPC 2.0
+  over stdio or TCP using Content-Length header framing.
+
+authors:
+  - GitHub Copilot SDK Contributors
+
+crystal: ">= 1.10.0"
+
+license: MIT
+
+targets:
+  copilot_sdk:
+    main: src/copilot_sdk.cr
+
+dependencies: {}
+
+development_dependencies:
+  ameba:
+    github: crystal-ameba/ameba
+    version: ~> 1.6

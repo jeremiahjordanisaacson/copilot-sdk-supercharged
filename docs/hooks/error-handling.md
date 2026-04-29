@@ -116,6 +116,79 @@ public delegate Task<ErrorOccurredHookOutput?> ErrorOccurredHandler(
 
 </details>
 
+<details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+type ErrorOccurredHandler = Box<dyn Fn(
+    ErrorOccurredHookInput,
+    HookInvocation,
+) -> Pin<Box<dyn Future<Output = Option<ErrorOccurredHookOutput>>>> + Send + Sync>;
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+```ruby
+# on_error_occurred receives input hash and invocation hash,
+# returns an ErrorOccurredHookOutput hash or nil.
+on_error_occurred = ->(input, invocation) { nil }
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+```php
+// ErrorOccurredHandler receives $input and $invocation arrays,
+// returns an ErrorOccurredHookOutput array or null.
+$onErrorOccurred = function (array $input, array $invocation): ?array {
+    return null;
+};
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+```swift
+typealias ErrorOccurredHandler = (
+    ErrorOccurredHookInput,
+    HookInvocation
+) async throws -> ErrorOccurredHookOutput?
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+```kotlin
+typealias ErrorOccurredHandler = suspend (
+    input: ErrorOccurredHookInput,
+    invocation: HookInvocation
+) -> ErrorOccurredHookOutput?
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+```cpp
+using ErrorOccurredHandler = std::function<
+    std::optional<ErrorOccurredHookOutput>(
+        const ErrorOccurredHookInput& input,
+        const HookInvocation& invocation
+    )>;
+```
+
+</details>
+
 ## Input
 
 | Field | Type | Description |
@@ -287,6 +360,121 @@ session.setEventErrorPolicy(EventErrorPolicy.SUPPRESS_AND_LOG_ERRORS);
 session.setEventErrorHandler((event, ex) -> {
     System.err.println("[" + session.getSessionId() + "] Error: " + ex.getMessage());
     System.err.println("  Event: " + event.getType());
+});
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+let session = client.create_session(&SessionConfig {
+    hooks: Some(SessionHooks {
+        on_error_occurred: Some(Box::new(|input, invocation| {
+            Box::pin(async move {
+                eprintln!("[{}] Error: {}", invocation.session_id, input.error);
+                eprintln!("  Context: {}", input.error_context);
+                eprintln!("  Recoverable: {}", input.recoverable);
+                None
+            })
+        })),
+        ..Default::default()
+    }),
+    ..Default::default()
+}).await?;
+```
+
+</details>
+
+<details>
+<summary><strong>Ruby</strong></summary>
+
+```ruby
+session = client.create_session(
+  on_permission_request: ->(_req, _inv) { { kind: "approved" } },
+  hooks: {
+    on_error_occurred: ->(input, invocation) {
+      warn "[#{invocation[:session_id]}] Error: #{input[:error]}"
+      warn "  Context: #{input[:errorContext]}"
+      warn "  Recoverable: #{input[:recoverable]}"
+      nil
+    }
+  }
+)
+```
+
+</details>
+
+<details>
+<summary><strong>PHP</strong></summary>
+
+```php
+$session = $client->createSession([
+    'hooks' => [
+        'onErrorOccurred' => function (array $input, array $invocation): ?array {
+            fwrite(STDERR, "[{$invocation['sessionId']}] Error: {$input['error']}\n");
+            fwrite(STDERR, "  Context: {$input['errorContext']}\n");
+            fwrite(STDERR, "  Recoverable: {$input['recoverable']}\n");
+            return null;
+        },
+    ],
+]);
+```
+
+</details>
+
+<details>
+<summary><strong>Swift</strong></summary>
+
+```swift
+let session = try await client.createSession(config: SessionConfig(
+    hooks: SessionHooks(
+        onErrorOccurred: { input, invocation in
+            print("[\\(invocation.sessionId)] Error: \\(input.error)", to: &stderr)
+            print("  Context: \\(input.errorContext)", to: &stderr)
+            print("  Recoverable: \\(input.recoverable)", to: &stderr)
+            return nil
+        }
+    )
+))
+```
+
+</details>
+
+<details>
+<summary><strong>Kotlin</strong></summary>
+
+```kotlin
+val session = client.createSession(SessionConfig(
+    hooks = SessionHooks(
+        onErrorOccurred = { input, invocation ->
+            System.err.println("[${invocation.sessionId}] Error: ${input.error}")
+            System.err.println("  Context: ${input.errorContext}")
+            System.err.println("  Recoverable: ${input.recoverable}")
+            null
+        }
+    )
+))
+```
+
+</details>
+
+<details>
+<summary><strong>C++</strong></summary>
+
+```cpp
+auto session = client.createSession({
+    .hooks = {
+        .onErrorOccurred = [](const ErrorOccurredHookInput& input,
+                              const HookInvocation& invocation)
+            -> std::optional<ErrorOccurredHookOutput> {
+            std::cerr << "[" << invocation.sessionId << "] Error: " << input.error << "\n";
+            std::cerr << "  Context: " << input.errorContext << "\n";
+            std::cerr << "  Recoverable: " << input.recoverable << "\n";
+            return std::nullopt;
+        },
+    },
 });
 ```
 

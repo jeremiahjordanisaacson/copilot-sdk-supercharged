@@ -1,0 +1,646 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+<assembly><name>CopilotSDK.Supercharged.FSharp</name></assembly>
+<members>
+<member name="T:CopilotSDK.Supercharged.FSharp.GetAuthStatusResponse">
+<summary>
+ Authentication status response.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.GetStatusResponse">
+<summary>
+ Response from the server status endpoint.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SessionMetadata">
+<summary>
+ Metadata for a persisted session.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ModelInfo">
+<summary>
+ Information about an available model.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SessionEvent">
+<summary>
+ All session events emitted by the Copilot CLI, represented as a discriminated union.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SessionCompactionData">
+<summary>
+ Data payload for a session compaction event.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolExecutionCompleteData">
+<summary>
+ Data payload for a tool execution complete event.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolExecutionStartData">
+<summary>
+ Data payload for a tool execution start event.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.AssistantReasoningData">
+<summary>
+ Data payload for an assistant reasoning event.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.AssistantMessageDeltaData">
+<summary>
+ Data payload for an assistant message delta event.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.AssistantMessageData">
+<summary>
+ Data payload for an assistant message event.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolResultObject">
+<summary>
+ Structured result of a tool execution.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolBinaryResult">
+<summary>
+ Binary result from a tool (e.g. an image).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.RegisteredTool">
+<summary>
+ A registered tool pairing its definition with its handler.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolHandler">
+<summary>
+ Handler function for tool invocations.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolInvocation">
+<summary>
+ Context passed to a tool handler during invocation.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.Tool.Parameters">
+<summary>
+ JSON Schema for parameters.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.Tool.Description">
+<summary>
+ Human-readable description.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.Tool.Name">
+<summary>
+ Unique tool name.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.Tool">
+<summary>
+ Definition of a tool that the assistant can invoke.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ToolParameterSchema">
+<summary>
+ Schema for a tool&apos;s parameters (JSON Schema object).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.Model">
+<summary>
+ Model override for the resumed session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.OnPermissionRequest">
+<summary>
+ Handler for permission requests.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.SessionId">
+<summary>
+ The session ID to resume.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig">
+<summary>
+ Configuration for resuming an existing session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.IncludeSubAgentStreamingEvents">
+<summary>
+ Include sub-agent streaming events.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.SkillDirectories">
+<summary>
+ Skill directories to load.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.Agent">
+<summary>
+ Custom agent name.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.Streaming">
+<summary>
+ Enable streaming events.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.SystemMessage">
+<summary>
+ System message override.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnPermissionRequest">
+<summary>
+ Handler for permission requests (required).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.Model">
+<summary>
+ Model to use (e.g. &quot;gpt-5&quot;).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SessionConfig">
+<summary>
+ Configuration for creating a new session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MessageOptions.Mode">
+<summary>
+ Optional mode override.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MessageOptions.Attachments">
+<summary>
+ Optional file attachments.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.MessageOptions.Prompt">
+<summary>
+ The prompt text to send.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.MessageOptions">
+<summary>
+ Options for sending a message to a session.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.Attachment">
+<summary>
+ File attachment for a message.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.SessionIdleTimeoutSeconds">
+<summary>
+ Session idle timeout in seconds (None = no timeout).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.Telemetry">
+<summary>
+ OpenTelemetry configuration.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.UseLoggedInUser">
+<summary>
+ Use the logged-in user for authentication.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.GitHubToken">
+<summary>
+ GitHub token for authentication.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.Environment">
+<summary>
+ Environment variables for the CLI process.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.AutoStart">
+<summary>
+ Auto-start server on first use.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.LogLevel">
+<summary>
+ Log level for the CLI server.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.CliUrl">
+<summary>
+ URL of an existing CLI server to connect to.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.UseStdio">
+<summary>
+ Use stdio transport instead of TCP.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.Port">
+<summary>
+ Port number for the CLI server (0 for random).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.Cwd">
+<summary>
+ Working directory for the CLI process.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.CliArgs">
+<summary>
+ Extra arguments prepended before SDK-managed flags.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.CliPath">
+<summary>
+ Path to the Copilot CLI executable.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CopilotClientOptions">
+<summary>
+ Configuration options for creating a CopilotClient.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.TelemetryConfig">
+<summary>
+ OpenTelemetry configuration for the CLI server.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PermissionRequestHandler">
+<summary>
+ Handler that decides whether to approve a tool invocation.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PermissionRequest">
+<summary>
+ Permission-request payload sent by the server.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PermissionRequestResult">
+<summary>
+ Result returned by a permission-request handler.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.PermissionResultKind">
+<summary>
+ Kind of a permission-request result.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ConnectionState">
+<summary>
+ Represents the connection state of the Copilot client.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.JsonRpcTransport.StartReadLoop">
+<summary>
+ Start the read loop that dispatches incoming messages.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.JsonRpcTransport.SendRequestAsync``1(System.String,Microsoft.FSharp.Core.FSharpOption{System.Object})">
+<summary>
+ Send a JSON-RPC request and wait for the response.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.JsonRpcTransport.SendNotificationAsync(System.String,Microsoft.FSharp.Core.FSharpOption{System.Object})">
+<summary>
+ Send a JSON-RPC notification (no response expected).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.JsonRpcTransport.RemoveNotification(System.String)">
+<summary>
+ Remove a previously registered notification handler.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.JsonRpcTransport.OnNotification(System.String,Microsoft.FSharp.Core.FSharpFunc{Microsoft.FSharp.Core.FSharpOption{System.Text.Json.JsonElement},Microsoft.FSharp.Core.Unit})">
+<summary>
+ Register a handler for a server-initiated notification method.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.JsonRpcTransport.Dispose">
+<summary>
+ Shut down the transport, cancelling any pending reads.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.JsonRpcTransport">
+<summary>
+ Low-level JSON-RPC transport over streams with Content-Length framing.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.JsonRpcException">
+<summary>
+ Exception raised when a JSON-RPC error response is received.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.JsonRpcNotification">
+<summary>
+ A JSON-RPC 2.0 notification (no id, no response expected).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.JsonRpcError">
+<summary>
+ A JSON-RPC 2.0 error object.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.JsonRpcResponse">
+<summary>
+ A JSON-RPC 2.0 response envelope.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.JsonRpcRequest">
+<summary>
+ A JSON-RPC 2.0 request envelope.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotSession.WorkspacePath">
+<summary>
+ The workspace path if infinite sessions are enabled.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotSession.SessionId">
+<summary>
+ The unique identifier for this session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotSession.Events">
+<summary>
+ Subscribe to session events via an IObservable.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.StopAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Stop the session (notifies the server).
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.SendAsync(CopilotSDK.Supercharged.FSharp.MessageOptions,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Send a message to the session. Returns the response message ID.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.SendAndWaitAsync(CopilotSDK.Supercharged.FSharp.MessageOptions,Microsoft.FSharp.Core.FSharpOption{System.TimeSpan},Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Send a message and wait until the session becomes idle.
+ Returns the final assistant message, or None if no message was received.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.RegisterTools(Microsoft.FSharp.Collections.FSharpList{CopilotSDK.Supercharged.FSharp.RegisteredTool})">
+<summary>
+ Register multiple tools at once.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.RegisterTool(CopilotSDK.Supercharged.FSharp.RegisteredTool)">
+<summary>
+ Register a tool that the assistant can invoke during this session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.On(Microsoft.FSharp.Core.FSharpFunc{CopilotSDK.Supercharged.FSharp.SessionEvent,Microsoft.FSharp.Core.Unit})">
+<summary>
+ Subscribe to all session events. Returns an IDisposable that
+ removes the handler when disposed.
+
+ Use pattern matching in F# to handle events idiomatically:
+   session.On(function
+       | AssistantMessage data -&gt; printfn &quot;%s&quot; data.Content
+       | SessionIdle -&gt; printfn &quot;Done&quot;
+       | _ -&gt; ())
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.GetHistoryAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Retrieve the conversation history for this session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.#ctor(System.String,CopilotSDK.Supercharged.FSharp.JsonRpcTransport)">
+<summary>
+ Alternate constructor without workspace path.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CopilotSession">
+<summary>
+ A Copilot conversation session.
+
+ Sessions are created via CopilotClient.createSession or resumed via
+ CopilotClient.resumeSession. They manage event subscriptions, tool
+ registration, and message exchange with the assistant.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClient.NegotiatedProtocolVersion">
+<summary>
+ Negotiated protocol version with the server.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClient.ConnectionState">
+<summary>
+ Current connection state.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClient.ActualPort">
+<summary>
+ Actual TCP port when not using stdio.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.StopAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Stop the client, killing the CLI process if one was spawned.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.StartAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Start the client, spawning the CLI process or connecting to an
+ existing server.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.ResumeSessionAsync(CopilotSDK.Supercharged.FSharp.ResumeSessionConfig,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Resume an existing session by ID.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.ListModelsAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ List available models.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.GetStatusAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Get the server status.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.GetSessionMetadataAsync(System.String,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Get metadata for a session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.GetAuthStatusAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Get the authentication status.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.DeleteSessionAsync(System.String,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Delete a session permanently.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.CreateSessionAsync(CopilotSDK.Supercharged.FSharp.SessionConfig,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Create a new conversation session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.#ctor">
+<summary>
+ Create a client with default options.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CopilotClient">
+<summary>
+ Main client for interacting with the GitHub Copilot CLI.
+
+ CopilotClient manages the connection to the Copilot CLI server and
+ provides methods to create and manage conversation sessions. It can
+ either spawn a CLI server process or connect to an existing server.
+
+ Example:
+   async {
+       use client = CopilotClient.create CopilotClientOptions.defaults
+       do! client.StartAsync()
+       let! session =
+           client.CreateSessionAsync(SessionConfig.defaults)
+       let! reply =
+           session.SendAndWaitAsync({ Prompt = &quot;Hello!&quot;; Attachments = None; Mode = None })
+       reply |&gt; Option.iter (fun data -&gt; printfn &quot;%s&quot; data.Content)
+       do! client.StopAsync()
+   } |&gt; Async.RunSynchronously
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SdkProtocolVersion.getVersion">
+<summary>
+ Gets the SDK protocol version.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SdkProtocolVersion.Version">
+<summary>
+ The SDK protocol version.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SdkProtocolVersion">
+<summary>
+ Provides the SDK protocol version.
+ This must match the version expected by the copilot-agent-runtime server.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionEventModule.parse(System.String,Microsoft.FSharp.Core.FSharpOption{System.Text.Json.JsonElement})">
+<summary>
+ Parse a wire event type string and raw JSON into a SessionEvent.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionEventModule.isIdle(CopilotSDK.Supercharged.FSharp.SessionEvent)">
+<summary>
+ Check whether this event signals session idle.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionEventModule.tryGetDeltaContent(CopilotSDK.Supercharged.FSharp.SessionEvent)">
+<summary>
+ Try to extract delta content for streaming.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionEventModule.tryGetMessageContent(CopilotSDK.Supercharged.FSharp.SessionEvent)">
+<summary>
+ Try to extract the assistant message content from an event.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ToolResultObjectModule.failure(System.String)">
+<summary>
+ Create a failure result with an error message.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.ToolResultObjectModule.success(System.String)">
+<summary>
+ Create a successful text result.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfigModule.defaults">
+<summary>
+ Default session config with approveAll handler.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionConfigModule.rejectAll(CopilotSDK.Supercharged.FSharp.PermissionRequest)">
+<summary>
+ Reject all permission requests.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.SessionConfigModule.approveAll(CopilotSDK.Supercharged.FSharp.PermissionRequest)">
+<summary>
+ Approve all permission requests automatically.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptionsModule.defaults">
+<summary>
+ Default client options (stdio, auto-start, info log level).
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.DefineTool.ToolBuilder">
+<summary>
+ Pipe-friendly tool builder: start with a name and description, then
+ compose using |&gt; withParameters |&gt; withHandler.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.DefineTool.createSimple(System.String,System.String,Microsoft.FSharp.Core.FSharpFunc{Microsoft.FSharp.Core.Unit,Microsoft.FSharp.Control.FSharpAsync{System.String}})">
+<summary>
+ Create a simple tool with no parameters.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.DefineTool.createTyped``2(System.String,System.String,Microsoft.FSharp.Core.FSharpOption{System.Text.Json.JsonElement},Microsoft.FSharp.Core.FSharpFunc{``0,Microsoft.FSharp.Control.FSharpAsync{``1}})">
+<summary>
+ Create a RegisteredTool using a typed argument extractor.
+ The extractor deserializes the arguments JSON element into a typed value,
+ and the handler receives that typed value.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.DefineTool.create(System.String,System.String,Microsoft.FSharp.Core.FSharpOption{System.Text.Json.JsonElement},Microsoft.FSharp.Core.FSharpFunc{CopilotSDK.Supercharged.FSharp.ToolInvocation,Microsoft.FSharp.Control.FSharpAsync{System.Object}})">
+<summary>
+ Create a RegisteredTool from a name, description, optional JSON schema, and handler.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.DefineTool">
+<summary>
+ Helper module for defining tools with F# idioms.
+
+ Example:
+   let weatherTool =
+       DefineTool.create
+           &quot;get_weather&quot;
+           &quot;Get current weather for a city&quot;
+           (Some parameterSchema)
+           (fun invocation -&gt; async {
+               let city =
+                   invocation.Arguments
+                   |&gt; Option.bind (fun a -&gt;
+                       match a.TryGetProperty(&quot;city&quot;) with
+                       | true, c -&gt; Some (c.GetString())
+                       | _ -&gt; None)
+                   |&gt; Option.defaultValue &quot;Unknown&quot;
+               return ToolResultObject.success (sprintf &quot;Weather in %s: Sunny, 72F&quot; city) :&gt; obj
+           })
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClientModule.stop(CopilotSDK.Supercharged.FSharp.CopilotClient)">
+<summary>
+ Stop the client asynchronously.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClientModule.start(CopilotSDK.Supercharged.FSharp.CopilotClient)">
+<summary>
+ Start the client asynchronously.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClientModule.createDefault">
+<summary>
+ Create a CopilotClient with default options.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClientModule.create(CopilotSDK.Supercharged.FSharp.CopilotClientOptions)">
+<summary>
+ Create a CopilotClient with the given options.
+</summary>
+</member>
+</members>
+</doc>

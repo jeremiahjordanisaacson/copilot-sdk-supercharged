@@ -1,0 +1,14 @@
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\obj\Debug\net8.0\CopilotSDK.Supercharged.FSharp.fsproj.AssemblyReference.cache
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\obj\Debug\net8.0\CopilotSDK.Supercharged.FSharp.AssemblyInfoInputs.cache
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\obj\Debug\net8.0\CopilotSDK.Supercharged.FSharp.AssemblyInfo.fs
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\obj\Debug\net8.0\CopilotSDK.Supercharged.FSharp.fsproj.CoreCompileInputs.cache
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\obj\Debug\net8.0\CopilotSDK.Supercharged.FSharp.sourcelink.json
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\bin\Debug\net8.0\CopilotSDK.Supercharged.FSharp.deps.json
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\bin\Debug\net8.0\CopilotSDK.Supercharged.FSharp.dll
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\bin\Debug\net8.0\CopilotSDK.Supercharged.FSharp.pdb
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\bin\Debug\net8.0\CopilotSDK.Supercharged.FSharp.xml
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\obj\Debug\net8.0\CopilotSDK.Supercharged.FSharp.dll
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\obj\Debug\net8.0\refint\CopilotSDK.Supercharged.FSharp.dll
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\obj\Debug\net8.0\CopilotSDK.Supercharged.FSharp.xml
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\obj\Debug\net8.0\CopilotSDK.Supercharged.FSharp.pdb
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\fsharp\src\obj\Debug\net8.0\ref\CopilotSDK.Supercharged.FSharp.dll
