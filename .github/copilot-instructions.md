@@ -4,13 +4,13 @@
 
 ## Big picture 🔧
 
-- The repo implements language SDKs for **21 languages** (Node/TS, Python, Go, .NET, Java, Rust, Ruby, PHP, Swift, Kotlin, C++, C, Dart, Scala, R, Perl, Lua, Shell/Bash, Elixir, Haskell, Clojure) that speak to the **Copilot CLI** via **JSON-RPC** (see `README.md` and `nodejs/src/client.ts`).
+- The repo implements language SDKs for **40 languages** (Node/TS, Python, Go, .NET, Java, Rust, Ruby, PHP, Swift, Kotlin, C++, C, Dart, Scala, R, Perl, Lua, Shell/Bash, Elixir, Haskell, Clojure, Visual Basic, Delphi, Fortran, MATLAB, Ada, Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V) that speak to the **Copilot CLI** via **JSON-RPC** (see `README.md` and `nodejs/src/client.ts`).
 - Typical flow: your App → SDK client → JSON-RPC → Copilot CLI (server mode). The CLI must be installed or you can connect to an external CLI server via the `CLI URL option (language-specific casing)` (Node: `cliUrl`, Go: `CLIUrl`, .NET: `CliUrl`, Python: `cli_url`).
 
 ## Most important files to read first 📚
 
 - Top-level: `README.md` (architecture + quick start)
-- Language entry points: `nodejs/src/client.ts`, `python/README.md`, `go/README.md`, `dotnet/README.md`, and 17 additional SDK READMEs (see `MULTI_LANGUAGE_SDKS.md` for the full list)
+- Language entry points: `nodejs/src/client.ts`, `python/README.md`, `go/README.md`, `dotnet/README.md`, and 36 additional SDK READMEs (see `MULTI_LANGUAGE_SDKS.md` for the full list)
 - Test harness & E2E: `test/harness/*`, Python harness wrapper `python/e2e/testharness/proxy.py`
 - Schemas & type generation: `nodejs/scripts/generate-session-types.ts`
 - Session snapshots used by E2E: `test/snapshots/` (used by the replay proxy)
@@ -44,8 +44,27 @@
   - Elixir: `cd elixir && mix test`
   - Haskell: `cd haskell && cabal test`
   - Clojure: `cd clojure && clj -M:test`
+  - Visual Basic: `cd visualbasic && dotnet test`
+  - Delphi: `cd delphi && lazbuild tests/TestRunner.lpi && ./tests/TestRunner`
+  - Fortran: `cd fortran && fpm test`
+  - MATLAB: `cd matlab && matlab -batch "runtests('tests')"`
+  - Ada: `cd ada && alr build && alr run copilot_sdk_tests`
+  - Objective-C: `cd objc && xcodebuild test -scheme CopilotSDK`
+  - F#: `cd fsharp && dotnet test`
+  - Groovy: `cd groovy && ./gradlew test`
+  - Julia: `cd julia && julia --project=. -e 'using Pkg; Pkg.test()'`
+  - COBOL: `cd cobol && make test`
+  - OCaml: `cd ocaml && dune runtest`
+  - Zig: `cd zig && zig build test`
+  - Nim: `cd nim && nimble test`
+  - D: `cd dlang && dub test`
+  - Erlang: `cd erlang && rebar3 ct`
+  - Crystal: `cd crystal && crystal spec`
+  - Tcl: `cd tcl && make test`
+  - Solidity: `cd solidity && forge test`
+  - V: `cd vlang && v test src/`
 
-## Testing & E2E tips ⚙️
+## Testing & E2E tips⚙️
 
 - E2E runs against a local **replaying CAPI proxy** (see `test/harness/server.ts`). Most language E2E harnesses spawn that server automatically (see `python/e2e/testharness/proxy.py`).
 - Tests rely on YAML snapshot exchanges under `test/snapshots/` — to add test scenarios, add or edit the appropriate YAML files and update tests.
@@ -89,7 +108,7 @@
 
 ## Where to add new code or tests 🧭
 
-- SDK code: `nodejs/src`, `python/copilot`, `go`, `dotnet/src`, and `{java,rust,ruby,php,swift,kotlin,cpp,c,dart,scala,r,perl,lua,shell,elixir,haskell,clojure}/` (see each SDK's README for directory layout)
-- Unit tests: `nodejs/test`, `python/*`, `go/*`, `dotnet/test`, and test directories within each of the 17 additional SDK directories
+- SDK code: `nodejs/src`, `python/copilot`, `go`, `dotnet/src`, and `{java,rust,ruby,php,swift,kotlin,cpp,c,dart,scala,r,perl,lua,shell,elixir,haskell,clojure,visualbasic,delphi,fortran,matlab,ada,objc,fsharp,groovy,julia,cobol,ocaml,zig,nim,dlang,erlang,crystal,tcl,solidity,vlang}/` (see each SDK's README for directory layout)
+- Unit tests: `nodejs/test`, `python/*`, `go/*`, `dotnet/test`, and test directories within each of the 36 additional SDK directories
 - E2E tests: `*/e2e/` folders that use the shared replay proxy and `test/snapshots/`
 - Generated types: update schema in `@github/copilot` then run `cd nodejs && npm run generate:session-types` and commit generated files in `src/generated` or language generated location.

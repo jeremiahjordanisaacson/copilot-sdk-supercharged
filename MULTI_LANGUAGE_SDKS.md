@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document records the expansion of the GitHub Copilot SDK Supercharged from 4 languages to 28 languages, adding full SDK implementations for 24 additional programming languages.
+This document records the expansion of the GitHub Copilot SDK Supercharged from 4 languages to 40 languages, adding full SDK implementations for 36 additional programming languages.
 
 ## Base SDKs (4 languages)
 
@@ -15,7 +15,7 @@ The repository started with SDKs for:
 | Go | `go/` | `github.com/github/copilot-sdk/go` |
 | .NET / C# | `dotnet/` | `GitHub.Copilot.SDK` |
 
-## Added SDKs (18 languages)
+## Added SDKs (36 languages)
 
 All 17 SDKs were built to match the existing SDK architecture exactly, implementing the same JSON-RPC 2.0 protocol, the same CLI spawn pattern, and the same core API surface.
 
@@ -50,6 +50,13 @@ All 17 SDKs were built to match the existing SDK architecture exactly, implement
 | 27 | **Groovy** | `groovy/` | 16 | 2,800 | Groovy 4.0+, closures, JsonSlurper, @CompileStatic, Spock, Gradle | -- |
 | 28 | **Nim** | `nim/` | 16 | 2,600 | Nim 2.0+, asyncdispatch, osproc, ref objects, templates, Nimble | -- |
 | 29 | **Tcl** | `tcl/` | 17 | 2,400 | Tcl 8.6+, namespaces, dicts, coroutines, fileevent, open pipe | -- |
+| 30 | **Visual Basic** | `visualbasic/` | 17 | 2,900 | VB.NET, xUnit, .NET 8+, Async/Await, Events | -- |
+| 31 | **Fortran** | `fortran/` | 18 | 2,700 | Fortran 2008+, fpm, iso_c_binding, derived types, coarrays | -- |
+| 32 | **Objective-C** | `objc/` | 16 | 3,100 | Objective-C 2.0, Foundation, NSTask, blocks, GCD | -- |
+| 33 | **F#** | `fsharp/` | 15 | 2,600 | F# 8+, Async workflows, DUs, pipelines, .NET 8 | -- |
+| 34 | **Julia** | `julia/` | 14 | 2,500 | Julia 1.9+, multiple dispatch, Tasks, Channels, Pkg | -- |
+| 35 | **Zig** | `zig/` | 15 | 2,800 | Zig 0.12+, comptime, allocators, async I/O, zon build | -- |
+| 36 | **Solidity** | `solidity/` | 14 | 2,200 | Solidity 0.8+, Foundry, events, structs, off-chain orchestration | -- |
 
 **Total: 383 new files, ~85,150 lines of code, 29 commits**
 
@@ -107,7 +114,7 @@ Each SDK provides these components:
 - **Client-to-Server Methods**: `ping`, `status.get`, `auth.getStatus`, `models.list`, `session.create`, `session.resume`, `session.send`, `session.getMessages`, `session.destroy`, `session.abort`, `session.list`, `session.delete`, `session.getForeground`, `session.setForeground`, `session.getLastId`
 - **Server-to-Client Requests**: `tool.call`, `permission.request`, `userInput.request`, `hooks.invoke`
 - **Server-to-Client Notifications**: `session.event` (30+ event types including `assistant.image`, `assistant.image_delta`, `assistant.content`), `session.lifecycle`
-- **Image Generation**: All 21 SDKs support `responseFormat` ("text", "image", "json_object") and `imageOptions` (size, quality, style) in MessageOptions, with full type definitions for `AssistantImageData` and `ContentBlock`
+- **Image Generation**: All 40 SDKs support `responseFormat` ("text", "image", "json_object") and `imageOptions` (size, quality, style) in MessageOptions, with full type definitions for `AssistantImageData` and `ContentBlock`
 
 ## Build Process
 

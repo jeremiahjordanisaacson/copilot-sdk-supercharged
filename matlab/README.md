@@ -1,6 +1,6 @@
 # MATLAB SDK for the GitHub Copilot CLI
 
-> Part of [copilot-sdk-supercharged](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged) -- 22 languages, one SDK.
+> Part of [copilot-sdk-supercharged](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged) -- 40 languages, one SDK.
 
 Embed Copilot's agentic workflows in your MATLAB application. The SDK
 speaks JSON-RPC 2.0 over stdio to a local Copilot CLI process, giving

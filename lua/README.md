@@ -58,7 +58,7 @@ client:stop()
 
 ## Architecture
 
-The SDK follows the same architecture as all other SDKs in this repository (21 languages supported):
+The SDK follows the same architecture as all other SDKs in this repository (40 languages supported):
 
 ```
 CopilotClient (client.lua)

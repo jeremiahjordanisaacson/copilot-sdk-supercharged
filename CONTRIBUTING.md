@@ -19,7 +19,7 @@ The team already has a committed product roadmap, and features must be maintaine
 
 If you submit a PR, **be sure to link to an associated issue describing the bug or agreed feature**. No PRs without context :)
 
-**Want an SDK for a language we don't support yet?** Open an issue and request it! We currently support 21 languages and are always looking to expand. Community requests are how we prioritize which languages to add next.
+**Want an SDK for a language we don't support yet?** Open an issue and request it! We currently support 40 languages and are always looking to expand. Community requests are how we prioritize which languages to add next.
 
 ## What We're Looking For
 

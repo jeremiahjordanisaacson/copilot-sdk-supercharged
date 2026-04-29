@@ -225,7 +225,7 @@ When auditing documentation, check:
 
 ### Completeness
 - [ ] All major SDK features are documented
-- [ ] All 21 languages have examples (at minimum the four core SDKs)
+- [ ] All 40 languages have examples (at minimum the four core SDKs)
 - [ ] API reference covers all public methods
 - [ ] Configuration options are documented
 - [ ] Error scenarios are explained

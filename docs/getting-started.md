@@ -2,7 +2,7 @@
 
 In this tutorial, you'll use the Copilot SDK to build a command-line assistant. You'll start with the basics, add streaming responses, then add custom tools - giving Copilot the ability to call your code.
 
-The Copilot SDK Supercharged supports **21 languages**. This guide covers the core SDKs in detail, with links to all language SDKs.
+The Copilot SDK Supercharged supports **40 languages**. This guide covers the core SDKs in detail, with links to all language SDKs.
 
 **What you'll build:**
 

@@ -2,7 +2,7 @@
 
 Dart SDK for programmatic control of GitHub Copilot CLI via JSON-RPC 2.0.
 
-This SDK follows the same architecture and protocol as all other SDKs in the [copilot-sdk-supercharged](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged) repository (21 languages supported).
+This SDK follows the same architecture and protocol as all other SDKs in the [copilot-sdk-supercharged](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged) repository (40 languages supported).
 
 ## Features
 

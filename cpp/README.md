@@ -58,7 +58,7 @@ int main() {
 
 ## Architecture
 
-The SDK mirrors the architecture of all other SDKs in this repository (21 languages supported):
+The SDK mirrors the architecture of all other SDKs in this repository (40 languages supported):
 
 ```
 CopilotClient
