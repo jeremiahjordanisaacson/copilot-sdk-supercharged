@@ -46,8 +46,10 @@ All 17 SDKs were built to match the existing SDK architecture exactly, implement
 | 23 | **OCaml** | `ocaml/` | 21 | 2,400 | OCaml 4.14+, Lwt, Yojson, Dune, Alcotest | -- |
 | 24 | **D** | `dlang/` | 16 | 2,400 | DMD/LDC, std.json, std.process, Nullable, DUB | -- |
 | 25 | **COBOL** | `cobol/` | 16 | 2,600 | GnuCOBOL 3+, STRING/UNSTRING, CALL, copybooks | -- |
+| 26 | **Erlang** | `erlang/` | 17 | 2,500 | OTP 25+, gen_server, jsx, open_port, Common Test | -- |
+| 27 | **Groovy** | `groovy/` | 16 | 2,800 | Groovy 4.0+, closures, JsonSlurper, @CompileStatic, Spock, Gradle | -- |
 
-**Total: 317 new files, ~74,850 lines of code, 25 commits**
+**Total: 350 new files, ~80,150 lines of code, 27 commits**
 
 ## SDK Architecture
 

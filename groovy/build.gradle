@@ -1,0 +1,68 @@
+plugins {
+    id 'groovy'
+    id 'maven-publish'
+}
+
+group = 'io.github.jeremiahjordanisaacson'
+archivesBaseName = 'copilot-sdk-groovy'
+version = '2.0.0'
+
+sourceCompatibility = '17'
+targetCompatibility = '17'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Groovy core (groovy-json included by default in groovy-all)
+    implementation 'org.apache.groovy:groovy:4.0.21'
+    implementation 'org.apache.groovy:groovy-json:4.0.21'
+
+    // Test dependencies - Spock
+    testImplementation 'org.spockframework:spock-core:2.4-M4-groovy-4.0'
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+java {
+    withSourcesJar()
+}
+
+tasks.withType(GroovyCompile).configureEach {
+    groovyOptions.encoding = 'UTF-8'
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+            pom {
+                name = 'GitHub Copilot Supercharged SDK for Groovy'
+                description = 'Groovy SDK for the GitHub Copilot CLI via JSON-RPC'
+                url = 'https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged'
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/licenses/MIT'
+                    }
+                }
+                developers {
+                    developer {
+                        name = 'Jeremiah Isaacson'
+                        url = 'https://github.com/jeremiahjordanisaacson'
+                    }
+                }
+                scm {
+                    connection = 'scm:git:git://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git'
+                    url = 'https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/tree/main'
+                }
+            }
+        }
+    }
+}
