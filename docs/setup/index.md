@@ -134,7 +134,7 @@ All guides assume you have:
   - Python: `pip install github-copilot-sdk`
   - Go: `go get github.com/github/copilot-sdk/go` (requires separate CLI installation)
   - .NET: `dotnet add package GitHub.Copilot.SDK`
-  - See the [Getting Started tutorial](../../getting-started.md) for all 20 supported languages, including community SDKs for Java, Rust, Ruby, PHP, Swift, Kotlin, C++, and more.
+  - See the [Getting Started tutorial](../../getting-started.md) for all 40 supported languages, including community SDKs for Java, Rust, Ruby, PHP, Swift, Kotlin, C++, and more.
 
 If you're brand new, start with the **[Getting Started tutorial](../getting-started.md)** first, then come back here for production configuration.
 

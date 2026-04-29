@@ -63,7 +63,7 @@ jobs:
           cat > release_notes.md << 'HEADER'
           ## Copilot SDK Supercharged v${VERSION}
 
-          **21 languages. 8 package registries. One SDK.**
+          **40 languages. 9 package registries. One SDK.**
 
           ### Install from Package Registries
 

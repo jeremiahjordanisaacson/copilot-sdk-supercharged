@@ -76,7 +76,7 @@ See the individual SDK READMEs for usage examples and API reference. For archite
 
 ## What's New in v2.0.0
 
-Synced with upstream `github/copilot-sdk` v0.3.0 (public preview) and ported all features to all 21 SDKs:
+Synced with upstream `github/copilot-sdk` v0.3.0 (public preview) and ported all features to all 40 SDKs:
 
 - **Per-session GitHub authentication** – Scope auth tokens per session for multi-tenant apps
 - **Session idle timeout** – Auto-cleanup inactive sessions with configurable timeout
@@ -194,7 +194,7 @@ Please use the [GitHub Issues](https://github.com/jeremiahjordanisaacson/copilot
 - **[Setup Guides](./docs/setup/index.md)** – Architecture, deployment, and scaling
 - **[Authentication](./docs/auth/index.md)** – GitHub OAuth, BYOK, and more
 - **[Features](./docs/features/index.md)** – Hooks, custom agents, MCP, skills, and more
-- **[Architecture](./MULTI_LANGUAGE_SDKS.md)** – How all 21 SDKs work under the hood
+- **[Architecture](./MULTI_LANGUAGE_SDKS.md)** – How all 40 SDKs work under the hood
 - **[Troubleshooting](./docs/troubleshooting/debugging.md)** – Common issues and solutions
 - **[Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk)** – Practical recipes for common tasks across all languages
 - **[More Resources](https://github.com/github/awesome-copilot/blob/main/collections/copilot-sdk.md)** – Additional examples, tutorials, and community resources

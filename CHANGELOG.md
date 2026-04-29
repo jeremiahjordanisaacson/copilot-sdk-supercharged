@@ -7,11 +7,11 @@ See [GitHub Releases](https://github.com/github/copilot-sdk/releases) for the fu
 
 ## [v2.0.2](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/releases/tag/v2.0.2) (2026-04-28)
 
-### Documentation: v2.0 feature docs across all 21 SDKs
+### Documentation: v2.0 feature docs across all 40 SDKs
 
-Added documentation for SessionFs, session idle timeout, session metadata, and skills/sub-agent orchestration to all 21 SDK READMEs with language-idiomatic code examples. Updated all 18 sample/example files with v2.0 feature demonstrations.
+Added documentation for SessionFs, session idle timeout, session metadata, and skills/sub-agent orchestration to all 40 SDK READMEs with language-idiomatic code examples. Updated all 18 sample/example files with v2.0 feature demonstrations.
 
-### Cookbooks for 17 additional SDKs
+### Cookbooks for 36 additional SDKs
 
 Created cookbooks with 4 practical recipes each (error handling, multiple sessions, persisting sessions, tools and skills) for Java, Rust, Ruby, PHP, Swift, Kotlin, C++, C, Dart, Scala, R, Perl, Lua, Shell, Elixir, Haskell, and Clojure. 85 files, ~13,800 lines of code examples.
 

@@ -179,7 +179,7 @@ just lint-go       # Go linting
 just lint-dotnet   # .NET linting
 ```
 
-For the remaining SDKs, run commands directly in each SDK directory. Below are the test and lint commands for all 21 SDKs:
+For the remaining SDKs, run commands directly in each SDK directory. Below are the test and lint commands for all 40 SDKs:
 
 ```bash
 # Node.js

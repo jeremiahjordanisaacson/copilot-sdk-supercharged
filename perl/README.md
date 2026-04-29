@@ -2,7 +2,7 @@
 
 Perl SDK for the GitHub Copilot CLI. Communicates with the Copilot CLI server
 via JSON-RPC 2.0 over stdio, following the same patterns as all other SDKs
-in this repository (see the [full list of 21 supported languages](../README.md#available-sdks)).
+in this repository (see the [full list of 40 supported languages](../README.md#available-sdks)).
 
 ## Requirements
 

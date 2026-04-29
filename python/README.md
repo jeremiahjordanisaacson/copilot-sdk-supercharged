@@ -4,7 +4,7 @@ Python SDK for programmatic control of GitHub Copilot CLI via JSON-RPC.
 
 > **Note:** This SDK is in public preview and may change in breaking ways.
 
-> This is the **copilot-sdk-supercharged** fork, which extends the official Copilot SDK with support for 17 additional language SDKs and extra features. See the [top-level README](../README.md) for the full multi-language overview.
+> This is the **copilot-sdk-supercharged** fork, which extends the official Copilot SDK with support for 36 additional language SDKs and extra features. See the [top-level README](../README.md) for the full multi-language overview.
 
 ## Installation
 

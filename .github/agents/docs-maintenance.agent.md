@@ -168,7 +168,7 @@ Every major SDK feature should be documented. Core features include:
 
 ### 2. Multi-Language Support
 
-All documentation must include examples for all 21 SDKs where applicable. At minimum, examples should cover the four core SDKs, with additional language examples encouraged:
+All documentation must include examples for all 40 SDKs where applicable. At minimum, examples should cover the four core SDKs, with additional language examples encouraged:
 - **Node.js / TypeScript**
 - **Python**
 - **Go**

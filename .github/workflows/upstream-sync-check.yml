@@ -97,7 +97,7 @@ jobs:
           echo "### Actions needed" >> /tmp/issue-body.md
           echo "1. \`git fetch upstream && git merge upstream/main\`" >> /tmp/issue-body.md
           echo "2. Resolve any conflicts" >> /tmp/issue-body.md
-          echo "3. Port new features to 17 additional SDKs (if any)" >> /tmp/issue-body.md
+          echo "3. Port new features to 36 additional SDKs (if any)" >> /tmp/issue-body.md
           echo "4. Push and verify CI" >> /tmp/issue-body.md
           echo "" >> /tmp/issue-body.md
           echo "---" >> /tmp/issue-body.md

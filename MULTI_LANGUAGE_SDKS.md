@@ -17,7 +17,7 @@ The repository started with SDKs for:
 
 ## Added SDKs (36 languages)
 
-All 17 SDKs were built to match the existing SDK architecture exactly, implementing the same JSON-RPC 2.0 protocol, the same CLI spawn pattern, and the same core API surface.
+All 36 additional SDKs were built to match the existing SDK architecture exactly, implementing the same JSON-RPC 2.0 protocol, the same CLI spawn pattern, and the same core API surface.
 
 | # | Language | Directory | Files | Lines | Key Technologies | Commit |
 |---|----------|-----------|-------|-------|------------------|--------|
@@ -118,7 +118,7 @@ Each SDK provides these components:
 
 ## Build Process
 
-The 17 SDKs were built using a parallelized approach:
+The 36 additional SDKs were built using a parallelized approach:
 
 1. **Java SDK** was built first as the reference implementation for the new languages
 2. **16 background agents** were launched concurrently, each building one SDK

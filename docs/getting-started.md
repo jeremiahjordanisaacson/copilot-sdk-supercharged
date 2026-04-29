@@ -3355,4 +3355,4 @@ Trace context is propagated automatically — no manual instrumentation is neede
 - Streaming for real-time output
 - Defining custom tools that Copilot can call
 
-Now go build something amazing in any of our **20 supported languages**!
+Now go build something amazing in any of our **40 supported languages**!

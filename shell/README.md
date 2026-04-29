@@ -1,6 +1,6 @@
 # Copilot Supercharged CLI SDK for Shell/Bash
 
-A Bash library for communicating with the GitHub Copilot CLI server via JSON-RPC 2.0 over stdio. This SDK follows the same patterns as all other SDKs in this repository (see the [full list of 21 supported languages](../README.md#available-sdks)).
+A Bash library for communicating with the GitHub Copilot CLI server via JSON-RPC 2.0 over stdio. This SDK follows the same patterns as all other SDKs in this repository (see the [full list of 40 supported languages](../README.md#available-sdks)).
 
 ## Requirements
 

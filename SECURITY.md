@@ -25,7 +25,7 @@ This information will help us triage your report more quickly.
 
 ## Supported Versions
 
-We actively maintain the latest release across all 21 SDK languages. Security fixes will be applied to the most recent version.
+We actively maintain the latest release across all 40 SDK languages. Security fixes will be applied to the most recent version.
 
 ## Response
 

@@ -4,7 +4,7 @@
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <PackageId>CopilotSDK.Supercharged</PackageId>
         <Version>2.0.0</Version>
-        <Description>GitHub Copilot SDK Supercharged - .NET SDK for programmatic control of GitHub Copilot CLI. Supports 21 languages.</Description>
+        <Description>GitHub Copilot SDK Supercharged - .NET SDK for programmatic control of GitHub Copilot CLI. Supports 40 languages.</Description>
         <Authors>jeremiahjordanisaacson</Authors>
         <Company>copilot-sdk-supercharged</Company>
         <Copyright>Copyright (c) Microsoft Corporation. All rights reserved.</Copyright>
