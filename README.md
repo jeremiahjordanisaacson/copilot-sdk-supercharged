@@ -13,13 +13,13 @@
 [![LuaRocks](https://img.shields.io/badge/LuaRocks-latest-2C2D72?logo=lua)](https://luarocks.org/modules/jeremiahisaacson/copilot-sdk-supercharged)
 [![GitHub Stars](https://img.shields.io/github/stars/jeremiahjordanisaacson/copilot-sdk-supercharged?style=flat&logo=github&color=238636)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged)
 [![Registries](https://img.shields.io/badge/registries-9-f0883e?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
-[![Languages](https://img.shields.io/badge/languages-26-58a6ff?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
+[![Languages](https://img.shields.io/badge/languages-40-58a6ff?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
 
-**26 languages. One SDK.** Agents for every app.
+**40 languages. One SDK.** Agents for every app.
 
 > **Trusted by 15,000+ developers globally and growing daily.**
 
-Embed Copilot's agentic workflows in your application - now available in public preview as a programmable SDK for 26 languages.
+Embed Copilot's agentic workflows in your application - now available in public preview as a programmable SDK for 40 languages.
 
 The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-tested agent runtime you can invoke programmatically. No need to build your own orchestration - you define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
 
@@ -57,6 +57,20 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 | **Fortran** | [`fortran/`](./fortran/README.md) | [Cookbook](./fortran/cookbook/README.md) | `fpm` |
 | **MATLAB** | [`matlab/`](./matlab/README.md) | [Cookbook](./matlab/cookbook/README.md) | `addpath` |
 | **Ada** | [`ada/`](./ada/README.md) | [Cookbook](./ada/cookbook/README.md) | Alire |
+| **Objective-C** | [`objc/`](./objc/README.md) | [Cookbook](./objc/cookbook/README.md) | CocoaPods / SPM |
+| **F#** | [`fsharp/`](./fsharp/README.md) | [Cookbook](./fsharp/cookbook/README.md) | `dotnet add package CopilotSDK.Supercharged.FSharp` |
+| **Groovy** | [`groovy/`](./groovy/README.md) | [Cookbook](./groovy/cookbook/README.md) | Gradle |
+| **Julia** | [`julia/`](./julia/README.md) | [Cookbook](./julia/cookbook/README.md) | `Pkg.add("CopilotSDK")` |
+| **COBOL** | [`cobol/`](./cobol/README.md) | [Cookbook](./cobol/cookbook/README.md) | GnuCOBOL |
+| **OCaml** | [`ocaml/`](./ocaml/README.md) | [Cookbook](./ocaml/cookbook/README.md) | `opam install copilot-sdk-supercharged` |
+| **Zig** | [`zig/`](./zig/README.md) | [Cookbook](./zig/cookbook/README.md) | `zig fetch` |
+| **Nim** | [`nim/`](./nim/README.md) | [Cookbook](./nim/cookbook/README.md) | `nimble install copilot_sdk` |
+| **D** | [`dlang/`](./dlang/README.md) | [Cookbook](./dlang/cookbook/README.md) | `dub add copilot` |
+| **Erlang** | [`erlang/`](./erlang/README.md) | [Cookbook](./erlang/cookbook/README.md) | Rebar3 |
+| **Crystal** | [`crystal/`](./crystal/README.md) | [Cookbook](./crystal/cookbook/README.md) | `shards install` |
+| **Tcl** | [`tcl/`](./tcl/README.md) | [Cookbook](./tcl/cookbook/README.md) | `package require copilot` |
+| **Solidity** | [`solidity/`](./solidity/README.md) | [Cookbook](./solidity/cookbook/README.md) | `npm install copilot-sdk-solidity` |
+| **V (Vlang)** | [`vlang/`](./vlang/README.md) | [Cookbook](./vlang/cookbook/README.md) | `v install copilot_sdk` |
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
