@@ -49,8 +49,9 @@ All 17 SDKs were built to match the existing SDK architecture exactly, implement
 | 26 | **Erlang** | `erlang/` | 17 | 2,500 | OTP 25+, gen_server, jsx, open_port, Common Test | -- |
 | 27 | **Groovy** | `groovy/` | 16 | 2,800 | Groovy 4.0+, closures, JsonSlurper, @CompileStatic, Spock, Gradle | -- |
 | 28 | **Nim** | `nim/` | 16 | 2,600 | Nim 2.0+, asyncdispatch, osproc, ref objects, templates, Nimble | -- |
+| 29 | **Tcl** | `tcl/` | 17 | 2,400 | Tcl 8.6+, namespaces, dicts, coroutines, fileevent, open pipe | -- |
 
-**Total: 366 new files, ~82,750 lines of code, 28 commits**
+**Total: 383 new files, ~85,150 lines of code, 29 commits**
 
 ## SDK Architecture
 
