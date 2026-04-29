@@ -13,13 +13,13 @@
 [![LuaRocks](https://img.shields.io/badge/LuaRocks-latest-2C2D72?logo=lua)](https://luarocks.org/modules/jeremiahisaacson/copilot-sdk-supercharged)
 [![GitHub Stars](https://img.shields.io/github/stars/jeremiahjordanisaacson/copilot-sdk-supercharged?style=flat&logo=github&color=238636)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged)
 [![Registries](https://img.shields.io/badge/registries-9-f0883e?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
-[![Languages](https://img.shields.io/badge/languages-21-58a6ff?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
+[![Languages](https://img.shields.io/badge/languages-26-58a6ff?style=flat)](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks)
 
-**21 languages. One SDK.** Agents for every app.
+**26 languages. One SDK.** Agents for every app.
 
 > **Trusted by 15,000+ developers globally and growing daily.**
 
-Embed Copilot's agentic workflows in your application - now available in public preview as a programmable SDK for 21 languages.
+Embed Copilot's agentic workflows in your application - now available in public preview as a programmable SDK for 26 languages.
 
 The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-tested agent runtime you can invoke programmatically. No need to build your own orchestration - you define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
 
@@ -52,6 +52,11 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 | **Elixir** | [`elixir/`](./elixir/README.md) | [Cookbook](./elixir/cookbook/README.md) | `{:copilot_sdk_supercharged, "~> 2.0"}` |
 | **Haskell** | [`haskell/`](./haskell/README.md) | [Cookbook](./haskell/cookbook/README.md) | Cabal |
 | **Clojure** | [`clojure/`](./clojure/README.md) | [Cookbook](./clojure/cookbook/README.md) | `net.clojars.jeremiahisaacson/copilot-sdk-supercharged` |
+| **Visual Basic** | [`visualbasic/`](./visualbasic/README.md) | [Cookbook](./visualbasic/cookbook/README.md) | `dotnet add package CopilotSDK.Supercharged.VB` |
+| **Delphi / Object Pascal** | [`delphi/`](./delphi/README.md) | [Cookbook](./delphi/cookbook/README.md) | Boss / Manual |
+| **Fortran** | [`fortran/`](./fortran/README.md) | [Cookbook](./fortran/cookbook/README.md) | `fpm` |
+| **MATLAB** | [`matlab/`](./matlab/README.md) | [Cookbook](./matlab/cookbook/README.md) | `addpath` |
+| **Ada** | [`ada/`](./ada/README.md) | [Cookbook](./ada/cookbook/README.md) | Alire |
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 

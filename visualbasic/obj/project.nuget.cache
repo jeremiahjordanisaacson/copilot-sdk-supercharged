@@ -1,0 +1,36 @@
+{
+  "version": 2,
+  "dgSpecHash": "PomH0JT0MyM=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\visualbasic\\CopilotSDK.Supercharged.VB.vbproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\jeisaacs\\.nuget\\packages\\system.text.encodings.web\\8.0.0\\system.text.encodings.web.8.0.0.nupkg.sha512",
+    "C:\\Users\\jeisaacs\\.nuget\\packages\\system.text.json\\8.0.0\\system.text.json.8.0.0.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1903",
+      "level": "Warning",
+      "message": "Package 'System.Text.Json' 8.0.0 has a known high severity vulnerability, https://github.com/advisories/GHSA-8g4q-xg66-9fp4",
+      "projectPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\visualbasic\\CopilotSDK.Supercharged.VB.vbproj",
+      "warningLevel": 1,
+      "filePath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\visualbasic\\CopilotSDK.Supercharged.VB.vbproj",
+      "libraryId": "System.Text.Json",
+      "targetGraphs": [
+        "net8.0"
+      ]
+    },
+    {
+      "code": "NU1903",
+      "level": "Warning",
+      "message": "Package 'System.Text.Json' 8.0.0 has a known high severity vulnerability, https://github.com/advisories/GHSA-hh2w-p6rv-4g7w",
+      "projectPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\visualbasic\\CopilotSDK.Supercharged.VB.vbproj",
+      "warningLevel": 1,
+      "filePath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\visualbasic\\CopilotSDK.Supercharged.VB.vbproj",
+      "libraryId": "System.Text.Json",
+      "targetGraphs": [
+        "net8.0"
+      ]
+    }
+  ]
+}

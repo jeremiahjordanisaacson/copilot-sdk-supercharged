@@ -1,0 +1,6 @@
+ada/obj/
+ada/lib/
+*.o
+*.ali
+*.exe
+b__*.ad?

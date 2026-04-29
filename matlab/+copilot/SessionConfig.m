@@ -1,0 +1,107 @@
+classdef SessionConfig
+    % SessionConfig  Configuration for a Copilot session.
+    %
+    %   cfg = copilot.SessionConfig('Model', 'gpt-5');
+    %   cfg = copilot.SessionConfig('Model', 'gpt-5', 'SystemMessage', 'You are helpful.');
+    %   cfg = copilot.SessionConfig('Model', 'gpt-5', 'Tools', {myTool1, myTool2});
+
+    properties
+        % Model identifier (e.g. 'gpt-5', 'claude-sonnet-4').
+        Model (1,:) char = ''
+
+        % System prompt sent at the start of the session.
+        SystemMessage (1,:) char = ''
+
+        % System-message mode: 'append' (default), 'replace', or 'customize'.
+        SystemMessageMode (1,:) char = 'append'
+
+        % Cell array of copilot.DefineTool objects exposed to this session.
+        Tools (1,:) cell = {}
+
+        % Session idle timeout in seconds (0 = no timeout).
+        IdleTimeout (1,1) double = 0
+
+        % Enable streaming deltas for assistant messages.
+        Streaming (1,1) logical = true
+
+        % Skills to preload into the agent context (cell of char).
+        Skills (1,:) cell = {}
+
+        % Tool names excluded from this session (cell of char).
+        ExcludedTools (1,:) cell = {}
+
+        % Arbitrary key-value metadata (containers.Map).
+        Metadata
+
+        % Custom request headers (containers.Map).
+        RequestHeaders
+
+        % Model capabilities override (struct or containers.Map).
+        ModelCapabilities
+    end
+
+    methods
+        function obj = SessionConfig(varargin)
+            %SessionConfig  Create a session configuration.
+            %
+            %   cfg = copilot.SessionConfig('Model', 'gpt-5');
+
+            p = inputParser;
+            p.KeepUnmatched = true;
+            p.addParameter('Model',              obj.Model);
+            p.addParameter('SystemMessage',       obj.SystemMessage);
+            p.addParameter('SystemMessageMode',   obj.SystemMessageMode);
+            p.addParameter('Tools',               obj.Tools);
+            p.addParameter('IdleTimeout',         obj.IdleTimeout);
+            p.addParameter('Streaming',           obj.Streaming);
+            p.addParameter('Skills',              obj.Skills);
+            p.addParameter('ExcludedTools',       obj.ExcludedTools);
+            p.addParameter('Metadata',            containers.Map());
+            p.addParameter('RequestHeaders',      containers.Map());
+            p.addParameter('ModelCapabilities',   struct());
+            p.parse(varargin{:});
+
+            obj.Model              = p.Results.Model;
+            obj.SystemMessage      = p.Results.SystemMessage;
+            obj.SystemMessageMode  = p.Results.SystemMessageMode;
+            obj.Tools              = p.Results.Tools;
+            obj.IdleTimeout        = p.Results.IdleTimeout;
+            obj.Streaming          = p.Results.Streaming;
+            obj.Skills             = p.Results.Skills;
+            obj.ExcludedTools      = p.Results.ExcludedTools;
+            obj.Metadata           = p.Results.Metadata;
+            obj.RequestHeaders     = p.Results.RequestHeaders;
+            obj.ModelCapabilities  = p.Results.ModelCapabilities;
+        end
+
+        function s = toStruct(obj)
+            %toStruct  Serialize config for JSON-RPC.
+            s = struct();
+            if ~isempty(obj.Model)
+                s.model = obj.Model;
+            end
+            if ~isempty(obj.SystemMessage)
+                s.systemMessage = struct( ...
+                    'content', obj.SystemMessage, ...
+                    'mode',    obj.SystemMessageMode);
+            end
+            s.streaming = obj.Streaming;
+            if obj.IdleTimeout > 0
+                s.idleTimeout = obj.IdleTimeout;
+            end
+            if ~isempty(obj.Tools)
+                toolDefs = cell(1, numel(obj.Tools));
+                for i = 1:numel(obj.Tools)
+                    toolDefs{i} = obj.Tools{i}.toStruct();
+                end
+                s.tools = toolDefs;
+            end
+            if ~isempty(obj.Skills)
+                s.skills = obj.Skills;
+            end
+            if ~isempty(obj.ExcludedTools)
+                s.excludedTools = obj.ExcludedTools;
+            end
+        end
+    end
+end

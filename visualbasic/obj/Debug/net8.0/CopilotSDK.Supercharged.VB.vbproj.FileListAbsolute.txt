@@ -1,0 +1,12 @@
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\obj\Debug\net8.0\CopilotSDK.Supercharged.VB.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\obj\Debug\net8.0\CopilotSDK.Supercharged.VB.AssemblyInfoInputs.cache
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\obj\Debug\net8.0\CopilotSDK.Supercharged.VB.AssemblyInfo.vb
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\obj\Debug\net8.0\CopilotSDK.Supercharged.VB.vbproj.CoreCompileInputs.cache
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\obj\Debug\net8.0\CopilotSDK.Supercharged.VB.sourcelink.json
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\bin\Debug\net8.0\CopilotSDK.Supercharged.VB.deps.json
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\bin\Debug\net8.0\CopilotSDK.Supercharged.VB.dll
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\bin\Debug\net8.0\CopilotSDK.Supercharged.VB.pdb
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\obj\Debug\net8.0\CopilotSDK.Supercharged.VB.dll
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\obj\Debug\net8.0\refint\CopilotSDK.Supercharged.VB.dll
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\obj\Debug\net8.0\CopilotSDK.Supercharged.VB.pdb
+C:\Users\jeisaacs\OneDrive - Microsoft\Documents\Repos\copilot-sdk-supercharged\visualbasic\obj\Debug\net8.0\ref\CopilotSDK.Supercharged.VB.dll

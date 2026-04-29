@@ -1,0 +1,22 @@
+name = "copilot_sdk_supercharged"
+version = "2.0.2"
+description = "Ada SDK for the GitHub Copilot CLI (JSON-RPC 2.0)"
+authors = ["Jeremiah Isaacson"]
+licenses = "MIT"
+website = "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged"
+tags = ["copilot", "ai", "sdk", "json-rpc", "github"]
+long-description = """
+Full-featured Ada SDK for programmatic control of the GitHub Copilot CLI.
+Communicates via JSON-RPC 2.0 over stdio with Content-Length header framing
+(LSP protocol style).  Supports sessions, streaming events, custom tools,
+permission handling, and all v2.0 features.
+"""
+
+[gpr-externals]
+BUILD_MODE = ["release", "debug"]
+
+[gpr-set-externals]
+BUILD_MODE = "release"
+
+[[depends-on]]
+gnatcoll_json = ">=24.0.0"

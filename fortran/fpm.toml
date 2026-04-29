@@ -1,0 +1,21 @@
+name = "copilot-sdk-supercharged"
+version = "2.0.2"
+license = "MIT"
+author = "Jeremiah Isaacson"
+description = "Fortran SDK for the GitHub Copilot CLI"
+
+[build]
+auto-executables = false
+
+[dependencies]
+json-fortran = { git = "https://github.com/jacobwilliams/json-fortran.git" }
+
+[[test]]
+name = "test_client"
+source-dir = "tests"
+main = "test_client.f90"
+
+[[example]]
+name = "basic_example"
+source-dir = "examples"
+main = "basic_example.f90"
