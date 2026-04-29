@@ -2,3 +2,6 @@
 # Documentation validation output
 docs/.validation/
 .DS_Store
+
+visualbasic/bin/
+visualbasic/obj/
