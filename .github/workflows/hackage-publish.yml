@@ -36,6 +36,9 @@ jobs:
       - name: Upload to Hackage
         run: |
           cabal upload dist-newstyle/sdist/copilot-sdk-supercharged-*.tar.gz \
-            --username=${{ secrets.HACKAGE_USERNAME }} \
-            --password=${{ secrets.HACKAGE_PASSWORD }} \
+            --username="${HACKAGE_USERNAME}" \
+            --password="${HACKAGE_PASSWORD}" \
             --publish
+        env:
+          HACKAGE_USERNAME: ${{ secrets.HACKAGE_USERNAME }}
+          HACKAGE_PASSWORD: ${{ secrets.HACKAGE_PASSWORD }}
