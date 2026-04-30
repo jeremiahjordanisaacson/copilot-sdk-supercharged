@@ -9,7 +9,7 @@ Your application needs to give the AI assistant the ability to call custom funct
 ## Defining a Simple Tool
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 final timeTool = DefineTool(
   name: 'get_current_time',
@@ -25,7 +25,7 @@ final timeTool = DefineTool(
 
 ```dart
 import 'dart:io';
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 final readFileTool = DefineTool(
   name: 'read_file',
@@ -50,7 +50,7 @@ final readFileTool = DefineTool(
 ## Registering Tools with a Client
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<void> main() async {
   final client = CopilotClient(
@@ -79,7 +79,7 @@ Future<void> main() async {
 ## Defining Multiple Related Tools (Skill Pattern)
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 class KVStoreSkill {
   final Map<String, String> _store = {};
@@ -147,7 +147,7 @@ Future<void> main() async {
 ## Sub-Agent Orchestration
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<void> orchestrate(CopilotClient client) async {
   // Create specialized sessions as sub-agents

@@ -13,7 +13,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<void> main() async {
   // -------------------------------------------------------------------------

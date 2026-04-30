@@ -10,7 +10,7 @@ Your application needs to save a conversation so users can close the app and ret
 
 ```dart
 import 'dart:io';
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 const sessionFile = 'session_state.txt';
 
@@ -31,7 +31,7 @@ Future<String?> loadSessionId() async {
 
 ```dart
 import 'dart:io';
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<CopilotSession> getOrCreateSession(CopilotClient client) async {
   final savedId = await loadSessionId();
@@ -60,7 +60,7 @@ Future<CopilotSession> getOrCreateSession(CopilotClient client) async {
 
 ```dart
 import 'dart:io';
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 const sessionFile = 'session_state.txt';
 
@@ -100,7 +100,7 @@ Future<void> main() async {
 ```dart
 import 'dart:convert';
 import 'dart:io';
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 const sessionsFile = 'sessions.json';
 

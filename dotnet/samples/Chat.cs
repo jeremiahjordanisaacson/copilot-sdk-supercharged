@@ -37,14 +37,14 @@ while (true)
     Console.WriteLine($"\nAssistant: {reply?.Data.Content}\n");
 }
 
-// --- v2.0 Features ---
+// --- v2.0 Features (shown after chat loop exits) ---
 
 // Session Metadata
-var meta = await client.GetSessionMetadataAsync(session.SessionId);
-if (meta is not null)
-{
-    Console.WriteLine($"Session ID: {meta.SessionId}, Summary: {meta.Summary}");
-}
+// var meta = await client.GetSessionMetadataAsync(session.SessionId);
+// if (meta is not null)
+// {
+//     Console.WriteLine($"Session ID: {meta.SessionId}, Summary: {meta.Summary}");
+// }
 
 // Skills (uncomment to use)
 // var skillSession = await client.CreateSessionAsync(new SessionConfig

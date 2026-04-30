@@ -11,7 +11,7 @@ Your application needs fine-grained control over authentication, filesystem acce
 Supply a GitHub token per session instead of globally.
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<void> main() async {
   final client = CopilotClient(CopilotOptions());
@@ -54,7 +54,7 @@ final response = await session.sendAndWait(
 Configure a filesystem provider with the 10 required I/O operations.
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 // Implement the 10 required I/O operations
 class MySessionFsProvider implements SessionFsProvider {
@@ -137,7 +137,7 @@ Future<void> main() async {
 Register slash commands and handle elicitation requests from the agent.
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<void> main() async {
   final client = CopilotClient(CopilotOptions());
@@ -386,7 +386,7 @@ Configure the response format to request image generation.
 
 ```dart
 import 'dart:io';
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<void> main() async {
   final client = CopilotClient(CopilotOptions());

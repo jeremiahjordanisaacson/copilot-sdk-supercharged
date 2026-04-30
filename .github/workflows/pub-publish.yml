@@ -12,9 +12,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    if: ${{ secrets.PUB_DEV_CREDENTIALS != '' }}
     defaults:
-      run:
-        working-directory: dart
     steps:
       - name: Checkout
         uses: actions/checkout@v4

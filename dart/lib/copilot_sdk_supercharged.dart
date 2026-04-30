@@ -8,7 +8,7 @@
 /// ## Quick Start
 ///
 /// ```dart
-/// import 'package:copilot_sdk/copilot_sdk.dart';
+/// import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 ///
 /// void main() async {
 ///   final client = CopilotClient(CopilotClientOptions(

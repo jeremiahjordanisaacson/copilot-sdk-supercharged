@@ -9,7 +9,7 @@ Your application needs to run several conversations at the same time, each with 
 ## Creating Multiple Sessions
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<void> main() async {
   final client = CopilotClient(options: CopilotOptions());
@@ -43,7 +43,7 @@ Future<void> main() async {
 ## Session Manager Class
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 class SessionManager {
   final CopilotClient _client;
@@ -110,7 +110,7 @@ Future<void> main() async {
 ## Parallel Sessions with Future.wait
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<void> parallelSessions(CopilotClient client) async {
   final tasks = [

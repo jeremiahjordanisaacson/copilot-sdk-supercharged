@@ -9,7 +9,7 @@ Your application needs to handle connection failures, request timeouts, and unex
 ## Basic Try/Catch
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<void> main() async {
   CopilotClient? client;
@@ -40,7 +40,7 @@ Future<void> main() async {
 ## Retry with Exponential Backoff
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<CopilotClient> connectWithRetry({
   required CopilotOptions options,
@@ -69,7 +69,7 @@ Future<CopilotClient> connectWithRetry({
 ## Timeout Handling
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<String> sendWithTimeout(
   CopilotSession session,
@@ -102,7 +102,7 @@ Future<void> example(CopilotSession session) async {
 ## Safe Session Wrapper
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 class SafeSession {
   final CopilotClient _client;
@@ -147,7 +147,7 @@ Future<void> main() async {
 ## Handling Stream Errors
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 Future<void> handleStreamErrors(CopilotSession session) async {
   final stream = session.sendStream(

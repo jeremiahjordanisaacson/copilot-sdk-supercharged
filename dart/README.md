@@ -42,7 +42,7 @@ dart pub get
 ## Quick Start
 
 ```dart
-import 'package:copilot_sdk/copilot_sdk.dart';
+import 'package:copilot_sdk_supercharged/copilot_sdk_supercharged.dart';
 
 void main() async {
   // Create a client that spawns the CLI server.
