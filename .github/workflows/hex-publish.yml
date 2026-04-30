@@ -16,7 +16,7 @@ jobs:
         working-directory: elixir
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Elixir
         uses: erlef/setup-beam@v1
