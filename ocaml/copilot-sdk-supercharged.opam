@@ -8,8 +8,8 @@ A client library for programmatic control of GitHub Copilot CLI
 via JSON-RPC 2.0 over stdio or TCP, with Content-Length header
 framing (LSP protocol style).
 """
-maintainer: ["Microsoft Corporation"]
-authors: ["Microsoft Corporation"]
+maintainer: ["Jeremiah Isaacson"]
+authors: ["Jeremiah Isaacson"]
 license: "MIT"
 homepage: "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged"
 bug-reports: "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/issues"

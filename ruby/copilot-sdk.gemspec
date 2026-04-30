@@ -5,7 +5,7 @@ require_relative "lib/copilot/version"
 Gem::Specification.new do |spec|
   spec.name          = "copilot-sdk-supercharged"
   spec.version       = Copilot::VERSION
-  spec.authors       = ["Microsoft Corporation"]
+  spec.authors       = ["Jeremiah Isaacson"]
   spec.email         = ["copilot@github.com"]
 
   spec.summary       = "Ruby SDK for the GitHub Copilot CLI"

@@ -8,8 +8,8 @@ description:
   registration, permission handling, hooks, and event subscriptions.
 license:            MIT
 license-file:       LICENSE
-author:             Microsoft Corporation
-copyright:          (c) Microsoft Corporation. All rights reserved.
+author:             Jeremiah Isaacson
+copyright:          (c) Jeremiah Isaacson. All rights reserved.
 category:           Development
 build-type:         Simple
 
