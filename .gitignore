@@ -8,3 +8,6 @@ visualbasic/obj/
 
 # Visual Studio
 .vs/
+
+release-staging/
+brain-graph.html
