@@ -34,8 +34,6 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 
 ### Download Stats
 
-> **Trusted by 15,000+ developers globally and growing daily.**
-
 ## Available SDKs
 
 | SDK | Location | Cookbook | Installation |
