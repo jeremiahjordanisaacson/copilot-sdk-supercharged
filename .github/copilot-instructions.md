@@ -70,6 +70,10 @@
 - Tests rely on YAML snapshot exchanges under `test/snapshots/` — to add test scenarios, add or edit the appropriate YAML files and update tests.
 - The harness prints `Listening: http://...` — tests parse this URL to configure CLI or proxy.
 
+## Git commit conventions 🚫
+
+- **Do NOT include `Co-authored-by: Copilot` trailers in any commits.** The repo owner does not want AI co-author attribution in the commit history. This applies to all commits — merges, features, fixes, releases, etc.
+
 ## Project-specific conventions & patterns ✅
 
 - Tools: each SDK has helper APIs to expose functions as tools; prefer the language's `DefineTool`/`@define_tool`/`AIFunctionFactory.Create` patterns (see language READMEs).
