@@ -198,6 +198,25 @@ module CopilotSDK
       sessions_array.map { |s| SessionMetadata.from_json(s.to_json) }
     end
 
+    # Get the foreground session ID.
+    def get_foreground_session_id : String
+      ensure_connected!
+      result = rpc.send_request("session.getForeground")
+      result["sessionId"]?.try(&.as_s) || raise CopilotError.new("No sessionId in response")
+    end
+
+    # Set the foreground session ID.
+    def set_foreground_session_id(session_id : String) : Nil
+      ensure_connected!
+      params = JSON.parse({"sessionId" => session_id}.to_json)
+      result = rpc.send_request("session.setForeground", params)
+      success = result["success"]?.try(&.as_bool?) || false
+      unless success
+        error_msg = result["error"]?.try(&.as_s?) || "Unknown"
+        raise CopilotError.new("Failed to set foreground session: #{error_msg}")
+      end
+    end
+
     # Returns the session with the given ID, or nil.
     def get_session(session_id : String) : CopilotSession?
       @mutex.synchronize { @sessions[session_id]? }

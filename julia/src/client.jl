@@ -224,6 +224,35 @@ function list_sessions(client::CopilotClient)
     return sessions
 end
 
+"""
+    get_foreground_session_id(client) -> String
+
+Return the session ID of the current foreground session.
+"""
+function get_foreground_session_id(client::CopilotClient)
+    _ensure_started!(client)
+    result = send_request(client.rpc, "session.getForeground", Dict{String,Any}(); timeout=10)
+    if result isa Dict
+        return get(result, "sessionId", "")
+    end
+    return ""
+end
+
+"""
+    set_foreground_session_id(client, session_id)
+
+Set the foreground session to the given session ID.
+"""
+function set_foreground_session_id(client::CopilotClient, session_id::AbstractString)
+    _ensure_started!(client)
+    result = send_request(client.rpc, "session.setForeground",
+        Dict{String,Any}("sessionId" => session_id); timeout=10)
+    if result isa Dict && get(result, "success", false) != true
+        error_msg = get(result, "error", "Unknown")
+        throw(ErrorException("Failed to set foreground session: $error_msg"))
+    end
+end
+
 # -- Internal helpers -------------------------------------------------------------
 
 function _ensure_started!(client::CopilotClient)

@@ -777,6 +777,30 @@ copilot_error_t copilot_client_delete_session(
     const char *session_id
 );
 
+/**
+ * Gets the foreground session ID.
+ *
+ * @param client  The client.
+ * @param out     Output: session ID string. Caller must free().
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_get_foreground_session_id(
+    copilot_client_t *client,
+    char **out
+);
+
+/**
+ * Sets the foreground session ID.
+ *
+ * @param client      The client.
+ * @param session_id  The session ID to set as foreground.
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_set_foreground_session_id(
+    copilot_client_t *client,
+    const char *session_id
+);
+
 /* ============================================================================
  * Session API
  * ============================================================================ */

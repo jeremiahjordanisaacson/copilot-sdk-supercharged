@@ -205,6 +205,27 @@ let list_models (t : t) : Types.model_info list Lwt.t =
          match Types.model_info_of_yojson j with Ok m -> Some m | Error _ -> None)
        models)
 
+let get_foreground_session_id (t : t) : string Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let* result = Jsonrpc.send_request rpc "session.getForeground" (`Assoc []) in
+  let open Yojson.Safe.Util in
+  Lwt.return (result |> member "sessionId" |> to_string)
+
+let set_foreground_session_id (t : t) (session_id : string) : unit Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let params = `Assoc [ ("sessionId", `String session_id) ] in
+  let* result = Jsonrpc.send_request rpc "session.setForeground" params in
+  let open Yojson.Safe.Util in
+  let success = try result |> member "success" |> to_bool with _ -> false in
+  if not success then
+    let err =
+      try result |> member "error" |> to_string with _ -> "Unknown"
+    in
+    Lwt.fail_with (Printf.sprintf "Failed to set foreground session: %s" err)
+  else Lwt.return_unit
+
 (* ========================================================================== *)
 (* State inspection                                                           *)
 (* ========================================================================== *)

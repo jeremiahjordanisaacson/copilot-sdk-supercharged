@@ -165,6 +165,18 @@ defmodule Copilot.Client do
     GenServer.call(client, :get_last_session_id, 10_000)
   end
 
+  @doc "Get the foreground session ID."
+  @spec get_foreground_session_id(GenServer.server()) :: {:ok, String.t() | nil} | {:error, any()}
+  def get_foreground_session_id(client) do
+    GenServer.call(client, :get_foreground_session_id, 10_000)
+  end
+
+  @doc "Set the foreground session ID."
+  @spec set_foreground_session_id(GenServer.server(), String.t()) :: :ok | {:error, any()}
+  def set_foreground_session_id(client, session_id) do
+    GenServer.call(client, {:set_foreground_session_id, session_id}, 10_000)
+  end
+
   @doc "Get the current connection state."
   @spec get_state(GenServer.server()) :: :disconnected | :connecting | :connected | :error
   def get_state(client) do
@@ -343,6 +355,34 @@ defmodule Copilot.Client do
       {:ok, %{"sessionId" => sid}} -> {:reply, {:ok, sid}, state}
       {:ok, _} -> {:reply, {:ok, nil}, state}
       {:error, _} = err -> {:reply, err, state}
+    end
+  end
+
+  def handle_call(:get_foreground_session_id, _from, state) do
+    state = maybe_auto_start(state)
+
+    case JsonRpcClient.request(state.rpc, "session.getForeground", %{}) do
+      {:ok, %{"sessionId" => sid}} -> {:reply, {:ok, sid}, state}
+      {:ok, _} -> {:reply, {:ok, nil}, state}
+      {:error, _} = err -> {:reply, err, state}
+    end
+  end
+
+  def handle_call({:set_foreground_session_id, session_id}, _from, state) do
+    state = maybe_auto_start(state)
+
+    case JsonRpcClient.request(state.rpc, "session.setForeground", %{"sessionId" => session_id}) do
+      {:ok, %{"success" => true}} ->
+        {:reply, :ok, state}
+
+      {:ok, %{"success" => false, "error" => err}} ->
+        {:reply, {:error, "Failed to set foreground session: " <> err}, state}
+
+      {:ok, _} ->
+        {:reply, {:error, "Failed to set foreground session: Unknown error"}, state}
+
+      {:error, _} = err ->
+        {:reply, err, state}
     end
   end
 

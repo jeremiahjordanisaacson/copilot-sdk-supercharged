@@ -386,6 +386,26 @@ CopilotClient <- R6::R6Class(
       invisible(NULL)
     },
 
+    #' @description Get the foreground session ID.
+    #' @return Character or NULL if no foreground session.
+    get_foreground_session_id = function() {
+      if (is.null(private$client)) stop("Client not connected")
+      response <- private$client$request("session.getForeground", list())
+      response$sessionId
+    },
+
+    #' @description Set the foreground session ID.
+    #' @param session_id Character. Session ID to set as foreground.
+    set_foreground_session_id = function(session_id) {
+      if (is.null(private$client)) stop("Client not connected")
+      response <- private$client$request("session.setForeground", list(sessionId = session_id))
+      if (!isTRUE(response$success)) {
+        err <- response$error %||% "Unknown error"
+        stop(paste0("Failed to set foreground session: ", err))
+      }
+      invisible(NULL)
+    },
+
     #' @description Subscribe to session lifecycle events.
     #' @param handler Function(SessionLifecycleEvent).
     #' @return A function that when called, unsubscribes the handler.

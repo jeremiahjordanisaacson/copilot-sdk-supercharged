@@ -1432,6 +1432,62 @@ copilot_error_t copilot_client_delete_session(
     return COPILOT_OK;
 }
 
+copilot_error_t copilot_client_get_foreground_session_id(
+    copilot_client_t *client,
+    char **out)
+{
+    if (!client || !out) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(client->rpc, "session.getForeground", params, 10000,
+                                            &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        free(err_msg);
+        return COPILOT_ERROR_RPC;
+    }
+
+    cJSON *sid = cJSON_GetObjectItem(result, "sessionId");
+    *out = (sid && cJSON_IsString(sid)) ? strdup(sid->valuestring) : NULL;
+    cJSON_Delete(result);
+
+    return COPILOT_OK;
+}
+
+copilot_error_t copilot_client_set_foreground_session_id(
+    copilot_client_t *client,
+    const char *session_id)
+{
+    if (!client || !session_id) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "sessionId", session_id);
+
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(client->rpc, "session.setForeground", params, 10000,
+                                            &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        free(err_msg);
+        return COPILOT_ERROR_RPC;
+    }
+
+    cJSON *success = cJSON_GetObjectItem(result, "success");
+    bool ok = success && cJSON_IsTrue(success);
+    cJSON_Delete(result);
+
+    if (!ok) return COPILOT_ERROR_RPC;
+
+    return COPILOT_OK;
+}
+
 /* ============================================================================
  * Public API: Session creation
  * ============================================================================ */

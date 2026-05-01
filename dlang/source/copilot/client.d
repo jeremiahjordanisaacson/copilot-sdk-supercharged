@@ -236,6 +236,33 @@ final class CopilotClient
         return _rpc.request("getAuthStatus");
     }
 
+    /// Get the foreground session ID.
+    string getForegroundSessionId() @trusted
+    {
+        enforce(_started, "client not started");
+        auto result = _rpc.request("session.getForeground");
+        auto pSid = "sessionId" in result;
+        enforce(pSid !is null && (*pSid).type == JSONType.string,
+            "No sessionId in response");
+        return (*pSid).str;
+    }
+
+    /// Set the foreground session ID.
+    void setForegroundSessionId(string sessionId) @trusted
+    {
+        enforce(_started, "client not started");
+        auto params = JSONValue(["sessionId": JSONValue(sessionId)]);
+        auto result = _rpc.request("session.setForeground", params);
+        auto pSuccess = "success" in result;
+        if (pSuccess is null || (*pSuccess).type != JSONType.true_)
+        {
+            auto pErr = "error" in result;
+            string errMsg = (pErr !is null && (*pErr).type == JSONType.string)
+                ? (*pErr).str : "Unknown";
+            throw new Exception("Failed to set foreground session: " ~ errMsg);
+        }
+    }
+
     // ------------------------------------------------------------------
     // Internal startup helpers
     // ------------------------------------------------------------------

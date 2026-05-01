@@ -55,6 +55,7 @@
        01  WS-IO-RETURN-CODE        PIC S9(4)   VALUE 0.
        01  WS-JSON-WORK             PIC X(8192) VALUE SPACES.
        01  WS-JSON-WORK-LEN         PIC 9(5)    VALUE 0.
+       01  WS-FG-SESSION-ID         PIC X(256)  VALUE SPACES.
 
        LINKAGE SECTION.
        01  LS-REQUEST               PIC X(8192).
@@ -110,6 +111,27 @@
       *----------------------------------------------------------------*
        ENTRY "COPILOT-CLIENT-PING" USING WS-RETURN-CODE.
            PERFORM PING-CLI
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * GET-FG-SESSION: Get the foreground session ID.                 *
+      * Output: WS-FG-SESSION-ID, WS-RETURN-CODE                     *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-GET-FG-SESSION" USING WS-FG-SESSION-ID
+           WS-RETURN-CODE.
+           PERFORM GET-FOREGROUND-SESSION
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * SET-FG-SESSION: Set the foreground session ID.                 *
+      * Input:  WS-FG-SESSION-ID                                      *
+      * Output: WS-RETURN-CODE                                        *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-SET-FG-SESSION" USING WS-FG-SESSION-ID
+           WS-RETURN-CODE.
+           PERFORM SET-FOREGROUND-SESSION
            GOBACK
            .
 
@@ -294,6 +316,76 @@
                MOVE 0 TO LS-RETURN-CODE
            ELSE
                MOVE -1 TO LS-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * GET-FOREGROUND-SESSION: Get the current foreground session.     *
+      *----------------------------------------------------------------*
+       GET-FOREGROUND-SESSION.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"session.getForeground",'
+               '"params":{},'
+               '"id":1}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE WS-READ-BUFFER TO WS-FG-SESSION-ID
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * SET-FOREGROUND-SESSION: Set the foreground session.             *
+      *----------------------------------------------------------------*
+       SET-FOREGROUND-SESSION.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"session.setForeground",'
+               '"params":{"sessionId":"'
+               FUNCTION TRIM(WS-FG-SESSION-ID)
+               '"},"id":2}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
+               MOVE "Failed to set foreground session"
+                   TO WS-LAST-ERROR
            END-IF
            .
 

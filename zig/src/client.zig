@@ -217,6 +217,27 @@ pub const CopilotClient = struct {
         return try self.transport.?.sendRequest("session.getMetadata", .{ .object = params });
     }
 
+    /// Get the foreground session ID.
+    pub fn getForegroundSessionId(self: *CopilotClient) SdkError!JsonValue {
+        if (self.state != .connected) return SdkError.NotConnected;
+        return try self.transport.?.sendRequest("session.getForeground", .{ .object = std.json.ObjectMap.init(self.allocator) });
+    }
+
+    /// Set the foreground session ID.
+    pub fn setForegroundSessionId(self: *CopilotClient, session_id: []const u8) SdkError!void {
+        if (self.state != .connected) return SdkError.NotConnected;
+        var params = std.json.ObjectMap.init(self.allocator);
+        defer params.deinit();
+        params.put("sessionId", .{ .string = session_id }) catch return SdkError.AllocationFailed;
+        const result = try self.transport.?.sendRequest("session.setForeground", .{ .object = params });
+        if (result == .object) {
+            if (result.object.get("success")) |sv| {
+                if (sv == .bool and sv.bool) return;
+            }
+        }
+        return SdkError.RequestFailed;
+    }
+
     /// Get the current connection state.
     pub fn getState(self: *const CopilotClient) ConnectionState {
         return self.state;

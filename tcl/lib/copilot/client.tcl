@@ -362,6 +362,56 @@ proc ::copilot::client::get_auth_status {handle} {
     return $result
 }
 
+# ---- Get foreground session ID ----------------------------------------------
+
+proc ::copilot::client::get_foreground_session_id {handle} {
+    variable clients
+    if {![dict exists $clients $handle]} {
+        error "Client not found: $handle"
+    }
+
+    set cdata [dict get $clients $handle]
+    set write_ch [dict get $cdata write_ch]
+    set read_ch  [dict get $cdata read_ch]
+
+    set req_id [::copilot::jsonrpc::send_request $write_ch "session.getForeground" [dict create]]
+    ::copilot::jsonrpc::register_pending $req_id
+
+    set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+
+    if {[dict exists $result sessionId]} {
+        return [dict get $result sessionId]
+    }
+    error "No sessionId in response"
+}
+
+# ---- Set foreground session ID ----------------------------------------------
+
+proc ::copilot::client::set_foreground_session_id {handle session_id} {
+    variable clients
+    if {![dict exists $clients $handle]} {
+        error "Client not found: $handle"
+    }
+
+    set cdata [dict get $clients $handle]
+    set write_ch [dict get $cdata write_ch]
+    set read_ch  [dict get $cdata read_ch]
+
+    set params [dict create sessionId $session_id]
+    set req_id [::copilot::jsonrpc::send_request $write_ch "session.setForeground" $params]
+    ::copilot::jsonrpc::register_pending $req_id
+
+    set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+
+    if {![dict exists $result success] || ![dict get $result success]} {
+        set err_msg "Unknown"
+        if {[dict exists $result error]} {
+            set err_msg [dict get $result error]
+        }
+        error "Failed to set foreground session: $err_msg"
+    }
+}
+
 # ---- Get connection state ---------------------------------------------------
 
 proc ::copilot::client::get_state {handle} {

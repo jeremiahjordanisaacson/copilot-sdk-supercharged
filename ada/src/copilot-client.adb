@@ -336,4 +336,35 @@ package body Copilot.Client is
       return Self.State = Connected;
    end Is_Connected;
 
+   function Get_Foreground_Session_Id
+     (Self : in out Copilot_Client) return String
+   is
+      Resp : constant String :=
+        Send_Request (Self.Conn, "session.getForeground", "{}");
+      Sid  : constant String := Json_Get (Resp, "sessionId");
+   begin
+      return Sid;
+   end Get_Foreground_Session_Id;
+
+   procedure Set_Foreground_Session_Id
+     (Self       : in out Copilot_Client;
+      Session_Id : String)
+   is
+      Params : constant String :=
+        "{""sessionId"":""" & Escape (Session_Id) & """}";
+      Resp   : constant String :=
+        Send_Request (Self.Conn, "session.setForeground", Params);
+      Succ   : constant String := Json_Get (Resp, "success");
+   begin
+      if Succ /= "true" then
+         declare
+            Err : constant String := Json_Get (Resp, "error");
+         begin
+            raise Protocol_Error
+              with "Failed to set foreground session: "
+                 & (if Err'Length > 0 then Err else "Unknown error");
+         end;
+      end if;
+   end Set_Foreground_Session_Id;
+
 end Copilot.Client;

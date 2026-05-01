@@ -68,6 +68,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setForeground:(NSString *)sessionId
            completion:(void (^)(NSError * _Nullable error))completion;
 
+/// Gets the foreground session ID.
+- (void)getForegroundSessionIdWithCompletion:(void (^)(NSString * _Nullable sessionId,
+                                                       NSError * _Nullable error))completion;
+
 /// Lists all sessions known to the server.
 - (void)listSessionsWithCompletion:(void (^)(NSArray<CPSessionMetadata *> * _Nullable sessions,
                                              NSError * _Nullable error))completion;

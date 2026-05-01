@@ -278,6 +278,25 @@ sub list_sessions {
     return \@sessions;
 }
 
+sub get_foreground_session_id {
+    my ($self) = @_;
+    $self->_ensure_connected();
+
+    my $response = $self->{_client}->request('session.getForeground', {});
+    return $response->{sessionId};
+}
+
+sub set_foreground_session_id {
+    my ($self, $session_id) = @_;
+    $self->_ensure_connected();
+
+    my $response = $self->{_client}->request('session.setForeground', { sessionId => $session_id });
+    if (!$response->{success}) {
+        my $error = $response->{error} // 'Unknown error';
+        croak "Failed to set foreground session: $error";
+    }
+}
+
 # --------------------------------------------------------------------------
 # Ping and status
 # --------------------------------------------------------------------------

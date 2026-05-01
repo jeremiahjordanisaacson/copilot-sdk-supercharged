@@ -30,6 +30,8 @@ Embed Copilot's agentic workflows in your application - now available in public 
 
 The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-tested agent runtime you can invoke programmatically. No need to build your own orchestration - you define agent behavior, Copilot handles planning, tool invocation, file edits, and more.
 
+> ⭐ **If you find this SDK useful, [star the repo](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/stargazers)!** It helps others discover it and keeps us motivated to ship more.
+
 ### Download Stats
 
 > **Trusted by 15,000+ developers globally and growing daily.**

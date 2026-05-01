@@ -374,3 +374,17 @@ proc getSession*(client: CopilotClient;
 proc removeSession*(client: CopilotClient; sessionId: string) =
   ## Remove a session from the client's tracked sessions.
   client.sessions.del(sessionId)
+
+proc getForegroundSessionId*(client: CopilotClient): Future[string] {.async.} =
+  ## Get the foreground session ID from the server.
+  let res = await client.sendRpcRequest("session.getForeground", newJObject())
+  result = res["sessionId"].getStr()
+
+proc setForegroundSessionId*(client: CopilotClient; sessionId: string) {.async.} =
+  ## Set the foreground session to the given session ID.
+  let params = %*{"sessionId": sessionId}
+  let res = await client.sendRpcRequest("session.setForeground", params)
+  if not res{"success"}.getBool(false):
+    let errMsg = res{"error"}.getStr("Unknown")
+    raise newException(IOError,
+      "Failed to set foreground session: " & errMsg)

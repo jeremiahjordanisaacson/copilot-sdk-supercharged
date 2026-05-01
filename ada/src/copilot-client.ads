@@ -91,6 +91,16 @@ package Copilot.Client is
    --  Return True when the client has an active connection.
    function Is_Connected (Self : Copilot_Client) return Boolean;
 
+   --  Get the foreground session ID. Returns empty string if none.
+   function Get_Foreground_Session_Id
+     (Self : in out Copilot_Client) return String;
+
+   --  Set the foreground session ID.
+   --  Raises Protocol_Error if the server reports failure.
+   procedure Set_Foreground_Session_Id
+     (Self       : in out Copilot_Client;
+      Session_Id : String);
+
 private
 
    type Copilot_Client is tagged record

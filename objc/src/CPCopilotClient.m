@@ -438,10 +438,37 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 
 - (void)setForeground:(NSString *)sessionId
            completion:(void (^)(NSError * _Nullable))completion {
-    [self.rpcClient sendRequest:@"setForeground"
+    [self.rpcClient sendRequest:@"session.setForeground"
                          params:@{@"sessionId": sessionId}
                      completion:^(NSDictionary *result, NSError *error) {
-        completion(error);
+        if (error) {
+            completion(error);
+            return;
+        }
+        NSNumber *success = result[@"success"];
+        if (![success boolValue]) {
+            NSString *errMsg = result[@"error"] ?: @"Unknown error";
+            NSError *failError = [NSError errorWithDomain:kCPClientErrorDomain
+                                                     code:-7
+                                                 userInfo:@{NSLocalizedDescriptionKey:
+                                                     [NSString stringWithFormat:@"Failed to set foreground session: %@", errMsg]}];
+            completion(failError);
+            return;
+        }
+        completion(nil);
+    }];
+}
+
+- (void)getForegroundSessionIdWithCompletion:(void (^)(NSString * _Nullable, NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"session.getForeground"
+                         params:@{}
+                     completion:^(NSDictionary *result, NSError *error) {
+        if (error) {
+            completion(nil, error);
+            return;
+        }
+        NSString *sessionId = result[@"sessionId"];
+        completion(sessionId, nil);
     }];
 }
 

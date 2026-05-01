@@ -91,6 +91,20 @@ export class CopilotSolidityClient {
     }
 
     // -----------------------------------------------------------------------
+    // Foreground session management
+    // -----------------------------------------------------------------------
+
+    /** Get the foreground session ID from the CLI server. */
+    async getForegroundSessionId(): Promise<string> {
+        return (this.client as any).getForegroundSessionId();
+    }
+
+    /** Set the foreground session ID on the CLI server. */
+    async setForegroundSessionId(sessionId: string): Promise<void> {
+        return (this.client as any).setForegroundSessionId(sessionId);
+    }
+
+    // -----------------------------------------------------------------------
     // Session helpers
     // -----------------------------------------------------------------------
 

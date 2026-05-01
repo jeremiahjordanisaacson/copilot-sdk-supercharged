@@ -278,6 +278,25 @@ type CopilotClient(options: CopilotClientOptions) =
         sessions.TryRemove(sessionId) |> ignore
     }
 
+    /// Get the foreground session ID.
+    member _.GetForegroundSessionIdAsync(?cancellationToken: CancellationToken) : Async<string option> = async {
+        let t = getTransport ()
+        try
+            let! result = t.SendRequestAsync<{| sessionId: string option |}>("session.getForeground")
+            return result.sessionId
+        with
+        | :? JsonRpcException -> return None
+    }
+
+    /// Set the foreground session ID.
+    member _.SetForegroundSessionIdAsync(sessionId: string, ?cancellationToken: CancellationToken) : Async<unit> = async {
+        let t = getTransport ()
+        let! result = t.SendRequestAsync<{| success: bool; error: string option |}>("session.setForeground", {| sessionId = sessionId |})
+        if not result.success then
+            let errMsg = result.error |> Option.defaultValue "Unknown error"
+            failwithf "Failed to set foreground session: %s" errMsg
+    }
+
     // ------------------------------------------------------------------
     // IDisposable
     // ------------------------------------------------------------------

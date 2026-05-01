@@ -24,6 +24,8 @@ module Copilot.Client
   , deleteSession
   , listSessions
   , getLastSessionId
+  , getForegroundSessionId
+  , setForegroundSessionId
 
     -- * Queries
   , ping
@@ -433,6 +435,33 @@ getLastSessionId client = do
   case result of
     Left _ -> pure Nothing
     Right val -> pure $ parseMaybe (withObject "" $ \o -> o .: "sessionId") val
+
+-- | Get the foreground session ID.
+getForegroundSessionId :: CopilotClient -> IO (Maybe Text)
+getForegroundSessionId client = do
+  rpc <- ensureConnected client
+  result <- sendRequest rpc "session.getForeground" (object [])
+  case result of
+    Left _ -> pure Nothing
+    Right val -> pure $ parseMaybe (withObject "" $ \o -> o .: "sessionId") val
+
+-- | Set the foreground session ID.
+setForegroundSessionId :: CopilotClient -> Text -> IO ()
+setForegroundSessionId client sessionId = do
+  rpc <- ensureConnected client
+  result <- sendRequest rpc "session.setForeground" (object [ "sessionId" .= sessionId ])
+  case result of
+    Left err -> throwIO $ ServerError (jreMessage err)
+    Right val -> do
+      let mSuccess = parseMaybe (withObject "" $ \o -> o .: "success") val :: Maybe Bool
+          mError = parseMaybe (withObject "" $ \o -> o .:? "error") val :: Maybe (Maybe Text)
+      case mSuccess of
+        Just True -> pure ()
+        _ -> do
+          let errMsg = case mError of
+                Just (Just e) -> e
+                _             -> "Unknown error"
+          throwIO $ ServerError $ "Failed to set foreground session: " <> errMsg
 
 -- ============================================================================
 -- Queries

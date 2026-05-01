@@ -406,6 +406,65 @@ copilot_client_list_sessions() {
     return 0
 }
 
+# Get the foreground session ID.
+#
+# Sets:
+#   COPILOT_FOREGROUND_SESSION_ID - The foreground session ID (or empty)
+#   COPILOT_JSONRPC_LAST_RESPONSE - The full response
+#
+# Returns 0 on success, 1 on failure.
+copilot_client_get_foreground_session_id() {
+    _copilot_client_ensure_connected || return 1
+
+    if ! copilot_jsonrpc_request "session.getForeground" "{}"; then
+        echo "ERROR: Failed to get foreground session" >&2
+        return 1
+    fi
+
+    COPILOT_FOREGROUND_SESSION_ID=$(copilot_jsonrpc_get_result_field '.sessionId')
+    if [[ "$COPILOT_FOREGROUND_SESSION_ID" == "null" ]]; then
+        COPILOT_FOREGROUND_SESSION_ID=""
+    fi
+
+    return 0
+}
+
+# Set the foreground session ID.
+#
+# Arguments:
+#   $1 - Session ID to set as foreground (required)
+#
+# Returns 0 on success, 1 on failure.
+copilot_client_set_foreground_session_id() {
+    local session_id="$1"
+
+    _copilot_client_ensure_connected || return 1
+
+    if [[ -z "$session_id" ]]; then
+        echo "ERROR: session_id is required" >&2
+        return 1
+    fi
+
+    local params
+    params=$(jq -c -n --arg sid "$session_id" '{"sessionId":$sid}')
+
+    if ! copilot_jsonrpc_request "session.setForeground" "$params"; then
+        echo "ERROR: Failed to set foreground session $session_id" >&2
+        return 1
+    fi
+
+    local success
+    success=$(copilot_jsonrpc_get_result_field '.success')
+    if [[ "$success" != "true" ]]; then
+        local error_msg
+        error_msg=$(copilot_jsonrpc_get_result_field '.error')
+        echo "ERROR: Failed to set foreground session $session_id: $error_msg" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 # --- Internal Functions ---
 
 # Ensure the client is connected.

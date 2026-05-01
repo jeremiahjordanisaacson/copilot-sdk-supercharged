@@ -132,6 +132,28 @@ pub fn (mut c CopilotClient) get_models() ![]ModelInfo {
 	return json.decode([]ModelInfo, result)
 }
 
+// get_foreground_session_id retrieves the current foreground session ID.
+pub fn (mut c CopilotClient) get_foreground_session_id() !string {
+	raw := c.transport.send_request('session.getForeground', '{}')!
+	result := parse_response_result(raw)!
+	decoded := json.decode(map[string]string, result) or {
+		return error('failed to decode foreground session response: ${err}')
+	}
+	session_id := decoded['sessionId'] or { return error('no sessionId in response') }
+	return session_id
+}
+
+// set_foreground_session_id sets the foreground session to the given ID.
+pub fn (mut c CopilotClient) set_foreground_session_id(session_id string) ! {
+	mut params := map[string]string{}
+	params['"sessionId"'] = '"${session_id}"'
+	raw := c.transport.send_request('session.setForeground', build_params(params))!
+	result := parse_response_result(raw)!
+	if !result.contains('"success":true') && !result.contains('"success": true') {
+		return error('Failed to set foreground session: ${result}')
+	}
+}
+
 // --- private helpers ---
 
 fn (mut c CopilotClient) connect_to_server() ! {

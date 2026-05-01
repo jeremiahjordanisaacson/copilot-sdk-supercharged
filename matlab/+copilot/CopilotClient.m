@@ -217,8 +217,16 @@ classdef CopilotClient < handle
                 sessionId (1,:) char
             end
             obj.assertRunning();
-            obj.RpcClient.notify('session/setForeground', ...
-                struct('sessionId', sessionId));
+            result = obj.RpcClient.request('session.setForeground', ...
+                struct('sessionId', sessionId), 10);
+            if isfield(result, 'success') && ~result.success
+                errMsg = 'Unknown error';
+                if isfield(result, 'error')
+                    errMsg = result.error;
+                end
+                error('copilot:setForegroundFailed', ...
+                    'Failed to set foreground session: %s', errMsg);
+            end
         end
 
         function sessions = listSessions(obj, filter)
@@ -291,7 +299,7 @@ classdef CopilotClient < handle
         function sid = getForegroundSessionId(obj)
             %getForegroundSessionId  Return the foreground session identifier.
             obj.assertRunning();
-            result = obj.RpcClient.request('session/getForeground', struct(), 10);
+            result = obj.RpcClient.request('session.getForeground', struct(), 10);
             sid = '';
             if isfield(result, 'sessionId')
                 sid = result.sessionId;
