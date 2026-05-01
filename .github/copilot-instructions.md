@@ -104,6 +104,12 @@
 - Streaming: when `streaming`/`Streaming=true` you receive delta events (`assistant.message_delta`, `assistant.reasoning_delta`) and final events (`assistant.message`, `assistant.reasoning`) — tests expect this behavior.
 - Type generation is centralized in `nodejs/scripts/generate-session-types.ts` and requires the `@github/copilot` schema to be present (often via `npm link` or installed package).
 
+## Release announcements 📢
+
+**After every release or feature ship**, post an announcement to GitHub Discussions in the **Announcements** category (category ID: `DIC_kwDOROUors4C2RPG`). Use the GraphQL `createDiscussion` mutation. The announcement should include:
+- A title like "🚀 vX.Y.Z — <summary of key changes>"
+- A body with: what's new (grouped by version if multiple), which SDKs were updated, and a link to the release + star CTA
+
 ## Integration & environment notes ⚠️
 
 - The SDK requires a Copilot CLI installation or an external server reachable via the `CLI URL option (language-specific casing)` (Node: `cliUrl`, Go: `CLIUrl`, .NET: `CliUrl`, Python: `cli_url`) or `COPILOT_CLI_PATH`.
