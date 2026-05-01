@@ -27,6 +27,7 @@ namespace GitHub.Copilot.SDK;
 [JsonDerivedType(typeof(AssistantIntentEvent), "assistant.intent")]
 [JsonDerivedType(typeof(AssistantMessageEvent), "assistant.message")]
 [JsonDerivedType(typeof(AssistantMessageDeltaEvent), "assistant.message_delta")]
+[JsonDerivedType(typeof(AssistantMessageStartEvent), "assistant.message_start")]
 [JsonDerivedType(typeof(AssistantReasoningEvent), "assistant.reasoning")]
 [JsonDerivedType(typeof(AssistantReasoningDeltaEvent), "assistant.reasoning_delta")]
 [JsonDerivedType(typeof(AssistantStreamingDeltaEvent), "assistant.streaming_delta")]
@@ -102,22 +103,27 @@ namespace GitHub.Copilot.SDK;
 [JsonDerivedType(typeof(UserMessageEvent), "user.message")]
 public partial class SessionEvent
 {
-    /// <summary>Unique event identifier (UUID v4), generated when the event is emitted.</summary>
-    [JsonPropertyName("id")]
-    public Guid Id { get; set; }
-
-    /// <summary>ISO 8601 timestamp when the event was created.</summary>
-    [JsonPropertyName("timestamp")]
-    public DateTimeOffset Timestamp { get; set; }
-
-    /// <summary>ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.</summary>
-    [JsonPropertyName("parentId")]
-    public Guid? ParentId { get; set; }
+    /// <summary>Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("agentId")]
+    public string? AgentId { get; set; }
 
     /// <summary>When true, the event is transient and not persisted to the session event log on disk.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("ephemeral")]
     public bool? Ephemeral { get; set; }
+
+    /// <summary>Unique event identifier (UUID v4), generated when the event is emitted.</summary>
+    [JsonPropertyName("id")]
+    public Guid Id { get; set; }
+
+    /// <summary>ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.</summary>
+    [JsonPropertyName("parentId")]
+    public Guid? ParentId { get; set; }
+
+    /// <summary>ISO 8601 timestamp when the event was created.</summary>
+    [JsonPropertyName("timestamp")]
+    public DateTimeOffset Timestamp { get; set; }
 
     /// <summary>
     /// The event type discriminator.
@@ -511,6 +517,19 @@ public partial class AssistantMessageEvent : SessionEvent
     /// <summary>The <c>assistant.message</c> event payload.</summary>
     [JsonPropertyName("data")]
     public required AssistantMessageData Data { get; set; }
+}
+
+/// <summary>Streaming assistant message start metadata.</summary>
+/// <remarks>Represents the <c>assistant.message_start</c> event.</remarks>
+public partial class AssistantMessageStartEvent : SessionEvent
+{
+    /// <inheritdoc />
+    [JsonIgnore]
+    public override string Type => "assistant.message_start";
+
+    /// <summary>The <c>assistant.message_start</c> event payload.</summary>
+    [JsonPropertyName("data")]
+    public required AssistantMessageStartData Data { get; set; }
 }
 
 /// <summary>Streaming assistant message delta for incremental response updates.</summary>
@@ -1908,6 +1927,19 @@ public partial class AssistantMessageData
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("turnId")]
     public string? TurnId { get; set; }
+}
+
+/// <summary>Streaming assistant message start metadata.</summary>
+public partial class AssistantMessageStartData
+{
+    /// <summary>Message ID this start event belongs to, matching subsequent deltas and assistant.message.</summary>
+    [JsonPropertyName("messageId")]
+    public required string MessageId { get; set; }
+
+    /// <summary>Generation phase this message belongs to for phased-output models.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("phase")]
+    public string? Phase { get; set; }
 }
 
 /// <summary>Streaming assistant message delta for incremental response updates.</summary>
@@ -5125,6 +5157,8 @@ public enum ExtensionsLoadedExtensionStatus
 [JsonSerializable(typeof(AssistantMessageDeltaData))]
 [JsonSerializable(typeof(AssistantMessageDeltaEvent))]
 [JsonSerializable(typeof(AssistantMessageEvent))]
+[JsonSerializable(typeof(AssistantMessageStartData))]
+[JsonSerializable(typeof(AssistantMessageStartEvent))]
 [JsonSerializable(typeof(AssistantMessageToolRequest))]
 [JsonSerializable(typeof(AssistantReasoningData))]
 [JsonSerializable(typeof(AssistantReasoningDeltaData))]

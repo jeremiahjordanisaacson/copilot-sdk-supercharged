@@ -133,6 +133,7 @@ class SessionEventType(Enum):
     ASSISTANT_REASONING_DELTA = "assistant.reasoning_delta"
     ASSISTANT_STREAMING_DELTA = "assistant.streaming_delta"
     ASSISTANT_MESSAGE = "assistant.message"
+    ASSISTANT_MESSAGE_START = "assistant.message_start"
     ASSISTANT_MESSAGE_DELTA = "assistant.message_delta"
     ASSISTANT_TURN_END = "assistant.turn_end"
     ASSISTANT_USAGE = "assistant.usage"
@@ -392,6 +393,30 @@ class AssistantMessageDeltaData:
         result["messageId"] = from_str(self.message_id)
         if self.parent_tool_call_id is not None:
             result["parentToolCallId"] = from_union([from_none, from_str], self.parent_tool_call_id)
+        return result
+
+
+@dataclass
+class AssistantMessageStartData:
+    "Streaming assistant message start metadata"
+    message_id: str
+    phase: str | None = None
+
+    @staticmethod
+    def from_dict(obj: Any) -> "AssistantMessageStartData":
+        assert isinstance(obj, dict)
+        message_id = from_str(obj.get("messageId"))
+        phase = from_union([from_none, from_str], obj.get("phase"))
+        return AssistantMessageStartData(
+            message_id=message_id,
+            phase=phase,
+        )
+
+    def to_dict(self) -> dict:
+        result: dict = {}
+        result["messageId"] = from_str(self.message_id)
+        if self.phase is not None:
+            result["phase"] = from_union([from_none, from_str], self.phase)
         return result
 
 
@@ -4739,7 +4764,7 @@ class WorkspaceFileChangedOperation(Enum):
     UPDATE = "update"
 
 
-SessionEventData = SessionStartData | SessionResumeData | SessionRemoteSteerableChangedData | SessionErrorData | SessionIdleData | SessionTitleChangedData | SessionInfoData | SessionWarningData | SessionModelChangeData | SessionModeChangedData | SessionPlanChangedData | SessionWorkspaceFileChangedData | SessionHandoffData | SessionTruncationData | SessionSnapshotRewindData | SessionShutdownData | SessionContextChangedData | SessionUsageInfoData | SessionCompactionStartData | SessionCompactionCompleteData | SessionTaskCompleteData | UserMessageData | PendingMessagesModifiedData | AssistantTurnStartData | AssistantIntentData | AssistantReasoningData | AssistantReasoningDeltaData | AssistantStreamingDeltaData | AssistantMessageData | AssistantMessageDeltaData | AssistantTurnEndData | AssistantUsageData | ModelCallFailureData | AbortData | ToolUserRequestedData | ToolExecutionStartData | ToolExecutionPartialResultData | ToolExecutionProgressData | ToolExecutionCompleteData | SkillInvokedData | SubagentStartedData | SubagentCompletedData | SubagentFailedData | SubagentSelectedData | SubagentDeselectedData | HookStartData | HookEndData | SystemMessageData | SystemNotificationData | PermissionRequestedData | PermissionCompletedData | UserInputRequestedData | UserInputCompletedData | ElicitationRequestedData | ElicitationCompletedData | SamplingRequestedData | SamplingCompletedData | McpOauthRequiredData | McpOauthCompletedData | ExternalToolRequestedData | ExternalToolCompletedData | CommandQueuedData | CommandExecuteData | CommandCompletedData | AutoModeSwitchRequestedData | AutoModeSwitchCompletedData | CommandsChangedData | CapabilitiesChangedData | ExitPlanModeRequestedData | ExitPlanModeCompletedData | SessionToolsUpdatedData | SessionBackgroundTasksChangedData | SessionSkillsLoadedData | SessionCustomAgentsUpdatedData | SessionMcpServersLoadedData | SessionMcpServerStatusChangedData | SessionExtensionsLoadedData | RawSessionEventData | Data
+SessionEventData = SessionStartData | SessionResumeData | SessionRemoteSteerableChangedData | SessionErrorData | SessionIdleData | SessionTitleChangedData | SessionInfoData | SessionWarningData | SessionModelChangeData | SessionModeChangedData | SessionPlanChangedData | SessionWorkspaceFileChangedData | SessionHandoffData | SessionTruncationData | SessionSnapshotRewindData | SessionShutdownData | SessionContextChangedData | SessionUsageInfoData | SessionCompactionStartData | SessionCompactionCompleteData | SessionTaskCompleteData | UserMessageData | PendingMessagesModifiedData | AssistantTurnStartData | AssistantIntentData | AssistantReasoningData | AssistantReasoningDeltaData | AssistantStreamingDeltaData | AssistantMessageData | AssistantMessageStartData | AssistantMessageDeltaData | AssistantTurnEndData | AssistantUsageData | ModelCallFailureData | AbortData | ToolUserRequestedData | ToolExecutionStartData | ToolExecutionPartialResultData | ToolExecutionProgressData | ToolExecutionCompleteData | SkillInvokedData | SubagentStartedData | SubagentCompletedData | SubagentFailedData | SubagentSelectedData | SubagentDeselectedData | HookStartData | HookEndData | SystemMessageData | SystemNotificationData | PermissionRequestedData | PermissionCompletedData | UserInputRequestedData | UserInputCompletedData | ElicitationRequestedData | ElicitationCompletedData | SamplingRequestedData | SamplingCompletedData | McpOauthRequiredData | McpOauthCompletedData | ExternalToolRequestedData | ExternalToolCompletedData | CommandQueuedData | CommandExecuteData | CommandCompletedData | AutoModeSwitchRequestedData | AutoModeSwitchCompletedData | CommandsChangedData | CapabilitiesChangedData | ExitPlanModeRequestedData | ExitPlanModeCompletedData | SessionToolsUpdatedData | SessionBackgroundTasksChangedData | SessionSkillsLoadedData | SessionCustomAgentsUpdatedData | SessionMcpServersLoadedData | SessionMcpServerStatusChangedData | SessionExtensionsLoadedData | RawSessionEventData | Data
 
 
 @dataclass
@@ -4748,6 +4773,7 @@ class SessionEvent:
     id: UUID
     timestamp: datetime
     type: SessionEventType
+    agent_id: str | None = None
     ephemeral: bool | None = None
     parent_id: UUID | None = None
     raw_type: str | None = None
@@ -4757,10 +4783,11 @@ class SessionEvent:
         assert isinstance(obj, dict)
         raw_type = from_str(obj.get("type"))
         event_type = SessionEventType(raw_type)
-        event_id = from_uuid(obj.get("id"))
-        timestamp = from_datetime(obj.get("timestamp"))
-        ephemeral = from_union([from_bool, from_none], obj.get("ephemeral"))
+        agent_id = from_union([from_none, from_str], obj.get("agentId"))
+        ephemeral = from_union([from_none, from_bool], obj.get("ephemeral"))
+        id = from_uuid(obj.get("id"))
         parent_id = from_union([from_none, from_uuid], obj.get("parentId"))
+        timestamp = from_datetime(obj.get("timestamp"))
         data_obj = obj.get("data")
         match event_type:
             case SessionEventType.SESSION_START: data = SessionStartData.from_dict(data_obj)
@@ -4792,6 +4819,7 @@ class SessionEvent:
             case SessionEventType.ASSISTANT_REASONING_DELTA: data = AssistantReasoningDeltaData.from_dict(data_obj)
             case SessionEventType.ASSISTANT_STREAMING_DELTA: data = AssistantStreamingDeltaData.from_dict(data_obj)
             case SessionEventType.ASSISTANT_MESSAGE: data = AssistantMessageData.from_dict(data_obj)
+            case SessionEventType.ASSISTANT_MESSAGE_START: data = AssistantMessageStartData.from_dict(data_obj)
             case SessionEventType.ASSISTANT_MESSAGE_DELTA: data = AssistantMessageDeltaData.from_dict(data_obj)
             case SessionEventType.ASSISTANT_TURN_END: data = AssistantTurnEndData.from_dict(data_obj)
             case SessionEventType.ASSISTANT_USAGE: data = AssistantUsageData.from_dict(data_obj)
@@ -4843,9 +4871,10 @@ class SessionEvent:
             case _: data = RawSessionEventData.from_dict(data_obj)
         return SessionEvent(
             data=data,
-            id=event_id,
+            id=id,
             timestamp=timestamp,
             type=event_type,
+            agent_id=agent_id,
             ephemeral=ephemeral,
             parent_id=parent_id,
             raw_type=raw_type if event_type == SessionEventType.UNKNOWN else None,
@@ -4857,8 +4886,10 @@ class SessionEvent:
         result["id"] = to_uuid(self.id)
         result["timestamp"] = to_datetime(self.timestamp)
         result["type"] = self.raw_type if self.type == SessionEventType.UNKNOWN and self.raw_type is not None else to_enum(SessionEventType, self.type)
+        if self.agent_id is not None:
+            result["agentId"] = from_union([from_none, from_str], self.agent_id)
         if self.ephemeral is not None:
-            result["ephemeral"] = from_bool(self.ephemeral)
+            result["ephemeral"] = from_union([from_none, from_bool], self.ephemeral)
         result["parentId"] = from_union([from_none, to_uuid], self.parent_id)
         return result
 
