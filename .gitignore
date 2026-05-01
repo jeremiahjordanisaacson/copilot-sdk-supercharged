@@ -5,3 +5,6 @@ docs/.validation/
 
 visualbasic/bin/
 visualbasic/obj/
+
+# Visual Studio
+.vs/
