@@ -44,6 +44,10 @@ public class SessionConfig {
     private ElicitationHandler onElicitationRequest;
     /** Per-session auth token. When set, overrides the client-level token for this session only. Alias for gitHubToken. */
     private String authToken;
+    /** Additional HTTP headers sent with each model request. */
+    private Map<String, String> requestHeaders;
+    /** Response format for image generation ("text", "image", "json_object"). */
+    private String responseFormat;
 
     public SessionConfig() {}
 
@@ -74,6 +78,8 @@ public class SessionConfig {
     public SessionConfig commands(List<CommandDefinition> commands) { this.commands = commands; return this; }
     public SessionConfig onElicitationRequest(ElicitationHandler handler) { this.onElicitationRequest = handler; return this; }
     public SessionConfig authToken(String token) { this.authToken = token; return this; }
+    public SessionConfig requestHeaders(Map<String, String> headers) { this.requestHeaders = headers; return this; }
+    public SessionConfig responseFormat(String format) { this.responseFormat = format; return this; }
 
     // Getters
     public String getSessionId() { return sessionId; }
@@ -102,4 +108,6 @@ public class SessionConfig {
     public List<CommandDefinition> getCommands() { return commands; }
     public ElicitationHandler getOnElicitationRequest() { return onElicitationRequest; }
     public String getAuthToken() { return authToken; }
+    public Map<String, String> getRequestHeaders() { return requestHeaders; }
+    public String getResponseFormat() { return responseFormat; }
 }

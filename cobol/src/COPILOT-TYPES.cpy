@@ -188,6 +188,41 @@
                88 SUB-AGENT-STREAM-OFF        VALUE 0.
 
       *----------------------------------------------------------------*
+      * Feature support flags                                          *
+      * Maps to SDK features: elicitation, requestHeaders,             *
+      * responseFormat, skills, availableTools, modelCapabilities,     *
+      * enableConfigDiscovery, includeSubAgentStreamingEvents,         *
+      * idleTimeout, authToken, imageGeneration                        *
+      *----------------------------------------------------------------*
+       01  WS-FEATURE-FLAGS.
+      *    UI elicitation handler flag
+           05 WS-FEAT-ELICITATION    PIC 9      VALUE 0.
+               88 ELICITATION-ON               VALUE 1.
+               88 ELICITATION-OFF              VALUE 0.
+      *    Runtime request_headers (JSON object)
+           05 WS-REQUEST-HEADERS     PIC X(1024) VALUE SPACES.
+      *    Image generation / responseFormat
+           05 WS-RESPONSE-FORMAT     PIC X(16)  VALUE SPACES.
+      *    Per-agent skills (JSON array)
+           05 WS-AGENT-SKILLS        PIC X(1024) VALUE SPACES.
+      *    Per-agent tool visibility: availableTools
+           05 WS-AVAILABLE-TOOLS     PIC X(1024) VALUE SPACES.
+      *    Model capabilities override: modelCapabilities
+           05 WS-MODEL-CAPABILITIES  PIC X(1024) VALUE SPACES.
+      *    Config discovery: enableConfigDiscovery
+           05 WS-ENABLE-CONFIG-DISCOVERY PIC 9   VALUE 0.
+               88 CONFIG-DISC-ON               VALUE 1.
+               88 CONFIG-DISC-OFF              VALUE 0.
+      *    Sub-agent streaming: includeSubAgentStreamingEvents
+           05 WS-SUB-AGENT-STREAMING PIC 9      VALUE 0.
+               88 SUB-AGT-STREAM-ON           VALUE 1.
+               88 SUB-AGT-STREAM-OFF          VALUE 0.
+      *    Session idleTimeout in seconds
+           05 WS-IDLE-TIMEOUT        PIC 9(10)  VALUE 0.
+      *    Per-session authToken
+           05 WS-AUTH-TOKEN          PIC X(256) VALUE SPACES.
+
+      *----------------------------------------------------------------*
       * Client extended options                                        *
       *----------------------------------------------------------------*
        01  WS-CLIENT-EXTENDED.

@@ -245,6 +245,8 @@ type session_config = {
   working_directory : string option;
   github_token : string option;
   response_format : image_response_format option;
+  request_headers : (string * string) list;
+  on_elicitation_request : bool;
 }
 
 let default_session_config () =
@@ -264,6 +266,8 @@ let default_session_config () =
   ; working_directory = None
   ; github_token = None
   ; response_format = None
+  ; request_headers = []
+  ; on_elicitation_request = false
   }
 
 let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
@@ -348,6 +352,19 @@ let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
     match c.response_format with
     | Some f -> ("responseFormat", `String (image_response_format_to_string f)) :: fields
     | None -> fields
+  in
+  let fields =
+    match c.request_headers with
+    | [] -> fields
+    | hdrs ->
+      ("requestHeaders",
+       `Assoc (List.map (fun (k, v) -> (k, `String v)) hdrs))
+      :: fields
+  in
+  let fields =
+    if c.on_elicitation_request then
+      ("requestElicitation", `Bool true) :: fields
+    else fields
   in
   `Assoc fields
 

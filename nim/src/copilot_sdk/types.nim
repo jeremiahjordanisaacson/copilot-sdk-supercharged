@@ -69,6 +69,8 @@ type
     imageSize*: string
     imageQuality*: string
     imageStyle*: string
+    includeSubAgentStreamingEvents*: bool
+    authToken*: string
 
   ResumeSessionConfig* = object
     sessionId*: string
@@ -217,7 +219,9 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
                        responseFormat = "";
                        imageSize = "";
                        imageQuality = "";
-                       imageStyle = ""): SessionConfig =
+                       imageStyle = "";
+                       includeSubAgentStreamingEvents = false;
+                       authToken = ""): SessionConfig =
   SessionConfig(
     systemPrompt: systemPrompt,
     githubToken: githubToken,
@@ -233,6 +237,8 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
     imageSize: imageSize,
     imageQuality: imageQuality,
     imageStyle: imageStyle,
+    includeSubAgentStreamingEvents: includeSubAgentStreamingEvents,
+    authToken: authToken,
   )
 
 proc newResumeSessionConfig*(sessionId: string; systemPrompt = "";

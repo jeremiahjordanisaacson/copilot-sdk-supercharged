@@ -67,7 +67,7 @@ proc ::copilot::session::create_session {write_ch read_ch config} {
     }
 
     # Send the createSession request
-    set req_id [::copilot::jsonrpc::send_request $write_ch "session/create" $params]
+    set req_id [::copilot::jsonrpc::send_request $write_ch "session.create" $params]
     ::copilot::jsonrpc::register_pending $req_id
 
     # Read messages until we get our response

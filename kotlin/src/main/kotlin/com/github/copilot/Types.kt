@@ -320,7 +320,14 @@ data class SessionConfig(
     val commands: List<CommandDefinition>? = null,
 
     /** Handler for elicitation requests from the server. */
-    val onElicitationRequest: ElicitationHandler? = null
+    val onElicitationRequest: ElicitationHandler? = null,
+
+    /** Additional HTTP headers sent with each model request. */
+    val requestHeaders: Map<String, String>? = null,
+    /** Response format for image generation ("text", "image", "json_object"). */
+    val responseFormat: String? = null,
+    /** Idle timeout in seconds before the session is automatically closed. */
+    val idleTimeout: Int? = null,
 )
 
 /**

@@ -345,6 +345,49 @@
            .
 
       *----------------------------------------------------------------*
+      * CREATE-SESSION: Create a new conversation session.             *
+      * Input:  LS-REQUEST (JSON params)                               *
+      * Output: LS-RESPONSE, WS-RETURN-CODE                           *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-CREATE-SESSION" USING LS-REQUEST
+           LS-RESPONSE WS-RETURN-CODE.
+           PERFORM CREATE-SESSION-PARA
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * RESUME-SESSION: Resume an existing session by ID.              *
+      * Input:  WS-FG-SESSION-ID, LS-REQUEST (JSON params)            *
+      * Output: LS-RESPONSE, WS-RETURN-CODE                           *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-RESUME-SESSION" USING WS-FG-SESSION-ID
+           LS-REQUEST LS-RESPONSE WS-RETURN-CODE.
+           PERFORM RESUME-SESSION-PARA
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * DELETE-SESSION: Delete a session permanently.                  *
+      * Input:  WS-FG-SESSION-ID                                      *
+      * Output: WS-RETURN-CODE                                        *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-DELETE-SESSION" USING WS-FG-SESSION-ID
+           WS-RETURN-CODE.
+           PERFORM DELETE-SESSION-PARA
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * LIST-SESSIONS: List all sessions known to the server.          *
+      * Output: LS-RESPONSE, WS-RETURN-CODE                           *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-LIST-SESSIONS" USING LS-RESPONSE
+           WS-RETURN-CODE.
+           PERFORM LIST-SESSIONS-PARA
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
       * SEND-AND-RECEIVE: Write request, read response over pipes.     *
       *----------------------------------------------------------------*
        SEND-AND-RECEIVE.
@@ -705,6 +748,145 @@
                '"method":"auth.getStatus",'
                '"params":{},'
                '"id":7}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE WS-READ-BUFFER TO LS-RESPONSE
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * CREATE-SESSION-PARA: Create a new conversation session.        *
+      *----------------------------------------------------------------*
+       CREATE-SESSION-PARA.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"session.create",'
+               '"params":'
+               FUNCTION TRIM(LS-REQUEST TRAILING)
+               ','
+               '"id":8}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE WS-READ-BUFFER TO LS-RESPONSE
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * RESUME-SESSION-PARA: Resume an existing session by ID.         *
+      *----------------------------------------------------------------*
+       RESUME-SESSION-PARA.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"session.resume",'
+               '"params":{"sessionId":"'
+               FUNCTION TRIM(WS-FG-SESSION-ID)
+               '"},"id":9}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE WS-READ-BUFFER TO LS-RESPONSE
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * DELETE-SESSION-PARA: Delete a session permanently.             *
+      *----------------------------------------------------------------*
+       DELETE-SESSION-PARA.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"session.delete",'
+               '"params":{"sessionId":"'
+               FUNCTION TRIM(WS-FG-SESSION-ID)
+               '"},"id":10}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * LIST-SESSIONS-PARA: List all sessions from the server.         *
+      *----------------------------------------------------------------*
+       LIST-SESSIONS-PARA.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"session.list",'
+               '"params":{},'
+               '"id":11}'
                DELIMITED SIZE
                INTO WS-WRITE-BUFFER
                WITH POINTER WS-JSON-WORK-LEN

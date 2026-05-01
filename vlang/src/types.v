@@ -47,6 +47,9 @@ pub mut:
 	github_token                        string // per-session auth token
 	reasoning_effort                    string // reasoning effort level
 	response_format                     string // response format: "text", "image", "json_object"
+	request_headers                     map[string]string // additional request headers
+	elicitation_handler                 fn (map[string]string) map[string]string = unsafe { nil }
+	idle_timeout                        int    // session idle timeout in seconds
 }
 
 // HistoryEntry is a single turn in a conversation.

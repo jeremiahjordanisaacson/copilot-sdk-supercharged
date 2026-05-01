@@ -17,7 +17,8 @@ namespace eval ::copilot::client {
     variable clients [dict create]
     variable next_client_idx 0
 
-    namespace export new start stop create_session destroy_session \
+    namespace export new start stop create_session resume_session \
+                     delete_session list_sessions destroy_session \
                      define_tool get_status get_auth_status ping \
                      list_models get_last_session_id get_session_metadata \
                      set_session_fs_provider
@@ -345,7 +346,7 @@ proc ::copilot::client::get_status {handle} {
     set write_ch [dict get $cdata write_ch]
     set read_ch  [dict get $cdata read_ch]
 
-    set req_id [::copilot::jsonrpc::send_request $write_ch "getStatus" [dict create]]
+    set req_id [::copilot::jsonrpc::send_request $write_ch "status.get" [dict create]]
     ::copilot::jsonrpc::register_pending $req_id
 
     set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
@@ -364,7 +365,7 @@ proc ::copilot::client::get_auth_status {handle} {
     set write_ch [dict get $cdata write_ch]
     set read_ch  [dict get $cdata read_ch]
 
-    set req_id [::copilot::jsonrpc::send_request $write_ch "getAuthStatus" [dict create]]
+    set req_id [::copilot::jsonrpc::send_request $write_ch "auth.getStatus" [dict create]]
     ::copilot::jsonrpc::register_pending $req_id
 
     set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
@@ -454,6 +455,77 @@ proc ::copilot::client::list_models {handle} {
     set read_ch  [dict get $cdata read_ch]
 
     set req_id [::copilot::jsonrpc::send_request $write_ch "models.list" [dict create]]
+    ::copilot::jsonrpc::register_pending $req_id
+
+    set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+    return $result
+}
+
+# ---- Resume a session -------------------------------------------------------
+
+proc ::copilot::client::resume_session {handle session_id args} {
+    variable clients
+    if {![dict exists $clients $handle]} {
+        error "Client not found: $handle"
+    }
+
+    set cdata [dict get $clients $handle]
+    if {[dict get $cdata state] ne "connected"} {
+        error "Client is not connected. Call start first."
+    }
+
+    set write_ch [dict get $cdata write_ch]
+    set read_ch  [dict get $cdata read_ch]
+
+    set params [dict create sessionId $session_id]
+    set req_id [::copilot::jsonrpc::send_request $write_ch "session.resume" $params]
+    ::copilot::jsonrpc::register_pending $req_id
+
+    set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+    return $result
+}
+
+# ---- Delete a session -------------------------------------------------------
+
+proc ::copilot::client::delete_session {handle session_id} {
+    variable clients
+    if {![dict exists $clients $handle]} {
+        error "Client not found: $handle"
+    }
+
+    set cdata [dict get $clients $handle]
+    if {[dict get $cdata state] ne "connected"} {
+        error "Client is not connected. Call start first."
+    }
+
+    set write_ch [dict get $cdata write_ch]
+    set read_ch  [dict get $cdata read_ch]
+
+    set params [dict create sessionId $session_id]
+    set req_id [::copilot::jsonrpc::send_request $write_ch "session.delete" $params]
+    ::copilot::jsonrpc::register_pending $req_id
+
+    set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+    return $result
+}
+
+# ---- List sessions ----------------------------------------------------------
+
+proc ::copilot::client::list_sessions {handle} {
+    variable clients
+    if {![dict exists $clients $handle]} {
+        error "Client not found: $handle"
+    }
+
+    set cdata [dict get $clients $handle]
+    if {[dict get $cdata state] ne "connected"} {
+        error "Client is not connected. Call start first."
+    }
+
+    set write_ch [dict get $cdata write_ch]
+    set read_ch  [dict get $cdata read_ch]
+
+    set req_id [::copilot::jsonrpc::send_request $write_ch "session.list" [dict create]]
     ::copilot::jsonrpc::register_pending $req_id
 
     set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]

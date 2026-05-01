@@ -182,7 +182,7 @@ function create_session(client::CopilotClient, config::SessionConfig)
         params["tools"] = [tool_to_wire(t) for t in tool_list]
     end
 
-    result = send_request(client.rpc, "session/create", params; timeout=30)
+    result = send_request(client.rpc, "session.create", params; timeout=30)
 
     session_id = if result isa Dict
         get(result, "sessionId", get(result, "session_id", string(UUIDs.uuid4())))
@@ -211,7 +211,7 @@ Query the server for version and authentication status.
 """
 function get_status(client::CopilotClient)
     _ensure_started!(client)
-    result = send_request(client.rpc, "getStatus", nothing; timeout=10)
+    result = send_request(client.rpc, "status.get", nothing; timeout=10)
     if result isa Dict
         ServerStatus(
             get(result, "version", ""),
@@ -230,7 +230,7 @@ List available models from the server.
 """
 function get_models(client::CopilotClient)
     _ensure_started!(client)
-    result = send_request(client.rpc, "getModels", nothing; timeout=10)
+    result = send_request(client.rpc, "models.list", nothing; timeout=10)
     models = ModelInfo[]
     if result isa AbstractVector
         for m in result
@@ -256,7 +256,7 @@ List sessions known to the server.
 """
 function list_sessions(client::CopilotClient)
     _ensure_started!(client)
-    result = send_request(client.rpc, "session/list", nothing; timeout=10)
+    result = send_request(client.rpc, "session.list", nothing; timeout=10)
     sessions = SessionMetadata[]
     if result isa AbstractVector
         for s in result
@@ -272,6 +272,54 @@ function list_sessions(client::CopilotClient)
         end
     end
     return sessions
+end
+
+"""
+    resume_session(client, session_id; kwargs...) -> CopilotSession
+
+Resume an existing session by ID.
+"""
+function resume_session(client::CopilotClient, session_id::AbstractString, config::SessionConfig)
+    _ensure_started!(client)
+
+    params = Dict{String, Any}(
+        "sessionId" => session_id,
+        "model"     => config.model,
+        "streaming" => config.streaming,
+    )
+
+    if config.system_message !== nothing
+        params["systemMessage"] = config.system_message
+    end
+
+    result = send_request(client.rpc, "session.resume", params; timeout=30)
+
+    sid = if result isa Dict
+        get(result, "sessionId", session_id)
+    else
+        session_id
+    end
+
+    session = CopilotSession(sid, client.rpc, config)
+    client.sessions[sid] = session
+    _register_session_handlers!(client, session)
+    return session
+end
+
+resume_session(client::CopilotClient, session_id::AbstractString; kwargs...) =
+    resume_session(client, session_id, SessionConfig(; kwargs...))
+
+"""
+    delete_session(client, session_id)
+
+Delete a session permanently.
+"""
+function delete_session(client::CopilotClient, session_id::AbstractString)
+    _ensure_started!(client)
+    send_request(client.rpc, "session.delete",
+        Dict{String,Any}("sessionId" => session_id); timeout=10)
+    delete!(client.sessions, session_id)
+    return nothing
 end
 
 """

@@ -99,6 +99,9 @@ public:
     /// Sets the foreground session (TUI+server mode only).
     void setForegroundSessionId(const std::string& sessionId);
 
+    /// Sets the session filesystem provider configuration.
+    void setSessionFsProvider(const SessionFsConfig& config = {});
+
     /// Subscribe to all session lifecycle events. Returns unsubscribe function.
     std::function<void()> onLifecycle(SessionLifecycleHandler handler);
 

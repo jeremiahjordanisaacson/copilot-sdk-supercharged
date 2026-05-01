@@ -279,6 +279,9 @@ class CopilotClient {
      *   <li>{@code infiniteSessions} - Infinite session config</li>
      *   <li>{@code skillDirectories} - Skill directory paths</li>
      *   <li>{@code disabledSkills} - Disabled skill names</li>
+     *   <li>{@code requestHeaders} - Additional HTTP headers for model requests</li>
+     *   <li>{@code responseFormat} - Response format ("text", "image", "json_object")</li>
+     *   <li>{@code imageGeneration} - Image generation config map</li>
      * </ul>
      */
     @SuppressWarnings('unchecked')
@@ -546,6 +549,9 @@ class CopilotClient {
         if (config.infiniteSessions) payload.infiniteSessions = config.infiniteSessions
         if (config.enableConfigDiscovery != null) payload.enableConfigDiscovery = config.enableConfigDiscovery
         if (config.gitHubToken) payload.gitHubToken = config.gitHubToken
+        if (config.requestHeaders) payload.requestHeaders = config.requestHeaders
+        if (config.responseFormat) payload.responseFormat = config.responseFormat
+        if (config.imageGeneration) payload.imageGeneration = config.imageGeneration
         payload
     }
 

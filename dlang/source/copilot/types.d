@@ -223,6 +223,9 @@ struct SessionConfig
     /// Response format for image generation.
     Nullable!ImageResponseFormat responseFormat;
 
+    /// Additional HTTP headers sent with each model request.
+    string[string] requestHeaders;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
@@ -302,6 +305,14 @@ struct SessionConfig
 
         if (!responseFormat.isNull)
             obj["responseFormat"] = cast(string) responseFormat.get;
+
+        if (requestHeaders.length > 0)
+        {
+            auto hdrObj = JSONValue(string[string].init);
+            foreach (key, val; requestHeaders)
+                hdrObj[key] = val;
+            obj["requestHeaders"] = hdrObj;
+        }
 
         return obj;
     }
@@ -397,6 +408,26 @@ struct MessageOptions
 
     /// Desired response format.
     Nullable!string responseFormat;
+}
+
+// ---------------------------------------------------------------------------
+// Elicitation
+// ---------------------------------------------------------------------------
+
+/// Context for an elicitation request from the server.
+struct ElicitationRequest
+{
+    string sessionId;
+    string message;
+    Nullable!string mode;
+    JSONValue requestedSchema;
+}
+
+/// Result from an elicitation handler.
+struct ElicitationResult
+{
+    string action = "accept";
+    JSONValue content;
 }
 
 // ---------------------------------------------------------------------------

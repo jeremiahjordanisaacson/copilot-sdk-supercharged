@@ -380,7 +380,14 @@ case class SessionConfig(
   commands: Option[List[CommandDefinition]] = None,
 
   /** Handler for elicitation requests from the server. */
-  onElicitationRequest: Option[ElicitationHandler] = None
+  onElicitationRequest: Option[ElicitationHandler] = None,
+
+  /** Additional HTTP headers sent with each model request. */
+  requestHeaders: Option[Map[String, String]] = None,
+  /** Response format for image generation ("text", "image", "json_object"). */
+  responseFormat: Option[String] = None,
+  /** Idle timeout in seconds before the session is automatically closed. */
+  idleTimeout: Option[Int] = None,
 )
 
 /** Configuration for resuming an existing session. */

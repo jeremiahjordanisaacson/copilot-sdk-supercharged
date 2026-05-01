@@ -365,6 +365,27 @@ void CopilotClient::setForegroundSessionId(const std::string& sessionId) {
 }
 
 // ============================================================================
+// Session Filesystem Provider
+// ============================================================================
+
+void CopilotClient::setSessionFsProvider(const SessionFsConfig& config) {
+    ensureConnected();
+
+    nlohmann::json params = nlohmann::json::object();
+    if (config.initialCwd) {
+        params["initialCwd"] = *config.initialCwd;
+    }
+    if (config.sessionStatePath) {
+        params["sessionStatePath"] = *config.sessionStatePath;
+    }
+    if (config.conventions) {
+        params["conventions"] = *config.conventions;
+    }
+
+    rpcClient_->request("sessionFs.setProvider", params);
+}
+
+// ============================================================================
 // Lifecycle Event Subscriptions
 // ============================================================================
 

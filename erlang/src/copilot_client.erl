@@ -179,18 +179,18 @@ handle_call({ping, Message}, _From, #state{rpc = Rpc} = State) when Rpc =/= unde
     {reply, Result, State};
 
 handle_call(get_status, _From, #state{rpc = Rpc} = State) when Rpc =/= undefined ->
-    Result = copilot_jsonrpc:request(Rpc, <<"getStatus">>, #{}),
+    Result = copilot_jsonrpc:request(Rpc, <<"status.get">>, #{}),
     {reply, Result, State};
 
 handle_call(get_auth_status, _From, #state{rpc = Rpc} = State) when Rpc =/= undefined ->
-    Result = copilot_jsonrpc:request(Rpc, <<"getAuthStatus">>, #{}),
+    Result = copilot_jsonrpc:request(Rpc, <<"auth.getStatus">>, #{}),
     {reply, Result, State};
 
 handle_call(list_models, _From, #state{rpc = Rpc, models_cache = Cache} = State)
   when Rpc =/= undefined ->
     case Cache of
         undefined ->
-            case copilot_jsonrpc:request(Rpc, <<"listModels">>, #{}) of
+            case copilot_jsonrpc:request(Rpc, <<"models.list">>, #{}) of
                 {ok, Models} ->
                     {reply, {ok, Models}, State#state{models_cache = Models}};
                 Error ->
@@ -276,12 +276,12 @@ handle_call(get_last_session_id, _From, #state{rpc = Rpc} = State)
 
 handle_call(get_foreground_session_id, _From, #state{rpc = Rpc} = State)
   when Rpc =/= undefined ->
-    Result = copilot_jsonrpc:request(Rpc, <<"session.getForegroundSessionId">>, #{}),
+    Result = copilot_jsonrpc:request(Rpc, <<"session.getForeground">>, #{}),
     {reply, Result, State};
 
 handle_call({set_foreground_session_id, SessionId}, _From, #state{rpc = Rpc} = State)
   when Rpc =/= undefined ->
-    case copilot_jsonrpc:request(Rpc, <<"session.setForegroundSessionId">>,
+    case copilot_jsonrpc:request(Rpc, <<"session.setForeground">>,
                                  #{<<"sessionId">> => SessionId}) of
         {ok, _} -> {reply, ok, State};
         Err     -> {reply, Err, State}

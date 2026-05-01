@@ -165,6 +165,22 @@ pub const UserInputResponse = struct {
 };
 
 // ---------------------------------------------------------------------------
+// Elicitation
+// ---------------------------------------------------------------------------
+
+pub const ElicitationRequest = struct {
+    session_id: []const u8 = "",
+    message: []const u8 = "",
+    mode: ?[]const u8 = null,
+    schema_json: ?[]const u8 = null,
+};
+
+pub const ElicitationResult = struct {
+    action: []const u8 = "accept",
+    content_json: ?[]const u8 = null,
+};
+
+// ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
 

@@ -127,6 +127,8 @@ Base.@kwdef mutable struct SessionConfig
     working_directory::Union{String, Nothing} = nothing
     github_token::Union{String, Nothing} = nothing
     response_format::Union{ImageResponseFormat, Nothing} = nothing
+    request_headers::Union{Dict{String, String}, Nothing} = nothing
+    on_elicitation_request::Union{Function, Nothing} = nothing
 end
 
 """Payload for sending a message to a session."""

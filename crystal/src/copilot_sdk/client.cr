@@ -139,7 +139,7 @@ module CopilotSDK
       ensure_connected!
 
       params = JSON.parse(config.to_json)
-      result = rpc.send_request("session/create", params, @options.request_timeout)
+      result = rpc.send_request("session.create", params, @options.request_timeout)
 
       session_id = result["sessionId"]?.try(&.as_s) || raise CopilotError.new("No sessionId in response")
       model = result["model"]?.try(&.as_s) || config.model
@@ -155,7 +155,7 @@ module CopilotSDK
       ensure_connected!
 
       params = JSON.parse(config.to_json)
-      result = rpc.send_request("session/resume", params, @options.request_timeout)
+      result = rpc.send_request("session.resume", params, @options.request_timeout)
 
       session_id = config.session_id
       model = result["model"]?.try(&.as_s) || config.model
@@ -169,14 +169,14 @@ module CopilotSDK
     # Get the status of the connected server.
     def get_status : GetStatusResponse
       ensure_connected!
-      result = rpc.send_request("getStatus")
+      result = rpc.send_request("status.get")
       GetStatusResponse.from_json(result.to_json)
     end
 
     # Get the authentication status.
     def get_auth_status : GetAuthStatusResponse
       ensure_connected!
-      result = rpc.send_request("getAuthStatus")
+      result = rpc.send_request("auth.getStatus")
       GetAuthStatusResponse.from_json(result.to_json)
     end
 
@@ -188,7 +188,7 @@ module CopilotSDK
         return cached
       end
 
-      result = rpc.send_request("listModels")
+      result = rpc.send_request("models.list")
       models_array = result.as_a? || [] of JSON::Any
       models = models_array.map { |m| ModelInfo.from_json(m.to_json) }
       @models_cache = models
@@ -198,9 +198,17 @@ module CopilotSDK
     # List active sessions.
     def list_sessions : Array(SessionMetadata)
       ensure_connected!
-      result = rpc.send_request("session/list")
+      result = rpc.send_request("session.list")
       sessions_array = result.as_a? || [] of JSON::Any
       sessions_array.map { |s| SessionMetadata.from_json(s.to_json) }
+    end
+
+    # Delete a session by ID.
+    def delete_session(session_id : String) : Nil
+      ensure_connected!
+      params = JSON.parse({"sessionId" => session_id}.to_json)
+      rpc.send_request("session.delete", params, @options.request_timeout)
+      @mutex.synchronize { @sessions.delete(session_id) }
     end
 
     # Get the foreground session ID.

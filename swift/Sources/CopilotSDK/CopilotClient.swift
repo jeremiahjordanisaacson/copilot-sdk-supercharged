@@ -473,6 +473,31 @@ public actor CopilotClient {
         }
     }
 
+    // MARK: - Session Filesystem Provider
+
+    /// Sets the session filesystem provider configuration.
+    ///
+    /// - Parameters:
+    ///   - initialCwd: Optional initial working directory.
+    ///   - sessionStatePath: Optional path for session state persistence.
+    ///   - conventions: Optional list of convention strings.
+    public func setSessionFsProvider(
+        initialCwd: String? = nil,
+        sessionStatePath: String? = nil,
+        conventions: [String]? = nil
+    ) async throws {
+        guard let rpc = rpcClient else {
+            throw CopilotError.notConnected
+        }
+
+        var params: [String: Any] = [:]
+        if let cwd = initialCwd { params["initialCwd"] = cwd }
+        if let path = sessionStatePath { params["sessionStatePath"] = path }
+        if let conv = conventions { params["conventions"] = conv }
+
+        _ = try await rpc.sendRequest(method: "sessionFs.setProvider", params: params)
+    }
+
     // MARK: - Lifecycle Event Subscription
 
     /// Subscribes to all session lifecycle events.

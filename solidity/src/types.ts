@@ -231,6 +231,8 @@ export interface SolidityCommandDefinition {
 
 /** Extended options for Solidity sessions with all feature flags. */
 export interface SolidityExtendedSessionConfig extends SoliditySessionConfig {
+    /** Idle timeout in seconds — session auto-closes after this inactivity period. */
+    idleTimeout?: number;
     /** Excluded tools for this session. */
     excludedTools?: string[];
     /** MCP server configurations. */
@@ -253,4 +255,12 @@ export interface SolidityExtendedSessionConfig extends SoliditySessionConfig {
     sessionFs?: SessionFsConfig;
     /** Response format. */
     responseFormat?: "text" | "image" | "json_object";
+    /** Handler for elicitation requests. */
+    elicitationHandler?: (request: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    /** Additional request headers sent with each model request. */
+    requestHeaders?: Record<string, string>;
+    /** Session idle timeout in seconds. */
+    idleTimeout?: number;
+    /** Per-session auth token override. */
+    authToken?: string;
 }

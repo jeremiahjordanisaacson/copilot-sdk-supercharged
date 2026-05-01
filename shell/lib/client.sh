@@ -15,6 +15,11 @@ COPILOT_CLIENT_LOG_LEVEL="info"
 # Set these before calling copilot_client_create_session to include in the payload.
 # Server-wide idle timeout for sessions in seconds (integer, optional)
 COPILOT_SESSION_IDLE_TIMEOUT_SECONDS=""
+# Alias: idle_timeout (seconds) for session inactivity before auto-close
+COPILOT_IDLE_TIMEOUT=""
+# Elicitation handler callback function name (optional)
+# When set, the client calls this function to handle elicitation requests from the server.
+COPILOT_ELICITATION_HANDLER=""
 # Custom HTTP headers for outbound model requests (JSON object string, optional)
 # Example: '{"X-Custom":"value"}'
 COPILOT_REQUEST_HEADERS=""

@@ -1,4 +1,4 @@
---  ---------------------------------------------------------------------------
+﻿--  ---------------------------------------------------------------------------
 --  Copyright (c) Microsoft Corporation. All rights reserved.
 --  ---------------------------------------------------------------------------
 --
@@ -107,6 +107,9 @@ package Copilot.Types is
       Image_Size                       : UString  := Null_UString;
       Image_Quality                    : UString  := Null_UString;
       Image_Style                      : UString  := Null_UString;
+      Available_Tools_Json          : UString  := Null_UString;
+      Auth_Token                    : UString  := Null_UString;
+      Elicitation_Handler_Set       : Boolean  := False;
    end record;
 
    Default_Session_Config : constant Session_Config :=
@@ -128,7 +131,10 @@ package Copilot.Types is
       Response_Format                  => Null_UString,
       Image_Size                       => Null_UString,
       Image_Quality                    => Null_UString,
-      Image_Style                      => Null_UString);
+      Image_Style                      => Null_UString,
+       Available_Tools_Json          => Null_UString,
+       Auth_Token                    => Null_UString,
+       Elicitation_Handler_Set       => False);
 
    --  -----------------------------------------------------------------------
    --  Resume session configuration

@@ -18,6 +18,7 @@ module copilot_client_module
   public :: copilot_start, copilot_stop, copilot_ping
   public :: copilot_create_session, copilot_resume_session
   public :: copilot_get_session_metadata, copilot_set_foreground_session
+  public :: copilot_get_foreground_session, copilot_delete_session
   public :: copilot_list_sessions, copilot_get_status
   public :: copilot_get_auth_status, copilot_list_models
   public :: copilot_get_last_session_id
@@ -44,6 +45,8 @@ module copilot_client_module
     procedure :: list_models     => client_list_models
     procedure :: list_sessions   => client_list_sessions
     procedure :: set_foreground     => client_set_foreground
+    procedure :: get_foreground     => client_get_foreground
+    procedure :: delete_session     => client_delete_session
     procedure :: get_last_session_id => client_get_last_session_id
   end type copilot_client
 
@@ -394,10 +397,52 @@ contains
     character(len=:), allocatable :: params
 
     params = '{"sessionId":"' // session_id // '"}'
-    call client%rpc%send_request('session.getMessages', params, req_id, iostat)
+    call client%rpc%send_request('session.getMetadata', params, req_id, iostat)
     meta%session_id = session_id
     meta%status = 'active'
   end subroutine copilot_get_session_metadata
+
+  !> Delete a session by ID.
+  subroutine client_delete_session(self, session_id, iostat)
+    class(copilot_client), intent(inout) :: self
+    character(len=*), intent(in) :: session_id
+    integer, intent(out) :: iostat
+    integer :: req_id
+    character(len=:), allocatable :: params
+
+    params = '{"sessionId":"' // session_id // '"}'
+    call self%rpc%send_request('session.delete', params, req_id, iostat)
+  end subroutine client_delete_session
+
+  subroutine copilot_delete_session(client, session_id, iostat)
+    type(copilot_client), intent(inout) :: client
+    character(len=*), intent(in) :: session_id
+    integer, intent(out) :: iostat
+    call client%delete_session(session_id, iostat)
+  end subroutine copilot_delete_session
+
+  !> Get the foreground session ID.
+  subroutine client_get_foreground(self, session_id, iostat)
+    class(copilot_client), intent(inout) :: self
+    character(len=:), allocatable, intent(out) :: session_id
+    integer, intent(out) :: iostat
+    integer :: req_id
+    character(len=:), allocatable :: response
+
+    call self%rpc%send_request('session.getForeground', '{}', req_id, iostat)
+    if (iostat /= 0) return
+    call self%rpc%read_message(response, iostat)
+    if (iostat /= 0) return
+
+    session_id = extract_session_id(response)
+  end subroutine client_get_foreground
+
+  subroutine copilot_get_foreground_session(client, session_id, iostat)
+    type(copilot_client), intent(inout) :: client
+    character(len=:), allocatable, intent(out) :: session_id
+    integer, intent(out) :: iostat
+    call client%get_foreground(session_id, iostat)
+  end subroutine copilot_get_foreground_session
 
   !> Set the foreground session (TUI mode).
   subroutine client_set_foreground(self, session_id, iostat)

@@ -887,6 +887,20 @@ copilot_error_t copilot_client_resume_session(
 );
 
 /**
+ * Sets the session filesystem provider configuration.
+ *
+ * @param client              The client.
+ * @param initial_cwd         Optional initial working directory (NULL to omit).
+ * @param session_state_path  Optional session state path (NULL to omit).
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_set_session_fs_provider(
+    copilot_client_t *client,
+    const char *initial_cwd,
+    const char *session_state_path
+);
+
+/**
  * Returns the session ID for the given session.
  */
 const char *copilot_session_get_id(const copilot_session_t *session);

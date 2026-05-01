@@ -27,6 +27,7 @@ module Copilot.Client
   , getSessionMetadata
   , getForegroundSessionId
   , setForegroundSessionId
+  , setSessionFsProvider
 
     -- * Queries
   , ping
@@ -472,6 +473,16 @@ setForegroundSessionId client sessionId = do
                 Just (Just e) -> e
                 _             -> "Unknown error"
           throwIO $ ServerError $ "Failed to set foreground session: " <> errMsg
+
+-- | Set the session filesystem provider configuration.
+setSessionFsProvider :: CopilotClient -> SessionFsConfig -> IO ()
+setSessionFsProvider client config = do
+  rpc <- ensureConnected client
+  let params = Aeson.toJSON config
+  result <- sendRequest rpc "sessionFs.setProvider" params
+  case result of
+    Left err -> throwIO $ ServerError (jreMessage err)
+    Right _  -> pure ()
 
 -- ============================================================================
 -- Queries

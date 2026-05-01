@@ -1686,6 +1686,47 @@ copilot_error_t copilot_client_resume_session(
 }
 
 /* ============================================================================
+ * Public API: Session Filesystem Provider
+ * ============================================================================ */
+
+copilot_error_t copilot_set_session_fs_provider(
+    copilot_client_t *client,
+    const char *initial_cwd,
+    const char *session_state_path)
+{
+    if (!client) return COPILOT_ERROR_INVALID_ARGUMENT;
+
+    /* Auto-start if needed */
+    if (client->state != COPILOT_STATE_CONNECTED && client->auto_start) {
+        copilot_error_t err = copilot_client_start(client);
+        if (err != COPILOT_OK) return err;
+    }
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    if (initial_cwd) {
+        cJSON_AddStringToObject(params, "initialCwd", initial_cwd);
+    }
+    if (session_state_path) {
+        cJSON_AddStringToObject(params, "sessionStatePath", session_state_path);
+    }
+
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(client->rpc, "sessionFs.setProvider", params, 30000,
+                                            &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        free(err_msg);
+        return COPILOT_ERROR_RPC;
+    }
+
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+/* ============================================================================
  * Public API: Session
  * ============================================================================ */
 

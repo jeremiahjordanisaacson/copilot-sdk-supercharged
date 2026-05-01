@@ -84,6 +84,10 @@ package Copilot.Client is
    function List_Models
      (Self : in out Copilot_Client) return Model_List;
 
+   --  List all sessions. Returns the raw JSON response string.
+   function List_Sessions
+     (Self : in out Copilot_Client) return String;
+
    --  Get the last-used session ID (returns empty string if none).
    function Get_Last_Session_Id
      (Self : in out Copilot_Client) return String;

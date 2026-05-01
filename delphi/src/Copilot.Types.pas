@@ -198,6 +198,7 @@ type
     GithubToken: string;
     ResponseFormat: TResponseFormat;
     ImageOptions: TImageOptions;
+    AuthToken: string;
   end;
 
   // Resume session config

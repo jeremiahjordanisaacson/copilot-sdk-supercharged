@@ -139,7 +139,8 @@
                 mcp-servers custom-agents config-dir skill-directories
                 disabled-skills infinite-sessions disable-resume
                 model-capabilities enable-config-discovery
-                include-sub-agent-streaming-events github-token]} config]
+                include-sub-agent-streaming-events github-token
+                idle-timeout]} config]
     (cond-> {}
       model               (assoc :model model)
       session-id          (assoc :sessionId session-id)
@@ -168,7 +169,8 @@
       model-capabilities  (assoc :modelCapabilities model-capabilities)
       (some? enable-config-discovery) (assoc :enableConfigDiscovery enable-config-discovery)
       (some? include-sub-agent-streaming-events) (assoc :includeSubAgentStreamingEvents include-sub-agent-streaming-events)
-      github-token        (assoc :gitHubToken github-token))))
+      github-token        (assoc :gitHubToken github-token)
+      idle-timeout        (assoc :idleTimeout idle-timeout))))
 
 (defn create-client
   "Create a new CopilotClient.

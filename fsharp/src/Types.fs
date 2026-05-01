@@ -234,6 +234,8 @@ type SessionConfig =
       ResponseFormat: string option
       /// Image generation options.
       ImageOptions: ImageOptions option
+      /// Handler for elicitation requests from the server.
+      OnElicitationRequest: ElicitationHandler option
       /// Per-session GitHub token.
       GitHubToken: string option }
 
@@ -263,6 +265,7 @@ module SessionConfig =
           McpServers = None
           ResponseFormat = None
           ImageOptions = None
+          OnElicitationRequest = None
           GitHubToken = None }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +280,25 @@ type ResumeSessionConfig =
       OnPermissionRequest: PermissionRequestHandler
       /// Model override for the resumed session.
       Model: string option }
+
+// ---------------------------------------------------------------------------
+// Elicitation handling
+// ---------------------------------------------------------------------------
+
+/// Context for an elicitation request from the server.
+type ElicitationContext =
+    { SessionId: string
+      Message: string
+      RequestedSchema: IDictionary<string, obj> option
+      Mode: string option }
+
+/// Result returned from an elicitation handler.
+type ElicitationResult =
+    { Action: string
+      Content: IDictionary<string, obj> option }
+
+/// Handler for elicitation requests.
+type ElicitationHandler = ElicitationContext -> Async<ElicitationResult>
 
 // ---------------------------------------------------------------------------
 // Tool definition

@@ -384,6 +384,16 @@ proc removeSession*(client: CopilotClient; sessionId: string) =
   ## Remove a session from the client's tracked sessions.
   client.sessions.del(sessionId)
 
+proc deleteSession*(client: CopilotClient; sessionId: string) {.async.} =
+  ## Delete a session on the server.
+  let params = %*{"sessionId": sessionId}
+  discard await client.sendRpcRequest("session.delete", params)
+  client.sessions.del(sessionId)
+
+proc listSessions*(client: CopilotClient): Future[JsonNode] {.async.} =
+  ## List all sessions known to the server.
+  result = await client.sendRpcRequest("session.list", newJObject())
+
 proc getForegroundSessionId*(client: CopilotClient): Future[string] {.async.} =
   ## Get the foreground session ID from the server.
   let res = await client.sendRpcRequest("session.getForeground", newJObject())

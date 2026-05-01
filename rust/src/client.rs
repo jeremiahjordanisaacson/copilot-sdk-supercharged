@@ -520,6 +520,25 @@ impl CopilotClient {
     }
 
     // ========================================================================
+    // Session Filesystem Provider
+    // ========================================================================
+
+    /// Sets the session filesystem provider configuration.
+    ///
+    /// This configures the session filesystem with optional initial working directory,
+    /// session state path, and conventions.
+    pub async fn set_session_fs_provider(
+        &self,
+        config: SessionFsConfig,
+    ) -> Result<(), CopilotError> {
+        let rpc = self.get_rpc_client().await?;
+        let params = serde_json::to_value(&config)
+            .map_err(|e| CopilotError::Serialization(e.to_string()))?;
+        rpc.request("sessionFs.setProvider", params, None).await?;
+        Ok(())
+    }
+
+    // ========================================================================
     // Lifecycle Event Subscription
     // ========================================================================
 

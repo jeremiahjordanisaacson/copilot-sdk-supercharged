@@ -13,6 +13,7 @@ module copilot_types
   public :: session_event, send_options, send_and_wait_result
   public :: copilot_tool, tool_result, tool_invocation
   public :: permission_request, permission_result
+  public :: elicitation_request, elicitation_result
   public :: session_fs_config, session_fs_entry
   public :: copilot_connection_state
   public :: mcp_server_config, command_definition, image_options
@@ -201,6 +202,21 @@ module copilot_types
     logical :: granted = .false.
     character(len=:), allocatable :: reason
   end type permission_result
+
+  ! --------------------------------------------------------------------------
+  ! Elicitation request / result
+  ! --------------------------------------------------------------------------
+  type :: elicitation_request
+    character(len=:), allocatable :: session_id
+    character(len=:), allocatable :: message
+    character(len=:), allocatable :: mode
+    character(len=:), allocatable :: schema_json
+  end type elicitation_request
+
+  type :: elicitation_result
+    character(len=:), allocatable :: action
+    character(len=:), allocatable :: content_json
+  end type elicitation_result
 
   ! --------------------------------------------------------------------------
   ! Abstract interfaces for callbacks

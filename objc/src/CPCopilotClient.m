@@ -348,7 +348,7 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
              completion:(void (^)(CPCopilotSession * _Nullable, NSError * _Nullable))completion {
     NSDictionary *params = config ? [config toDictionary] : @{};
 
-    [self.rpcClient sendRequest:@"session/create"
+    [self.rpcClient sendRequest:@"session.create"
                          params:params
                      completion:^(NSDictionary *result, NSError *error) {
         if (error) {
@@ -406,7 +406,7 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
         [params addEntriesFromDictionary:[config toDictionary]];
     }
 
-    [self.rpcClient sendRequest:@"session/resume"
+    [self.rpcClient sendRequest:@"session.resume"
                          params:params
                      completion:^(NSDictionary *result, NSError *error) {
         if (error) {
@@ -484,7 +484,7 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 }
 
 - (void)listSessionsWithCompletion:(void (^)(NSArray<CPSessionMetadata *> * _Nullable, NSError * _Nullable))completion {
-    [self.rpcClient sendRequest:@"session/list"
+    [self.rpcClient sendRequest:@"session.list"
                          params:nil
                      completion:^(NSDictionary *result, NSError *error) {
         if (error) {
@@ -503,7 +503,7 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 
 - (void)deleteSession:(NSString *)sessionId
            completion:(void (^)(NSError * _Nullable))completion {
-    [self.rpcClient sendRequest:@"session/delete"
+    [self.rpcClient sendRequest:@"session.delete"
                          params:@{@"sessionId": sessionId}
                      completion:^(NSDictionary *result, NSError *error) {
         if (!error) {

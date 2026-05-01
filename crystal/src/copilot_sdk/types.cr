@@ -165,6 +165,32 @@ module CopilotSDK
     end
   end
 
+  # Context for an elicitation request from the server.
+  class ElicitationRequest
+    include JSON::Serializable
+
+    @[JSON::Field(key: "sessionId")]
+    property session_id : String
+    property message : String
+    property mode : String?
+    @[JSON::Field(key: "requestedSchema")]
+    property requested_schema : Hash(String, JSON::Any)?
+
+    def initialize(@session_id, @message, @mode = nil, @requested_schema = nil)
+    end
+  end
+
+  # Result returned from an elicitation handler.
+  class ElicitationResult
+    include JSON::Serializable
+
+    property action : String
+    property content : Hash(String, JSON::Any)?
+
+    def initialize(@action = "accept", @content = nil)
+    end
+  end
+
   # Session event from the Copilot CLI.
   class SessionEvent
     include JSON::Serializable
@@ -229,6 +255,10 @@ module CopilotSDK
     property reasoning_effort : String?
     @[JSON::Field(key: "responseFormat")]
     property response_format : String?
+    @[JSON::Field(key: "requestHeaders")]
+    property request_headers : Hash(String, String)?
+    @[JSON::Field(key: "elicitationHandler")]
+    property elicitation_handler : Bool?
 
     def initialize(@model = nil, @streaming = nil, @system_message = nil,
                    @tools = nil, @instructions = nil, @agent_mode = nil,
@@ -236,7 +266,7 @@ module CopilotSDK
                    @enable_config_discovery = nil, @include_sub_agent_streaming_events = nil,
                    @commands = nil, @skill_directories = nil, @disabled_skills = nil,
                    @working_directory = nil, @github_token = nil, @reasoning_effort = nil,
-                   @response_format = nil)
+                   @response_format = nil, @request_headers = nil, @elicitation_handler = nil)
     end
   end
 

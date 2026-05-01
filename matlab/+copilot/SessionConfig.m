@@ -56,6 +56,9 @@ classdef SessionConfig
 
         % Image generation options (struct with Size, Quality, Style).
         ImageOptions
+
+        % Handler for elicitation requests (function handle or empty).
+        ElicitationHandler
     end
 
     methods
@@ -83,6 +86,7 @@ classdef SessionConfig
             p.addParameter('Commands',            obj.Commands);
             p.addParameter('ResponseFormat',      obj.ResponseFormat);
             p.addParameter('ImageOptions',        struct());
+            p.addParameter('ElicitationHandler',  []);
             p.parse(varargin{:});
 
             obj.Model              = p.Results.Model;
@@ -102,6 +106,7 @@ classdef SessionConfig
             obj.Commands           = p.Results.Commands;
             obj.ResponseFormat     = p.Results.ResponseFormat;
             obj.ImageOptions       = p.Results.ImageOptions;
+            obj.ElicitationHandler = p.Results.ElicitationHandler;
         end
 
         function s = toStruct(obj)

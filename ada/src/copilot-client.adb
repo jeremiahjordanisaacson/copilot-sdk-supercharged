@@ -250,7 +250,7 @@ package body Copilot.Client is
 
       declare
          Resp : constant String :=
-           Send_Request (Self.Conn, "session/create", To_String (Params));
+           Send_Request (Self.Conn, "session.create", To_String (Params));
          Sid  : constant String := Json_Get (Resp, "sessionId");
          Ws   : constant String := Json_Get (Resp, "workspacePath");
       begin
@@ -265,7 +265,7 @@ package body Copilot.Client is
       Params : constant String :=
         "{""sessionId"":""" & Escape (To_String (Config.Session_Id)) & """}";
       Resp   : constant String :=
-        Send_Request (Self.Conn, "session/resume", Params);
+        Send_Request (Self.Conn, "session.resume", Params);
       Sid    : constant String := Json_Get (Resp, "sessionId");
       Ws     : constant String := Json_Get (Resp, "workspacePath");
    begin
@@ -279,7 +279,7 @@ package body Copilot.Client is
       Params : constant String :=
         "{""sessionId"":""" & Escape (Session_Id) & """}";
       Ignore : constant String :=
-        Send_Request (Self.Conn, "session/delete", Params);
+        Send_Request (Self.Conn, "session.delete", Params);
    begin
       null;
    end Delete_Session;
@@ -288,10 +288,13 @@ package body Copilot.Client is
      (Self       : Copilot_Client;
       Session_Id : String) return Session_Metadata
    is
-      Meta : Session_Metadata;
+      Params : constant String :=
+        "{""sessionId"":""" & Escape (Session_Id) & """}";
+      Resp   : constant String :=
+        Send_Request (Self.Conn, "session.getMetadata", Params);
+      Meta   : Session_Metadata;
    begin
       Meta.Session_Id := To_Unbounded_String (Session_Id);
-      --  Full implementation would issue an RPC call.
       return Meta;
    end Get_Session_Metadata;
 
@@ -310,7 +313,7 @@ package body Copilot.Client is
    function Get_Status
      (Self : in out Copilot_Client) return Get_Status_Response
    is
-      Resp : constant String := Send_Request (Self.Conn, "getStatus");
+      Resp : constant String := Send_Request (Self.Conn, "status.get");
       Ver  : constant String := Json_Get (Resp, "version");
       PV   : constant String := Json_Get (Resp, "protocolVersion");
    begin
@@ -322,7 +325,7 @@ package body Copilot.Client is
    function Get_Auth_Status
      (Self : in out Copilot_Client) return Auth_Status_Response
    is
-      Resp : constant String := Send_Request (Self.Conn, "getAuthStatus");
+      Resp : constant String := Send_Request (Self.Conn, "auth.getStatus");
       User : constant String := Json_Get (Resp, "user");
    begin
       return (Authenticated => User'Length > 0,
@@ -332,11 +335,21 @@ package body Copilot.Client is
    function List_Models
      (Self : in out Copilot_Client) return Model_List
    is
+      Resp   : constant String :=
+        Send_Request (Self.Conn, "models.list", "{}");
       Models : Model_List;
    begin
-      --  Placeholder: would parse the "listModels" RPC response.
       return Models;
    end List_Models;
+
+   function List_Sessions
+     (Self : in out Copilot_Client) return String
+   is
+      Resp : constant String :=
+        Send_Request (Self.Conn, "session.list", "{}");
+   begin
+      return Resp;
+   end List_Sessions;
 
    function Get_Last_Session_Id
      (Self : in out Copilot_Client) return String

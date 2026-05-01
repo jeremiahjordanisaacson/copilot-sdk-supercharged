@@ -498,6 +498,29 @@ class CopilotClient
     }
 
     /**
+     * Sets the session filesystem provider configuration.
+     *
+     * @param array $config Optional config with keys: initialCwd, sessionStatePath, conventions
+     */
+    public function setSessionFsProvider(array $config = []): void
+    {
+        $this->ensureConnected();
+
+        $params = [];
+        if (isset($config['initialCwd'])) {
+            $params['initialCwd'] = $config['initialCwd'];
+        }
+        if (isset($config['sessionStatePath'])) {
+            $params['sessionStatePath'] = $config['sessionStatePath'];
+        }
+        if (isset($config['conventions'])) {
+            $params['conventions'] = $config['conventions'];
+        }
+
+        $this->connection->request('sessionFs.setProvider', $params);
+    }
+
+    /**
      * Subscribe to session lifecycle events (typed).
      *
      * @param string $eventType e.g. "session.created", "session.deleted"

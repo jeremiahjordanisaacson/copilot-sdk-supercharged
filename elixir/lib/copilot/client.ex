@@ -183,6 +183,20 @@ defmodule Copilot.Client do
     GenServer.call(client, {:set_foreground_session_id, session_id}, 10_000)
   end
 
+  @doc """
+  Sets the session filesystem provider configuration.
+
+  ## Options
+
+    * `:initial_cwd` - Optional initial working directory.
+    * `:session_state_path` - Optional path for session state persistence.
+    * `:conventions` - Optional list of convention strings.
+  """
+  @spec set_session_fs_provider(GenServer.server(), map()) :: :ok | {:error, any()}
+  def set_session_fs_provider(client, config \\ %{}) do
+    GenServer.call(client, {:set_session_fs_provider, config}, 10_000)
+  end
+
   @doc "Get the current connection state."
   @spec get_state(GenServer.server()) :: :disconnected | :connecting | :connected | :error
   def get_state(client) do
@@ -398,6 +412,21 @@ defmodule Copilot.Client do
 
       {:error, _} = err ->
         {:reply, err, state}
+    end
+  end
+
+  def handle_call({:set_session_fs_provider, config}, _from, state) do
+    state = maybe_auto_start(state)
+
+    params =
+      %{}
+      |> then(fn p -> if config[:initial_cwd], do: Map.put(p, "initialCwd", config[:initial_cwd]), else: p end)
+      |> then(fn p -> if config[:session_state_path], do: Map.put(p, "sessionStatePath", config[:session_state_path]), else: p end)
+      |> then(fn p -> if config[:conventions], do: Map.put(p, "conventions", config[:conventions]), else: p end)
+
+    case JsonRpcClient.request(state.rpc, "sessionFs.setProvider", params, 10_000) do
+      {:ok, _} -> {:reply, :ok, state}
+      {:error, _} = err -> {:reply, err, state}
     end
   end
 

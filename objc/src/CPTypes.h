@@ -83,6 +83,13 @@ typedef void (^CPPermissionHandler)(NSDictionary<NSString *, id> *request,
                                     NSString *sessionId,
                                     void (^completion)(CPPermissionKind kind));
 
+#pragma mark - Elicitation Handler
+
+/// Block type for elicitation request handlers.
+typedef void (^CPElicitationHandler)(NSDictionary<NSString *, id> *request,
+                                     NSString *sessionId,
+                                     void (^completion)(NSDictionary<NSString *, id> *result));
+
 #pragma mark - Session Event
 
 /// An event received from the session.
@@ -186,6 +193,8 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, copy, nullable) NSArray<NSDictionary<NSString *, id> *> *commands;
 @property (nonatomic, copy, nullable) NSString *responseFormat;
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *imageOptions;
+@property (nonatomic, copy, nullable) CPElicitationHandler elicitationHandler;
+@property (nonatomic, copy, nullable) NSString *authToken;
 
 - (NSDictionary<NSString *, id> *)toDictionary;
 

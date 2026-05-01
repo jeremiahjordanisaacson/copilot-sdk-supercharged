@@ -75,6 +75,9 @@ type
     // Get session metadata
     function GetSessionMetadata(const ASessionId: string): TSessionMetadata;
 
+    // Get the foreground session id (TUI mode)
+    function GetForegroundSessionId: string;
+
     // Set the foreground session id (TUI mode)
     procedure SetForegroundSessionId(const ASessionId: string);
 
@@ -526,6 +529,21 @@ begin
       Result.Status := Obj.GetValue<string>('status', '');
       Result.MessageCount := Obj.GetValue<Integer>('messageCount', 0);
     end;
+  finally
+    ResultVal.Free;
+  end;
+end;
+
+function TCopilotClient.GetForegroundSessionId: string;
+var
+  ResultVal: TJSONValue;
+begin
+  ResultVal := FRpc.SendRequest('session.getForeground', TJSONObject.Create);
+  try
+    if ResultVal is TJSONObject then
+      Result := TJSONObject(ResultVal).GetValue<string>('sessionId', '')
+    else
+      Result := '';
   finally
     ResultVal.Free;
   end;

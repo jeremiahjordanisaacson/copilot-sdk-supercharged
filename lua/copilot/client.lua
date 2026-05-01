@@ -418,6 +418,34 @@ function CopilotClient:list_sessions()
     return {}, nil
 end
 
+--- Sets the session filesystem provider configuration.
+-- @param config table|nil  Optional table with keys: initialCwd, sessionStatePath, conventions
+-- @return boolean success
+-- @return string|nil error
+function CopilotClient:set_session_fs_provider(config)
+    local ok, err = self:_ensure_connected()
+    if not ok then return false, err end
+
+    config = config or {}
+    local params = {}
+    if config.initialCwd then
+        params.initialCwd = config.initialCwd
+    end
+    if config.sessionStatePath then
+        params.sessionStatePath = config.sessionStatePath
+    end
+    if config.conventions then
+        params.conventions = config.conventions
+    end
+
+    local _, req_err = self._rpc_client:request("sessionFs.setProvider", params)
+    if req_err then
+        return false, "failed to set session fs provider: " .. tostring(req_err)
+    end
+
+    return true, nil
+end
+
 --- Delete a session permanently.
 -- @param session_id string
 -- @return boolean success

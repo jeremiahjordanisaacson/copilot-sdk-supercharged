@@ -203,19 +203,19 @@ pub const CopilotClient = struct {
     /// Get server version and protocol information.
     pub fn getStatus(self: *CopilotClient) SdkError!JsonValue {
         if (self.state != .connected) return SdkError.NotConnected;
-        return try self.transport.?.sendRequest("getStatus", null);
+        return try self.transport.?.sendRequest("status.get", null);
     }
 
     /// Get authentication status.
     pub fn getAuthStatus(self: *CopilotClient) SdkError!JsonValue {
         if (self.state != .connected) return SdkError.NotConnected;
-        return try self.transport.?.sendRequest("getAuthStatus", null);
+        return try self.transport.?.sendRequest("auth.getStatus", null);
     }
 
     /// List available models.
     pub fn listModels(self: *CopilotClient) SdkError!JsonValue {
         if (self.state != .connected) return SdkError.NotConnected;
-        return try self.transport.?.sendRequest("listModels", null);
+        return try self.transport.?.sendRequest("models.list", null);
     }
 
     /// Get session metadata by session ID.

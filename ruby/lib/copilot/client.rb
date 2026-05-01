@@ -428,6 +428,23 @@ module Copilot
       end
     end
 
+    # Sets the session filesystem provider configuration.
+    #
+    # @param initial_cwd [String, nil] Initial working directory
+    # @param session_state_path [String, nil] Path for session state persistence
+    # @param conventions [Array<String>, nil] Convention strings
+    # @return [void]
+    def set_session_fs_provider(initial_cwd: nil, session_state_path: nil, conventions: nil)
+      raise_not_connected! unless @rpc_client
+
+      params = {}
+      params[:initialCwd] = initial_cwd if initial_cwd
+      params[:sessionStatePath] = session_state_path if session_state_path
+      params[:conventions] = conventions if conventions
+
+      @rpc_client.request("sessionFs.setProvider", params)
+    end
+
     # Subscribe to session lifecycle events.
     #
     # @overload on(&handler)

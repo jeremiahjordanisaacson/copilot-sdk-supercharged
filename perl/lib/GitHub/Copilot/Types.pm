@@ -571,6 +571,16 @@ has include_sub_agent_streaming_events => (is => 'ro', default => sub { undef })
 has github_token              => (is => 'ro', default => sub { undef });
 has commands                => (is => 'ro', default => sub { undef });
 has on_elicitation_request  => (is => 'ro', default => sub { undef });
+# System prompt text (alias for system_message, maps to systemPrompt on wire)
+has system_prompt           => (is => 'ro', default => sub { undef });
+# List of skill names to enable
+has skills                  => (is => 'ro', default => sub { undef });
+# Request headers to forward with each request
+has request_headers         => (is => 'ro', default => sub { undef });
+# Response format override (e.g. 'text', 'json_object')
+has response_format         => (is => 'ro', default => sub { undef });
+# Idle timeout in seconds for this session
+has idle_timeout            => (is => 'ro', default => sub { undef });
 
 sub to_wire {
     my ($self) = @_;
@@ -606,8 +616,25 @@ sub to_wire {
         $payload{gitHubToken} = $self->github_token;
     }
 
+    if (defined $self->system_prompt) {
+        $payload{systemPrompt} = $self->system_prompt;
+    }
+    if (defined $self->skills) {
+        $payload{skills} = $self->skills;
+    }
+    if (defined $self->request_headers) {
+        $payload{requestHeaders} = $self->request_headers;
+    }
+    if (defined $self->response_format) {
+        $payload{responseFormat} = $self->response_format;
+    }
+    if (defined $self->idle_timeout) {
+        $payload{idleTimeout} = $self->idle_timeout;
+    }
+
     $payload{requestPermission} = \1 if defined $self->on_permission_request;
     $payload{requestUserInput}  = \1 if defined $self->on_user_input_request;
+    $payload{requestElicitation} = \1 if defined $self->on_elicitation_request;
 
     if (defined $self->hooks) {
         my $hooks = $self->hooks;

@@ -529,6 +529,31 @@ class CopilotClient {
   }
 
   // -------------------------------------------------------------------------
+  // Session Filesystem Provider
+  // -------------------------------------------------------------------------
+
+  /// Sets the session filesystem provider configuration.
+  ///
+  /// [initialCwd] is the optional initial working directory.
+  /// [sessionStatePath] is the optional path for session state persistence.
+  /// [conventions] is an optional list of convention strings.
+  Future<void> setSessionFsProvider({
+    String? initialCwd,
+    String? sessionStatePath,
+    List<String>? conventions,
+  }) async {
+    await _ensureConnected();
+
+    final params = <String, dynamic>{
+      if (initialCwd != null) 'initialCwd': initialCwd,
+      if (sessionStatePath != null) 'sessionStatePath': sessionStatePath,
+      if (conventions != null) 'conventions': conventions,
+    };
+
+    await _connection!.sendRequest('sessionFs.setProvider', params);
+  }
+
+  // -------------------------------------------------------------------------
   // Lifecycle Event Subscriptions
   // -------------------------------------------------------------------------
 

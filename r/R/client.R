@@ -224,7 +224,9 @@ CopilotClient <- R6::R6Class(
                               github_token = NULL, model_capabilities = NULL,
                               enable_config_discovery = NULL,
                               include_sub_agent_streaming_events = NULL,
-                              commands = NULL) {
+                              commands = NULL,
+                              request_headers = NULL,
+                              response_format = NULL) {
       if (is.null(private$client)) {
         if (isTRUE(self$options$auto_start)) {
           self$start()
@@ -274,6 +276,8 @@ CopilotClient <- R6::R6Class(
         })
         payload$commands <- cmds_list
       }
+      if (!is.null(request_headers)) payload$requestHeaders <- request_headers
+      if (!is.null(response_format)) payload$responseFormat <- response_format
       if (!is.null(infinite_sessions)) {
         wire_config <- list()
         if (!is.null(infinite_sessions$enabled)) wire_config$enabled <- infinite_sessions$enabled

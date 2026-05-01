@@ -168,7 +168,7 @@ classdef CopilotClient < handle
             obj.assertRunning();
 
             params = config.toStruct();
-            result = obj.RpcClient.request('session/create', params, 30);
+            result = obj.RpcClient.request('session.create', params, 30);
 
             sessionId = '';
             if isfield(result, 'sessionId')
@@ -194,7 +194,7 @@ classdef CopilotClient < handle
 
             params = config.toStruct();
             params.sessionId = sessionId;
-            result = obj.RpcClient.request('session/resume', params, 30);
+            result = obj.RpcClient.request('session.resume', params, 30);
 
             sid = sessionId;
             if isfield(result, 'sessionId')
@@ -214,7 +214,7 @@ classdef CopilotClient < handle
                 sessionId (1,:) char
             end
             obj.assertRunning();
-            metadata = obj.RpcClient.request('session/getMetadata', ...
+            metadata = obj.RpcClient.request('session.getMetadata', ...
                 struct('sessionId', sessionId), 15);
         end
 
@@ -246,7 +246,7 @@ classdef CopilotClient < handle
                 filter = struct()
             end
             obj.assertRunning();
-            sessions = obj.RpcClient.request('session/list', filter, 15);
+            sessions = obj.RpcClient.request('session.list', filter, 15);
         end
 
         function deleteSession(obj, sessionId)
@@ -256,7 +256,7 @@ classdef CopilotClient < handle
                 sessionId (1,:) char
             end
             obj.assertRunning();
-            obj.RpcClient.request('session/delete', ...
+            obj.RpcClient.request('session.delete', ...
                 struct('sessionId', sessionId), 15);
             if obj.Sessions.isKey(sessionId)
                 obj.Sessions.remove(sessionId);
@@ -279,25 +279,25 @@ classdef CopilotClient < handle
         function status = getStatus(obj)
             %getStatus  Return the CLI server status.
             obj.assertRunning();
-            status = obj.RpcClient.request('getStatus', struct(), 10);
+            status = obj.RpcClient.request('status.get', struct(), 10);
         end
 
         function authStatus = getAuthStatus(obj)
             %getAuthStatus  Return the current authentication status.
             obj.assertRunning();
-            authStatus = obj.RpcClient.request('getAuthStatus', struct(), 10);
+            authStatus = obj.RpcClient.request('auth.getStatus', struct(), 10);
         end
 
         function models = listModels(obj)
             %listModels  Return available models.
             obj.assertRunning();
-            models = obj.RpcClient.request('listModels', struct(), 15);
+            models = obj.RpcClient.request('models.list', struct(), 15);
         end
 
         function sid = getLastSessionId(obj)
             %getLastSessionId  Return the last-used session identifier.
             obj.assertRunning();
-            result = obj.RpcClient.request('getLastSessionId', struct(), 10);
+            result = obj.RpcClient.request('session.getLastId', struct(), 10);
             sid = '';
             if isfield(result, 'sessionId')
                 sid = result.sessionId;

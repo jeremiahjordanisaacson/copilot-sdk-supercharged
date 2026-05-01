@@ -158,7 +158,7 @@ final class CopilotClient
     {
         enforce(_started, "client not started");
 
-        auto result = _rpc.request("session/create", config.toJson());
+        auto result = _rpc.request("session.create", config.toJson());
         auto info = SessionInfo.fromJson(result);
         enforce(info.sessionId.length > 0, "server returned empty sessionId");
 
@@ -192,7 +192,7 @@ final class CopilotClient
     {
         enforce(_started, "client not started");
 
-        auto result = _rpc.request("session/resume", config.toJson());
+        auto result = _rpc.request("session.resume", config.toJson());
         auto info = SessionInfo.fromJson(result);
         string sid = info.sessionId.length > 0 ? info.sessionId : config.sessionId;
 
@@ -203,6 +203,25 @@ final class CopilotClient
         _sessions[sid] = session;
 
         return session;
+    }
+
+    /// Delete a session by ID.
+    void deleteSession(string sessionId) @trusted
+    {
+        enforce(_started, "client not started");
+        auto params = JSONValue(["sessionId": JSONValue(sessionId)]);
+        _rpc.request("session.delete", params);
+
+        _sessionsMutex.lock();
+        scope(exit) _sessionsMutex.unlock();
+        _sessions.remove(sessionId);
+    }
+
+    /// List all sessions known to the server.
+    JSONValue listSessions() @trusted
+    {
+        enforce(_started, "client not started");
+        return _rpc.request("session.list");
     }
 
     // ------------------------------------------------------------------
@@ -225,7 +244,7 @@ final class CopilotClient
     CopilotStatus getStatus() @trusted
     {
         enforce(_started, "client not started");
-        auto result = _rpc.request("getStatus");
+        auto result = _rpc.request("status.get");
         return CopilotStatus.fromJson(result);
     }
 
@@ -233,14 +252,14 @@ final class CopilotClient
     JSONValue listModels() @trusted
     {
         enforce(_started, "client not started");
-        return _rpc.request("listModels");
+        return _rpc.request("models.list");
     }
 
     /// Get the current authentication status.
     JSONValue getAuthStatus() @trusted
     {
         enforce(_started, "client not started");
-        return _rpc.request("getAuthStatus");
+        return _rpc.request("auth.getStatus");
     }
 
     /// Get the last session ID, or null if none.

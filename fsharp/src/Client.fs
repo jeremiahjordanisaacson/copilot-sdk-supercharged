@@ -268,20 +268,20 @@ type CopilotClient(options: CopilotClientOptions) =
     /// List available models.
     member _.ListModelsAsync(?cancellationToken: CancellationToken) : Async<ModelInfo list> = async {
         let t = getTransport ()
-        let! models = t.SendRequestAsync<ModelInfo list>("listModels")
+        let! models = t.SendRequestAsync<ModelInfo list>("models.list")
         return models
     }
 
     /// Get the authentication status.
     member _.GetAuthStatusAsync(?cancellationToken: CancellationToken) : Async<GetAuthStatusResponse> = async {
         let t = getTransport ()
-        return! t.SendRequestAsync<GetAuthStatusResponse>("getAuthStatus")
+        return! t.SendRequestAsync<GetAuthStatusResponse>("auth.getStatus")
     }
 
     /// Get the server status.
     member _.GetStatusAsync(?cancellationToken: CancellationToken) : Async<GetStatusResponse> = async {
         let t = getTransport ()
-        return! t.SendRequestAsync<GetStatusResponse>("getStatus")
+        return! t.SendRequestAsync<GetStatusResponse>("status.get")
     }
 
     /// Get the ID of the most recently updated session.
@@ -316,6 +316,13 @@ type CopilotClient(options: CopilotClientOptions) =
             return result.sessionId
         with
         | :? JsonRpcException -> return None
+    }
+
+    /// List all sessions known to the server.
+    member _.ListSessionsAsync(?cancellationToken: CancellationToken) : Async<SessionMetadata list> = async {
+        let t = getTransport ()
+        let! sessions = t.SendRequestAsync<SessionMetadata list>("session.list")
+        return sessions
     }
 
     /// Set the foreground session ID.

@@ -96,12 +96,16 @@ export class CopilotSolidityClient {
 
     /** Get the foreground session ID from the CLI server. */
     async getForegroundSessionId(): Promise<string> {
-        return (this.client as any).getForegroundSessionId();
+        const result = await (this.client as any).request("session.getForeground", {});
+        return result?.sessionId ?? "";
     }
 
     /** Set the foreground session ID on the CLI server. */
     async setForegroundSessionId(sessionId: string): Promise<void> {
-        return (this.client as any).setForegroundSessionId(sessionId);
+        const result = await (this.client as any).request("session.setForeground", { sessionId });
+        if (!result?.success) {
+            throw new Error(`Failed to set foreground session: ${result?.error ?? "Unknown error"}`);
+        }
     }
 
     /** Get the last session ID, or null if none. */
@@ -135,6 +139,21 @@ export class CopilotSolidityClient {
         return (this.client as any).request("auth.getStatus", {});
     }
 
+    /** Resume a previously created session by ID. */
+    async resumeSession(sessionId: string): Promise<unknown> {
+        return (this.client as any).request("session.resume", { sessionId });
+    }
+
+    /** Delete a session by ID. */
+    async deleteSession(sessionId: string): Promise<void> {
+        await (this.client as any).request("session.delete", { sessionId });
+    }
+
+    /** List all known sessions. */
+    async listSessions(): Promise<unknown[]> {
+        return (this.client as any).request("session.list", {});
+    }
+
     // -----------------------------------------------------------------------
     // Session filesystem
     // -----------------------------------------------------------------------
@@ -151,6 +170,14 @@ export class CopilotSolidityClient {
     // -----------------------------------------------------------------------
     // Session helpers
     // -----------------------------------------------------------------------
+
+    /**
+     * Create a raw session via the "session.create" RPC (without Solidity tools).
+     * For a session pre-loaded with Solidity tools use {@link createSession}.
+     */
+    async createRawSession(params: Record<string, unknown> = {}): Promise<unknown> {
+        return (this.client as any).request("session.create", params);
+    }
 
     /**
      * Create a session pre-configured with Solidity tools and system prompt.

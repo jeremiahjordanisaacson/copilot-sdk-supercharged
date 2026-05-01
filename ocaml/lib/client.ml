@@ -181,7 +181,7 @@ let create_session ?(config = Types.default_session_config ()) (t : t)
   let open Lwt.Syntax in
   let rpc = get_rpc t in
   let params = Types.session_config_to_yojson config in
-  let* result = Jsonrpc.send_request rpc "session/create" params in
+  let* result = Jsonrpc.send_request rpc "session.create" params in
   let open Yojson.Safe.Util in
   let session_id = result |> member "sessionId" |> to_string in
   let session = Session.create ~rpc ~session_id ~config in
@@ -195,7 +195,7 @@ let create_session ?(config = Types.default_session_config ()) (t : t)
 let get_status (t : t) : Types.get_status_response Lwt.t =
   let open Lwt.Syntax in
   let rpc = get_rpc t in
-  let* result = Jsonrpc.send_request rpc "getStatus" `Null in
+  let* result = Jsonrpc.send_request rpc "status.get" `Null in
   match Types.get_status_response_of_yojson result with
   | Ok resp -> Lwt.return resp
   | Error msg -> Lwt.fail_with msg
@@ -203,7 +203,7 @@ let get_status (t : t) : Types.get_status_response Lwt.t =
 let list_models (t : t) : Types.model_info list Lwt.t =
   let open Lwt.Syntax in
   let rpc = get_rpc t in
-  let* result = Jsonrpc.send_request rpc "models/list" `Null in
+  let* result = Jsonrpc.send_request rpc "models.list" `Null in
   let open Yojson.Safe.Util in
   let models = result |> to_list in
   Lwt.return
@@ -257,12 +257,41 @@ let ping ?(message = "ping") (t : t) : Yojson.Safe.t Lwt.t =
   let params = `Assoc [ ("message", `String message) ] in
   Jsonrpc.send_request rpc "ping" params
 
+let resume_session (t : t) (session_id : string) ?(config = Types.default_session_config ())
+    : Session.t Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let base_params = Types.session_config_to_yojson config in
+  let params =
+    match base_params with
+    | `Assoc fields -> `Assoc (("sessionId", `String session_id) :: fields)
+    | _ -> `Assoc [ ("sessionId", `String session_id) ]
+  in
+  let* result = Jsonrpc.send_request rpc "session.resume" params in
+  let open Yojson.Safe.Util in
+  let sid = try result |> member "sessionId" |> to_string with _ -> session_id in
+  let session = Session.create ~rpc ~session_id:sid ~config in
+  Session.setup_notifications session;
+  Lwt.return session
+
+let delete_session (t : t) (session_id : string) : unit Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let params = `Assoc [ ("sessionId", `String session_id) ] in
+  let* _result = Jsonrpc.send_request rpc "session.delete" params in
+  Lwt.return_unit
+
+let list_sessions (t : t) : Yojson.Safe.t Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  Jsonrpc.send_request rpc "session.list" (`Assoc [])
+
 let get_auth_status (t : t) : Yojson.Safe.t Lwt.t =
   let open Lwt.Syntax in
   let rpc = get_rpc t in
   Jsonrpc.send_request rpc "auth.getStatus" (`Assoc [])
 
-let set_session_fs_provider (t : t) (config : Types.session_fs_config)
+let set_session_fs_provider(t : t) (config : Types.session_fs_config)
     : Yojson.Safe.t Lwt.t =
   let open Lwt.Syntax in
   let rpc = get_rpc t in

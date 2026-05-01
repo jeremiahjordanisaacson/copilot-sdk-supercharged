@@ -317,6 +317,22 @@ Namespace GitHub.Copilot.SDK
         End Function
 
         ''' <summary>
+        ''' Gets the foreground session ID from the server.
+        ''' </summary>
+        Public Async Function GetForegroundSessionIdAsync(
+            Optional cancellationToken As CancellationToken = Nothing
+        ) As Task(Of String)
+
+            Await EnsureStartedAsync(cancellationToken)
+            Dim result = Await _rpcClient.InvokeAsync(Of JsonElement)(
+                "session.getForeground", Nothing, cancellationToken)
+            If result.TryGetProperty("sessionId", Nothing) Then
+                Return result.GetProperty("sessionId").GetString()
+            End If
+            Return String.Empty
+        End Function
+
+        ''' <summary>
         ''' Lists all sessions on the server.
         ''' </summary>
         Public Async Function ListSessionsAsync(

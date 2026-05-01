@@ -60,6 +60,8 @@ proc ::copilot::types::make_session_config {args} {
         working_directory                   "" \
         reasoning_effort                    "" \
         response_format                     "" \
+        request_headers                     {} \
+        elicitation_handler                 "" \
     ]
     set cfg $defaults
     foreach {key value} $args {

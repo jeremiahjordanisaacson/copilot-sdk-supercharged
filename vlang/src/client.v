@@ -107,7 +107,7 @@ pub fn (mut c CopilotClient) create_session(config SessionConfig) !&CopilotSessi
 		params['"history"'] = json.encode(config.history)
 	}
 
-	raw_result := c.transport.send_request('session/create', build_params(params))!
+	raw_result := c.transport.send_request('session.create', build_params(params))!
 	result := parse_response_result(raw_result)!
 
 	metadata := json.decode(SessionMetadata, result) or {
@@ -126,13 +126,13 @@ pub fn (mut c CopilotClient) create_session(config SessionConfig) !&CopilotSessi
 
 // get_status retrieves the server status.
 pub fn (mut c CopilotClient) get_status() !string {
-	raw := c.transport.send_request('getStatus', '{}')!
+	raw := c.transport.send_request('status.get', '{}')!
 	return parse_response_result(raw)
 }
 
 // get_models lists available models.
 pub fn (mut c CopilotClient) get_models() ![]ModelInfo {
-	raw := c.transport.send_request('getModels', '{}')!
+	raw := c.transport.send_request('models.list', '{}')!
 	result := parse_response_result(raw)!
 	return json.decode([]ModelInfo, result)
 }
@@ -190,6 +190,28 @@ pub fn (mut c CopilotClient) ping(message string) !string {
 // get_auth_status retrieves the authentication status.
 pub fn (mut c CopilotClient) get_auth_status() !string {
 	raw := c.transport.send_request('auth.getStatus', '{}')!
+	return parse_response_result(raw)
+}
+
+// resume_session resumes a previously created session by ID.
+pub fn (mut c CopilotClient) resume_session(session_id string) !string {
+	mut params := map[string]string{}
+	params['"sessionId"'] = '"${session_id}"'
+	raw := c.transport.send_request('session.resume', build_params(params))!
+	return parse_response_result(raw)
+}
+
+// delete_session deletes a session by ID.
+pub fn (mut c CopilotClient) delete_session(session_id string) ! {
+	mut params := map[string]string{}
+	params['"sessionId"'] = '"${session_id}"'
+	raw := c.transport.send_request('session.delete', build_params(params))!
+	_ := parse_response_result(raw)!
+}
+
+// list_sessions returns a list of all known sessions.
+pub fn (mut c CopilotClient) list_sessions() !string {
+	raw := c.transport.send_request('session.list', '{}')!
 	return parse_response_result(raw)
 }
 
