@@ -149,7 +149,7 @@ Namespace GitHub.Copilot.SDK
                     {"sessionStatePath", _options.SessionFs.SessionStatePath},
                     {"conventions", If(_options.SessionFs.Conventions, "posix")}
                 }
-                Await _rpcClient.SendRequestAsync(Of Object)("sessionFs.setProvider", fsParams, cancellationToken)
+                Await _rpcClient.InvokeAsync(Of Object)("sessionFs.setProvider", fsParams, cancellationToken)
             End If
 
             _started = True

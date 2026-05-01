@@ -16,6 +16,9 @@ lazy val root = project
       "org.scalatest" %% "scalatest" % "3.2.19" % Test,
     ),
 
+    // Include e2e/ as an additional test source directory
+    Test / unmanagedSourceDirectories += baseDirectory.value / "e2e",
+
     scalacOptions ++= Seq(
       "-deprecation",
       "-feature",

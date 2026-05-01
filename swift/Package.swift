@@ -29,5 +29,10 @@ let package = Package(
             dependencies: ["CopilotSDK"],
             path: "Examples/BasicExample"
         ),
+        .testTarget(
+            name: "E2ETests",
+            dependencies: ["CopilotSDK"],
+            path: "Tests/E2ETests"
+        ),
     ]
 )

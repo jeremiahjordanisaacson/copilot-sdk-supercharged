@@ -1,0 +1,4 @@
+(executable
+ (name test_e2e)
+ (libraries alcotest str unix copilot_sdk)
+ (modules test_e2e test_harness))

@@ -11,3 +11,6 @@ visualbasic/obj/
 
 release-staging/
 brain-graph.html
+
+**/bin/Debug/
+**/obj/

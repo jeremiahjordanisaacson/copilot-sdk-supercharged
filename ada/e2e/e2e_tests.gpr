@@ -1,0 +1,40 @@
+--  ---------------------------------------------------------------------------
+--  Copyright (c) Microsoft Corporation. All rights reserved.
+--  ---------------------------------------------------------------------------
+--
+--  GPR project for the Ada SDK E2E test suite.
+--
+--  Build with:
+--    gprbuild -P e2e_tests.gpr
+--
+--  Run with:
+--    ./bin/test_e2e
+--
+
+with "../copilot_sdk.gpr";
+
+project E2E_Tests is
+
+   for Source_Dirs use (".");
+   for Object_Dir use "obj";
+   for Exec_Dir use "bin";
+   for Main use ("test_e2e.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnat2012",
+         "-gnata",
+         "-gnatwa",
+         "-gnatQ",
+         "-g");
+   end Compiler;
+
+   package Binder is
+      for Default_Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Linker is
+      for Default_Switches ("Ada") use ("-g");
+   end Linker;
+
+end E2E_Tests;

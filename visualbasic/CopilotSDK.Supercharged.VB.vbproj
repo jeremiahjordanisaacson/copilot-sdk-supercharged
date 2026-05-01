@@ -21,6 +21,7 @@
   <ItemGroup>
     <Compile Remove="tests\**" />
     <Compile Remove="examples\**" />
+    <Compile Remove="e2e\**" />
   </ItemGroup>
 
 </Project>
