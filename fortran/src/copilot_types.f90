@@ -15,6 +15,7 @@ module copilot_types
   public :: permission_request, permission_result
   public :: session_fs_config, session_fs_entry
   public :: copilot_connection_state
+  public :: mcp_server_config, command_definition, image_options
   public :: COPILOT_STATE_DISCONNECTED, COPILOT_STATE_CONNECTING
   public :: COPILOT_STATE_CONNECTED, COPILOT_STATE_ERROR
 
@@ -43,6 +44,8 @@ module copilot_types
     logical :: auto_restart     = .false.
     logical :: use_logged_in_user = .false.
     logical :: use_stdio        = .true.
+    integer :: session_idle_timeout_seconds = 0
+    type(session_fs_config), allocatable :: session_fs
   contains
     procedure :: set_defaults => client_options_set_defaults
   end type copilot_client_options
@@ -60,9 +63,37 @@ module copilot_types
   ! Session filesystem configuration
   ! --------------------------------------------------------------------------
   type :: session_fs_config
-    character(len=:), allocatable :: cwd
-    type(session_fs_entry), allocatable :: entries(:)
+    character(len=:), allocatable :: initial_cwd
+    character(len=:), allocatable :: session_state_path
+    character(len=:), allocatable :: conventions
   end type session_fs_config
+
+  ! --------------------------------------------------------------------------
+  ! MCP server configuration
+  ! --------------------------------------------------------------------------
+  type :: mcp_server_config
+    character(len=:), allocatable :: command
+    character(len=:), allocatable :: server_type
+    character(len=:), allocatable :: url
+    integer :: timeout = 0
+  end type mcp_server_config
+
+  ! --------------------------------------------------------------------------
+  ! Command definition
+  ! --------------------------------------------------------------------------
+  type :: command_definition
+    character(len=:), allocatable :: name
+    character(len=:), allocatable :: description
+  end type command_definition
+
+  ! --------------------------------------------------------------------------
+  ! Image options
+  ! --------------------------------------------------------------------------
+  type :: image_options
+    character(len=:), allocatable :: size
+    character(len=:), allocatable :: quality
+    character(len=:), allocatable :: style
+  end type image_options
 
   ! --------------------------------------------------------------------------
   ! Session configuration
@@ -77,6 +108,17 @@ module copilot_types
     type(session_fs_config) :: fs
     logical :: streaming = .true.
     integer :: session_idle_timeout_seconds = 0
+    character(len=:), allocatable :: skill_directories(:)
+    character(len=:), allocatable :: disabled_skills(:)
+    character(len=:), allocatable :: excluded_tools(:)
+    logical :: include_sub_agent_streaming_events = .false.
+    logical :: enable_config_discovery = .false.
+    character(len=:), allocatable :: model_capabilities_json
+    character(len=:), allocatable :: request_headers_json
+    character(len=:), allocatable :: mcp_servers_json
+    type(command_definition), allocatable :: commands(:)
+    type(image_options) :: img_options
+    character(len=:), allocatable :: response_format
   end type session_config
 
   ! --------------------------------------------------------------------------

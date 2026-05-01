@@ -143,3 +143,56 @@
            88 RC-TIMEOUT                       VALUE -2.
            88 RC-PARSE-ERROR                   VALUE -3.
            88 RC-CONNECTION-ERROR              VALUE -4.
+
+      *----------------------------------------------------------------*
+      * Session filesystem configuration                               *
+      *----------------------------------------------------------------*
+       01  WS-SESSION-FS-CONFIG.
+           05 WS-SFS-INITIAL-CWD    PIC X(256) VALUE SPACES.
+           05 WS-SFS-STATE-PATH     PIC X(256) VALUE SPACES.
+           05 WS-SFS-CONVENTIONS    PIC X(16)  VALUE "posix".
+           05 WS-SFS-ENABLED        PIC 9      VALUE 0.
+               88 SESSION-FS-ON                VALUE 1.
+               88 SESSION-FS-OFF               VALUE 0.
+
+      *----------------------------------------------------------------*
+      * MCP server configuration                                       *
+      *----------------------------------------------------------------*
+       01  WS-MCP-SERVER-CONFIG.
+           05 WS-MCP-SERVER-NAME    PIC X(64)  VALUE SPACES.
+           05 WS-MCP-SERVER-TYPE    PIC X(16)  VALUE "stdio".
+           05 WS-MCP-SERVER-CMD     PIC X(256) VALUE SPACES.
+           05 WS-MCP-SERVER-URL     PIC X(256) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Command definition                                             *
+      *----------------------------------------------------------------*
+       01  WS-COMMAND-DEF.
+           05 WS-CMD-NAME           PIC X(64)  VALUE SPACES.
+           05 WS-CMD-DESCRIPTION    PIC X(256) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Extended session options                                       *
+      *----------------------------------------------------------------*
+       01  WS-SESSION-EXTENDED.
+           05 WS-SESS-MODEL         PIC X(64)  VALUE SPACES.
+           05 WS-SESS-REASON-EFFORT PIC X(16)  VALUE SPACES.
+           05 WS-SESS-AUTH-TOKEN    PIC X(256) VALUE SPACES.
+           05 WS-SESS-WORKING-DIR   PIC X(256) VALUE SPACES.
+           05 WS-SESS-RESP-FORMAT   PIC X(16)  VALUE SPACES.
+           05 WS-SESS-CONFIG-DISC   PIC 9      VALUE 0.
+               88 CONFIG-DISCOVERY-ON          VALUE 1.
+               88 CONFIG-DISCOVERY-OFF         VALUE 0.
+           05 WS-SESS-SUB-STREAM    PIC 9      VALUE 0.
+               88 SUB-AGENT-STREAM-ON         VALUE 1.
+               88 SUB-AGENT-STREAM-OFF        VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Client extended options                                        *
+      *----------------------------------------------------------------*
+       01  WS-CLIENT-EXTENDED.
+           05 WS-CLI-USE-LOGGED-IN  PIC 9      VALUE 1.
+               88 USE-LOGGED-IN-YES           VALUE 1.
+               88 USE-LOGGED-IN-NO            VALUE 0.
+           05 WS-CLI-IDLE-TIMEOUT   PIC 9(10)  VALUE 0.
+           05 WS-CLI-LOG-LEVEL      PIC X(16)  VALUE "error".

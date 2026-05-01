@@ -366,6 +366,7 @@ do_start_cli(#state{cli_path = CliPath, options = Options} = State) ->
         },
         case verify_connection(RpcPid) of
             ok ->
+                maybe_set_session_fs(RpcPid, Options),
                 {ok, NewState#state{conn_state = connected}};
             {error, Reason} ->
                 catch port_close(Port),
@@ -423,14 +424,35 @@ build_session_params(Config, _State) ->
         {infinite_sessions, <<"infiniteSessions">>},
         {skill_directories, <<"skillDirectories">>},
         {disabled_skills, <<"disabledSkills">>},
-        {include_sub_agent_streaming_events, <<"includeSubAgentStreamingEvents">>}
+        {include_sub_agent_streaming_events, <<"includeSubAgentStreamingEvents">>},
+        {model_capabilities, <<"modelCapabilities">>},
+        {enable_config_discovery, <<"enableConfigDiscovery">>},
+        {github_token, <<"gitHubToken">>}
     ],
-    lists:foldl(fun({Key, JsonKey}, Acc) ->
+    Params1 = lists:foldl(fun({Key, JsonKey}, Acc) ->
         case maps:get(Key, Config, undefined) of
             undefined -> Acc;
             Value     -> Acc#{JsonKey => Value}
         end
-    end, Params, Fields).
+    end, Params, Fields),
+    %% Wire commands (name + description only, handler stays client-side)
+    Params2 = case maps:get(commands, Config, undefined) of
+        undefined -> Params1;
+        Commands ->
+            CmdList = lists:map(fun(Cmd) ->
+                Base = #{<<"name">> => maps:get(name, Cmd)},
+                case maps:get(description, Cmd, undefined) of
+                    undefined -> Base;
+                    Desc      -> Base#{<<"description">> => Desc}
+                end
+            end, Commands),
+            Params1#{<<"commands">> => CmdList}
+    end,
+    %% Wire requestElicitation flag
+    case maps:get(on_elicitation_request, Config, undefined) of
+        undefined -> Params2;
+        _         -> Params2#{<<"requestElicitation">> => true}
+    end.
 
 register_session_handlers(Rpc, SessionId, SessionPid, Config) ->
     %% Register tool handlers
@@ -495,6 +517,19 @@ dispatch_notification(<<"session.event">>, Params, State) ->
     end;
 dispatch_notification(_Method, _Params, State) ->
     State.
+
+maybe_set_session_fs(RpcPid, Options) ->
+    case maps:get(session_fs, Options, undefined) of
+        undefined -> ok;
+        FsConfig ->
+            FsParams = maps:filter(fun(_K, V) -> V =/= undefined end, #{
+                <<"initialCwd">>       => maps:get(initial_cwd, FsConfig),
+                <<"sessionStatePath">> => maps:get(session_state_path, FsConfig),
+                <<"conventions">>      => maps:get(conventions, FsConfig, <<>>)
+            }),
+            copilot_jsonrpc:request(RpcPid, <<"sessionFs.setProvider">>, FsParams),
+            ok
+    end.
 
 ensure_binary(V) when is_binary(V) -> V;
 ensure_binary(V) when is_list(V)   -> list_to_binary(V);

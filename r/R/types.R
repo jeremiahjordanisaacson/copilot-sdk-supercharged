@@ -1416,6 +1416,7 @@ ElicitationResult <- R6::R6Class(
 #' @field mcp_servers Named list or NULL. Map of server name to MCPLocalServerConfig/MCPRemoteServerConfig.
 #' @field commands List of CommandDefinition or NULL. Slash commands registered for this session.
 #' @field on_elicitation_request Function or NULL. Handler for elicitation requests from the server.
+#' @field excluded_tools Character vector or NULL. Tool names to exclude.
 #' @export
 SessionConfig <- R6::R6Class(
   "SessionConfig",
@@ -1430,6 +1431,7 @@ SessionConfig <- R6::R6Class(
     github_token = NULL,
     commands = NULL,
     on_elicitation_request = NULL,
+    excluded_tools = NULL,
 
     #' @description Create a new SessionConfig.
     #' @param model Character or NULL.
@@ -1442,6 +1444,7 @@ SessionConfig <- R6::R6Class(
     #' @param github_token Character or NULL. GitHub token for authentication. Overrides client-level token for this session.
     #' @param commands List of CommandDefinition or NULL.
     #' @param on_elicitation_request Function or NULL.
+    #' @param excluded_tools Character vector or NULL.
     initialize = function(model = NULL, system_message = NULL,
                           model_capabilities = NULL,
                           enable_config_discovery = NULL,
@@ -1450,7 +1453,8 @@ SessionConfig <- R6::R6Class(
                           mcp_servers = NULL,
                           github_token = NULL,
                           commands = NULL,
-                          on_elicitation_request = NULL) {
+                          on_elicitation_request = NULL,
+                          excluded_tools = NULL) {
       self$model <- model
       self$system_message <- system_message
       self$model_capabilities <- model_capabilities
@@ -1461,6 +1465,7 @@ SessionConfig <- R6::R6Class(
       self$github_token <- github_token
       self$commands <- commands
       self$on_elicitation_request <- on_elicitation_request
+      self$excluded_tools <- excluded_tools
     },
 
     #' @description Convert to list.
@@ -1495,6 +1500,8 @@ SessionConfig <- R6::R6Class(
         result$mcpServers <- mcp_list
       }
       if (!is.null(self$github_token)) result$gitHubToken <- self$github_token
+      if (!is.null(self$excluded_tools)) result$excludedTools <- self$excluded_tools
+      if (!is.null(self$on_elicitation_request)) result$requestElicitation <- TRUE
       if (!is.null(self$commands)) {
         cmds_list <- lapply(self$commands, function(cmd) {
           c_list <- list(name = cmd$name)

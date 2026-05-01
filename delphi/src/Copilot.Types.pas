@@ -135,9 +135,35 @@ type
 
   // SessionFs configuration
   TSessionFsConfig = record
-    WorkspaceRoot: string;
-    StateRoot: string;
-    PathStyle: string; // 'posix' or 'windows'
+    InitialCwd: string;
+    SessionStatePath: string;
+    Conventions: string;
+  end;
+
+  // Elicitation handler callback
+  TElicitationRequest = record
+    Id: string;
+    Title: string;
+    Message: string;
+    Options: TArray<string>;
+    SessionId: string;
+  end;
+  TElicitationResponse = record
+    Result: string;
+  end;
+  TElicitationHandler = reference to function(const Request: TElicitationRequest): TElicitationResponse;
+
+  // Command definition
+  TCommandDefinition = record
+    Name: string;
+    Description: string;
+  end;
+
+  // Image options
+  TImageOptions = record
+    Size: string;
+    Quality: string;
+    Style: string;
   end;
 
   // Message options
@@ -155,14 +181,23 @@ type
     Tools: TArray<TTool>;
     OnPermissionRequest: TPermissionHandler;
     OnUserInputRequest: TUserInputHandler;
+    OnElicitationRequest: TElicitationHandler;
     Hooks: TSessionHooks;
     SkillDirectories: TArray<string>;
     DisabledSkills: TArray<string>;
+    ExcludedTools: TArray<string>;
     IncludeSubAgentStreamingEvents: Boolean;
     Provider: TProviderConfig;
     MCPServers: TDictionary<string, TMCPServerConfig>;
     SystemMessage: TSystemMessageConfig;
     Instructions: TArray<string>;
+    Commands: TArray<TCommandDefinition>;
+    RequestHeaders: TDictionary<string, string>;
+    ModelCapabilities: TDictionary<string, string>;
+    EnableConfigDiscovery: Boolean;
+    GithubToken: string;
+    ResponseFormat: TResponseFormat;
+    ImageOptions: TImageOptions;
   end;
 
   // Resume session config
@@ -173,7 +208,11 @@ type
     Tools: TArray<TTool>;
     OnPermissionRequest: TPermissionHandler;
     OnUserInputRequest: TUserInputHandler;
+    OnElicitationRequest: TElicitationHandler;
     Hooks: TSessionHooks;
+    Commands: TArray<TCommandDefinition>;
+    ExcludedTools: TArray<string>;
+    IncludeSubAgentStreamingEvents: Boolean;
   end;
 
   // Session metadata

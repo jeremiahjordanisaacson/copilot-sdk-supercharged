@@ -67,6 +67,7 @@ sub new {
     my $auto_start = exists $args{auto_start} ? $args{auto_start} : 1;
     my $github_token      = $args{github_token};
     my $use_logged_in_user = $args{use_logged_in_user};
+    my $session_fs = $args{session_fs};  # SessionFsConfig object
 
     # Default use_logged_in_user: false when github_token provided, true otherwise
     if (!defined $use_logged_in_user) {
@@ -90,6 +91,7 @@ sub new {
         auto_start         => $auto_start,
         github_token       => $github_token,
         use_logged_in_user => $use_logged_in_user,
+        session_fs         => $session_fs,
         env                => $args{env},
         _process_pid       => undef,
         _client            => undef,
@@ -115,6 +117,12 @@ sub start {
         $self->_start_cli_server();
         $self->_setup_handlers();
         $self->_verify_protocol_version();
+
+        # Register session filesystem provider if configured
+        if ($self->{session_fs}) {
+            $self->_set_session_fs_provider($self->{session_fs});
+        }
+
         $self->{_state} = 'connected';
     };
     if ($@) {
@@ -652,6 +660,27 @@ sub _verify_protocol_version {
             . "but server reports version $server_version. "
             . "Please update your SDK or server to ensure compatibility.";
     }
+}
+
+# --------------------------------------------------------------------------
+# Internal: register session filesystem provider with CLI server
+# --------------------------------------------------------------------------
+
+sub _set_session_fs_provider {
+    my ($self, $fs_config) = @_;
+
+    my %payload;
+    if (blessed($fs_config) && $fs_config->can('TO_JSON')) {
+        %payload = %{ $fs_config->TO_JSON() };
+    } elsif (ref($fs_config) eq 'HASH') {
+        $payload{initialCwd}       = $fs_config->{initial_cwd}        // $fs_config->{initialCwd};
+        $payload{sessionStatePath} = $fs_config->{session_state_path} // $fs_config->{sessionStatePath};
+        $payload{conventions}      = $fs_config->{conventions};
+    } else {
+        croak "session_fs must be a SessionFsConfig object or hashref";
+    }
+
+    $self->{_client}->request('sessionFs.setProvider', \%payload);
 }
 
 # --------------------------------------------------------------------------

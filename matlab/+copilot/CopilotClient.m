@@ -112,6 +112,14 @@ classdef CopilotClient < handle
             end
 
             obj.IsRunning = true;
+
+            % Set up session filesystem provider if configured
+            if isstruct(obj.Options.SessionFs) && isfield(obj.Options.SessionFs, 'InitialCwd')
+                obj.RpcClient.request('sessionFs.setProvider', struct( ...
+                    'initialCwd', obj.Options.SessionFs.InitialCwd, ...
+                    'sessionStatePath', obj.Options.SessionFs.SessionStatePath, ...
+                    'conventions', obj.Options.SessionFs.Conventions), 10);
+            end
         end
 
         function stop(obj)

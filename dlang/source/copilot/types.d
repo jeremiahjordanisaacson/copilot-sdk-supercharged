@@ -51,11 +51,100 @@ struct CopilotClientOptions
     /// Use the currently logged-in GitHub user.
     bool useLoggedInUser = true;
 
-    /// Session filesystem path for persistence.
-    Nullable!string sessionFs;
+    /// Session filesystem configuration for persistence.
+    Nullable!SessionFsConfig sessionFs;
 
     /// Idle timeout in seconds before a session is reaped.
     Nullable!uint sessionIdleTimeoutSeconds;
+}
+
+// ---------------------------------------------------------------------------
+// SessionFs configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for the session filesystem provider.
+struct SessionFsConfig
+{
+    string initialCwd;
+    string sessionStatePath;
+    string conventions; // "windows" or "posix"
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["initialCwd"] = initialCwd;
+        obj["sessionStatePath"] = sessionStatePath;
+        obj["conventions"] = conventions;
+        return obj;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MCP server configuration
+// ---------------------------------------------------------------------------
+
+/// Transport type for an MCP server.
+enum McpServerType : string
+{
+    stdio = "stdio",
+    http = "http",
+}
+
+/// Configuration for an MCP server.
+struct McpServerConfig
+{
+    McpServerType type;
+    Nullable!string command;
+    string[] args;
+    Nullable!string url;
+    string[string] env;
+    string[string] headers;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["type"] = cast(string) type;
+        if (!command.isNull) obj["command"] = command.get;
+        if (args.length > 0)
+        {
+            JSONValue[] arr;
+            foreach (a; args) arr ~= JSONValue(a);
+            obj["args"] = JSONValue(arr);
+        }
+        if (url.isNull == false) obj["url"] = url.get;
+        return obj;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Command definition
+// ---------------------------------------------------------------------------
+
+/// A named command exposed to the model.
+struct CommandDefinition
+{
+    string name;
+    string description;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["name"] = name;
+        obj["description"] = description;
+        return obj;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Image response format
+// ---------------------------------------------------------------------------
+
+/// Desired response format for image generation.
+enum ImageResponseFormat : string
+{
+    text = "text",
+    image = "image",
+    jsonObject = "json_object",
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +184,45 @@ struct SessionConfig
     /// Enable infinite (persistent) sessions.
     bool infiniteSessions = true;
 
+    /// Model to use.
+    Nullable!string model;
+
+    /// Reasoning effort level.
+    Nullable!string reasoningEffort;
+
+    /// Per-session auth token override.
+    Nullable!string gitHubToken;
+
+    /// Excluded tools for this session.
+    string[] excludedTools;
+
+    /// MCP server configurations.
+    McpServerConfig[string] mcpServers;
+
+    /// Model capabilities override.
+    JSONValue modelCapabilities;
+
+    /// Enable automatic config discovery.
+    bool enableConfigDiscovery = false;
+
+    /// Include sub-agent streaming events.
+    bool includeSubAgentStreamingEvents = false;
+
+    /// Command definitions.
+    CommandDefinition[] commands;
+
+    /// Skill directories.
+    string[] skillDirectories;
+
+    /// Disabled skills.
+    string[] disabledSkills;
+
+    /// Working directory.
+    Nullable!string workingDirectory;
+
+    /// Response format for image generation.
+    Nullable!ImageResponseFormat responseFormat;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
@@ -114,6 +242,66 @@ struct SessionConfig
                 arr ~= t.toJson();
             obj["tools"] = JSONValue(arr);
         }
+
+        if (!model.isNull)
+            obj["model"] = model.get;
+
+        if (!reasoningEffort.isNull)
+            obj["reasoningEffort"] = reasoningEffort.get;
+
+        if (!gitHubToken.isNull)
+            obj["gitHubToken"] = gitHubToken.get;
+
+        if (excludedTools.length > 0)
+        {
+            JSONValue[] arr;
+            foreach (t; excludedTools) arr ~= JSONValue(t);
+            obj["excludedTools"] = JSONValue(arr);
+        }
+
+        if (mcpServers.length > 0)
+        {
+            auto mcpObj = JSONValue(string[string].init);
+            foreach (key, cfg; mcpServers)
+                mcpObj[key] = cfg.toJson();
+            obj["mcpServers"] = mcpObj;
+        }
+
+        if (modelCapabilities.type == JSONType.object)
+            obj["modelCapabilities"] = modelCapabilities;
+
+        if (enableConfigDiscovery)
+            obj["enableConfigDiscovery"] = true;
+
+        if (includeSubAgentStreamingEvents)
+            obj["includeSubAgentStreamingEvents"] = true;
+
+        if (commands.length > 0)
+        {
+            JSONValue[] arr;
+            foreach (ref c; commands) arr ~= c.toJson();
+            obj["commands"] = JSONValue(arr);
+        }
+
+        if (skillDirectories.length > 0)
+        {
+            JSONValue[] arr;
+            foreach (s; skillDirectories) arr ~= JSONValue(s);
+            obj["skillDirectories"] = JSONValue(arr);
+        }
+
+        if (disabledSkills.length > 0)
+        {
+            JSONValue[] arr;
+            foreach (s; disabledSkills) arr ~= JSONValue(s);
+            obj["disabledSkills"] = JSONValue(arr);
+        }
+
+        if (!workingDirectory.isNull)
+            obj["workingDirectory"] = workingDirectory.get;
+
+        if (!responseFormat.isNull)
+            obj["responseFormat"] = cast(string) responseFormat.get;
 
         return obj;
     }

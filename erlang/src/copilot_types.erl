@@ -15,12 +15,26 @@
     tool_result/3,
     permission_result/1,
     user_input_response/2,
-    image_options/1
+    image_options/1,
+    elicitation_result/1,
+    elicitation_result/2
 ]).
 
 %% ---------------------------------------------------------------------------
 %% Records
 %% ---------------------------------------------------------------------------
+
+-record(session_fs_config, {
+    initial_cwd        :: binary(),
+    session_state_path :: binary(),
+    conventions        :: binary()
+}).
+
+-record(command_definition, {
+    name        :: binary(),
+    description :: binary() | undefined,
+    handler     :: fun()
+}).
 
 -record(client_options, {
     cli_path         :: binary() | undefined,
@@ -31,7 +45,8 @@
     use_logged_in    :: boolean() | undefined,
     auto_start       :: boolean() | undefined,
     auto_restart     :: boolean() | undefined,
-    session_idle_timeout_seconds :: non_neg_integer() | undefined
+    session_idle_timeout_seconds :: non_neg_integer() | undefined,
+    session_fs       :: #session_fs_config{} | undefined
 }).
 
 -record(session_config, {
@@ -51,7 +66,33 @@
     infinite_sessions    :: map() | undefined,
     skill_directories    :: [binary()] | undefined,
     disabled_skills      :: [binary()] | undefined,
-    include_sub_agent_streaming_events :: boolean() | undefined
+    include_sub_agent_streaming_events :: boolean() | undefined,
+    model_capabilities   :: map() | undefined,
+    enable_config_discovery :: boolean() | undefined,
+    github_token         :: binary() | undefined,
+    commands             :: [#command_definition{}] | undefined,
+    on_elicitation_request :: fun() | undefined
+}).
+
+-record(command_context, {
+    session_id    :: binary(),
+    command       :: binary(),
+    command_name  :: binary(),
+    args          :: binary()
+}).
+
+-record(elicitation_context, {
+    session_id          :: binary(),
+    message             :: binary(),
+    requested_schema    :: map() | undefined,
+    mode                :: binary() | undefined,
+    elicitation_source  :: binary() | undefined,
+    url                 :: binary() | undefined
+}).
+
+-record(elicitation_result, {
+    action  :: binary(),
+    content :: map() | undefined
 }).
 
 -record(session_event, {
@@ -107,7 +148,12 @@
     user_input_response/0,
     image_options/0,
     connection_state/0,
-    session_event_type/0
+    session_event_type/0,
+    session_fs_config/0,
+    command_definition/0,
+    command_context/0,
+    elicitation_context/0,
+    elicitation_result/0
 ]).
 
 -type client_options()           :: #client_options{}.
@@ -119,6 +165,11 @@
 -type permission_request_result() :: #permission_request_result{}.
 -type user_input_response()      :: #user_input_response{}.
 -type image_options()            :: #image_options{}.
+-type session_fs_config()        :: #session_fs_config{}.
+-type command_definition()       :: #command_definition{}.
+-type command_context()          :: #command_context{}.
+-type elicitation_context()      :: #elicitation_context{}.
+-type elicitation_result()       :: #elicitation_result{}.
 -type connection_state()         :: disconnected | connecting | connected | error.
 -type session_event_type()       :: binary().
 
@@ -173,7 +224,10 @@ session_event_type(tool_execution_partial_result) -> <<"tool.execution_partial_r
 session_event_type(tool_execution_progress)       -> <<"tool.execution_progress">>;
 session_event_type(tool_execution_start)          -> <<"tool.execution_start">>;
 session_event_type(tool_user_requested)           -> <<"tool.user_requested">>;
-session_event_type(user_message)                  -> <<"user.message">>.
+session_event_type(user_message)                  -> <<"user.message">>;
+session_event_type(command_execute)               -> <<"command.execute">>;
+session_event_type(elicitation_requested)         -> <<"elicitation.requested">>;
+session_event_type(capabilities_changed)          -> <<"capabilities.changed">>.
 
 %% ---------------------------------------------------------------------------
 %% Constructor helpers
@@ -212,3 +266,15 @@ image_options(Opts) ->
         <<"quality">> => maps:get(quality, Opts, undefined),
         <<"style">>   => maps:get(style, Opts, undefined)
     }).
+
+-spec elicitation_result(binary()) -> map().
+elicitation_result(Action) ->
+    elicitation_result(Action, undefined).
+
+-spec elicitation_result(binary(), map() | undefined) -> map().
+elicitation_result(Action, Content) ->
+    Base = #{<<"action">> => Action},
+    case Content of
+        undefined -> Base;
+        _         -> Base#{<<"content">> => Content}
+    end.

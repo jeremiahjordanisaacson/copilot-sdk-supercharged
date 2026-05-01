@@ -51,6 +51,11 @@ pub fn (mut c CopilotClient) start() ! {
 
 	c.handshake()!
 	c.state = .connected
+
+	// Set up session filesystem if configured
+	if c.options.session_fs.initial_cwd.len > 0 {
+		c.set_session_fs_provider(c.options.session_fs) or {}
+	}
 }
 
 // stop shuts down the CLI process and all active sessions.
@@ -185,6 +190,16 @@ pub fn (mut c CopilotClient) ping(message string) !string {
 // get_auth_status retrieves the authentication status.
 pub fn (mut c CopilotClient) get_auth_status() !string {
 	raw := c.transport.send_request('auth.getStatus', '{}')!
+	return parse_response_result(raw)
+}
+
+// set_session_fs_provider registers a session filesystem provider with the CLI server.
+pub fn (mut c CopilotClient) set_session_fs_provider(config SessionFsConfig) !string {
+	mut params := map[string]string{}
+	params['"initialCwd"'] = '"${config.initial_cwd}"'
+	params['"sessionStatePath"'] = '"${config.session_state_path}"'
+	params['"conventions"'] = '"${config.conventions}"'
+	raw := c.transport.send_request('sessionFs.setProvider', build_params(params))!
 	return parse_response_result(raw)
 }
 

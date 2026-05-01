@@ -248,6 +248,69 @@ final class Types {
         }
     }
 
+    /** Context passed to a command handler when a command is executed. */
+    @ToString(includeNames = true)
+    static class CommandContext {
+        String sessionId
+        String command
+        String commandName
+        String args
+    }
+
+    /** Definition of a slash command registered with the session. */
+    @ToString(includeNames = true, excludes = ['handler'])
+    static class CommandDefinition {
+        String name
+        String description
+        Closure handler
+
+        CommandDefinition() {}
+        CommandDefinition(String name, String description, Closure handler) {
+            this.name = name
+            this.description = description
+            this.handler = handler
+        }
+    }
+
+    /** Context for an elicitation handler invocation. */
+    @ToString(includeNames = true)
+    static class ElicitationContext {
+        String sessionId
+        String message
+        Object requestedSchema
+        String mode
+        String elicitationSource
+        String url
+    }
+
+    /** Result returned from an elicitation request. */
+    @ToString(includeNames = true)
+    static class ElicitationResult {
+        String action
+        Map<String, Object> content
+
+        ElicitationResult() {}
+        ElicitationResult(String action, Map<String, Object> content = null) {
+            this.action = action
+            this.content = content
+        }
+    }
+
+    /** Configuration for a custom session filesystem provider. */
+    @ToString(includeNames = true)
+    static class SessionFsConfig {
+        String initialCwd
+        String sessionStatePath
+        String conventions
+
+        SessionFsConfig() {}
+        SessionFsConfig(String initialCwd, String sessionStatePath, String conventions) {
+            this.initialCwd = initialCwd
+            this.sessionStatePath = sessionStatePath
+            this.conventions = conventions
+        }
+    }
+
     /** Error encountered during stop(). */
     @ToString(includeNames = true)
     static class StopError {

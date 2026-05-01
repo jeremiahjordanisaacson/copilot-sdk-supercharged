@@ -67,6 +67,14 @@ COPILOT_SYSTEM_MESSAGE_CUSTOMIZE="customize"
 # and echo a JSON result:
 #   my_elicitation_handler() { local context="$1"; echo '{"action":"accept","content":{}}'; }
 
+# --- Handler Registration ---
+# Set these to a shell function name to handle callbacks during send_and_wait.
+
+# Elicitation handler function name (receives JSON context, echoes JSON result)
+COPILOT_ELICITATION_HANDLER=""
+# Command handler function name (receives JSON context, echoes JSON result)
+COPILOT_COMMAND_HANDLER=""
+
 # --- Session State ---
 # The active session ID (set by copilot_client_create_session / resume)
 COPILOT_SESSION_ID=""
@@ -247,6 +255,44 @@ copilot_session_send_and_wait() {
                         return 1
                         ;;
                 esac
+
+            # Handle elicitation requests from the server
+            elif [[ "$method" == "session.elicitationRequest" ]]; then
+                local req_id
+                req_id=$(echo "$msg" | jq -r '.id // empty' 2>/dev/null)
+                local elicit_result='{"action":"cancel"}'
+
+                if [[ -n "$COPILOT_ELICITATION_HANDLER" ]] && declare -f "$COPILOT_ELICITATION_HANDLER" > /dev/null 2>&1; then
+                    local elicit_context
+                    elicit_context=$(echo "$msg" | jq -c '.params // {}' 2>/dev/null)
+                    elicit_result=$("$COPILOT_ELICITATION_HANDLER" "$elicit_context" 2>/dev/null) || elicit_result='{"action":"cancel"}'
+                fi
+
+                if [[ -n "$req_id" ]]; then
+                    local response
+                    response=$(jq -c -n --argjson id "$req_id" --argjson res "$elicit_result" \
+                        '{"jsonrpc":"2.0","id":$id,"result":$res}')
+                    copilot_jsonrpc_send_message "$response"
+                fi
+
+            # Handle command requests from the server
+            elif [[ "$method" == "session.commandRequest" ]]; then
+                local req_id
+                req_id=$(echo "$msg" | jq -r '.id // empty' 2>/dev/null)
+                local cmd_result='{}'
+
+                if [[ -n "$COPILOT_COMMAND_HANDLER" ]] && declare -f "$COPILOT_COMMAND_HANDLER" > /dev/null 2>&1; then
+                    local cmd_context
+                    cmd_context=$(echo "$msg" | jq -c '.params // {}' 2>/dev/null)
+                    cmd_result=$("$COPILOT_COMMAND_HANDLER" "$cmd_context" 2>/dev/null) || cmd_result='{}'
+                fi
+
+                if [[ -n "$req_id" ]]; then
+                    local response
+                    response=$(jq -c -n --argjson id "$req_id" --argjson res "$cmd_result" \
+                        '{"jsonrpc":"2.0","id":$id,"result":$res}')
+                    copilot_jsonrpc_send_message "$response"
+                fi
             fi
         fi
 

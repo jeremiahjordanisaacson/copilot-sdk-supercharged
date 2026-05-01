@@ -42,6 +42,8 @@ class CopilotSession {
     private final ConcurrentHashMap<String, Closure> toolHandlers = new ConcurrentHashMap<>()
     private volatile Closure permissionHandler
     private volatile Closure userInputHandler
+    private volatile Closure elicitationHandler
+    private final ConcurrentHashMap<String, CommandDefinition> commandHandlers = new ConcurrentHashMap<>()
 
     CopilotSession(String sessionId, JsonRpcClient client, String workspacePath) {
         this.sessionId = sessionId
@@ -68,7 +70,7 @@ class CopilotSession {
     /**
      * Sends a message with full options.
      *
-     * @param options map with keys: prompt, attachments, mode, responseFormat, imageOptions
+     * @param options map with keys: prompt, attachments, mode, responseFormat, imageOptions, requestHeaders
      * @return the message ID
      */
     @SuppressWarnings('unchecked')
@@ -79,6 +81,7 @@ class CopilotSession {
         if (options.mode) params.mode = options.mode
         if (options.responseFormat) params.responseFormat = options.responseFormat
         if (options.imageOptions) params.imageOptions = options.imageOptions
+        if (options.requestHeaders) params.requestHeaders = options.requestHeaders
 
         Map<String, Object> response = client.request('session.send', params)
         (String) response.messageId
@@ -189,7 +192,9 @@ class CopilotSession {
         eventHandlers.clear()
         typedEventHandlers.clear()
         toolHandlers.clear()
+        commandHandlers.clear()
         permissionHandler = null
+        elicitationHandler = null
     }
 
     /** Aborts the currently processing message. */
@@ -214,6 +219,17 @@ class CopilotSession {
         this.userInputHandler = handler
     }
 
+    void registerElicitationHandler(Closure handler) {
+        this.elicitationHandler = handler
+    }
+
+    void registerCommands(List<CommandDefinition> commands) {
+        commandHandlers.clear()
+        commands?.each { CommandDefinition cmd ->
+            commandHandlers.put(cmd.name, cmd)
+        }
+    }
+
     Closure getToolHandler(String name) {
         toolHandlers.get(name)
     }
@@ -232,12 +248,102 @@ class CopilotSession {
 
     @SuppressWarnings('unchecked')
     void dispatchEvent(Map<String, Object> eventMap) {
+        String eventType = (String) eventMap.type
+        Map<String, Object> eventData = (Map<String, Object>) (eventMap.data ?: [:])
+
+        // Handle command.execute events
+        if (eventType == 'command.execute') {
+            String requestId = (String) eventData.requestId
+            String commandName = (String) eventData.commandName
+            String command = (String) eventData.command
+            String args = (String) eventData.args
+            handleCommandExecute(requestId, commandName, command, args)
+        }
+
+        // Handle elicitation.requested events
+        if (eventType == 'elicitation.requested' && elicitationHandler) {
+            String requestId = (String) eventData.requestId
+            String message = (String) eventData.message
+            Object requestedSchema = eventData.requestedSchema
+            String mode = (String) eventData.mode
+            String elicitationSource = (String) eventData.elicitationSource
+            String url = (String) eventData.url
+            handleElicitationRequest(requestId, message, requestedSchema, mode, elicitationSource, url)
+        }
+
         SessionEvent event = new SessionEvent().with {
-            type = (String) eventMap.type
-            data = (Map<String, Object>) (eventMap.data ?: [:])
+            type = eventType
+            data = eventData
             it
         }
         dispatchEvent(event)
+    }
+
+    private void handleCommandExecute(String requestId, String commandName, String command, String args) {
+        CommandDefinition cmd = commandHandlers.get(commandName)
+        if (!cmd || !cmd.handler) return
+
+        try {
+            CommandContext ctx = new CommandContext().with {
+                it.sessionId = this.sessionId
+                it.command = command
+                it.commandName = commandName
+                it.args = args
+                it
+            }
+            cmd.handler.call(ctx)
+            client.request('session.handleCommandResponse', [
+                sessionId: sessionId,
+                requestId: requestId
+            ])
+        } catch (Exception e) {
+            try {
+                client.request('session.handleCommandResponse', [
+                    sessionId: sessionId,
+                    requestId: requestId,
+                    error    : e.message
+                ])
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private void handleElicitationRequest(String requestId, String message, Object requestedSchema,
+                                          String mode, String elicitationSource, String url) {
+        if (!elicitationHandler) return
+
+        try {
+            ElicitationContext ctx = new ElicitationContext().with {
+                it.sessionId = this.sessionId
+                it.message = message
+                it.requestedSchema = requestedSchema
+                it.mode = mode
+                it.elicitationSource = elicitationSource
+                it.url = url
+                it
+            }
+            Object result = elicitationHandler.call(ctx)
+            Map<String, Object> resultMap
+            if (result instanceof ElicitationResult) {
+                ElicitationResult er = (ElicitationResult) result
+                resultMap = [action: er.action] as Map<String, Object>
+                if (er.content) resultMap.content = er.content
+            } else if (result instanceof Map) {
+                resultMap = (Map<String, Object>) result
+            } else {
+                resultMap = [action: 'cancel'] as Map<String, Object>
+            }
+            client.request('ui.handlePendingElicitation', [
+                requestId: requestId,
+                result   : resultMap
+            ])
+        } catch (Exception e) {
+            try {
+                client.request('ui.handlePendingElicitation', [
+                    requestId: requestId,
+                    result   : [action: 'cancel']
+                ])
+            } catch (Exception ignored) {}
+        }
     }
 
     PermissionRequestResult handlePermissionRequest(Object request) throws Exception {

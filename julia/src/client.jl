@@ -64,6 +64,14 @@ function start!(client::CopilotClient)
     end
 
     client.state = CONNECTED
+
+    # Set up session filesystem if configured
+    if client.options.session_fs !== nothing
+        try
+            set_session_fs_provider(client, client.options.session_fs)
+        catch; end
+    end
+
     return client
 end
 
@@ -119,6 +127,48 @@ function create_session(client::CopilotClient, config::SessionConfig)
     end
     if config.agent !== nothing
         params["agent"] = config.agent
+    end
+    if !isempty(config.excluded_tools)
+        params["excludedTools"] = config.excluded_tools
+    end
+    if config.mcp_servers !== nothing && !isempty(config.mcp_servers)
+        mcp_dict = Dict{String, Any}()
+        for (name, cfg) in config.mcp_servers
+            mcp_dict[name] = Dict{String, Any}(
+                "type" => get(MCP_SERVER_TYPE_STRINGS, cfg.type, "stdio"),
+            )
+            cfg.command !== nothing && (mcp_dict[name]["command"] = cfg.command)
+            !isempty(cfg.args) && (mcp_dict[name]["args"] = cfg.args)
+            cfg.url !== nothing && (mcp_dict[name]["url"] = cfg.url)
+        end
+        params["mcpServers"] = mcp_dict
+    end
+    if config.model_capabilities !== nothing
+        params["modelCapabilities"] = config.model_capabilities
+    end
+    if config.enable_config_discovery
+        params["enableConfigDiscovery"] = true
+    end
+    if config.include_sub_agent_streaming_events
+        params["includeSubAgentStreamingEvents"] = true
+    end
+    if !isempty(config.commands)
+        params["commands"] = [Dict("name" => c.name, "description" => c.description) for c in config.commands]
+    end
+    if !isempty(config.skill_directories)
+        params["skillDirectories"] = config.skill_directories
+    end
+    if !isempty(config.disabled_skills)
+        params["disabledSkills"] = config.disabled_skills
+    end
+    if config.working_directory !== nothing
+        params["workingDirectory"] = config.working_directory
+    end
+    if config.github_token !== nothing
+        params["gitHubToken"] = config.github_token
+    end
+    if config.response_format !== nothing
+        params["responseFormat"] = get(IMAGE_RESPONSE_FORMAT_STRINGS, config.response_format, "text")
     end
 
     # Convert tools
@@ -301,6 +351,22 @@ function get_auth_status(client::CopilotClient)
     _ensure_started!(client)
     result = send_request(client.rpc, "auth.getStatus", Dict{String,Any}(); timeout=10)
     return result isa Dict ? result : Dict{String,Any}()
+end
+
+"""
+    set_session_fs_provider(client, config::SessionFsConfig) -> Dict
+
+Register a session filesystem provider with the CLI server.
+"""
+function set_session_fs_provider(client::CopilotClient, config::SessionFsConfig)
+    _ensure_started!(client)
+    params = Dict{String, Any}(
+        "initialCwd"       => config.initial_cwd,
+        "sessionStatePath" => config.session_state_path,
+        "conventions"      => config.conventions,
+    )
+    result = send_request(client.rpc, "sessionFs.setProvider", params; timeout=10)
+    return result isa Dict ? result : Dict{String, Any}()
 end
 
 # -- Internal helpers -------------------------------------------------------------

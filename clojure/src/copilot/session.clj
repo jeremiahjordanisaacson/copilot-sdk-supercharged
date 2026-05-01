@@ -28,7 +28,8 @@
          :tool-handlers      {}       ;; {tool-name handler-fn}
          :permission-handler nil      ;; (fn [request invocation])
          :user-input-handler nil      ;; (fn [request invocation])
-         :hooks              nil}))   ;; session-hooks map
+         :hooks              nil      ;; session-hooks map
+         :session-fs-handler nil}))   ;; session filesystem provider map
 
 ;; ============================================================================
 ;; Event subscription
@@ -138,6 +139,15 @@
     :on-session-start, :on-session-end, :on-error-occurred"
   [session-atom hooks]
   (swap! session-atom assoc :hooks hooks))
+
+(defn register-session-fs-handler!
+  "Register a session filesystem handler.
+
+  `handler` - map with function-valued keys:
+    :read-file, :write-file, :append-file, :exists?, :stat,
+    :mkdir, :readdir, :readdir-with-types, :rm, :rename"
+  [session-atom handler]
+  (swap! session-atom assoc :session-fs-handler handler))
 
 (defn handle-hooks-invoke!
   "Handle an incoming hooks invoke request.  Internal."
@@ -275,7 +285,8 @@
            :tool-handlers {}
            :permission-handler nil
            :user-input-handler nil
-           :hooks nil)
+           :hooks nil
+           :session-fs-handler nil)
     nil))
 
 (defn abort!

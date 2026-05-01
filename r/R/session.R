@@ -140,6 +140,12 @@ CopilotSession <- R6::R6Class(
     #' @param event SessionEvent R6 object.
     #' @keywords internal
     dispatch_event = function(event) {
+      # Handle elicitation.requested events internally
+      if (identical(event$type, "elicitation.requested") &&
+          !is.null(private$elicitation_handler)) {
+        private$handle_elicitation_request(event$data)
+      }
+
       for (handler in private$event_handlers) {
         tryCatch(
           handler(event),
@@ -246,6 +252,20 @@ CopilotSession <- R6::R6Class(
       private$hooks <- hooks
     },
 
+    #' @description Register an elicitation request handler.
+    #' @param handler Function or NULL. Called with (context, request_id).
+    #' @keywords internal
+    register_elicitation_handler = function(handler) {
+      private$elicitation_handler <- handler
+    },
+
+    #' @description Register slash commands for this session.
+    #' @param commands List of CommandDefinition objects or NULL.
+    #' @keywords internal
+    register_commands = function(commands) {
+      private$commands <- commands
+    },
+
     #' @description Handle a hooks invocation from the CLI.
     #' @param hook_type Character. Hook type.
     #' @param input_data Any. Hook input.
@@ -316,6 +336,39 @@ CopilotSession <- R6::R6Class(
     tool_handlers = NULL,
     permission_handler = NULL,
     user_input_handler = NULL,
-    hooks = NULL
+    hooks = NULL,
+    elicitation_handler = NULL,
+    commands = NULL,
+
+    handle_elicitation_request = function(data) {
+      request_id <- data$requestId
+      context <- list(
+        session_id = self$session_id,
+        message = data$message,
+        requested_schema = data$requestedSchema,
+        mode = data$mode,
+        elicitation_source = data$elicitationSource,
+        url = data$url
+      )
+
+      tryCatch(
+        {
+          result <- private$elicitation_handler(context)
+          private$client$request("ui.handlePendingElicitation", list(
+            requestId = request_id,
+            result = result
+          ))
+        },
+        error = function(e) {
+          tryCatch(
+            private$client$request("ui.handlePendingElicitation", list(
+              requestId = request_id,
+              result = list(action = "cancel")
+            )),
+            error = function(e2) NULL
+          )
+        }
+      )
+    }
   )
 )

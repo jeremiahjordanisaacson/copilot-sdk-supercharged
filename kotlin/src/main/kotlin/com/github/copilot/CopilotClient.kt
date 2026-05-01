@@ -132,6 +132,16 @@ class CopilotClient(
             }
             connectToServer()
             verifyProtocolVersion()
+
+            // Register session filesystem provider if configured
+            options.sessionFs?.let { fs ->
+                rpcClient?.request("sessionFs.setProvider", buildJsonObject {
+                    put("initialCwd", fs.initialCwd)
+                    put("sessionStatePath", fs.sessionStatePath)
+                    put("conventions", fs.conventions)
+                })
+            }
+
             state = ConnectionState.CONNECTED
         } catch (e: Exception) {
             state = ConnectionState.ERROR
@@ -240,6 +250,7 @@ class CopilotClient(
         session.registerTools(config.tools)
         config.onPermissionRequest?.let { session.registerPermissionHandler(it) }
         config.onUserInputRequest?.let { session.registerUserInputHandler(it) }
+        config.onElicitationRequest?.let { session.registerElicitationHandler(it) }
         config.hooks?.let { session.registerHooks(it) }
         sessions[sessionId] = session
 
@@ -286,6 +297,12 @@ class CopilotClient(
             config.skillDirectories?.let { put("skillDirectories", json.encodeToJsonElement(it)) }
             config.disabledSkills?.let { put("disabledSkills", json.encodeToJsonElement(it)) }
             config.infiniteSessions?.let { put("infiniteSessions", json.encodeToJsonElement(InfiniteSessionConfig.serializer(), it)) }
+            config.includeSubAgentStreamingEvents?.let { put("includeSubAgentStreamingEvents", JsonPrimitive(it)) }
+            config.modelCapabilities?.let { put("modelCapabilities", json.encodeToJsonElement(it)) }
+            config.enableConfigDiscovery?.let { put("enableConfigDiscovery", JsonPrimitive(it)) }
+            config.gitHubToken?.let { put("gitHubToken", JsonPrimitive(it)) }
+            config.commands?.let { put("commands", json.encodeToJsonElement(it)) }
+            if (config.onElicitationRequest != null) put("requestElicitation", true)
             config.disableResume?.let { put("disableResume", it) }
         }
 
@@ -298,6 +315,7 @@ class CopilotClient(
         session.registerTools(config.tools)
         config.onPermissionRequest?.let { session.registerPermissionHandler(it) }
         config.onUserInputRequest?.let { session.registerUserInputHandler(it) }
+        config.onElicitationRequest?.let { session.registerElicitationHandler(it) }
         config.hooks?.let { session.registerHooks(it) }
         sessions[resumedId] = session
 
@@ -512,10 +530,16 @@ class CopilotClient(
             config.skillDirectories?.let { put("skillDirectories", json.encodeToJsonElement(it)) }
             config.disabledSkills?.let { put("disabledSkills", json.encodeToJsonElement(it)) }
             config.infiniteSessions?.let { put("infiniteSessions", json.encodeToJsonElement(InfiniteSessionConfig.serializer(), it)) }
+            config.includeSubAgentStreamingEvents?.let { put("includeSubAgentStreamingEvents", JsonPrimitive(it)) }
+            config.modelCapabilities?.let { put("modelCapabilities", json.encodeToJsonElement(it)) }
+            config.enableConfigDiscovery?.let { put("enableConfigDiscovery", JsonPrimitive(it)) }
+            config.gitHubToken?.let { put("gitHubToken", JsonPrimitive(it)) }
+            config.commands?.let { put("commands", json.encodeToJsonElement(it)) }
+            if (config.onElicitationRequest != null) put("requestElicitation", true)
         }
     }
 
-    private suspend fun verifyProtocolVersion() {
+    private suspend fun verifyProtocolVersion(){
         val expected = getSdkProtocolVersion()
         val pingResult = ping()
         val serverVersion = pingResult.protocolVersion
@@ -670,6 +694,7 @@ class CopilotClient(
         client.setRequestHandler("permission.request") { params -> handlePermissionRequest(params) }
         client.setRequestHandler("userInput.request") { params -> handleUserInputRequest(params) }
         client.setRequestHandler("hooks.invoke") { params -> handleHooksInvoke(params) }
+        client.setRequestHandler("elicitation.request") { params -> handleElicitationRequest(params) }
     }
 
     private fun handleSessionEventNotification(params: JsonObject) {
@@ -819,6 +844,36 @@ class CopilotClient(
         val output = session.handleHooksInvoke(hookType, input)
         return buildJsonObject {
             output?.let { put("output", json.encodeToJsonElement(it)) }
+        }
+    }
+
+    private suspend fun handleElicitationRequest(params: JsonObject): JsonObject {
+        val sessionId = params["sessionId"]?.jsonPrimitive?.content
+            ?: throw RuntimeException("Invalid elicitation request payload")
+        val message = params["message"]?.jsonPrimitive?.content
+            ?: throw RuntimeException("Invalid elicitation request payload")
+
+        val session = sessions[sessionId]
+            ?: throw RuntimeException("Session not found: $sessionId")
+
+        val context = ElicitationContext(
+            sessionId = sessionId,
+            message = message,
+            requestedSchema = params["requestedSchema"]?.jsonObject?.toMap()?.mapValues { (_, v) ->
+                when (v) {
+                    is JsonPrimitive -> if (v.isString) v.content else v.toString()
+                    else -> v.toString()
+                }
+            },
+            mode = params["mode"]?.jsonPrimitive?.contentOrNull,
+            elicitationSource = params["elicitationSource"]?.jsonPrimitive?.contentOrNull,
+            url = params["url"]?.jsonPrimitive?.contentOrNull
+        )
+
+        val result = session.handleElicitationRequest(context)
+        return buildJsonObject {
+            put("action", result.action)
+            result.content?.let { put("content", json.encodeToJsonElement(it)) }
         }
     }
 

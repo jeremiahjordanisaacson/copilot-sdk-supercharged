@@ -723,4 +723,143 @@
            END-IF
            .
 
+      *----------------------------------------------------------------*
+      * SEND-RPC-REQUEST: Build and send a generic JSON-RPC request.    *
+      * Uses WS-REQ-METHOD, WS-REQ-PARAMS, WS-REQ-PARAMS-LEN.         *
+      *----------------------------------------------------------------*
+       SEND-RPC-REQUEST.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           ADD 1 TO WS-REQUEST-ID
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"'
+               FUNCTION TRIM(WS-REQ-METHOD TRAILING)
+               '",'
+               '"params":'
+               WS-REQ-PARAMS(1:WS-REQ-PARAMS-LEN)
+               ','
+               '"id":'
+               FUNCTION TRIM(WS-REQUEST-ID)
+               '}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * SET-SESSION-FS-PROVIDER                                        *
+      * Register a session filesystem provider via                     *
+      * sessionFs.setProvider                                          *
+      *----------------------------------------------------------------*
+       SET-SESSION-FS-PROVIDER.
+           IF NOT SESSION-FS-ON
+               SET RC-SUCCESS TO TRUE
+               GOBACK
+           END-IF
+
+           MOVE SPACES TO WS-REQ-PARAMS
+           STRING
+               '{"initialCwd":"'
+               FUNCTION TRIM(WS-SFS-INITIAL-CWD TRAILING)
+               '","sessionStatePath":"'
+               FUNCTION TRIM(WS-SFS-STATE-PATH TRAILING)
+               '","conventions":"'
+               FUNCTION TRIM(WS-SFS-CONVENTIONS TRAILING)
+               '"}'
+               DELIMITED BY SIZE
+               INTO WS-REQ-PARAMS
+           END-STRING
+
+           MOVE FUNCTION LENGTH(
+               FUNCTION TRIM(WS-REQ-PARAMS TRAILING))
+               TO WS-REQ-PARAMS-LEN
+
+           MOVE "sessionFs.setProvider" TO WS-REQ-METHOD
+           PERFORM SEND-RPC-REQUEST
+
+           .
+
+      *----------------------------------------------------------------*
+      * ADD-MCP-SERVER                                                 *
+      * Register an MCP server with the CLI.                           *
+      *----------------------------------------------------------------*
+       ADD-MCP-SERVER.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-REQ-PARAMS
+           STRING
+               '{"name":"'
+               FUNCTION TRIM(WS-MCP-SERVER-NAME TRAILING)
+               '","type":"'
+               FUNCTION TRIM(WS-MCP-SERVER-TYPE TRAILING)
+               '","command":"'
+               FUNCTION TRIM(WS-MCP-SERVER-CMD TRAILING)
+               '","url":"'
+               FUNCTION TRIM(WS-MCP-SERVER-URL TRAILING)
+               '"}'
+               DELIMITED BY SIZE
+               INTO WS-REQ-PARAMS
+           END-STRING
+
+           MOVE FUNCTION LENGTH(
+               FUNCTION TRIM(WS-REQ-PARAMS TRAILING))
+               TO WS-REQ-PARAMS-LEN
+
+           MOVE "mcp.addServer" TO WS-REQ-METHOD
+           PERFORM SEND-RPC-REQUEST
+
+           .
+
+      *----------------------------------------------------------------*
+      * REGISTER-COMMAND                                               *
+      * Register a slash command with the CLI.                         *
+      *----------------------------------------------------------------*
+       REGISTER-COMMAND.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-REQ-PARAMS
+           STRING
+               '{"name":"'
+               FUNCTION TRIM(WS-CMD-NAME TRAILING)
+               '","description":"'
+               FUNCTION TRIM(WS-CMD-DESCRIPTION TRAILING)
+               '"}'
+               DELIMITED BY SIZE
+               INTO WS-REQ-PARAMS
+           END-STRING
+
+           MOVE FUNCTION LENGTH(
+               FUNCTION TRIM(WS-REQ-PARAMS TRAILING))
+               TO WS-REQ-PARAMS-LEN
+
+           MOVE "commands.register" TO WS-REQ-METHOD
+           PERFORM SEND-RPC-REQUEST
+
+           .
+
        STOP RUN.

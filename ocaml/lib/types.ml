@@ -94,6 +94,92 @@ let tool_invocation_of_yojson (json : Yojson.Safe.t)
   with exn -> Error (Printexc.to_string exn)
 
 (* ========================================================================== *)
+(* Session Filesystem Configuration                                           *)
+(* ========================================================================== *)
+
+type session_fs_config = {
+  initial_cwd : string;
+  session_state_path : string;
+  conventions : string;  (** "windows" or "posix" *)
+}
+
+let default_session_fs_config () =
+  { initial_cwd = ""; session_state_path = ""; conventions = "posix" }
+
+let session_fs_config_to_yojson (c : session_fs_config) : Yojson.Safe.t =
+  `Assoc
+    [ ("initialCwd", `String c.initial_cwd)
+    ; ("sessionStatePath", `String c.session_state_path)
+    ; ("conventions", `String c.conventions)
+    ]
+
+(* ========================================================================== *)
+(* MCP Server Configuration                                                   *)
+(* ========================================================================== *)
+
+type mcp_server_type = Stdio | Http
+
+let mcp_server_type_to_string = function
+  | Stdio -> "stdio"
+  | Http -> "http"
+
+type mcp_server_config = {
+  mcp_type : mcp_server_type;
+  command : string option;
+  args : string list;
+  url : string option;
+  env : (string * string) list;
+  headers : (string * string) list;
+}
+
+let mcp_server_config_to_yojson (c : mcp_server_config) : Yojson.Safe.t =
+  let fields =
+    [ ("type", `String (mcp_server_type_to_string c.mcp_type)) ]
+  in
+  let fields =
+    match c.command with
+    | Some cmd -> ("command", `String cmd) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.args with
+    | [] -> fields
+    | args -> ("args", `List (List.map (fun s -> `String s) args)) :: fields
+  in
+  let fields =
+    match c.url with
+    | Some u -> ("url", `String u) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+(* ========================================================================== *)
+(* Command Definition                                                         *)
+(* ========================================================================== *)
+
+type command_definition = {
+  cmd_name : string;
+  cmd_description : string;
+}
+
+let command_definition_to_yojson (c : command_definition) : Yojson.Safe.t =
+  `Assoc
+    [ ("name", `String c.cmd_name)
+    ; ("description", `String c.cmd_description)
+    ]
+
+(* ========================================================================== *)
+(* Image Response Format                                                      *)
+(* ========================================================================== *)
+
+type image_response_format = FormatText | FormatImage | FormatJsonObject
+
+let image_response_format_to_string = function
+  | FormatText -> "text"
+  | FormatImage -> "image"
+  | FormatJsonObject -> "json_object"
+
+(* ========================================================================== *)
 (* Session Configuration                                                      *)
 (* ========================================================================== *)
 
@@ -148,6 +234,17 @@ type session_config = {
   reasoning_effort : reasoning_effort option;
   streaming : bool;
   tools : tool_definition list;
+  excluded_tools : string list;
+  mcp_servers : (string * mcp_server_config) list;
+  model_capabilities : (string * Yojson.Safe.t) list;
+  enable_config_discovery : bool;
+  include_sub_agent_streaming_events : bool;
+  commands : command_definition list;
+  skill_directories : string list;
+  disabled_skills : string list;
+  working_directory : string option;
+  github_token : string option;
+  response_format : image_response_format option;
 }
 
 let default_session_config () =
@@ -156,6 +253,17 @@ let default_session_config () =
   ; reasoning_effort = None
   ; streaming = true
   ; tools = []
+  ; excluded_tools = []
+  ; mcp_servers = []
+  ; model_capabilities = []
+  ; enable_config_discovery = false
+  ; include_sub_agent_streaming_events = false
+  ; commands = []
+  ; skill_directories = []
+  ; disabled_skills = []
+  ; working_directory = None
+  ; github_token = None
+  ; response_format = None
   }
 
 let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
@@ -182,6 +290,64 @@ let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
     | ts ->
       let tools_json = `List (List.map tool_definition_to_yojson ts) in
       ("tools", tools_json) :: fields
+  in
+  let fields =
+    match c.excluded_tools with
+    | [] -> fields
+    | et -> ("excludedTools", `List (List.map (fun s -> `String s) et)) :: fields
+  in
+  let fields =
+    match c.mcp_servers with
+    | [] -> fields
+    | servers ->
+      let assocs = List.map (fun (name, cfg) -> (name, mcp_server_config_to_yojson cfg)) servers in
+      ("mcpServers", `Assoc assocs) :: fields
+  in
+  let fields =
+    match c.model_capabilities with
+    | [] -> fields
+    | caps -> ("modelCapabilities", `Assoc caps) :: fields
+  in
+  let fields =
+    if c.enable_config_discovery then
+      ("enableConfigDiscovery", `Bool true) :: fields
+    else fields
+  in
+  let fields =
+    if c.include_sub_agent_streaming_events then
+      ("includeSubAgentStreamingEvents", `Bool true) :: fields
+    else fields
+  in
+  let fields =
+    match c.commands with
+    | [] -> fields
+    | cmds ->
+      ("commands", `List (List.map command_definition_to_yojson cmds)) :: fields
+  in
+  let fields =
+    match c.skill_directories with
+    | [] -> fields
+    | dirs -> ("skillDirectories", `List (List.map (fun s -> `String s) dirs)) :: fields
+  in
+  let fields =
+    match c.disabled_skills with
+    | [] -> fields
+    | sk -> ("disabledSkills", `List (List.map (fun s -> `String s) sk)) :: fields
+  in
+  let fields =
+    match c.working_directory with
+    | Some d -> ("workingDirectory", `String d) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.github_token with
+    | Some t -> ("gitHubToken", `String t) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.response_format with
+    | Some f -> ("responseFormat", `String (image_response_format_to_string f)) :: fields
+    | None -> fields
   in
   `Assoc fields
 
@@ -296,10 +462,21 @@ type client_options = {
   cli_path : string option;
   cli_url : string option;
   log_level : string option;
+  github_token : string option;
+  use_logged_in_user : bool option;
+  session_idle_timeout_seconds : int option;
+  session_fs : session_fs_config option;
 }
 
 let default_client_options () =
-  { cli_path = None; cli_url = None; log_level = None }
+  { cli_path = None
+  ; cli_url = None
+  ; log_level = None
+  ; github_token = None
+  ; use_logged_in_user = None
+  ; session_idle_timeout_seconds = None
+  ; session_fs = None
+  }
 
 (* ========================================================================== *)
 (* Helper Constructors                                                        *)

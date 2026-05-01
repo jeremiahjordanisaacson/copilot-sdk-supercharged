@@ -90,6 +90,17 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
             }
 
             self.connectionState = CPConnectionStateConnected;
+
+            // Set up session filesystem provider if configured
+            if (self.options.sessionFs && self.options.sessionFs.initialCwd) {
+                NSDictionary *fsParams = [self.options.sessionFs toDictionary];
+                [self.rpcClient sendRequest:@"sessionFs.setProvider"
+                                     params:fsParams
+                                 completion:^(NSDictionary *fsResp, NSError *fsErr) {
+                    // Provider set; ignore errors silently
+                }];
+            }
+
             completion(nil);
         }];
     });

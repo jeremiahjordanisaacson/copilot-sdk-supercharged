@@ -82,6 +82,13 @@ final class CopilotClient
             _startSubprocess();
         }
         _started = true;
+
+        // Set up session filesystem if configured.
+        if (!_opts.sessionFs.isNull)
+        {
+            try { setSessionFsProvider(_opts.sessionFs.get); }
+            catch (Exception) {}
+        }
     }
 
     /// Gracefully stop the CLI and clean up resources.
@@ -280,6 +287,17 @@ final class CopilotClient
                 ? (*pErr).str : "Unknown";
             throw new Exception("Failed to set foreground session: " ~ errMsg);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // SessionFs
+    // ------------------------------------------------------------------
+
+    /// Register a session filesystem provider with the CLI server.
+    JSONValue setSessionFsProvider(SessionFsConfig config) @trusted
+    {
+        enforce(_started, "client not started");
+        return _rpc.request("sessionFs.setProvider", config.toJson());
     }
 
     // ------------------------------------------------------------------

@@ -136,6 +136,19 @@ export class CopilotSolidityClient {
     }
 
     // -----------------------------------------------------------------------
+    // Session filesystem
+    // -----------------------------------------------------------------------
+
+    /** Register a session filesystem provider with the CLI server. */
+    async setSessionFsProvider(config: {
+        initialCwd: string;
+        sessionStatePath: string;
+        conventions: "windows" | "posix";
+    }): Promise<unknown> {
+        return (this.client as any).request("sessionFs.setProvider", config);
+    }
+
+    // -----------------------------------------------------------------------
     // Session helpers
     // -----------------------------------------------------------------------
 

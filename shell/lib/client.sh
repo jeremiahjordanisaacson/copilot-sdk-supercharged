@@ -36,10 +36,25 @@ COPILOT_MCP_SERVERS=""
 # When set, overrides the client-level token for this session only.
 COPILOT_GITHUB_TOKEN=""
 
+# Excluded built-in tools (JSON array string, optional)
+# Example: '["view","edit"]'
+COPILOT_EXCLUDED_TOOLS=""
+# Available/allowed tools (JSON array string, optional; takes precedence over excluded_tools)
+# Example: '["grep","glob"]'
+COPILOT_AVAILABLE_TOOLS=""
+# Commands (JSON array string of {name, description} objects, optional)
+# Example: '[{"name":"deploy","description":"Deploy to prod"}]'
+COPILOT_COMMANDS=""
+
 # --- Session Filesystem Config ---
 # Session filesystem configuration (JSON object string, optional)
 # Example: '{"initialCwd":"/home/user/project","sessionStatePath":"/tmp/state","conventions":"posix"}'
 COPILOT_SESSION_FS=""
+# Session filesystem provider RPC registration fields (optional)
+# When COPILOT_SESSION_FS_INITIAL_CWD is set, sessionFs.setProvider is called after connect.
+COPILOT_SESSION_FS_INITIAL_CWD=""
+COPILOT_SESSION_FS_STATE_PATH=""
+COPILOT_SESSION_FS_CONVENTIONS=""
 
 # Session Filesystem Provider:
 # To implement a session filesystem provider in Shell, define the following
@@ -173,6 +188,19 @@ copilot_client_start() {
         return 1
     fi
 
+    # Register session filesystem provider if configured
+    if [[ -n "${COPILOT_SESSION_FS_INITIAL_CWD:-}" ]]; then
+        local fs_params
+        fs_params=$(jq -c -n \
+            --arg cwd "$COPILOT_SESSION_FS_INITIAL_CWD" \
+            --arg state "${COPILOT_SESSION_FS_STATE_PATH:-}" \
+            --arg conv "${COPILOT_SESSION_FS_CONVENTIONS:-}" \
+            '{initialCwd: $cwd, sessionStatePath: $state, conventions: $conv}')
+        if ! copilot_jsonrpc_request "sessionFs.setProvider" "$fs_params"; then
+            echo "WARN: Failed to register sessionFs provider" >&2
+        fi
+    fi
+
     COPILOT_CLIENT_STATE="connected"
     return 0
 }
@@ -264,6 +292,15 @@ copilot_client_create_session() {
     fi
     if [[ -n "$COPILOT_GITHUB_TOKEN" ]]; then
         params=$(echo "$params" | jq -c --arg tok "$COPILOT_GITHUB_TOKEN" '. + {"gitHubToken":$tok}')
+    fi
+    if [[ -n "$COPILOT_EXCLUDED_TOOLS" ]]; then
+        params=$(echo "$params" | jq -c --argjson et "$COPILOT_EXCLUDED_TOOLS" '. + {"excludedTools":$et}')
+    fi
+    if [[ -n "$COPILOT_AVAILABLE_TOOLS" ]]; then
+        params=$(echo "$params" | jq -c --argjson at "$COPILOT_AVAILABLE_TOOLS" '. + {"availableTools":$at}')
+    fi
+    if [[ -n "$COPILOT_COMMANDS" ]]; then
+        params=$(echo "$params" | jq -c --argjson cmds "$COPILOT_COMMANDS" '. + {"commands":$cmds}')
     fi
 
     if ! copilot_jsonrpc_request "session.create" "$params"; then

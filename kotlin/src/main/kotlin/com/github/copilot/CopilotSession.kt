@@ -62,6 +62,9 @@ class CopilotSession internal constructor(
     @Volatile
     private var hooks: SessionHooks? = null
 
+    @Volatile
+    private var elicitationHandler: ElicitationHandler? = null
+
     /**
      * Sends a message to this session.
      *
@@ -201,6 +204,7 @@ class CopilotSession internal constructor(
         toolHandlers.clear()
         permissionHandler = null
         userInputHandler = null
+        elicitationHandler = null
         hooks = null
     }
 
@@ -261,6 +265,14 @@ class CopilotSession internal constructor(
     }
 
     /**
+     * Registers an elicitation handler.
+     * @suppress
+     */
+    internal fun registerElicitationHandler(handler: ElicitationHandler?) {
+        this.elicitationHandler = handler
+    }
+
+    /**
      * Dispatches a session event to all registered handlers.
      * @suppress
      */
@@ -311,6 +323,20 @@ class CopilotSession internal constructor(
         val handler = userInputHandler
             ?: throw RuntimeException("User input requested but no handler registered")
         return handler(request, sessionId)
+    }
+
+    /**
+     * Handles an elicitation request from the server.
+     * @suppress
+     */
+    internal suspend fun handleElicitationRequest(context: ElicitationContext): ElicitationResult {
+        val handler = elicitationHandler
+            ?: return ElicitationResult(action = "dismiss")
+        return try {
+            handler(context)
+        } catch (_: Exception) {
+            ElicitationResult(action = "dismiss")
+        }
     }
 
     /**

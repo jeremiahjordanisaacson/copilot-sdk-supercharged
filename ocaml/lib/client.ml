@@ -135,6 +135,13 @@ let start (t : t) : unit Lwt.t =
       t.rpc <- Some rpc;
       let* () = perform_handshake rpc in
       t.state <- Connected;
+      let* () =
+        match t.options.session_fs with
+        | Some fs_config ->
+          let* _result = set_session_fs_provider t fs_config in
+          Lwt.return_unit
+        | None -> Lwt.return_unit
+      in
       Lwt.return_unit)
     (fun exn ->
       t.state <- Error;
@@ -254,6 +261,13 @@ let get_auth_status (t : t) : Yojson.Safe.t Lwt.t =
   let open Lwt.Syntax in
   let rpc = get_rpc t in
   Jsonrpc.send_request rpc "auth.getStatus" (`Assoc [])
+
+let set_session_fs_provider (t : t) (config : Types.session_fs_config)
+    : Yojson.Safe.t Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let params = Types.session_fs_config_to_yojson config in
+  Jsonrpc.send_request rpc "sessionFs.setProvider" params
 
 (* ========================================================================== *)
 (* State inspection                                                           *)

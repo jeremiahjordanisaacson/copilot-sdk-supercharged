@@ -19,7 +19,8 @@ namespace eval ::copilot::client {
 
     namespace export new start stop create_session destroy_session \
                      define_tool get_status get_auth_status ping \
-                     list_models get_last_session_id get_session_metadata
+                     list_models get_last_session_id get_session_metadata \
+                     set_session_fs_provider
 }
 
 # ---- Resolve the CLI path ---------------------------------------------------
@@ -111,6 +112,13 @@ proc ::copilot::client::start {handle} {
 
     dict set cdata state "connected"
     dict set clients $handle $cdata
+
+    # Set up session filesystem if configured
+    set session_fs [dict get $opts session_fs]
+    if {$session_fs ne "" && [dict size $session_fs] > 0} {
+        set_session_fs_provider $handle $session_fs
+    }
+
     return $handle
 }
 
@@ -489,6 +497,30 @@ proc ::copilot::client::get_session_metadata {handle session_id} {
 
     set params [dict create sessionId $session_id]
     set req_id [::copilot::jsonrpc::send_request $write_ch "session.getMetadata" $params]
+    ::copilot::jsonrpc::register_pending $req_id
+
+    set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+    return $result
+}
+
+# ---- Set session filesystem provider ----------------------------------------
+
+proc ::copilot::client::set_session_fs_provider {handle config} {
+    variable clients
+    if {![dict exists $clients $handle]} {
+        error "Client not found: $handle"
+    }
+
+    set cdata [dict get $clients $handle]
+    set write_ch [dict get $cdata write_ch]
+    set read_ch  [dict get $cdata read_ch]
+
+    set params [dict create \
+        initialCwd        [dict get $config initial_cwd] \
+        sessionStatePath  [dict get $config session_state_path] \
+        conventions       [dict get $config conventions] \
+    ]
+    set req_id [::copilot::jsonrpc::send_request $write_ch "sessionFs.setProvider" $params]
     ::copilot::jsonrpc::register_pending $req_id
 
     set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]

@@ -86,6 +86,11 @@ module CopilotSDK
         verify_protocol_version
 
         @state = ConnectionState::Connected
+
+        # Set up session filesystem if configured
+        if fs = @options.session_fs
+          set_session_fs_provider(fs)
+        end
       rescue ex
         @state = ConnectionState::Error
         raise CopilotError.new("Failed to start: #{ex.message}")
@@ -246,6 +251,13 @@ module CopilotSDK
     # Returns true if the client is currently connected.
     def connected? : Bool
       @state == ConnectionState::Connected
+    end
+
+    # Register a session filesystem provider with the CLI server.
+    def set_session_fs_provider(config : SessionFsConfig) : JSON::Any
+      ensure_connected!
+      params = JSON.parse(config.to_json)
+      rpc.send_request("sessionFs.setProvider", params, @options.request_timeout)
     end
 
     # --------------------------------------------------------------------------

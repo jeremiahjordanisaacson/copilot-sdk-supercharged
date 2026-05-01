@@ -66,6 +66,8 @@ class CopilotClient {
     private Map<String, String> env
     private String githubToken
     private boolean useLoggedInUser = true
+    private SessionFsConfig sessionFsConfig
+    private Integer sessionIdleTimeoutSeconds
 
     // Session config defaults (stored for createSession)
     private List<Tool> defaultTools
@@ -133,6 +135,21 @@ class CopilotClient {
                 this.useLoggedInUser = false
             }
             if (options.useLoggedInUser != null) this.useLoggedInUser = options.useLoggedInUser as boolean
+            if (options.sessionFs) {
+                this.sessionFsConfig = options.sessionFs instanceof SessionFsConfig
+                    ? (SessionFsConfig) options.sessionFs
+                    : new SessionFsConfig().with {
+                        Map<String, Object> fsMap = (Map<String, Object>) options.sessionFs
+                        initialCwd = (String) fsMap.initialCwd
+                        sessionStatePath = (String) fsMap.sessionStatePath
+                        conventions = (String) fsMap.conventions
+                        it
+                    }
+                validateSessionFsConfig(this.sessionFsConfig)
+            }
+            if (options.sessionIdleTimeoutSeconds != null) {
+                this.sessionIdleTimeoutSeconds = options.sessionIdleTimeoutSeconds as Integer
+            }
         }
 
         this.isExternalServer = external
@@ -173,6 +190,15 @@ class CopilotClient {
             }
             connectToServer()
             verifyProtocolVersion()
+
+            if (sessionFsConfig) {
+                rpcClient.request('sessionFs.setProvider', [
+                    initialCwd     : sessionFsConfig.initialCwd,
+                    sessionStatePath: sessionFsConfig.sessionStatePath,
+                    conventions    : sessionFsConfig.conventions
+                ] as Map<String, Object>)
+            }
+
             state = ConnectionState.CONNECTED
         } catch (Exception e) {
             state = ConnectionState.ERROR
@@ -275,6 +301,12 @@ class CopilotClient {
         Closure inputHandler = (Closure) config.onUserInputRequest
         if (inputHandler) session.registerUserInputHandler(inputHandler)
 
+        Closure elicitationHandler = (Closure) config.onElicitationRequest
+        if (elicitationHandler) session.registerElicitationHandler(elicitationHandler)
+
+        List<CommandDefinition> commands = (List<CommandDefinition>) config.commands
+        if (commands) session.registerCommands(commands)
+
         sessions.put(sessionId, session)
         session
     }
@@ -302,6 +334,12 @@ class CopilotClient {
 
         Closure inputHandler = (Closure) config.onUserInputRequest
         if (inputHandler) session.registerUserInputHandler(inputHandler)
+
+        Closure elicitationHandler = (Closure) config.onElicitationRequest
+        if (elicitationHandler) session.registerElicitationHandler(elicitationHandler)
+
+        List<CommandDefinition> commands = (List<CommandDefinition>) config.commands
+        if (commands) session.registerCommands(commands)
 
         sessions.put(resumedId, session)
         session
@@ -478,19 +516,36 @@ class CopilotClient {
                 def_
             }
         }
+        if (config.commands) {
+            List<CommandDefinition> commands = (List<CommandDefinition>) config.commands
+            payload.commands = commands.collect { CommandDefinition cmd ->
+                Map<String, Object> def_ = [name: cmd.name] as Map<String, Object>
+                if (cmd.description) def_.description = cmd.description
+                def_
+            }
+        }
         if (config.systemMessage) payload.systemMessage = config.systemMessage
         if (config.availableTools) payload.availableTools = config.availableTools
         if (config.excludedTools) payload.excludedTools = config.excludedTools
         if (config.provider) payload.provider = config.provider
+        if (config.modelCapabilities) payload.modelCapabilities = config.modelCapabilities
         if (config.onPermissionRequest) payload.requestPermission = true
         if (config.onUserInputRequest) payload.requestUserInput = true
+        if (config.onElicitationRequest) payload.requestElicitation = true
         if (config.workingDirectory) payload.workingDirectory = config.workingDirectory
         if (config.streaming != null) payload.streaming = config.streaming
+        if (config.includeSubAgentStreamingEvents != null) {
+            payload.includeSubAgentStreamingEvents = config.includeSubAgentStreamingEvents
+        } else {
+            payload.includeSubAgentStreamingEvents = true
+        }
         if (config.mcpServers) payload.mcpServers = config.mcpServers
         if (config.customAgents) payload.customAgents = config.customAgents
         if (config.skillDirectories) payload.skillDirectories = config.skillDirectories
         if (config.disabledSkills) payload.disabledSkills = config.disabledSkills
         if (config.infiniteSessions) payload.infiniteSessions = config.infiniteSessions
+        if (config.enableConfigDiscovery != null) payload.enableConfigDiscovery = config.enableConfigDiscovery
+        if (config.gitHubToken) payload.gitHubToken = config.gitHubToken
         payload
     }
 
@@ -508,6 +563,18 @@ class CopilotClient {
                 "SDK protocol version mismatch: SDK expects version ${expected}, " +
                 "but server reports version ${pingResp.protocolVersion}."
             )
+        }
+    }
+
+    private void validateSessionFsConfig(SessionFsConfig config) {
+        if (!config.initialCwd) {
+            throw new IllegalArgumentException('sessionFs.initialCwd is required')
+        }
+        if (!config.sessionStatePath) {
+            throw new IllegalArgumentException('sessionFs.sessionStatePath is required')
+        }
+        if (config.conventions != 'windows' && config.conventions != 'posix') {
+            throw new IllegalArgumentException("sessionFs.conventions must be either 'windows' or 'posix'")
         }
     }
 
@@ -534,6 +601,10 @@ class CopilotClient {
         }
         if (!useLoggedInUser) {
             args << '--no-auto-login'
+        }
+
+        if (sessionIdleTimeoutSeconds != null && sessionIdleTimeoutSeconds > 0) {
+            args << '--session-idle-timeout' << sessionIdleTimeoutSeconds.toString()
         }
 
         ProcessBuilder pb = new ProcessBuilder(args)

@@ -141,6 +141,17 @@ Namespace GitHub.Copilot.SDK
             ' Verify protocol compatibility
             Await VerifyProtocolVersionAsync(cancellationToken)
 
+            ' Set up session filesystem provider if configured
+            If _options.SessionFs IsNot Nothing AndAlso
+               Not String.IsNullOrEmpty(_options.SessionFs.InitialCwd) Then
+                Dim fsParams As New Dictionary(Of String, Object) From {
+                    {"initialCwd", _options.SessionFs.InitialCwd},
+                    {"sessionStatePath", _options.SessionFs.SessionStatePath},
+                    {"conventions", If(_options.SessionFs.Conventions, "posix")}
+                }
+                Await _rpcClient.SendRequestAsync(Of Object)("sessionFs.setProvider", fsParams, cancellationToken)
+            End If
+
             _started = True
         End Function
 

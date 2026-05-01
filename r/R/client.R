@@ -27,6 +27,7 @@ CopilotClient <- R6::R6Class(
     #' @param use_logged_in_user Logical. Use stored OAuth / gh CLI auth.
     #'   Default: TRUE (but FALSE when github_token is provided).
     #' @param env Named list or NULL. Additional environment variables.
+    #' @param session_fs SessionFsConfig or NULL. Custom session filesystem provider config.
     #'
     #' @return A CopilotClient R6 object.
     #'
@@ -38,7 +39,8 @@ CopilotClient <- R6::R6Class(
     #' }
     initialize = function(cli_path = NULL, cwd = getwd(), log_level = "info",
                           auto_start = TRUE, github_token = NULL,
-                          use_logged_in_user = NULL, env = NULL) {
+                          use_logged_in_user = NULL, env = NULL,
+                          session_fs = NULL) {
       # Determine CLI path
       if (is.null(cli_path)) {
         cli_path <- Sys.which("copilot")
@@ -68,6 +70,7 @@ CopilotClient <- R6::R6Class(
       private$sessions <- new.env(parent = emptyenv())
       private$models_cache <- NULL
       private$lifecycle_handlers <- list()
+      private$session_fs_config <- session_fs
     },
 
     #' @description Start the CLI server and establish connection.
@@ -86,6 +89,16 @@ CopilotClient <- R6::R6Class(
           private$start_cli_server()
           private$connect_to_server()
           private$verify_protocol_version()
+
+          # Register session filesystem provider if configured
+          if (!is.null(private$session_fs_config)) {
+            private$client$request("sessionFs.setProvider", list(
+              initialCwd = private$session_fs_config$initial_cwd,
+              sessionStatePath = private$session_fs_config$session_state_path,
+              conventions = private$session_fs_config$conventions
+            ))
+          }
+
           private$state <- "connected"
         },
         error = function(e) {
@@ -185,12 +198,18 @@ CopilotClient <- R6::R6Class(
     #' @param excluded_tools Character vector or NULL. Tool names to exclude.
     #' @param on_permission_request Function or NULL. Permission request handler.
     #' @param on_user_input_request Function or NULL. User input handler.
+    #' @param on_elicitation_request Function or NULL. Elicitation request handler.
     #' @param hooks Named list or NULL. Hook handlers.
     #' @param working_directory Character or NULL. Working directory for session.
     #' @param provider Named list or NULL. Custom provider config (BYOK).
     #' @param mcp_servers Named list or NULL. MCP server configurations.
     #' @param config_dir Character or NULL. Override config directory.
     #' @param infinite_sessions Named list or NULL. Infinite session config.
+    #' @param github_token Character or NULL. GitHub token for this session.
+    #' @param model_capabilities Named list or NULL. Model capabilities overrides.
+    #' @param enable_config_discovery Logical or NULL. Auto-discover MCP server configs.
+    #' @param include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events.
+    #' @param commands List of CommandDefinition or NULL. Slash commands for this session.
     #'
     #' @return A CopilotSession R6 object.
     create_session = function(model = NULL, session_id = NULL, tools = NULL,
@@ -198,9 +217,14 @@ CopilotClient <- R6::R6Class(
                               available_tools = NULL, excluded_tools = NULL,
                               on_permission_request = NULL,
                               on_user_input_request = NULL,
+                              on_elicitation_request = NULL,
                               hooks = NULL, working_directory = NULL,
                               provider = NULL, mcp_servers = NULL,
-                              config_dir = NULL, infinite_sessions = NULL) {
+                              config_dir = NULL, infinite_sessions = NULL,
+                              github_token = NULL, model_capabilities = NULL,
+                              enable_config_discovery = NULL,
+                              include_sub_agent_streaming_events = NULL,
+                              commands = NULL) {
       if (is.null(private$client)) {
         if (isTRUE(self$options$auto_start)) {
           self$start()
@@ -229,12 +253,27 @@ CopilotClient <- R6::R6Class(
       if (!is.null(excluded_tools)) payload$excludedTools <- excluded_tools
       if (!is.null(on_permission_request)) payload$requestPermission <- TRUE
       if (!is.null(on_user_input_request)) payload$requestUserInput <- TRUE
+      if (!is.null(on_elicitation_request)) payload$requestElicitation <- TRUE
       if (!is.null(hooks) && length(hooks) > 0) payload$hooks <- TRUE
       if (!is.null(working_directory)) payload$workingDirectory <- working_directory
       if (!is.null(streaming)) payload$streaming <- streaming
       if (!is.null(provider)) payload$provider <- private$convert_provider(provider)
       if (!is.null(mcp_servers)) payload$mcpServers <- mcp_servers
       if (!is.null(config_dir)) payload$configDir <- config_dir
+      if (!is.null(github_token)) payload$gitHubToken <- github_token
+      if (!is.null(model_capabilities)) payload$modelCapabilities <- model_capabilities
+      if (!is.null(enable_config_discovery)) payload$enableConfigDiscovery <- enable_config_discovery
+      if (!is.null(include_sub_agent_streaming_events)) {
+        payload$includeSubAgentStreamingEvents <- include_sub_agent_streaming_events
+      }
+      if (!is.null(commands)) {
+        cmds_list <- lapply(commands, function(cmd) {
+          c_list <- list(name = cmd$name)
+          if (!is.null(cmd$description)) c_list$description <- cmd$description
+          c_list
+        })
+        payload$commands <- cmds_list
+      }
       if (!is.null(infinite_sessions)) {
         wire_config <- list()
         if (!is.null(infinite_sessions$enabled)) wire_config$enabled <- infinite_sessions$enabled
@@ -267,6 +306,12 @@ CopilotClient <- R6::R6Class(
       if (!is.null(hooks)) {
         session$register_hooks(hooks)
       }
+      if (!is.null(on_elicitation_request)) {
+        session$register_elicitation_handler(on_elicitation_request)
+      }
+      if (!is.null(commands)) {
+        session$register_commands(commands)
+      }
 
       assign(sid, session, envir = private$sessions)
       session
@@ -281,18 +326,31 @@ CopilotClient <- R6::R6Class(
     #' @param streaming Logical or NULL.
     #' @param on_permission_request Function or NULL.
     #' @param on_user_input_request Function or NULL.
+    #' @param on_elicitation_request Function or NULL. Elicitation request handler.
     #' @param hooks Named list or NULL.
     #' @param working_directory Character or NULL.
     #' @param provider Named list or NULL.
     #' @param disable_resume Logical or NULL.
+    #' @param excluded_tools Character vector or NULL. Tool names to exclude.
+    #' @param github_token Character or NULL. GitHub token for this session.
+    #' @param model_capabilities Named list or NULL. Model capabilities overrides.
+    #' @param enable_config_discovery Logical or NULL. Auto-discover MCP server configs.
+    #' @param include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events.
+    #' @param commands List of CommandDefinition or NULL. Slash commands for this session.
     #'
     #' @return A CopilotSession R6 object.
     resume_session = function(session_id, model = NULL, tools = NULL,
                               system_message = NULL, streaming = NULL,
                               on_permission_request = NULL,
                               on_user_input_request = NULL,
+                              on_elicitation_request = NULL,
                               hooks = NULL, working_directory = NULL,
-                              provider = NULL, disable_resume = NULL) {
+                              provider = NULL, disable_resume = NULL,
+                              excluded_tools = NULL, github_token = NULL,
+                              model_capabilities = NULL,
+                              enable_config_discovery = NULL,
+                              include_sub_agent_streaming_events = NULL,
+                              commands = NULL) {
       if (is.null(private$client)) {
         if (isTRUE(self$options$auto_start)) {
           self$start()
@@ -317,10 +375,26 @@ CopilotClient <- R6::R6Class(
       if (!is.null(streaming)) payload$streaming <- streaming
       if (!is.null(on_permission_request)) payload$requestPermission <- TRUE
       if (!is.null(on_user_input_request)) payload$requestUserInput <- TRUE
+      if (!is.null(on_elicitation_request)) payload$requestElicitation <- TRUE
       if (!is.null(hooks) && length(hooks) > 0) payload$hooks <- TRUE
       if (!is.null(working_directory)) payload$workingDirectory <- working_directory
       if (!is.null(provider)) payload$provider <- private$convert_provider(provider)
       if (isTRUE(disable_resume)) payload$disableResume <- TRUE
+      if (!is.null(excluded_tools)) payload$excludedTools <- excluded_tools
+      if (!is.null(github_token)) payload$gitHubToken <- github_token
+      if (!is.null(model_capabilities)) payload$modelCapabilities <- model_capabilities
+      if (!is.null(enable_config_discovery)) payload$enableConfigDiscovery <- enable_config_discovery
+      if (!is.null(include_sub_agent_streaming_events)) {
+        payload$includeSubAgentStreamingEvents <- include_sub_agent_streaming_events
+      }
+      if (!is.null(commands)) {
+        cmds_list <- lapply(commands, function(cmd) {
+          c_list <- list(name = cmd$name)
+          if (!is.null(cmd$description)) c_list$description <- cmd$description
+          c_list
+        })
+        payload$commands <- cmds_list
+      }
 
       response <- private$client$request("session.resume", payload)
 
@@ -332,6 +406,8 @@ CopilotClient <- R6::R6Class(
       if (!is.null(on_permission_request)) session$register_permission_handler(on_permission_request)
       if (!is.null(on_user_input_request)) session$register_user_input_handler(on_user_input_request)
       if (!is.null(hooks)) session$register_hooks(hooks)
+      if (!is.null(on_elicitation_request)) session$register_elicitation_handler(on_elicitation_request)
+      if (!is.null(commands)) session$register_commands(commands)
 
       assign(sid, session, envir = private$sessions)
       session
@@ -470,6 +546,7 @@ CopilotClient <- R6::R6Class(
     sessions = NULL,
     models_cache = NULL,
     lifecycle_handlers = NULL,
+    session_fs_config = NULL,
 
     start_cli_server = function() {
       cli_path <- self$options$cli_path

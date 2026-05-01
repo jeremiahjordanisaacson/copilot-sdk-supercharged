@@ -183,3 +183,74 @@ export type SecurityPattern =
     | "oracle-manipulation"
     | "denial-of-service"
     | "timestamp-dependency";
+
+// ---------------------------------------------------------------------------
+// Session filesystem configuration
+// ---------------------------------------------------------------------------
+
+/** Configuration for the session filesystem provider. */
+export interface SessionFsConfig {
+    /** Initial working directory. */
+    initialCwd: string;
+    /** Path for session state persistence. */
+    sessionStatePath: string;
+    /** Path conventions: "windows" or "posix". */
+    conventions: "windows" | "posix";
+}
+
+// ---------------------------------------------------------------------------
+// MCP server configuration
+// ---------------------------------------------------------------------------
+
+/** MCP server connection type. */
+export type McpServerType = "stdio" | "http";
+
+/** Configuration for an MCP server. */
+export interface McpServerConfig {
+    type: McpServerType;
+    command?: string;
+    args?: string[];
+    url?: string;
+    env?: Record<string, string>;
+    headers?: Record<string, string>;
+}
+
+// ---------------------------------------------------------------------------
+// Command definition
+// ---------------------------------------------------------------------------
+
+/** A command that can be registered with a session. */
+export interface SolidityCommandDefinition {
+    name: string;
+    description: string;
+}
+
+// ---------------------------------------------------------------------------
+// Extended session options (for explicit access beyond base SDK)
+// ---------------------------------------------------------------------------
+
+/** Extended options for Solidity sessions with all feature flags. */
+export interface SolidityExtendedSessionConfig extends SoliditySessionConfig {
+    /** Excluded tools for this session. */
+    excludedTools?: string[];
+    /** MCP server configurations. */
+    mcpServers?: Record<string, McpServerConfig>;
+    /** Model capabilities override. */
+    modelCapabilities?: Record<string, unknown>;
+    /** Enable automatic config discovery. */
+    enableConfigDiscovery?: boolean;
+    /** Include sub-agent streaming events. */
+    includeSubAgentStreamingEvents?: boolean;
+    /** Command definitions. */
+    commands?: SolidityCommandDefinition[];
+    /** Skill directories. */
+    skillDirectories?: string[];
+    /** Disabled skills. */
+    disabledSkills?: string[];
+    /** Per-session auth token. */
+    gitHubToken?: string;
+    /** Session filesystem config. */
+    sessionFs?: SessionFsConfig;
+    /** Response format. */
+    responseFormat?: "text" | "image" | "json_object";
+}

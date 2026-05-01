@@ -16,21 +16,37 @@ pub enum ConnectionState {
 // CopilotClientOptions configures the CopilotClient.
 pub struct CopilotClientOptions {
 pub mut:
-	cli_path  string // path to the Copilot CLI binary
-	cli_url   string // URL of an already-running CLI server (host:port)
-	log_level string = 'error' // log level: error, warn, info, debug
+	cli_path                      string // path to the Copilot CLI binary
+	cli_url                       string // URL of an already-running CLI server (host:port)
+	log_level                     string = 'error' // log level: error, warn, info, debug
+	github_token                  string // GitHub token for authentication
+	use_logged_in_user            bool = true // use the currently logged-in user
+	session_idle_timeout_seconds  int    // idle timeout in seconds
+	session_fs                    SessionFsConfig // session filesystem config
 }
 
 // SessionConfig defines how to create a new conversation session.
 pub struct SessionConfig {
 pub mut:
-	model                 string // model name, e.g. "gpt-4" or "gpt-5"
-	system_message        string // custom system prompt
-	tools                 []Tool // tools available to the model
-	streaming             bool = true // receive streaming delta events
-	agent                 string // agent name for scoped behaviour
-	history               []HistoryEntry // conversation history to seed the session
-	on_permission_request fn (PermissionRequest) PermissionResponse = unsafe { nil }
+	model                               string // model name, e.g. "gpt-4" or "gpt-5"
+	system_message                      string // custom system prompt
+	tools                               []Tool // tools available to the model
+	streaming                           bool = true // receive streaming delta events
+	agent                               string // agent name for scoped behaviour
+	history                             []HistoryEntry // conversation history to seed the session
+	on_permission_request               fn (PermissionRequest) PermissionResponse = unsafe { nil }
+	excluded_tools                      []string // tools to exclude
+	mcp_servers                         map[string]McpServerConfig // MCP server configs
+	model_capabilities                  map[string]string // model capabilities override
+	enable_config_discovery             bool // auto-discover config
+	include_sub_agent_streaming_events  bool // include sub-agent streaming events
+	commands                            []CommandDefinition // command definitions
+	skill_directories                   []string // skill directories
+	disabled_skills                     []string // disabled skills
+	working_directory                   string // working directory
+	github_token                        string // per-session auth token
+	reasoning_effort                    string // reasoning effort level
+	response_format                     string // response format: "text", "image", "json_object"
 }
 
 // HistoryEntry is a single turn in a conversation.
@@ -143,6 +159,38 @@ pub enum ErrorKind {
 	tool_error
 	permission_denied
 	unknown
+}
+
+// SessionFsConfig describes the session filesystem provider.
+pub struct SessionFsConfig {
+pub:
+	initial_cwd        string [json: 'initialCwd']
+	session_state_path string [json: 'sessionStatePath']
+	conventions        string [json: 'conventions'] // "windows" or "posix"
+}
+
+// McpServerType indicates how to connect to an MCP server.
+pub enum McpServerType {
+	stdio
+	http
+}
+
+// McpServerConfig describes an MCP server connection.
+pub struct McpServerConfig {
+pub:
+	server_type McpServerType     [json: 'type']
+	command     string            [json: 'command']
+	args        []string          [json: 'args']
+	url         string            [json: 'url']
+	env         map[string]string [json: 'env']
+	headers     map[string]string [json: 'headers']
+}
+
+// CommandDefinition describes a command that can be invoked.
+pub struct CommandDefinition {
+pub:
+	name        string [json: 'name']
+	description string [json: 'description']
 }
 
 // approve_all is a convenience permission handler that approves everything.

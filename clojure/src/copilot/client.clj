@@ -61,7 +61,10 @@
       (and (not use-stdio)
            (pos? port))  (conj "--port" (str port))
       github-token       (conj "--auth-token-env" "COPILOT_SDK_AUTH_TOKEN")
-      (not use-logged-in) (conj "--no-auto-login"))))
+      (not use-logged-in) (conj "--no-auto-login")
+      (and (:session-idle-timeout-seconds opts)
+           (pos? (:session-idle-timeout-seconds opts)))
+      (conj "--session-idle-timeout" (str (:session-idle-timeout-seconds opts))))))
 
 (defn- spawn-cli-process
   "Spawn the Copilot CLI process. Returns a java.lang.Process."
@@ -134,7 +137,9 @@
                 available-tools excluded-tools provider on-permission-request
                 on-user-input-request hooks working-directory streaming
                 mcp-servers custom-agents config-dir skill-directories
-                disabled-skills infinite-sessions disable-resume]} config]
+                disabled-skills infinite-sessions disable-resume
+                model-capabilities enable-config-discovery
+                include-sub-agent-streaming-events github-token]} config]
     (cond-> {}
       model               (assoc :model model)
       session-id          (assoc :sessionId session-id)
@@ -159,7 +164,11 @@
       skill-directories   (assoc :skillDirectories skill-directories)
       disabled-skills     (assoc :disabledSkills disabled-skills)
       infinite-sessions   (assoc :infiniteSessions infinite-sessions)
-      (some? disable-resume) (assoc :disableResume disable-resume))))
+      (some? disable-resume) (assoc :disableResume disable-resume)
+      model-capabilities  (assoc :modelCapabilities model-capabilities)
+      (some? enable-config-discovery) (assoc :enableConfigDiscovery enable-config-discovery)
+      (some? include-sub-agent-streaming-events) (assoc :includeSubAgentStreamingEvents include-sub-agent-streaming-events)
+      github-token        (assoc :gitHubToken github-token))))
 
 (defn create-client
   "Create a new CopilotClient.
@@ -298,7 +307,32 @@
        (if-not session-atom
          {:output nil}
          (let [output (session/handle-hooks-invoke! session-atom hook-type input)]
-           {:output output}))))))
+           {:output output})))))
+
+  ;; Session filesystem requests from server
+  (doseq [[method-name fs-key args-fn]
+          [["sessionFs.readFile"         :read-file          (fn [p] [(:sessionId p) (:path p)])]
+           ["sessionFs.writeFile"        :write-file         (fn [p] [(:sessionId p) (:path p) (:content p)])]
+           ["sessionFs.appendFile"       :append-file        (fn [p] [(:sessionId p) (:path p) (:content p)])]
+           ["sessionFs.exists"           :exists?            (fn [p] [(:sessionId p) (:path p)])]
+           ["sessionFs.stat"             :stat               (fn [p] [(:sessionId p) (:path p)])]
+           ["sessionFs.mkdir"            :mkdir              (fn [p] [(:sessionId p) (:path p) (:recursive p)])]
+           ["sessionFs.readdir"          :readdir            (fn [p] [(:sessionId p) (:path p)])]
+           ["sessionFs.readdirWithTypes" :readdir-with-types (fn [p] [(:sessionId p) (:path p)])]
+           ["sessionFs.rm"               :rm                 (fn [p] [(:sessionId p) (:path p) (:recursive p)])]
+           ["sessionFs.rename"           :rename             (fn [p] [(:sessionId p) (:oldPath p) (:newPath p)])]]]
+    (rpc/set-request-handler!
+     rpc-client method-name
+     (fn [params]
+       (let [session-id (:sessionId params)
+             state      @client-atom
+             session-atom (get-in state [:sessions session-id])
+             fs-handler (when session-atom
+                          (get-in @session-atom [:session-fs-handler fs-key]))]
+         (if-not fs-handler
+           (throw (ex-info (str "No sessionFs handler registered for " method-name)
+                           {:session-id session-id}))
+           (apply fs-handler (args-fn params))))))))
 
 (defn- connect-stdio!
   "Connect to CLI via stdio pipes."
@@ -372,6 +406,13 @@
                 (connect-tcp! client-atom "localhost" port)))))
         ;; Verify protocol version
         (verify-protocol-version! client-atom)
+        ;; Register session filesystem provider if configured
+        (when-let [fs-config (:session-fs (:options @client-atom))]
+          (let [rpc-client (:rpc-client @client-atom)]
+            (rpc/request! rpc-client "sessionFs.setProvider"
+                          {:initialCwd       (:initialCwd fs-config)
+                           :sessionStatePath (:sessionStatePath fs-config)
+                           :conventions      (:conventions fs-config)})))
         (swap! client-atom assoc :state :connected)
         (catch Exception e
           (swap! client-atom assoc :state :error)
@@ -475,6 +516,10 @@
       ;; Register hooks
       (when-let [h (:hooks config)]
         (session/register-hooks! sess h))
+      ;; Register session filesystem handler if client has sessionFs configured
+      (when-let [fs-config (:session-fs (:options @client-atom))]
+        (when-let [create-handler (:create-session-fs-handler config)]
+          (session/register-session-fs-handler! sess (create-handler))))
       ;; Store session in client
       (swap! client-atom assoc-in [:sessions session-id] sess)
       sess)))
@@ -504,6 +549,10 @@
         (session/register-user-input-handler! sess h))
       (when-let [h (:hooks config)]
         (session/register-hooks! sess h))
+      ;; Register session filesystem handler if client has sessionFs configured
+      (when-let [fs-config (:session-fs (:options @client-atom))]
+        (when-let [create-handler (:create-session-fs-handler config)]
+          (session/register-session-fs-handler! sess (create-handler))))
       (swap! client-atom assoc-in [:sessions resumed-id] sess)
       sess)))
 

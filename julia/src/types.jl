@@ -48,6 +48,46 @@ const TOOL_RESULT_STRINGS = Dict{ToolResultType, String}(
     TOOL_TIMEOUT  => "timeout",
 )
 
+"""Configuration for the session filesystem provider."""
+Base.@kwdef struct SessionFsConfig
+    initial_cwd::String = ""
+    session_state_path::String = ""
+    conventions::String = "posix"  # "windows" or "posix"
+end
+
+"""MCP server connection type."""
+@enum McpServerType MCP_STDIO MCP_HTTP
+
+const MCP_SERVER_TYPE_STRINGS = Dict{McpServerType, String}(
+    MCP_STDIO => "stdio",
+    MCP_HTTP  => "http",
+)
+
+"""MCP server configuration."""
+Base.@kwdef struct McpServerConfig
+    type::McpServerType = MCP_STDIO
+    command::Union{String, Nothing} = nothing
+    args::Vector{String} = String[]
+    url::Union{String, Nothing} = nothing
+    env::Union{Dict{String, String}, Nothing} = nothing
+    headers::Union{Dict{String, String}, Nothing} = nothing
+end
+
+"""Command definition for session commands."""
+Base.@kwdef struct CommandDefinition
+    name::String = ""
+    description::String = ""
+end
+
+"""Image/response format options."""
+@enum ImageResponseFormat FORMAT_TEXT FORMAT_IMAGE FORMAT_JSON_OBJECT
+
+const IMAGE_RESPONSE_FORMAT_STRINGS = Dict{ImageResponseFormat, String}(
+    FORMAT_TEXT        => "text",
+    FORMAT_IMAGE       => "image",
+    FORMAT_JSON_OBJECT => "json_object",
+)
+
 """Options for creating a CopilotClient."""
 Base.@kwdef mutable struct CopilotClientOptions
     cli_path::Union{String, Nothing} = nothing
@@ -59,6 +99,10 @@ Base.@kwdef mutable struct CopilotClientOptions
     log_level::LogLevel = LOG_ERROR
     auto_start::Bool = true
     env::Union{Dict{String, String}, Nothing} = nothing
+    github_token::Union{String, Nothing} = nothing
+    use_logged_in_user::Bool = true
+    session_idle_timeout_seconds::Union{Int, Nothing} = nothing
+    session_fs::Union{SessionFsConfig, Nothing} = nothing
 end
 
 """Configuration for creating a session."""
@@ -72,6 +116,17 @@ Base.@kwdef mutable struct SessionConfig
     reasoning_effort::Union{String, Nothing} = nothing
     streaming::Bool = true
     agent::Union{String, Nothing} = nothing
+    excluded_tools::Vector{String} = String[]
+    mcp_servers::Union{Dict{String, McpServerConfig}, Nothing} = nothing
+    model_capabilities::Union{Dict{String, Any}, Nothing} = nothing
+    enable_config_discovery::Bool = false
+    include_sub_agent_streaming_events::Bool = false
+    commands::Vector{CommandDefinition} = CommandDefinition[]
+    skill_directories::Vector{String} = String[]
+    disabled_skills::Vector{String} = String[]
+    working_directory::Union{String, Nothing} = nothing
+    github_token::Union{String, Nothing} = nothing
+    response_format::Union{ImageResponseFormat, Nothing} = nothing
 end
 
 """Payload for sending a message to a session."""

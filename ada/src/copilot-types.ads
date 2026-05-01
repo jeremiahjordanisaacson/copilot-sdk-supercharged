@@ -61,6 +61,9 @@ package Copilot.Types is
       Github_Token    : UString  := Null_UString;
       Use_Logged_In   : Boolean  := False;
       Session_Idle_Timeout_Seconds : Natural := 0;
+      Session_Fs_Initial_Cwd      : UString := Null_UString;
+      Session_Fs_State_Path       : UString := Null_UString;
+      Session_Fs_Conventions      : UString := Null_UString;
    end record;
 
    Default_Options : constant Client_Options :=
@@ -75,28 +78,57 @@ package Copilot.Types is
       Auto_Restart    => True,
       Github_Token    => Null_UString,
       Use_Logged_In   => False,
-      Session_Idle_Timeout_Seconds => 0);
+      Session_Idle_Timeout_Seconds => 0,
+      Session_Fs_Initial_Cwd      => Null_UString,
+      Session_Fs_State_Path       => Null_UString,
+      Session_Fs_Conventions      => Null_UString);
 
    --  -----------------------------------------------------------------------
    --  Session configuration
    --  -----------------------------------------------------------------------
 
    type Session_Config is record
-      System_Prompt        : UString  := Null_UString;
-      Model                : UString  := Null_UString;
-      Github_Token         : UString  := Null_UString;
-      Streaming            : Boolean  := True;
-      Workspace_Path       : UString  := Null_UString;
-      Session_Idle_Timeout : Natural  := 0;
+      System_Prompt                    : UString  := Null_UString;
+      Model                            : UString  := Null_UString;
+      Github_Token                     : UString  := Null_UString;
+      Streaming                        : Boolean  := True;
+      Workspace_Path                   : UString  := Null_UString;
+      Session_Idle_Timeout             : Natural  := 0;
+      Skill_Directories                : UString  := Null_UString;
+      Disabled_Skills                  : UString  := Null_UString;
+      Excluded_Tools                   : UString  := Null_UString;
+      Include_Sub_Agent_Streaming      : Boolean  := False;
+      Enable_Config_Discovery          : Boolean  := False;
+      Model_Capabilities_Json          : UString  := Null_UString;
+      Request_Headers_Json             : UString  := Null_UString;
+      Mcp_Servers_Json                 : UString  := Null_UString;
+      Commands_Json                    : UString  := Null_UString;
+      Response_Format                  : UString  := Null_UString;
+      Image_Size                       : UString  := Null_UString;
+      Image_Quality                    : UString  := Null_UString;
+      Image_Style                      : UString  := Null_UString;
    end record;
 
    Default_Session_Config : constant Session_Config :=
-     (System_Prompt        => Null_UString,
-      Model                => Null_UString,
-      Github_Token         => Null_UString,
-      Streaming            => True,
-      Workspace_Path       => Null_UString,
-      Session_Idle_Timeout => 0);
+     (System_Prompt                    => Null_UString,
+      Model                            => Null_UString,
+      Github_Token                     => Null_UString,
+      Streaming                        => True,
+      Workspace_Path                   => Null_UString,
+      Session_Idle_Timeout             => 0,
+      Skill_Directories                => Null_UString,
+      Disabled_Skills                  => Null_UString,
+      Excluded_Tools                   => Null_UString,
+      Include_Sub_Agent_Streaming      => False,
+      Enable_Config_Discovery          => False,
+      Model_Capabilities_Json          => Null_UString,
+      Request_Headers_Json             => Null_UString,
+      Mcp_Servers_Json                 => Null_UString,
+      Commands_Json                    => Null_UString,
+      Response_Format                  => Null_UString,
+      Image_Size                       => Null_UString,
+      Image_Quality                    => Null_UString,
+      Image_Style                      => Null_UString);
 
    --  -----------------------------------------------------------------------
    --  Resume session configuration

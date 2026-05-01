@@ -111,6 +111,20 @@ contains
       self%state%value = COPILOT_STATE_ERROR
       write(error_unit, '(A)') 'copilot_client: ping failed after start'
     end if
+
+    ! Set up session filesystem provider if configured
+    if (allocated(self%options%session_fs)) then
+      if (allocated(self%options%session_fs%initial_cwd)) then
+        block
+          character(len=:), allocatable :: fs_params
+          integer :: fs_req_id, fs_ios
+          fs_params = '{"initialCwd":"' // self%options%session_fs%initial_cwd // '",' // &
+                      '"sessionStatePath":"' // self%options%session_fs%session_state_path // '",' // &
+                      '"conventions":"' // self%options%session_fs%conventions // '"}'
+          call self%rpc%send_request('sessionFs.setProvider', fs_params, fs_req_id, fs_ios)
+        end block
+      end if
+    end if
   end subroutine client_start
 
   !> Stop the CLI process and close the JSON-RPC connection.

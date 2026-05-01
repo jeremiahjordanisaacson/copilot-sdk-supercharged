@@ -283,6 +283,20 @@ begin
         'Protocol version mismatch: server=%s, minimum=%d',
         [PingResult.ProtocolVersion, MIN_PROTOCOL_VERSION]);
 
+    // Set up session filesystem provider if configured
+    if FOptions.SessionFs.InitialCwd <> '' then
+    begin
+      var FsParams := TJSONObject.Create;
+      try
+        FsParams.AddPair('initialCwd', FOptions.SessionFs.InitialCwd);
+        FsParams.AddPair('sessionStatePath', FOptions.SessionFs.SessionStatePath);
+        FsParams.AddPair('conventions', FOptions.SessionFs.Conventions);
+        FRpc.SendRequest('sessionFs.setProvider', FsParams);
+      finally
+        FsParams.Free;
+      end;
+    end;
+
     FState := csConnected;
   except
     on E: Exception do

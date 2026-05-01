@@ -42,6 +42,8 @@ public class SessionConfig {
     private List<CommandDefinition> commands;
     /** Handler for elicitation requests from the server. */
     private ElicitationHandler onElicitationRequest;
+    /** Per-session auth token. When set, overrides the client-level token for this session only. Alias for gitHubToken. */
+    private String authToken;
 
     public SessionConfig() {}
 
@@ -71,6 +73,7 @@ public class SessionConfig {
     public SessionConfig gitHubToken(String token) { this.gitHubToken = token; return this; }
     public SessionConfig commands(List<CommandDefinition> commands) { this.commands = commands; return this; }
     public SessionConfig onElicitationRequest(ElicitationHandler handler) { this.onElicitationRequest = handler; return this; }
+    public SessionConfig authToken(String token) { this.authToken = token; return this; }
 
     // Getters
     public String getSessionId() { return sessionId; }
@@ -98,4 +101,5 @@ public class SessionConfig {
     public String getGitHubToken() { return gitHubToken; }
     public List<CommandDefinition> getCommands() { return commands; }
     public ElicitationHandler getOnElicitationRequest() { return onElicitationRequest; }
+    public String getAuthToken() { return authToken; }
 }

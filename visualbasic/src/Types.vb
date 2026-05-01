@@ -99,6 +99,33 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Initial attachments for context.</summary>
         Public Property Attachments As List(Of Attachment)
 
+        ''' <summary>Tools to exclude from the session.</summary>
+        Public Property ExcludedTools As List(Of String)
+
+        ''' <summary>Slash commands registered for this session.</summary>
+        Public Property Commands As List(Of CommandDefinition)
+
+        ''' <summary>Additional request headers sent with each turn.</summary>
+        Public Property RequestHeaders As Dictionary(Of String, String)
+
+        ''' <summary>Override model capabilities.</summary>
+        Public Property ModelCapabilities As Dictionary(Of String, Object)
+
+        ''' <summary>Enable automatic config discovery.</summary>
+        Public Property EnableConfigDiscovery As Boolean? = Nothing
+
+        ''' <summary>Include sub-agent streaming events.</summary>
+        Public Property IncludeSubAgentStreamingEvents As Boolean = False
+
+        ''' <summary>MCP server configurations keyed by server name.</summary>
+        Public Property McpServers As Dictionary(Of String, Object)
+
+        ''' <summary>Response format for the session.</summary>
+        Public Property ResponseFormat As ResponseFormat? = Nothing
+
+        ''' <summary>Image generation options.</summary>
+        Public Property ImageOptions As ImageOptions
+
     End Class
 
     ''' <summary>
@@ -120,6 +147,15 @@ Namespace GitHub.Copilot.SDK
 
         ''' <summary>Skills to enable for this session.</summary>
         Public Property Skills As List(Of String)
+
+        ''' <summary>Slash commands registered for this session.</summary>
+        Public Property Commands As List(Of CommandDefinition)
+
+        ''' <summary>Tools to exclude from the session.</summary>
+        Public Property ExcludedTools As List(Of String)
+
+        ''' <summary>Include sub-agent streaming events.</summary>
+        Public Property IncludeSubAgentStreamingEvents As Boolean = False
 
     End Class
 
@@ -361,6 +397,85 @@ Namespace GitHub.Copilot.SDK
 
         ''' <summary>Path where the runtime stores session-scoped files.</summary>
         Public Property SessionStatePath As String
+
+        ''' <summary>Path conventions ("posix" or "windows").</summary>
+        Public Property Conventions As String
+
+    End Class
+
+    ' -----------------------------------------------------------------------
+    '  MCP server configuration
+    ' -----------------------------------------------------------------------
+
+    ''' <summary>
+    ''' Configuration for an MCP stdio (local) server.
+    ''' </summary>
+    Public Class MCPStdioServerConfig
+
+        Public Property Tools As List(Of String)
+        Public Property Type As String
+        Public Property Timeout As Integer? = Nothing
+        Public Property Command As String
+        Public Property Args As List(Of String)
+        Public Property Env As Dictionary(Of String, String)
+        Public Property Cwd As String
+
+    End Class
+
+    ''' <summary>
+    ''' Configuration for an MCP HTTP (remote) server.
+    ''' </summary>
+    Public Class MCPHttpServerConfig
+
+        Public Property Tools As List(Of String)
+        Public Property Type As String
+        Public Property Timeout As Integer? = Nothing
+        Public Property Url As String
+        Public Property Headers As Dictionary(Of String, String)
+
+    End Class
+
+    ' -----------------------------------------------------------------------
+    '  Commands
+    ' -----------------------------------------------------------------------
+
+    ''' <summary>
+    ''' Definition of a slash command.
+    ''' </summary>
+    Public Class CommandDefinition
+
+        ''' <summary>Command name (e.g. "/help").</summary>
+        Public Property Name As String
+
+        ''' <summary>Human-readable description.</summary>
+        Public Property Description As String
+
+        ''' <summary>Handler function for the command.</summary>
+        Public Property Handler As Func(Of String, Task(Of String))
+
+    End Class
+
+    ' -----------------------------------------------------------------------
+    '  Response format / image options
+    ' -----------------------------------------------------------------------
+
+    ''' <summary>
+    ''' Response format for messages.
+    ''' </summary>
+    Public Enum ResponseFormat
+        Text
+        Image
+        JsonObject
+    End Enum
+
+    ''' <summary>
+    ''' Image generation options.
+    ''' </summary>
+    Public Class ImageOptions
+
+        Public Property Size As String
+        Public Property Quality As String
+        Public Property Style As String
 
     End Class
 

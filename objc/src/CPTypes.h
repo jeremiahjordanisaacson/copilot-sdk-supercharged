@@ -175,6 +175,17 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *systemMessage;
 @property (nonatomic, copy, nullable) NSString *githubToken;
 @property (nonatomic, copy, nullable) CPPermissionHandler permissionHandler;
+@property (nonatomic, copy, nullable) NSArray<NSString *> *excludedTools;
+@property (nonatomic, copy, nullable) NSArray<NSString *> *skillDirectories;
+@property (nonatomic, copy, nullable) NSArray<NSString *> *disabledSkills;
+@property (nonatomic, assign) BOOL includeSubAgentStreamingEvents;
+@property (nonatomic, assign) BOOL enableConfigDiscovery;
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *modelCapabilities;
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *requestHeaders;
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *mcpServers;
+@property (nonatomic, copy, nullable) NSArray<NSDictionary<NSString *, id> *> *commands;
+@property (nonatomic, copy, nullable) NSString *responseFormat;
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *imageOptions;
 
 - (NSDictionary<NSString *, id> *)toDictionary;
 
@@ -195,6 +206,7 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, assign) BOOL useLoggedInUser;
 @property (nonatomic, copy, nullable) NSArray<NSString *> *extraArgs;
 @property (nonatomic, strong, nullable) CPSessionFsConfig *sessionFs;
+@property (nonatomic, assign) NSInteger sessionIdleTimeoutSeconds;
 
 + (instancetype)defaultOptions;
 

@@ -39,6 +39,13 @@ classdef CopilotClientOptions
         % TCP port for the CLI server.  Only used when UseStdio is false
         % and CliUrl is empty.
         Port (1,1) double = 0
+
+        % Session idle timeout in seconds (0 = no timeout).
+        SessionIdleTimeoutSeconds (1,1) double = 0
+
+        % Session filesystem configuration (struct with InitialCwd,
+        % SessionStatePath, Conventions fields).
+        SessionFs
     end
 
     methods
@@ -59,6 +66,8 @@ classdef CopilotClientOptions
             p.addParameter('UseLoggedInUser', obj.UseLoggedInUser);
             p.addParameter('UseStdio', obj.UseStdio);
             p.addParameter('Port', obj.Port);
+            p.addParameter('SessionIdleTimeoutSeconds', obj.SessionIdleTimeoutSeconds);
+            p.addParameter('SessionFs', struct());
             p.parse(varargin{:});
 
             obj.CliPath          = p.Results.CliPath;
@@ -71,6 +80,8 @@ classdef CopilotClientOptions
             obj.UseLoggedInUser  = p.Results.UseLoggedInUser;
             obj.UseStdio         = p.Results.UseStdio;
             obj.Port             = p.Results.Port;
+            obj.SessionIdleTimeoutSeconds = p.Results.SessionIdleTimeoutSeconds;
+            obj.SessionFs        = p.Results.SessionFs;
         end
 
         function s = toStruct(obj)
@@ -84,7 +95,8 @@ classdef CopilotClientOptions
                 'gitHubToken',     obj.GitHubToken, ...
                 'useLoggedInUser', obj.UseLoggedInUser, ...
                 'useStdio',        obj.UseStdio, ...
-                'port',            obj.Port);
+                'port',            obj.Port, ...
+                'sessionIdleTimeoutSeconds', obj.SessionIdleTimeoutSeconds);
         end
     end
 end

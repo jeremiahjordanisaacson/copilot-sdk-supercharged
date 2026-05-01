@@ -54,7 +54,9 @@
     waiting         :: [{pid(), reference(), reference()}],
     last_assistant_event :: map() | undefined,
     ready           :: boolean(),
-    hooks           :: map() | undefined
+    hooks           :: map() | undefined,
+    command_handlers :: #{binary() => fun()},
+    elicitation_handler :: fun() | undefined
 }).
 
 %% ---------------------------------------------------------------------------
@@ -119,6 +121,14 @@ workspace_path(Pid) ->
 
 init({SessionId, Rpc, WorkspacePath, Config}) ->
     Hooks = maps:get(hooks, Config, undefined),
+    %% Build command handler map from command definitions
+    Commands = maps:get(commands, Config, []),
+    CmdHandlers = lists:foldl(fun(Cmd, Acc) ->
+        Name = maps:get(name, Cmd),
+        Handler = maps:get(handler, Cmd),
+        Acc#{Name => Handler}
+    end, #{}, Commands),
+    ElicitHandler = maps:get(on_elicitation_request, Config, undefined),
     {ok, #state{
         session_id = SessionId,
         rpc = Rpc,
@@ -127,7 +137,9 @@ init({SessionId, Rpc, WorkspacePath, Config}) ->
         subscribers = #{},
         waiting = [],
         ready = false,
-        hooks = Hooks
+        hooks = Hooks,
+        command_handlers = CmdHandlers,
+        elicitation_handler = ElicitHandler
     }}.
 
 handle_call({send, Options}, _From, #state{rpc = Rpc, session_id = SessionId} = State) ->
@@ -139,7 +151,8 @@ handle_call({send, Options}, _From, #state{rpc = Rpc, session_id = SessionId} = 
     Req2 = maybe_add(<<"mode">>, mode, Options, Req1),
     Req3 = maybe_add(<<"responseFormat">>, response_format, Options, Req2),
     Req4 = maybe_add(<<"imageOptions">>, image_options, Options, Req3),
-    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req4) of
+    Req5 = maybe_add(<<"requestHeaders">>, request_headers, Options, Req4),
+    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req5) of
         {ok, #{<<"messageId">> := MsgId}} ->
             {reply, {ok, MsgId}, State};
         {ok, _} ->
@@ -158,7 +171,8 @@ handle_call({send_and_wait, Options, Timeout}, From, State) ->
     Req2 = maybe_add(<<"mode">>, mode, Options, Req1),
     Req3 = maybe_add(<<"responseFormat">>, response_format, Options, Req2),
     Req4 = maybe_add(<<"imageOptions">>, image_options, Options, Req3),
-    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req4) of
+    Req5 = maybe_add(<<"requestHeaders">>, request_headers, Options, Req4),
+    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req5) of
         {ok, _} ->
             TimerRef = erlang:send_after(Timeout, self(), {wait_timeout, From}),
             Waiting = [{From, TimerRef, undefined} | State#state.waiting],
@@ -220,6 +234,10 @@ handle_cast({event, EventType, EventData}, State) ->
     end,
     %% Invoke hooks
     maybe_invoke_hook(EventType, EventData, State),
+    %% Handle command.execute events
+    maybe_handle_command(EventType, EventData, State),
+    %% Handle elicitation.requested events
+    maybe_handle_elicitation(EventType, EventData, State),
     {noreply, State#state{
         waiting = NewWaiting,
         last_assistant_event = NewLastEvent
@@ -296,4 +314,64 @@ maybe_invoke_hook(<<"session.error">>, Data, #state{hooks = Hooks})
         Hook      -> catch Hook(Data)
     end;
 maybe_invoke_hook(_EventType, _Data, _State) ->
+    ok.
+
+maybe_handle_command(<<"command.execute">>, Data,
+                     #state{rpc = Rpc, session_id = SessionId,
+                            command_handlers = Handlers}) ->
+    RequestId = maps:get(<<"requestId">>, Data, <<>>),
+    CommandName = maps:get(<<"commandName">>, Data, <<>>),
+    Command = maps:get(<<"command">>, Data, <<>>),
+    Args = maps:get(<<"args">>, Data, <<>>),
+    case maps:get(CommandName, Handlers, undefined) of
+        undefined ->
+            catch copilot_jsonrpc:request(Rpc, <<"commands.handlePendingCommand">>,
+                #{<<"requestId">> => RequestId,
+                  <<"error">> => <<"Unknown command: ", CommandName/binary>>});
+        Handler ->
+            try
+                Handler(#{
+                    session_id => SessionId,
+                    command => Command,
+                    command_name => CommandName,
+                    args => Args
+                }),
+                catch copilot_jsonrpc:request(Rpc, <<"commands.handlePendingCommand">>,
+                    #{<<"requestId">> => RequestId})
+            catch
+                _:Reason ->
+                    ErrMsg = iolist_to_binary(io_lib:format("~p", [Reason])),
+                    catch copilot_jsonrpc:request(Rpc, <<"commands.handlePendingCommand">>,
+                        #{<<"requestId">> => RequestId, <<"error">> => ErrMsg})
+            end
+    end,
+    ok;
+maybe_handle_command(_EventType, _Data, _State) ->
+    ok.
+
+maybe_handle_elicitation(<<"elicitation.requested">>, Data,
+                         #state{rpc = Rpc, session_id = SessionId,
+                                elicitation_handler = Handler})
+  when Handler =/= undefined ->
+    RequestId = maps:get(<<"requestId">>, Data, <<>>),
+    Context = #{
+        session_id => SessionId,
+        message => maps:get(<<"message">>, Data, <<>>),
+        requested_schema => maps:get(<<"requestedSchema">>, Data, undefined),
+        mode => maps:get(<<"mode">>, Data, undefined),
+        elicitation_source => maps:get(<<"elicitationSource">>, Data, undefined),
+        url => maps:get(<<"url">>, Data, undefined)
+    },
+    try
+        Result = Handler(Context),
+        catch copilot_jsonrpc:request(Rpc, <<"ui.handlePendingElicitation">>,
+            #{<<"requestId">> => RequestId, <<"result">> => Result})
+    catch
+        _:_ ->
+            catch copilot_jsonrpc:request(Rpc, <<"ui.handlePendingElicitation">>,
+                #{<<"requestId">> => RequestId,
+                  <<"result">> => #{<<"action">> => <<"cancel">>}})
+    end,
+    ok;
+maybe_handle_elicitation(_EventType, _Data, _State) ->
     ok.

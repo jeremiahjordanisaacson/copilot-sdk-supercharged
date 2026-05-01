@@ -150,6 +150,20 @@ package body Copilot.Client is
                  & Natural'Image (Copilot.Version.Min_Protocol);
          end if;
       end;
+
+      --  Set up session filesystem provider if configured.
+      if Length (Self.Options.Session_Fs_Initial_Cwd) > 0 then
+         declare
+            Fs_Params : constant String :=
+              "{""initialCwd"":""" & (-Self.Options.Session_Fs_Initial_Cwd) & """," &
+              """sessionStatePath"":""" & (-Self.Options.Session_Fs_State_Path) & """," &
+              """conventions"":""" & (-Self.Options.Session_Fs_Conventions) & """}";
+            Fs_Response : constant String :=
+              Send_Request (Self.Conn, "sessionFs.setProvider", Fs_Params);
+         begin
+            null;  --  Response is discarded; provider is now active.
+         end;
+      end if;
    end Start;
 
    procedure Stop (Self : in out Copilot_Client) is

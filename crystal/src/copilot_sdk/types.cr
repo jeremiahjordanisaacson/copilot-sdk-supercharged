@@ -206,9 +206,37 @@ module CopilotSDK
     property instructions : String?
     @[JSON::Field(key: "agentMode")]
     property agent_mode : String?
+    @[JSON::Field(key: "excludedTools")]
+    property excluded_tools : Array(String)?
+    @[JSON::Field(key: "mcpServers")]
+    property mcp_servers : Hash(String, McpServerConfig)?
+    @[JSON::Field(key: "modelCapabilities")]
+    property model_capabilities : Hash(String, JSON::Any)?
+    @[JSON::Field(key: "enableConfigDiscovery")]
+    property enable_config_discovery : Bool?
+    @[JSON::Field(key: "includeSubAgentStreamingEvents")]
+    property include_sub_agent_streaming_events : Bool?
+    property commands : Array(CommandDefinition)?
+    @[JSON::Field(key: "skillDirectories")]
+    property skill_directories : Array(String)?
+    @[JSON::Field(key: "disabledSkills")]
+    property disabled_skills : Array(String)?
+    @[JSON::Field(key: "workingDirectory")]
+    property working_directory : String?
+    @[JSON::Field(key: "gitHubToken")]
+    property github_token : String?
+    @[JSON::Field(key: "reasoningEffort")]
+    property reasoning_effort : String?
+    @[JSON::Field(key: "responseFormat")]
+    property response_format : String?
 
     def initialize(@model = nil, @streaming = nil, @system_message = nil,
-                   @tools = nil, @instructions = nil, @agent_mode = nil)
+                   @tools = nil, @instructions = nil, @agent_mode = nil,
+                   @excluded_tools = nil, @mcp_servers = nil, @model_capabilities = nil,
+                   @enable_config_discovery = nil, @include_sub_agent_streaming_events = nil,
+                   @commands = nil, @skill_directories = nil, @disabled_skills = nil,
+                   @working_directory = nil, @github_token = nil, @reasoning_effort = nil,
+                   @response_format = nil)
     end
   end
 
@@ -237,14 +265,70 @@ module CopilotSDK
     end
   end
 
+  # Filesystem provider configuration.
+  class SessionFsConfig
+    include JSON::Serializable
+
+    @[JSON::Field(key: "initialCwd")]
+    property initial_cwd : String
+    @[JSON::Field(key: "sessionStatePath")]
+    property session_state_path : String
+    property conventions : String
+
+    def initialize(@initial_cwd, @session_state_path, @conventions = "posix")
+    end
+  end
+
+  # MCP server type.
+  enum McpServerType
+    Stdio
+    Http
+
+    def to_json(json : JSON::Builder) : Nil
+      json.string(to_s.downcase)
+    end
+  end
+
+  # MCP server configuration.
+  class McpServerConfig
+    include JSON::Serializable
+
+    property type : McpServerType
+    property command : String?
+    property args : Array(String)?
+    property url : String?
+    property env : Hash(String, String)?
+    property headers : Hash(String, String)?
+
+    def initialize(@type, @command = nil, @args = nil, @url = nil, @env = nil, @headers = nil)
+    end
+  end
+
+  # Command definition for session commands.
+  class CommandDefinition
+    include JSON::Serializable
+
+    property name : String
+    property description : String?
+
+    def initialize(@name, @description = nil)
+    end
+  end
+
   # Options provided when constructing a CopilotClient.
   class CopilotClientOptions
     property cli_path : String?
     property cli_url : String?
     property auto_start : Bool
     property request_timeout : Int32
+    property github_token : String?
+    property use_logged_in_user : Bool?
+    property session_idle_timeout_seconds : Int32?
+    property session_fs : SessionFsConfig?
 
-    def initialize(@cli_path = nil, @cli_url = nil, @auto_start = true, @request_timeout = 30)
+    def initialize(@cli_path = nil, @cli_url = nil, @auto_start = true, @request_timeout = 30,
+                   @github_token = nil, @use_logged_in_user = nil,
+                   @session_idle_timeout_seconds = nil, @session_fs = nil)
     end
   end
 

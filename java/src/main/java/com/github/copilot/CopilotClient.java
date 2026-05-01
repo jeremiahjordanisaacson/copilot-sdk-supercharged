@@ -76,6 +76,8 @@ public class CopilotClient {
     private Map<String, String> env;
     private String githubToken;
     private boolean useLoggedInUser = true;
+    private Integer sessionIdleTimeoutSeconds;
+    private Types.SessionFsConfig sessionFsConfig;
 
     /**
      * Creates a new CopilotClient with default options.
@@ -122,6 +124,8 @@ public class CopilotClient {
                 this.useLoggedInUser = false;
             }
             if (options.getUseLoggedInUser() != null) this.useLoggedInUser = options.getUseLoggedInUser();
+            if (options.getSessionIdleTimeoutSeconds() != null) this.sessionIdleTimeoutSeconds = options.getSessionIdleTimeoutSeconds();
+            if (options.getSessionFs() != null) this.sessionFsConfig = options.getSessionFs();
         }
 
         this.isExternalServer = external;
@@ -161,6 +165,16 @@ public class CopilotClient {
             }
             connectToServer();
             verifyProtocolVersion();
+
+            // If a session filesystem provider was configured, register it
+            if (sessionFsConfig != null) {
+                Map<String, Object> fsParams = new HashMap<>();
+                if (sessionFsConfig.initialCwd != null) fsParams.put("initialCwd", sessionFsConfig.initialCwd);
+                if (sessionFsConfig.sessionStatePath != null) fsParams.put("sessionStatePath", sessionFsConfig.sessionStatePath);
+                if (sessionFsConfig.conventions != null) fsParams.put("conventions", sessionFsConfig.conventions);
+                rpcClient.request("sessionFs.setProvider", fsParams);
+            }
+
             state = ConnectionState.CONNECTED;
         } catch (Exception e) {
             state = ConnectionState.ERROR;
@@ -438,6 +452,23 @@ public class CopilotClient {
         if (config.getSkillDirectories() != null) payload.put("skillDirectories", config.getSkillDirectories());
         if (config.getDisabledSkills() != null) payload.put("disabledSkills", config.getDisabledSkills());
         if (config.getInfiniteSessions() != null) payload.put("infiniteSessions", config.getInfiniteSessions());
+        if (config.getModelCapabilities() != null) payload.put("modelCapabilities", config.getModelCapabilities());
+        if (config.getEnableConfigDiscovery() != null) payload.put("enableConfigDiscovery", config.getEnableConfigDiscovery());
+        if (config.getIncludeSubAgentStreamingEvents() != null) payload.put("includeSubAgentStreamingEvents", config.getIncludeSubAgentStreamingEvents());
+        // Per-session auth token: authToken takes precedence over gitHubToken
+        String sessionToken = config.getAuthToken() != null ? config.getAuthToken() : config.getGitHubToken();
+        if (sessionToken != null) payload.put("gitHubToken", sessionToken);
+        if (config.getCommands() != null && !config.getCommands().isEmpty()) {
+            List<Map<String, Object>> cmdDefs = new ArrayList<>();
+            for (Types.CommandDefinition cmd : config.getCommands()) {
+                Map<String, Object> def = new HashMap<>();
+                def.put("name", cmd.name);
+                if (cmd.description != null) def.put("description", cmd.description);
+                cmdDefs.add(def);
+            }
+            payload.put("commands", cmdDefs);
+        }
+        if (config.getOnElicitationRequest() != null) payload.put("requestElicitation", true);
         return payload;
     }
 
@@ -482,6 +513,11 @@ public class CopilotClient {
         }
         if (!useLoggedInUser) {
             args.add("--no-auto-login");
+        }
+
+        if (sessionIdleTimeoutSeconds != null && sessionIdleTimeoutSeconds > 0) {
+            args.add("--session-idle-timeout");
+            args.add(String.valueOf(sessionIdleTimeoutSeconds));
         }
 
         ProcessBuilder pb = new ProcessBuilder(args);

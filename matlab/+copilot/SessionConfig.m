@@ -38,6 +38,24 @@ classdef SessionConfig
 
         % Model capabilities override (struct or containers.Map).
         ModelCapabilities
+
+        % Enable automatic config discovery.
+        EnableConfigDiscovery (1,1) logical = false
+
+        % Include sub-agent streaming events.
+        IncludeSubAgentStreamingEvents (1,1) logical = false
+
+        % MCP server configurations (struct or containers.Map).
+        McpServers
+
+        % Slash commands (cell array of structs with Name and Description).
+        Commands (1,:) cell = {}
+
+        % Response format: 'text', 'image', or 'json_object'.
+        ResponseFormat (1,:) char = ''
+
+        % Image generation options (struct with Size, Quality, Style).
+        ImageOptions
     end
 
     methods
@@ -59,6 +77,12 @@ classdef SessionConfig
             p.addParameter('Metadata',            containers.Map());
             p.addParameter('RequestHeaders',      containers.Map());
             p.addParameter('ModelCapabilities',   struct());
+            p.addParameter('EnableConfigDiscovery', obj.EnableConfigDiscovery);
+            p.addParameter('IncludeSubAgentStreamingEvents', obj.IncludeSubAgentStreamingEvents);
+            p.addParameter('McpServers',          struct());
+            p.addParameter('Commands',            obj.Commands);
+            p.addParameter('ResponseFormat',      obj.ResponseFormat);
+            p.addParameter('ImageOptions',        struct());
             p.parse(varargin{:});
 
             obj.Model              = p.Results.Model;
@@ -72,6 +96,12 @@ classdef SessionConfig
             obj.Metadata           = p.Results.Metadata;
             obj.RequestHeaders     = p.Results.RequestHeaders;
             obj.ModelCapabilities  = p.Results.ModelCapabilities;
+            obj.EnableConfigDiscovery = p.Results.EnableConfigDiscovery;
+            obj.IncludeSubAgentStreamingEvents = p.Results.IncludeSubAgentStreamingEvents;
+            obj.McpServers         = p.Results.McpServers;
+            obj.Commands           = p.Results.Commands;
+            obj.ResponseFormat     = p.Results.ResponseFormat;
+            obj.ImageOptions       = p.Results.ImageOptions;
         end
 
         function s = toStruct(obj)

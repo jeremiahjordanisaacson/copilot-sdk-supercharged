@@ -79,8 +79,15 @@ pub const SessionConfig = struct {
     tools: ?[]const ToolDefinition = null,
     skill_directories: ?[]const []const u8 = null,
     disabled_skills: ?[]const []const u8 = null,
+    excluded_tools: ?[]const []const u8 = null,
     include_sub_agent_streaming_events: ?bool = null,
     provider: ?ProviderConfig = null,
+    enable_config_discovery: ?bool = null,
+    model_capabilities_json: ?[]const u8 = null,
+    request_headers_json: ?[]const u8 = null,
+    mcp_servers_json: ?[]const u8 = null,
+    commands_json: ?[]const u8 = null,
+    github_token: ?[]const u8 = null,
 };
 
 pub const ProviderConfig = struct {

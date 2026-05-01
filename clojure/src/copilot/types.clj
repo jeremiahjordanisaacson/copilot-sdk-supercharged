@@ -447,11 +447,10 @@
 
   `initial-cwd`        - initial working directory
   `session-state-path` - path for session state storage
-  `conventions`        - path conventions (\"windows\" or \"posix\")"
-  [initial-cwd session-state-path conventions]
-  {:initialCwd       initial-cwd
-   :sessionStatePath session-state-path
-   :conventions      conventions})
+  Optional: :conventions (\"windows\" or \"posix\")"
+  [initial-cwd session-state-path & {:keys [conventions]}]
+  (cond-> {:initialCwd initial-cwd :sessionStatePath session-state-path}
+    conventions (assoc :conventions conventions)))
 
 (defn session-fs-file-info
   "Create a session filesystem file info map.

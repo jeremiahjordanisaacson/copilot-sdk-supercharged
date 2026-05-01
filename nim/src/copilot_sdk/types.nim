@@ -41,6 +41,13 @@ type
     cliPath*: string
     cliUrl*: string
     extraArgs*: seq[string]
+    sessionIdleTimeoutSeconds*: int
+    sessionFs*: SessionFsConfig
+
+  SessionFsConfig* = object
+    initialCwd*: string
+    sessionStatePath*: string
+    conventions*: string
 
 # ---------------------------------------------------------------------------
 # Session configuration
@@ -54,6 +61,14 @@ type
     skillDirectories*: seq[string]
     disabledSkills*: seq[string]
     excludedTools*: seq[string]
+    enableConfigDiscovery*: bool
+    modelCapabilitiesJson*: string
+    mcpServersJson*: string
+    commandsJson*: string
+    responseFormat*: string
+    imageSize*: string
+    imageQuality*: string
+    imageStyle*: string
 
   ResumeSessionConfig* = object
     sessionId*: string
@@ -183,14 +198,26 @@ type
 # ---------------------------------------------------------------------------
 
 proc newClientConfig*(cliPath = ""; cliUrl = "";
-                      extraArgs: seq[string] = @[]): ClientConfig =
-  ClientConfig(cliPath: cliPath, cliUrl: cliUrl, extraArgs: extraArgs)
+                      extraArgs: seq[string] = @[];
+                      sessionIdleTimeoutSeconds = 0;
+                      sessionFs = SessionFsConfig()): ClientConfig =
+  ClientConfig(cliPath: cliPath, cliUrl: cliUrl, extraArgs: extraArgs,
+               sessionIdleTimeoutSeconds: sessionIdleTimeoutSeconds,
+               sessionFs: sessionFs)
 
 proc newSessionConfig*(systemPrompt = ""; githubToken = "";
                        sessionIdleTimeoutSeconds = 0;
                        skillDirectories: seq[string] = @[];
                        disabledSkills: seq[string] = @[];
-                       excludedTools: seq[string] = @[]): SessionConfig =
+                       excludedTools: seq[string] = @[];
+                       enableConfigDiscovery = false;
+                       modelCapabilitiesJson = "";
+                       mcpServersJson = "";
+                       commandsJson = "";
+                       responseFormat = "";
+                       imageSize = "";
+                       imageQuality = "";
+                       imageStyle = ""): SessionConfig =
   SessionConfig(
     systemPrompt: systemPrompt,
     githubToken: githubToken,
@@ -198,6 +225,14 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
     skillDirectories: skillDirectories,
     disabledSkills: disabledSkills,
     excludedTools: excludedTools,
+    enableConfigDiscovery: enableConfigDiscovery,
+    modelCapabilitiesJson: modelCapabilitiesJson,
+    mcpServersJson: mcpServersJson,
+    commandsJson: commandsJson,
+    responseFormat: responseFormat,
+    imageSize: imageSize,
+    imageQuality: imageQuality,
+    imageStyle: imageStyle,
   )
 
 proc newResumeSessionConfig*(sessionId: string; systemPrompt = "";

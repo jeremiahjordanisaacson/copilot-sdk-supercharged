@@ -9,17 +9,23 @@ package require Tcl 8.6
 
 namespace eval ::copilot::types {
     namespace export make_client_options make_session_config make_tool \
-                     make_send_options make_session_event validate_dict
+                     make_send_options make_session_event validate_dict \
+                     make_session_fs_config make_mcp_server_config \
+                     make_command_definition
 }
 
 # -- Client options -----------------------------------------------------------
 
 proc ::copilot::types::make_client_options {args} {
     set defaults [dict create \
-        cli_path    "" \
-        cli_url     "" \
-        log_level   "warn" \
-        timeout     30000 \
+        cli_path                        "" \
+        cli_url                         "" \
+        log_level                       "warn" \
+        timeout                         30000 \
+        github_token                    "" \
+        use_logged_in_user              1 \
+        session_idle_timeout_seconds    0 \
+        session_fs                      {} \
     ]
     set opts $defaults
     foreach {key value} $args {
@@ -35,14 +41,25 @@ proc ::copilot::types::make_client_options {args} {
 
 proc ::copilot::types::make_session_config {args} {
     set defaults [dict create \
-        system_prompt  "" \
-        github_token   "" \
-        tools          {} \
-        streaming      0 \
-        model          "" \
-        session_id     "" \
-        state          {} \
-        session_idle_timeout_seconds 0 \
+        system_prompt                       "" \
+        github_token                        "" \
+        tools                               {} \
+        streaming                           0 \
+        model                               "" \
+        session_id                          "" \
+        state                               {} \
+        session_idle_timeout_seconds        0 \
+        excluded_tools                      {} \
+        mcp_servers                         {} \
+        model_capabilities                  {} \
+        enable_config_discovery             0 \
+        include_sub_agent_streaming_events  0 \
+        commands                            {} \
+        skill_directories                   {} \
+        disabled_skills                     {} \
+        working_directory                   "" \
+        reasoning_effort                    "" \
+        response_format                     "" \
     ]
     set cfg $defaults
     foreach {key value} $args {
@@ -153,6 +170,51 @@ proc ::copilot::types::unwrap {result} {
         error [dict get $result error]
     }
     return [dict get $result value]
+}
+
+# -- Session filesystem configuration ----------------------------------------
+
+proc ::copilot::types::make_session_fs_config {args} {
+    set defaults [dict create \
+        initial_cwd         "" \
+        session_state_path  "" \
+        conventions         "posix" \
+    ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown session_fs config key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+# -- MCP server configuration ------------------------------------------------
+
+proc ::copilot::types::make_mcp_server_config {args} {
+    set defaults [dict create \
+        type     "stdio" \
+        command  "" \
+        args     {} \
+        url      "" \
+        env      {} \
+        headers  {} \
+    ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown mcp_server config key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+# -- Command definition -------------------------------------------------------
+
+proc ::copilot::types::make_command_definition {name description} {
+    return [dict create name $name description $description]
 }
 
 package provide copilot::types 2.0.0

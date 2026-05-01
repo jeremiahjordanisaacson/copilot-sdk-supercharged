@@ -174,6 +174,19 @@ type CopilotClient(options: CopilotClientOptions) =
                     do! connectTcp "127.0.0.1" port
 
             do! initializeHandshake ()
+
+            // Set up session filesystem provider if configured
+            match options.SessionFs with
+            | Some fs ->
+                let fsParams =
+                    {| initialCwd = fs.InitialCwd
+                       sessionStatePath = fs.SessionStatePath
+                       conventions = fs.Conventions |}
+                let t = transport |> Option.get
+                do! t.SendRequestAsync<obj>("sessionFs.setProvider", fsParams)
+                    |> Async.AwaitTask |> Async.Ignore
+            | None -> ()
+
             lock stateLock (fun () -> connectionState <- Connected)
         with ex ->
             lock stateLock (fun () -> connectionState <- Error)

@@ -94,7 +94,9 @@ type CopilotClientOptions =
       /// OpenTelemetry configuration.
       Telemetry: TelemetryConfig option
       /// Session idle timeout in seconds (None = no timeout).
-      SessionIdleTimeoutSeconds: int option }
+      SessionIdleTimeoutSeconds: int option
+      /// Session filesystem provider configuration.
+      SessionFs: SessionFsConfig option }
 
 module CopilotClientOptions =
     /// Default client options (stdio, auto-start, info log level).
@@ -111,7 +113,62 @@ module CopilotClientOptions =
           GitHubToken = None
           UseLoggedInUser = None
           Telemetry = None
-          SessionIdleTimeoutSeconds = None }
+          SessionIdleTimeoutSeconds = None
+          SessionFs = None }
+
+// ---------------------------------------------------------------------------
+// Session filesystem configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for a custom session filesystem provider.
+type SessionFsConfig =
+    { /// Initial working directory for sessions.
+      InitialCwd: string
+      /// Path where the runtime stores session-scoped files.
+      SessionStatePath: string
+      /// Path conventions ("posix" or "windows").
+      Conventions: string }
+
+// ---------------------------------------------------------------------------
+// MCP server configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for an MCP stdio (local) server.
+type MCPStdioServerConfig =
+    { Tools: string list option
+      Type: string option
+      Timeout: int option
+      Command: string
+      Args: string list option
+      Env: IDictionary<string, string> option
+      Cwd: string option }
+
+/// Configuration for an MCP HTTP (remote) server.
+type MCPHttpServerConfig =
+    { Tools: string list option
+      Type: string
+      Timeout: int option
+      Url: string
+      Headers: IDictionary<string, string> option }
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+/// Definition of a slash command.
+type CommandDefinition =
+    { Name: string
+      Description: string option }
+
+// ---------------------------------------------------------------------------
+// Response format / image options
+// ---------------------------------------------------------------------------
+
+/// Image generation options.
+type ImageOptions =
+    { Size: string option
+      Quality: string option
+      Style: string option }
 
 // ---------------------------------------------------------------------------
 // Attachments
@@ -160,7 +217,25 @@ type SessionConfig =
       /// Skill directories to load.
       SkillDirectories: string list option
       /// Include sub-agent streaming events.
-      IncludeSubAgentStreamingEvents: bool }
+      IncludeSubAgentStreamingEvents: bool
+      /// Tools to exclude from the session.
+      ExcludedTools: string list option
+      /// Slash commands registered for this session.
+      Commands: CommandDefinition list option
+      /// Additional request headers sent with each turn.
+      RequestHeaders: IDictionary<string, string> option
+      /// Override model capabilities.
+      ModelCapabilities: IDictionary<string, obj> option
+      /// Enable automatic config discovery.
+      EnableConfigDiscovery: bool option
+      /// MCP server configurations (keyed by name).
+      McpServers: IDictionary<string, obj> option
+      /// Response format ("text", "image", "json_object").
+      ResponseFormat: string option
+      /// Image generation options.
+      ImageOptions: ImageOptions option
+      /// Per-session GitHub token.
+      GitHubToken: string option }
 
 module SessionConfig =
     /// Approve all permission requests automatically.
@@ -179,7 +254,16 @@ module SessionConfig =
           Streaming = true
           Agent = None
           SkillDirectories = None
-          IncludeSubAgentStreamingEvents = false }
+          IncludeSubAgentStreamingEvents = false
+          ExcludedTools = None
+          Commands = None
+          RequestHeaders = None
+          ModelCapabilities = None
+          EnableConfigDiscovery = None
+          McpServers = None
+          ResponseFormat = None
+          ImageOptions = None
+          GitHubToken = None }
 
 // ---------------------------------------------------------------------------
 // Resume session configuration

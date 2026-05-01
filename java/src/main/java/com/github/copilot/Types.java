@@ -242,6 +242,29 @@ public final class Types {
         public Map<String, String> headers;
     }
 
+    /** MCP server configuration for stdio-based servers. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class MCPStdioServerConfig extends MCPServerConfig {
+        public MCPStdioServerConfig() { this.type = "stdio"; }
+
+        public MCPStdioServerConfig(String command, List<String> args) {
+            this.type = "stdio";
+            this.command = command;
+            this.args = args;
+        }
+    }
+
+    /** MCP server configuration for HTTP (SSE) servers. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class MCPHTTPServerConfig extends MCPServerConfig {
+        public MCPHTTPServerConfig() { this.type = "sse"; }
+
+        public MCPHTTPServerConfig(String url) {
+            this.type = "sse";
+            this.url = url;
+        }
+    }
+
     /** Custom agent configuration. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class CustomAgentConfig {

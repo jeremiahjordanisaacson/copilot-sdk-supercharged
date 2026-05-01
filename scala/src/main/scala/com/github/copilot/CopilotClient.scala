@@ -113,6 +113,18 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
       val pingResult = concurrent.Await.result(pingFuture, scala.concurrent.duration.Duration(10, "s"))
       verifyProtocolVersion(pingResult)
 
+      // Register session filesystem provider if configured
+      options.sessionFs.foreach { fs =>
+        concurrent.Await.result(
+          rpcClient.get.sendRequest("sessionFs.setProvider", Json.obj(
+            "initialCwd" -> fs.initialCwd.asJson,
+            "sessionStatePath" -> fs.sessionStatePath.asJson,
+            "conventions" -> fs.conventions.asJson
+          )),
+          scala.concurrent.duration.Duration(10, "s")
+        )
+      }
+
       stateRef.set(ConnectionState.Connected)
     catch
       case ex: Exception =>
@@ -219,6 +231,8 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "skillDirectories" -> config.skillDirectories.asJson,
         "disabledSkills" -> config.disabledSkills.asJson,
         "infiniteSessions" -> config.infiniteSessions.asJson,
+        "enableConfigDiscovery" -> config.enableConfigDiscovery.asJson,
+        "gitHubToken" -> config.gitHubToken.asJson,
       ).dropNullValues
 
       client.sendRequest("session.create", params).map { result =>
@@ -273,6 +287,8 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "skillDirectories" -> config.skillDirectories.asJson,
         "disabledSkills" -> config.disabledSkills.asJson,
         "infiniteSessions" -> config.infiniteSessions.asJson,
+        "enableConfigDiscovery" -> config.enableConfigDiscovery.asJson,
+        "gitHubToken" -> config.gitHubToken.asJson,
         "disableResume" -> config.disableResume.asJson,
       ).dropNullValues
 

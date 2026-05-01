@@ -80,6 +80,16 @@ pub const CopilotClient = struct {
 
         try self.spawnCliProcess();
         try self.verifyProtocol();
+
+        // Set up session filesystem provider if configured
+        if (self.options.session_fs) |fs| {
+            var params = std.json.Value{ .object = std.json.ObjectMap.init(self.allocator) };
+            try params.object.put("initialCwd", .{ .string = fs.initial_cwd });
+            try params.object.put("sessionStatePath", .{ .string = fs.session_state_path });
+            try params.object.put("conventions", .{ .string = fs.conventions });
+            _ = try self.sendRequest("sessionFs.setProvider", params);
+        }
+
         self.setState(.connected);
     }
 

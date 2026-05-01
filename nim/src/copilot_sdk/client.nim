@@ -246,6 +246,15 @@ proc start*(client: CopilotClient) {.async.} =
       raise newException(IOError,
         "Unsupported protocol version: " & ver & ". Requires v2.x")
 
+  # Set up session filesystem provider if configured
+  if client.config.sessionFs.initialCwd.len > 0:
+    let fsParams = %*{
+      "initialCwd": client.config.sessionFs.initialCwd,
+      "sessionStatePath": client.config.sessionFs.sessionStatePath,
+      "conventions": client.config.sessionFs.conventions,
+    }
+    discard await client.sendRpcRequest("sessionFs.setProvider", fsParams)
+
   client.state = csConnected
 
 proc startSync*(client: CopilotClient) =
