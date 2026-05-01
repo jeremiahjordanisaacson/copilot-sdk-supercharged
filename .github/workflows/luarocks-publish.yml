@@ -16,15 +16,15 @@ jobs:
         working-directory: lua
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Lua
-        uses: leafo/gh-actions-lua@v10
+        uses: leafo/gh-actions-lua@v13
         with:
           luaVersion: '5.4'
 
       - name: Setup LuaRocks
-        uses: leafo/gh-actions-luarocks@v4
+        uses: leafo/gh-actions-luarocks@v6
 
       - name: Install dependencies
         run: luarocks install dkjson
