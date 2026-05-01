@@ -27,10 +27,6 @@ Published the Java SDK to Maven Central under `io.github.jeremiahjordanisaacson:
 </dependency>
 ```
 
-### Community listing
-
-Submitted PR [github/copilot-sdk#1155](https://github.com/github/copilot-sdk/pull/1155) to list copilot-sdk-supercharged in the official upstream community SDK table.
-
 ## [v2.0.1](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/releases/tag/v2.0.1) (2026-04-27)
 
 ### Fix: AOT-safe `SetForegroundSessionRequest` for .NET
