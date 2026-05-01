@@ -552,6 +552,16 @@
       (swap! client-atom assoc :models-cache models)
       models)))
 
+(defn get-session-metadata!
+  "Get metadata for a session by ID.
+
+  Returns the metadata map, or nil if the session is not found."
+  [client-atom session-id]
+  (ensure-connected! client-atom)
+  (let [rpc-client (:rpc-client @client-atom)
+        result     (rpc/request! rpc-client "session.getMetadata" {:sessionId session-id})]
+    result))
+
 (defn get-last-session-id!
   "Get the ID of the most recently updated session."
   [client-atom]

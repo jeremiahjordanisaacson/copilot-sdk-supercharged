@@ -324,6 +324,16 @@ package body Copilot.Client is
       return Models;
    end List_Models;
 
+   function Get_Last_Session_Id
+     (Self : in out Copilot_Client) return String
+   is
+      Resp : constant String :=
+        Send_Request (Self.Conn, "session.getLastId", "{}");
+      Sid  : constant String := Json_Get (Resp, "sessionId");
+   begin
+      return Sid;
+   end Get_Last_Session_Id;
+
    function Get_State
      (Self : Copilot_Client) return Connection_State
    is

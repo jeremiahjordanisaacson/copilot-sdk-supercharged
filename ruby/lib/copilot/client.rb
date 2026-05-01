@@ -378,6 +378,16 @@ module Copilot
       response["sessionId"]
     end
 
+    # Get metadata for a specific session.
+    #
+    # @param session_id [String]
+    # @return [Hash] session metadata
+    def get_session_metadata(session_id)
+      raise_not_connected! unless @rpc_client
+
+      @rpc_client.request("session.getMetadata", { sessionId: session_id })
+    end
+
     # Delete a session permanently.
     #
     # @param session_id [String]

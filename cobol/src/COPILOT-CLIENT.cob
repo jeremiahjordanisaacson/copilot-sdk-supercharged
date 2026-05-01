@@ -294,6 +294,57 @@
            .
 
       *----------------------------------------------------------------*
+      * GET-LAST-SESSION-ID: Get the last session ID.                  *
+      * Output: WS-FG-SESSION-ID, WS-RETURN-CODE                     *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-GET-LAST-SESSION-ID" USING WS-FG-SESSION-ID
+           WS-RETURN-CODE.
+           PERFORM GET-LAST-SESSION-ID-PARA
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * GET-SESSION-METADATA: Get metadata for a session.              *
+      * Input:  WS-FG-SESSION-ID                                      *
+      * Output: LS-RESPONSE, WS-RETURN-CODE                           *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-GET-SESSION-METADATA" USING WS-FG-SESSION-ID
+           LS-RESPONSE WS-RETURN-CODE.
+           PERFORM GET-SESSION-METADATA-PARA
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * LIST-MODELS: List available models.                            *
+      * Output: LS-RESPONSE, WS-RETURN-CODE                           *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-LIST-MODELS" USING LS-RESPONSE
+           WS-RETURN-CODE.
+           PERFORM LIST-MODELS-PARA
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * GET-STATUS: Get the server status.                             *
+      * Output: LS-RESPONSE, WS-RETURN-CODE                           *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-GET-STATUS" USING LS-RESPONSE
+           WS-RETURN-CODE.
+           PERFORM GET-STATUS-PARA
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
+      * GET-AUTH-STATUS: Get the authentication status.                *
+      * Output: LS-RESPONSE, WS-RETURN-CODE                           *
+      *----------------------------------------------------------------*
+       ENTRY "COPILOT-GET-AUTH-STATUS" USING LS-RESPONSE
+           WS-RETURN-CODE.
+           PERFORM GET-AUTH-STATUS-PARA
+           GOBACK
+           .
+
+      *----------------------------------------------------------------*
       * SEND-AND-RECEIVE: Write request, read response over pipes.     *
       *----------------------------------------------------------------*
        SEND-AND-RECEIVE.
@@ -498,6 +549,177 @@
                MOVE WS-BODY-LENGTH TO WS-READ-LEN
            ELSE
                MOVE -1 TO WS-IO-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * GET-LAST-SESSION-ID-PARA: Retrieve the last session ID.        *
+      *----------------------------------------------------------------*
+       GET-LAST-SESSION-ID-PARA.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"session.getLastId",'
+               '"params":{},'
+               '"id":3}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE WS-READ-BUFFER TO WS-FG-SESSION-ID
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * GET-SESSION-METADATA-PARA: Get metadata for a given session.   *
+      *----------------------------------------------------------------*
+       GET-SESSION-METADATA-PARA.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"session.getMetadata",'
+               '"params":{"sessionId":"'
+               FUNCTION TRIM(WS-FG-SESSION-ID)
+               '"},"id":4}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE WS-READ-BUFFER TO LS-RESPONSE
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * LIST-MODELS-PARA: List available models from the server.       *
+      *----------------------------------------------------------------*
+       LIST-MODELS-PARA.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"models.list",'
+               '"params":{},'
+               '"id":5}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE WS-READ-BUFFER TO LS-RESPONSE
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * GET-STATUS-PARA: Get the server status.                        *
+      *----------------------------------------------------------------*
+       GET-STATUS-PARA.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"status.get",'
+               '"params":{},'
+               '"id":6}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE WS-READ-BUFFER TO LS-RESPONSE
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
+           END-IF
+           .
+
+      *----------------------------------------------------------------*
+      * GET-AUTH-STATUS-PARA: Get the authentication status.           *
+      *----------------------------------------------------------------*
+       GET-AUTH-STATUS-PARA.
+           IF NOT CLIENT-IS-ACTIVE
+               MOVE -4 TO WS-RETURN-CODE
+               EXIT PARAGRAPH
+           END-IF
+
+           MOVE SPACES TO WS-WRITE-BUFFER
+           MOVE 1 TO WS-JSON-WORK-LEN
+           STRING
+               '{"jsonrpc":"2.0",'
+               '"method":"auth.getStatus",'
+               '"params":{},'
+               '"id":7}'
+               DELIMITED SIZE
+               INTO WS-WRITE-BUFFER
+               WITH POINTER WS-JSON-WORK-LEN
+           END-STRING
+           SUBTRACT 1 FROM WS-JSON-WORK-LEN
+               GIVING WS-WRITE-LEN
+
+           PERFORM WRITE-FRAMED-MESSAGE
+           PERFORM READ-FRAMED-MESSAGE
+
+           IF WS-IO-RETURN-CODE = 0
+               MOVE WS-READ-BUFFER TO LS-RESPONSE
+               MOVE 0 TO WS-RETURN-CODE
+           ELSE
+               MOVE -4 TO WS-RETURN-CODE
            END-IF
            .
 

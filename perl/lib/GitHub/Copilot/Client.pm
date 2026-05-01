@@ -339,6 +339,19 @@ sub list_models {
     return [ @models ];
 }
 
+sub get_last_session_id {
+    my ($self) = @_;
+    $self->_ensure_connected();
+    my $result = $self->{_client}->request('session.getLastId', {});
+    return $result->{sessionId};
+}
+
+sub get_session_metadata {
+    my ($self, $session_id) = @_;
+    $self->_ensure_connected();
+    return $self->{_client}->request('session.getMetadata', { sessionId => $session_id });
+}
+
 # --------------------------------------------------------------------------
 # Internal: start CLI server process
 # --------------------------------------------------------------------------

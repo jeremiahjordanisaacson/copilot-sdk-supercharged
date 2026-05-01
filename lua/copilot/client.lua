@@ -285,6 +285,37 @@ function CopilotClient:list_models()
     return {}, nil
 end
 
+--- Get the ID of the most recently updated session.
+-- @return string|nil sessionId
+-- @return string|nil error
+function CopilotClient:get_last_session_id()
+    local ok, err = self:_ensure_connected()
+    if not ok then return nil, err end
+
+    local result, req_err = self._rpc_client:request("session.getLastId", {})
+    if req_err then
+        return nil, req_err
+    end
+    return result and result.sessionId, nil
+end
+
+--- Get metadata for a session by ID.
+-- @param session_id string  The session ID
+-- @return table|nil metadata
+-- @return string|nil error
+function CopilotClient:get_session_metadata(session_id)
+    local ok, err = self:_ensure_connected()
+    if not ok then return nil, err end
+
+    local result, req_err = self._rpc_client:request("session.getMetadata", {
+        sessionId = session_id,
+    })
+    if req_err then
+        return nil, req_err
+    end
+    return result, nil
+end
+
 --- Create a new session.
 -- @param config table|nil  SessionConfig (see types.SessionConfig)
 -- @return CopilotSession|nil

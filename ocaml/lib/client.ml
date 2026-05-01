@@ -230,4 +230,33 @@ let set_foreground_session_id (t : t) (session_id : string) : unit Lwt.t =
 (* State inspection                                                           *)
 (* ========================================================================== *)
 
+let get_last_session_id (t : t) : string option Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let* result = Jsonrpc.send_request rpc "session.getLastId" (`Assoc []) in
+  let open Yojson.Safe.Util in
+  let sid = try Some (result |> member "sessionId" |> to_string) with _ -> None in
+  Lwt.return sid
+
+let get_session_metadata (t : t) (session_id : string) : Yojson.Safe.t Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let params = `Assoc [ ("sessionId", `String session_id) ] in
+  Jsonrpc.send_request rpc "session.getMetadata" params
+
+let ping ?(message = "ping") (t : t) : Yojson.Safe.t Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  let params = `Assoc [ ("message", `String message) ] in
+  Jsonrpc.send_request rpc "ping" params
+
+let get_auth_status (t : t) : Yojson.Safe.t Lwt.t =
+  let open Lwt.Syntax in
+  let rpc = get_rpc t in
+  Jsonrpc.send_request rpc "auth.getStatus" (`Assoc [])
+
+(* ========================================================================== *)
+(* State inspection                                                           *)
+(* ========================================================================== *)
+
 let connection_state (t : t) : Types.connection_state = t.state

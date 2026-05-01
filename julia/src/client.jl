@@ -253,6 +253,56 @@ function set_foreground_session_id(client::CopilotClient, session_id::AbstractSt
     end
 end
 
+"""
+    get_last_session_id(client) -> Union{String, Nothing}
+
+Return the last-used session ID, or `nothing` if none exists.
+"""
+function get_last_session_id(client::CopilotClient)
+    _ensure_started!(client)
+    result = send_request(client.rpc, "session.getLastId", Dict{String,Any}(); timeout=10)
+    if result isa Dict
+        sid = get(result, "sessionId", nothing)
+        return sid isa AbstractString && !isempty(sid) ? sid : nothing
+    end
+    return nothing
+end
+
+"""
+    get_session_metadata(client, session_id) -> Dict
+
+Retrieve metadata for a specific session.
+"""
+function get_session_metadata(client::CopilotClient, session_id::AbstractString)
+    _ensure_started!(client)
+    result = send_request(client.rpc, "session.getMetadata",
+        Dict{String,Any}("sessionId" => session_id); timeout=15)
+    return result isa Dict ? result : Dict{String,Any}()
+end
+
+"""
+    ping(client; message="ping") -> Dict
+
+Ping the server and return the response (message + timestamp).
+"""
+function ping(client::CopilotClient; message::AbstractString="ping")
+    _ensure_started!(client)
+    result = send_request(client.rpc, "ping",
+        Dict{String,Any}("message" => message); timeout=10)
+    return result isa Dict ? result : Dict{String,Any}()
+end
+
+"""
+    get_auth_status(client) -> Dict
+
+Query the server for authentication status.
+"""
+function get_auth_status(client::CopilotClient)
+    _ensure_started!(client)
+    result = send_request(client.rpc, "auth.getStatus", Dict{String,Any}(); timeout=10)
+    return result isa Dict ? result : Dict{String,Any}()
+end
+
 # -- Internal helpers -------------------------------------------------------------
 
 function _ensure_started!(client::CopilotClient)

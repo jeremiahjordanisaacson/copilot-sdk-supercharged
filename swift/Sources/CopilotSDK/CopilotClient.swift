@@ -401,6 +401,16 @@ public actor CopilotClient {
         return result["sessionId"] as? String
     }
 
+    /// Gets metadata for a specific session.
+    public func getSessionMetadata(_ sessionId: String) async throws -> [String: Any] {
+        guard let rpc = rpcClient else {
+            throw CopilotError.notConnected
+        }
+        let result = try await rpc.sendRequest(
+            method: "session.getMetadata", params: ["sessionId": sessionId])
+        return result
+    }
+
     /// Deletes a session and its data from disk.
     public func deleteSession(_ sessionId: String) async throws {
         guard let rpc = rpcClient else {

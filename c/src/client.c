@@ -1432,6 +1432,117 @@ copilot_error_t copilot_client_delete_session(
     return COPILOT_OK;
 }
 
+copilot_error_t copilot_client_get_last_session_id(
+    copilot_client_t *client,
+    char **out)
+{
+    if (!client || !out) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    *out = NULL;
+
+    cJSON *params = cJSON_CreateObject();
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(client->rpc, "session.getLastId", params, 10000,
+                                            &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        free(err_msg);
+        return COPILOT_ERROR_RPC;
+    }
+
+    cJSON *sid = cJSON_GetObjectItem(result, "sessionId");
+    if (sid && cJSON_IsString(sid)) {
+        *out = strdup(sid->valuestring);
+    }
+
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+copilot_error_t copilot_client_get_session_metadata(
+    copilot_client_t *client,
+    const char *session_id,
+    char **out_json)
+{
+    if (!client || !session_id || !out_json) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    *out_json = NULL;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "sessionId", session_id);
+
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(client->rpc, "session.getMetadata", params, 10000,
+                                            &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        free(err_msg);
+        return COPILOT_ERROR_RPC;
+    }
+
+    *out_json = cJSON_PrintUnformatted(result);
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+copilot_error_t copilot_client_get_status(
+    copilot_client_t *client,
+    char **out_json)
+{
+    if (!client || !out_json) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    *out_json = NULL;
+
+    cJSON *params = cJSON_CreateObject();
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(client->rpc, "status.get", params, 10000,
+                                            &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        free(err_msg);
+        return COPILOT_ERROR_RPC;
+    }
+
+    *out_json = cJSON_PrintUnformatted(result);
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+copilot_error_t copilot_client_get_auth_status(
+    copilot_client_t *client,
+    char **out_json)
+{
+    if (!client || !out_json) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    *out_json = NULL;
+
+    cJSON *params = cJSON_CreateObject();
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(client->rpc, "auth.getStatus", params, 10000,
+                                            &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        free(err_msg);
+        return COPILOT_ERROR_RPC;
+    }
+
+    *out_json = cJSON_PrintUnformatted(result);
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
 copilot_error_t copilot_client_get_foreground_session_id(
     copilot_client_t *client,
     char **out)

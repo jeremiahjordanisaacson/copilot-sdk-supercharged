@@ -363,6 +363,47 @@ Namespace GitHub.Copilot.SDK
             Return Await _rpcClient.InvokeAsync(Of List(Of ModelInfo))("models.list", Nothing, cancellationToken)
         End Function
 
+        ''' <summary>
+        ''' Returns the last-used session identifier, or Nothing if none exists.
+        ''' </summary>
+        Public Async Function GetLastSessionIdAsync(
+            Optional cancellationToken As CancellationToken = Nothing
+        ) As Task(Of String)
+
+            Await EnsureStartedAsync(cancellationToken)
+            Dim result = Await _rpcClient.InvokeAsync(Of JsonElement)("session.getLastId", Nothing, cancellationToken)
+            If result.ValueKind = JsonValueKind.Object AndAlso
+               result.TryGetProperty("sessionId", Nothing) Then
+                Dim prop = result.GetProperty("sessionId")
+                If prop.ValueKind = JsonValueKind.String Then
+                    Return prop.GetString()
+                End If
+            End If
+            Return Nothing
+        End Function
+
+        ''' <summary>
+        ''' Returns the CLI server status information.
+        ''' </summary>
+        Public Async Function GetStatusAsync(
+            Optional cancellationToken As CancellationToken = Nothing
+        ) As Task(Of JsonElement)
+
+            Await EnsureStartedAsync(cancellationToken)
+            Return Await _rpcClient.InvokeAsync(Of JsonElement)("status.get", Nothing, cancellationToken)
+        End Function
+
+        ''' <summary>
+        ''' Returns the current authentication status.
+        ''' </summary>
+        Public Async Function GetAuthStatusAsync(
+            Optional cancellationToken As CancellationToken = Nothing
+        ) As Task(Of JsonElement)
+
+            Await EnsureStartedAsync(cancellationToken)
+            Return Await _rpcClient.InvokeAsync(Of JsonElement)("auth.getStatus", Nothing, cancellationToken)
+        End Function
+
         ' -----------------------------------------------------------------------
         '  Private helpers
         ' -----------------------------------------------------------------------

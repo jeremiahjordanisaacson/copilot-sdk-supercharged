@@ -104,6 +104,37 @@ export class CopilotSolidityClient {
         return (this.client as any).setForegroundSessionId(sessionId);
     }
 
+    /** Get the last session ID, or null if none. */
+    async getLastSessionId(): Promise<string | null> {
+        const result = await (this.client as any).request("session.getLastId", {});
+        return result?.sessionId ?? null;
+    }
+
+    /** Get metadata for a session by ID. */
+    async getSessionMetadata(sessionId: string): Promise<unknown> {
+        return (this.client as any).request("session.getMetadata", { sessionId });
+    }
+
+    /** List available models. */
+    async listModels(): Promise<unknown[]> {
+        return (this.client as any).request("models.list", {});
+    }
+
+    /** Ping the server. */
+    async ping(message?: string): Promise<{ message: string; timestamp: string }> {
+        return (this.client as any).request("ping", { message: message ?? "ping" });
+    }
+
+    /** Get server status. */
+    async getStatus(): Promise<unknown> {
+        return (this.client as any).request("status.get", {});
+    }
+
+    /** Get authentication status. */
+    async getAuthStatus(): Promise<unknown> {
+        return (this.client as any).request("auth.getStatus", {});
+    }
+
     // -----------------------------------------------------------------------
     // Session helpers
     // -----------------------------------------------------------------------

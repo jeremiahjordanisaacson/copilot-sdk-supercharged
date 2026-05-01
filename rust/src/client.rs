@@ -356,6 +356,22 @@ impl CopilotClient {
             .map(|s| s.to_string()))
     }
 
+    /// Gets metadata for a specific session.
+    pub async fn get_session_metadata(
+        &self,
+        session_id: &str,
+    ) -> Result<serde_json::Value, CopilotError> {
+        let rpc = self.get_rpc_client().await?;
+        let response = rpc
+            .request(
+                "session.getMetadata",
+                serde_json::json!({ "sessionId": session_id }),
+                None,
+            )
+            .await?;
+        Ok(response)
+    }
+
     /// Deletes a session permanently.
     pub async fn delete_session(&self, session_id: &str) -> Result<(), CopilotError> {
         let rpc = self.get_rpc_client().await?;

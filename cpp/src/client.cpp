@@ -318,6 +318,11 @@ std::optional<std::string> CopilotClient::getLastSessionId() {
     return std::nullopt;
 }
 
+nlohmann::json CopilotClient::getSessionMetadata(const std::string& sessionId) {
+    if (!rpcClient_) throw std::runtime_error("Client not connected");
+    return rpcClient_->request("session.getMetadata", {{"sessionId", sessionId}});
+}
+
 void CopilotClient::deleteSession(const std::string& sessionId) {
     if (!rpcClient_) throw std::runtime_error("Client not connected");
     auto result = rpcClient_->request("session.delete", {{"sessionId", sessionId}});

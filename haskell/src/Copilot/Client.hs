@@ -24,6 +24,7 @@ module Copilot.Client
   , deleteSession
   , listSessions
   , getLastSessionId
+  , getSessionMetadata
   , getForegroundSessionId
   , setForegroundSessionId
 
@@ -435,6 +436,15 @@ getLastSessionId client = do
   case result of
     Left _ -> pure Nothing
     Right val -> pure $ parseMaybe (withObject "" $ \o -> o .: "sessionId") val
+
+-- | Get metadata for a session by ID.
+getSessionMetadata :: CopilotClient -> Text -> IO (Maybe Value)
+getSessionMetadata client sessionId = do
+  rpc <- ensureConnected client
+  result <- sendRequest rpc "session.getMetadata" (object [ "sessionId" .= sessionId ])
+  case result of
+    Left _ -> pure Nothing
+    Right val -> pure (Just val)
 
 -- | Get the foreground session ID.
 getForegroundSessionId :: CopilotClient -> IO (Maybe Text)

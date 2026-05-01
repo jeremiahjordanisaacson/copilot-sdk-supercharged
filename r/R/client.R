@@ -386,6 +386,36 @@ CopilotClient <- R6::R6Class(
       invisible(NULL)
     },
 
+    #' @description Get server status.
+    #' @return The status response from the server.
+    get_status = function() {
+      if (is.null(private$client)) stop("Client not connected")
+      private$client$request("status.get", list())
+    },
+
+    #' @description Get authentication status.
+    #' @return The auth status response from the server.
+    get_auth_status = function() {
+      if (is.null(private$client)) stop("Client not connected")
+      private$client$request("auth.getStatus", list())
+    },
+
+    #' @description Get the last session ID.
+    #' @return Character or NULL if no previous session.
+    get_last_session_id = function() {
+      if (is.null(private$client)) stop("Client not connected")
+      response <- private$client$request("session.getLastId", list())
+      response$sessionId
+    },
+
+    #' @description Get metadata for a session.
+    #' @param session_id Character. The session ID to query.
+    #' @return The metadata response from the server.
+    get_session_metadata = function(session_id) {
+      if (is.null(private$client)) stop("Client not connected")
+      private$client$request("session.getMetadata", list(sessionId = session_id))
+    },
+
     #' @description Get the foreground session ID.
     #' @return Character or NULL if no foreground session.
     get_foreground_session_id = function() {

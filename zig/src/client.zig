@@ -238,6 +238,12 @@ pub const CopilotClient = struct {
         return SdkError.RequestFailed;
     }
 
+    /// Get the last session ID.
+    pub fn getLastSessionId(self: *CopilotClient) SdkError!JsonValue {
+        if (self.state != .connected) return SdkError.NotConnected;
+        return try self.transport.?.sendRequest("session.getLastId", .{ .object = std.json.ObjectMap.init(self.allocator) });
+    }
+
     /// Get the current connection state.
     pub fn getState(self: *const CopilotClient) ConnectionState {
         return self.state;

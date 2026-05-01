@@ -20,6 +20,7 @@ module copilot_client_module
   public :: copilot_get_session_metadata, copilot_set_foreground_session
   public :: copilot_list_sessions, copilot_get_status
   public :: copilot_get_auth_status, copilot_list_models
+  public :: copilot_get_last_session_id
 
   integer, parameter :: MAX_SESSIONS = 32
 
@@ -42,7 +43,8 @@ module copilot_client_module
     procedure :: get_auth_status => client_get_auth_status
     procedure :: list_models     => client_list_models
     procedure :: list_sessions   => client_list_sessions
-    procedure :: set_foreground  => client_set_foreground
+    procedure :: set_foreground     => client_set_foreground
+    procedure :: get_last_session_id => client_get_last_session_id
   end type copilot_client
 
 contains
@@ -344,6 +346,29 @@ contains
     integer, intent(out) :: iostat
     call client%list_sessions(sessions_json, iostat)
   end subroutine copilot_list_sessions
+
+  !> Get the last-used session ID.
+  subroutine client_get_last_session_id(self, session_id, iostat)
+    class(copilot_client), intent(inout) :: self
+    character(len=:), allocatable, intent(out) :: session_id
+    integer, intent(out) :: iostat
+    integer :: req_id
+    character(len=:), allocatable :: response
+
+    call self%rpc%send_request('session.getLastId', '{}', req_id, iostat)
+    if (iostat /= 0) return
+    call self%rpc%read_message(response, iostat)
+    if (iostat /= 0) return
+
+    session_id = extract_session_id(response)
+  end subroutine client_get_last_session_id
+
+  subroutine copilot_get_last_session_id(client, session_id, iostat)
+    type(copilot_client), intent(inout) :: client
+    character(len=:), allocatable, intent(out) :: session_id
+    integer, intent(out) :: iostat
+    call client%get_last_session_id(session_id, iostat)
+  end subroutine copilot_get_last_session_id
 
   !> Get metadata for a session by ID.
   subroutine copilot_get_session_metadata(client, session_id, meta, iostat)

@@ -405,6 +405,20 @@ class CopilotClient {
         (String) result.sessionId
     }
 
+    /** Gets the last-used session ID, or null if none. */
+    String getLastSessionId() throws Exception {
+        if (!rpcClient) throw new IllegalStateException('Client not connected')
+        Map<String, Object> result = rpcClient.request('session.getLastId', [:])
+        (String) result?.sessionId
+    }
+
+    /** Retrieves metadata for a specific session. */
+    @SuppressWarnings('unchecked')
+    Map<String, Object> getSessionMetadata(String sessionId) throws Exception {
+        if (!rpcClient) throw new IllegalStateException('Client not connected')
+        rpcClient.request('session.getMetadata', [sessionId: sessionId])
+    }
+
     /** Sets foreground session (TUI mode). */
     void setForegroundSessionId(String sessionId) throws Exception {
         ensureConnected()

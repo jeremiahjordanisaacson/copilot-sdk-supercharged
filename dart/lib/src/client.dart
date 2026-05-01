@@ -418,6 +418,19 @@ class CopilotClient {
         .toList();
   }
 
+  /// Gets metadata for a session by ID.
+  Future<Map<String, dynamic>?> getSessionMetadata(String sessionId) async {
+    await _ensureConnected();
+    try {
+      final response = await _connection!
+              .sendRequest('session.getMetadata', {'sessionId': sessionId})
+          as Map<String, dynamic>;
+      return response;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Gets the ID of the most recently updated session.
   Future<String?> getLastSessionId() async {
     await _ensureConnected();

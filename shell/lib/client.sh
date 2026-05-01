@@ -384,6 +384,93 @@ copilot_client_list_models() {
     return 0
 }
 
+# Get the last session ID.
+#
+# Sets:
+#   COPILOT_LAST_SESSION_ID - The last session ID (or empty)
+#   COPILOT_JSONRPC_LAST_RESPONSE - The full response
+#
+# Returns 0 on success, 1 on failure.
+copilot_client_get_last_session_id() {
+    _copilot_client_ensure_connected || return 1
+
+    if ! copilot_jsonrpc_request "session.getLastId" "{}"; then
+        echo "ERROR: Failed to get last session ID" >&2
+        return 1
+    fi
+
+    COPILOT_LAST_SESSION_ID=$(copilot_jsonrpc_get_result_field '.sessionId')
+    if [[ "$COPILOT_LAST_SESSION_ID" == "null" ]]; then
+        COPILOT_LAST_SESSION_ID=""
+    fi
+
+    return 0
+}
+
+# Get metadata for a session by ID.
+#
+# Arguments:
+#   $1 - Session ID (required)
+#
+# Sets:
+#   COPILOT_JSONRPC_LAST_RESPONSE - The full metadata response
+#
+# Returns 0 on success, 1 on failure.
+copilot_client_get_session_metadata() {
+    local session_id="$1"
+
+    _copilot_client_ensure_connected || return 1
+
+    if [[ -z "$session_id" ]]; then
+        echo "ERROR: session_id is required" >&2
+        return 1
+    fi
+
+    local params
+    params=$(jq -c -n --arg sid "$session_id" '{"sessionId":$sid}')
+
+    if ! copilot_jsonrpc_request "session.getMetadata" "$params"; then
+        echo "ERROR: Failed to get session metadata for $session_id" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Get CLI status including version and protocol information.
+#
+# Sets:
+#   COPILOT_JSONRPC_LAST_RESPONSE - The full status response
+#
+# Returns 0 on success, 1 on failure.
+copilot_client_get_status() {
+    _copilot_client_ensure_connected || return 1
+
+    if ! copilot_jsonrpc_request "status.get" "{}"; then
+        echo "ERROR: Failed to get status" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Get current authentication status.
+#
+# Sets:
+#   COPILOT_JSONRPC_LAST_RESPONSE - The full auth status response
+#
+# Returns 0 on success, 1 on failure.
+copilot_client_get_auth_status() {
+    _copilot_client_ensure_connected || return 1
+
+    if ! copilot_jsonrpc_request "auth.getStatus" "{}"; then
+        echo "ERROR: Failed to get auth status" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 # List all available sessions.
 #
 # Sets:

@@ -373,6 +373,16 @@ class CopilotClient(
     }
 
     /**
+     * Gets metadata for a specific session.
+     */
+    suspend fun getSessionMetadata(sessionId: String): JsonObject {
+        val client = rpcClient ?: throw IllegalStateException("Client not connected")
+        return client.request("session.getMetadata", buildJsonObject {
+            put("sessionId", sessionId)
+        }).jsonObject
+    }
+
+    /**
      * Deletes a session and its data from disk.
      */
     suspend fun deleteSession(sessionId: String) {

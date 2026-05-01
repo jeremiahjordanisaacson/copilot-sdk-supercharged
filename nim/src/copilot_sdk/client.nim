@@ -388,3 +388,34 @@ proc setForegroundSessionId*(client: CopilotClient; sessionId: string) {.async.}
     let errMsg = res{"error"}.getStr("Unknown")
     raise newException(IOError,
       "Failed to set foreground session: " & errMsg)
+
+proc getLastSessionId*(client: CopilotClient): Future[Option[string]] {.async.} =
+  ## Get the last session ID from the server. Returns none if not available.
+  let res = await client.sendRpcRequest("session.getLastId", newJObject())
+  let sid = res{"sessionId"}.getStr("")
+  if sid.len > 0:
+    result = some(sid)
+  else:
+    result = none(string)
+
+proc getSessionMetadata*(client: CopilotClient; sessionId: string): Future[JsonNode] {.async.} =
+  ## Get metadata for a session by ID.
+  let params = %*{"sessionId": sessionId}
+  result = await client.sendRpcRequest("session.getMetadata", params)
+
+proc listModels*(client: CopilotClient): Future[JsonNode] {.async.} =
+  ## List available models from the server.
+  result = await client.sendRpcRequest("models.list", newJObject())
+
+proc ping*(client: CopilotClient; message: string = "ping"): Future[JsonNode] {.async.} =
+  ## Send a ping to verify connectivity.
+  let params = %*{"message": message}
+  result = await client.sendRpcRequest("ping", params)
+
+proc getStatus*(client: CopilotClient): Future[JsonNode] {.async.} =
+  ## Get the server status.
+  result = await client.sendRpcRequest("status.get", newJObject())
+
+proc getAuthStatus*(client: CopilotClient): Future[JsonNode] {.async.} =
+  ## Get the authentication status.
+  result = await client.sendRpcRequest("auth.getStatus", newJObject())

@@ -76,6 +76,27 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)listSessionsWithCompletion:(void (^)(NSArray<CPSessionMetadata *> * _Nullable sessions,
                                              NSError * _Nullable error))completion;
 
+/// Returns the last-used session ID, or nil if none exists.
+- (void)getLastSessionIdWithCompletion:(void (^)(NSString * _Nullable sessionId,
+                                                  NSError * _Nullable error))completion;
+
+/// Retrieves metadata for a specific session.
+- (void)getSessionMetadata:(NSString *)sessionId
+                completion:(void (^)(NSDictionary<NSString *, id> * _Nullable metadata,
+                                     NSError * _Nullable error))completion;
+
+/// Lists available models.
+- (void)listModelsWithCompletion:(void (^)(NSArray<NSDictionary<NSString *, id> *> * _Nullable models,
+                                           NSError * _Nullable error))completion;
+
+/// Returns the CLI server status.
+- (void)getStatusWithCompletion:(void (^)(NSDictionary<NSString *, id> * _Nullable status,
+                                          NSError * _Nullable error))completion;
+
+/// Returns the current authentication status.
+- (void)getAuthStatusWithCompletion:(void (^)(NSDictionary<NSString *, id> * _Nullable authStatus,
+                                              NSError * _Nullable error))completion;
+
 /// Deletes a session from the server.
 - (void)deleteSession:(NSString *)sessionId
            completion:(void (^)(NSError * _Nullable error))completion;

@@ -236,6 +236,25 @@ final class CopilotClient
         return _rpc.request("getAuthStatus");
     }
 
+    /// Get the last session ID, or null if none.
+    Nullable!string getLastSessionId() @trusted
+    {
+        enforce(_started, "client not started");
+        auto result = _rpc.request("session.getLastId");
+        auto pSid = "sessionId" in result;
+        if (pSid !is null && (*pSid).type == JSONType.string)
+            return Nullable!string((*pSid).str);
+        return Nullable!string.init;
+    }
+
+    /// Get session metadata by session ID.
+    JSONValue getSessionMetadata(string sessionId) @trusted
+    {
+        enforce(_started, "client not started");
+        auto params = JSONValue(["sessionId": JSONValue(sessionId)]);
+        return _rpc.request("session.getMetadata", params);
+    }
+
     /// Get the foreground session ID.
     string getForegroundSessionId() @trusted
     {

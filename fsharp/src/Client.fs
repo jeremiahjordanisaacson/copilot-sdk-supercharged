@@ -271,6 +271,23 @@ type CopilotClient(options: CopilotClientOptions) =
         return! t.SendRequestAsync<GetStatusResponse>("getStatus")
     }
 
+    /// Get the ID of the most recently updated session.
+    member _.GetLastSessionIdAsync(?cancellationToken: CancellationToken) : Async<string option> = async {
+        let t = getTransport ()
+        try
+            let! result = t.SendRequestAsync<{| sessionId: string option |}>("session.getLastId", {||})
+            return result.sessionId
+        with
+        | :? JsonRpcException -> return None
+    }
+
+    /// Ping the server to verify connectivity.
+    member _.PingAsync(?message: string, ?cancellationToken: CancellationToken) : Async<{| message: string; timestamp: string |}> = async {
+        let t = getTransport ()
+        let msg = defaultArg message "ping"
+        return! t.SendRequestAsync<{| message: string; timestamp: string |}>("ping", {| message = msg |})
+    }
+
     /// Delete a session permanently.
     member _.DeleteSessionAsync(sessionId: string, ?cancellationToken: CancellationToken) : Async<unit> = async {
         let t = getTransport ()

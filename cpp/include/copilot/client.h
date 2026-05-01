@@ -84,6 +84,9 @@ public:
     /// Gets the ID of the most recently updated session.
     std::optional<std::string> getLastSessionId();
 
+    /// Gets metadata for a specific session.
+    nlohmann::json getSessionMetadata(const std::string& sessionId);
+
     /// Deletes a session permanently.
     void deleteSession(const std::string& sessionId);
 

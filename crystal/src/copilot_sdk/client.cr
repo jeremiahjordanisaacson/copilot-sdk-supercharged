@@ -217,6 +217,27 @@ module CopilotSDK
       end
     end
 
+    # Ping the server to verify connectivity.
+    def ping(message : String = "ping") : JSON::Any
+      ensure_connected!
+      params = JSON.parse({"message" => message}.to_json)
+      rpc.send_request("ping", params)
+    end
+
+    # Get the last session ID, or nil if none.
+    def get_last_session_id : String?
+      ensure_connected!
+      result = rpc.send_request("session.getLastId")
+      result["sessionId"]?.try(&.as_s)
+    end
+
+    # Get metadata for a session by ID.
+    def get_session_metadata(session_id : String) : JSON::Any
+      ensure_connected!
+      params = JSON.parse({"sessionId" => session_id}.to_json)
+      rpc.send_request("session.getMetadata", params)
+    end
+
     # Returns the session with the given ID, or nil.
     def get_session(session_id : String) : CopilotSession?
       @mutex.synchronize { @sessions[session_id]? }

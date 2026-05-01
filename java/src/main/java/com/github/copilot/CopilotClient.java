@@ -328,6 +328,20 @@ public class CopilotClient {
         }
     }
 
+    /** Gets the ID of the most recently updated session. */
+    public String getLastSessionId() throws Exception {
+        ensureConnected();
+        Map<String, Object> result = rpcClient.request("session.getLastId", Map.of());
+        return (String) result.get("sessionId");
+    }
+
+    /** Gets metadata for a specific session. */
+    public SessionMetadata getSessionMetadata(String sessionId) throws Exception {
+        ensureConnected();
+        Map<String, Object> result = rpcClient.request("session.getMetadata", Map.of("sessionId", sessionId));
+        return MAPPER.convertValue(result, SessionMetadata.class);
+    }
+
     /** Lists all sessions. */
     @SuppressWarnings("unchecked")
     public List<SessionMetadata> listSessions() throws Exception {

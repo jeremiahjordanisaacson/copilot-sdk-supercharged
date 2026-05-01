@@ -154,6 +154,40 @@ pub fn (mut c CopilotClient) set_foreground_session_id(session_id string) ! {
 	}
 }
 
+// get_last_session_id retrieves the last session ID, or an empty string if none.
+pub fn (mut c CopilotClient) get_last_session_id() !string {
+	raw := c.transport.send_request('session.getLastId', '{}')!
+	result := parse_response_result(raw)!
+	decoded := json.decode(map[string]string, result) or {
+		return ''
+	}
+	session_id := decoded['sessionId'] or { return '' }
+	return session_id
+}
+
+// get_session_metadata retrieves metadata for a session by ID.
+pub fn (mut c CopilotClient) get_session_metadata(session_id string) !string {
+	mut params := map[string]string{}
+	params['"sessionId"'] = '"${session_id}"'
+	raw := c.transport.send_request('session.getMetadata', build_params(params))!
+	return parse_response_result(raw)
+}
+
+// ping sends a health-check ping to the server.
+pub fn (mut c CopilotClient) ping(message string) !string {
+	msg := if message.len > 0 { message } else { 'ping' }
+	mut params := map[string]string{}
+	params['"message"'] = '"${msg}"'
+	raw := c.transport.send_request('ping', build_params(params))!
+	return parse_response_result(raw)
+}
+
+// get_auth_status retrieves the authentication status.
+pub fn (mut c CopilotClient) get_auth_status() !string {
+	raw := c.transport.send_request('auth.getStatus', '{}')!
+	return parse_response_result(raw)
+}
+
 // --- private helpers ---
 
 fn (mut c CopilotClient) connect_to_server() ! {

@@ -85,6 +85,18 @@ type
     // Delete a session permanently
     procedure DeleteSession(const ASessionId: string);
 
+    // Get the last-used session ID (may be empty)
+    function GetLastSessionId: string;
+
+    // List available models
+    function ListModels: TJSONArray;
+
+    // Get CLI status information
+    function GetStatus: TJSONObject;
+
+    // Get authentication status
+    function GetAuthStatus: TJSONObject;
+
     // Subscribe to session lifecycle events
     function OnLifecycle(Handler: TSessionLifecycleHandler): TUnsubscribeProc;
 
@@ -553,6 +565,70 @@ begin
     FSessions.Remove(ASessionId);
   finally
     FSessionsLock.Leave;
+  end;
+end;
+
+function TCopilotClient.GetLastSessionId: string;
+var
+  Params: TJSONObject;
+  ResultVal: TJSONValue;
+begin
+  Params := TJSONObject.Create;
+  ResultVal := FRpc.SendRequest('session.getLastId', Params);
+  try
+    if (ResultVal is TJSONObject) and TJSONObject(ResultVal).TryGetValue<string>('sessionId', Result) then
+      Exit;
+    Result := '';
+  finally
+    ResultVal.Free;
+  end;
+end;
+
+function TCopilotClient.ListModels: TJSONArray;
+var
+  Params: TJSONObject;
+  ResultVal: TJSONValue;
+begin
+  Params := TJSONObject.Create;
+  ResultVal := FRpc.SendRequest('models.list', Params);
+  if ResultVal is TJSONArray then
+    Result := TJSONArray(ResultVal)
+  else
+  begin
+    ResultVal.Free;
+    Result := TJSONArray.Create;
+  end;
+end;
+
+function TCopilotClient.GetStatus: TJSONObject;
+var
+  Params: TJSONObject;
+  ResultVal: TJSONValue;
+begin
+  Params := TJSONObject.Create;
+  ResultVal := FRpc.SendRequest('status.get', Params);
+  if ResultVal is TJSONObject then
+    Result := TJSONObject(ResultVal)
+  else
+  begin
+    ResultVal.Free;
+    Result := TJSONObject.Create;
+  end;
+end;
+
+function TCopilotClient.GetAuthStatus: TJSONObject;
+var
+  Params: TJSONObject;
+  ResultVal: TJSONValue;
+begin
+  Params := TJSONObject.Create;
+  ResultVal := FRpc.SendRequest('auth.getStatus', Params);
+  if ResultVal is TJSONObject then
+    Result := TJSONObject(ResultVal)
+  else
+  begin
+    ResultVal.Free;
+    Result := TJSONObject.Create;
   end;
 end;
 

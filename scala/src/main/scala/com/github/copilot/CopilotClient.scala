@@ -342,6 +342,14 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
           }
         }
 
+  /** Get metadata for a session by ID. */
+  def getSessionMetadata(sessionId: String): Future[Option[Json]] =
+    ensureConnected().flatMap { client =>
+      client.sendRequest("session.getMetadata", Json.obj("sessionId" -> sessionId.asJson)).map { result =>
+        Some(result)
+      }.recover { case _ => None }
+    }
+
   /** Get the last session ID. */
   def getLastSessionId(): Future[Option[String]] =
     ensureConnected().flatMap { client =>

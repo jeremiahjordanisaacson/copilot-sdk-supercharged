@@ -84,6 +84,10 @@ package Copilot.Client is
    function List_Models
      (Self : in out Copilot_Client) return Model_List;
 
+   --  Get the last-used session ID (returns empty string if none).
+   function Get_Last_Session_Id
+     (Self : in out Copilot_Client) return String;
+
    --  Current connection state.
    function Get_State
      (Self : Copilot_Client) return Connection_State;

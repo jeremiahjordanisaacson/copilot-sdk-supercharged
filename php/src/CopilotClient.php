@@ -421,6 +421,18 @@ class CopilotClient
     }
 
     /**
+     * Gets metadata for a specific session.
+     *
+     * @param string $sessionId The session ID
+     * @return array The session metadata
+     */
+    public function getSessionMetadata(string $sessionId): array
+    {
+        $this->ensureConnected();
+        return $this->connection->request('session.getMetadata', ['sessionId' => $sessionId]);
+    }
+
+    /**
      * Deletes a session and its data from disk.
      *
      * @param string $sessionId The session ID to delete

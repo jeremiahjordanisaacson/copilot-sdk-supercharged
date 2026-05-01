@@ -18,7 +18,8 @@ namespace eval ::copilot::client {
     variable next_client_idx 0
 
     namespace export new start stop create_session destroy_session \
-                     define_tool get_status get_auth_status
+                     define_tool get_status get_auth_status ping \
+                     list_models get_last_session_id get_session_metadata
 }
 
 # ---- Resolve the CLI path ---------------------------------------------------
@@ -410,6 +411,88 @@ proc ::copilot::client::set_foreground_session_id {handle session_id} {
         }
         error "Failed to set foreground session: $err_msg"
     }
+}
+
+# ---- Ping -------------------------------------------------------------------
+
+proc ::copilot::client::ping {handle {message "ping"}} {
+    variable clients
+    if {![dict exists $clients $handle]} {
+        error "Client not found: $handle"
+    }
+
+    set cdata [dict get $clients $handle]
+    set write_ch [dict get $cdata write_ch]
+    set read_ch  [dict get $cdata read_ch]
+
+    set params [dict create message $message]
+    set req_id [::copilot::jsonrpc::send_request $write_ch "ping" $params]
+    ::copilot::jsonrpc::register_pending $req_id
+
+    set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+    return $result
+}
+
+# ---- List models ------------------------------------------------------------
+
+proc ::copilot::client::list_models {handle} {
+    variable clients
+    if {![dict exists $clients $handle]} {
+        error "Client not found: $handle"
+    }
+
+    set cdata [dict get $clients $handle]
+    set write_ch [dict get $cdata write_ch]
+    set read_ch  [dict get $cdata read_ch]
+
+    set req_id [::copilot::jsonrpc::send_request $write_ch "models.list" [dict create]]
+    ::copilot::jsonrpc::register_pending $req_id
+
+    set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+    return $result
+}
+
+# ---- Get last session ID ----------------------------------------------------
+
+proc ::copilot::client::get_last_session_id {handle} {
+    variable clients
+    if {![dict exists $clients $handle]} {
+        error "Client not found: $handle"
+    }
+
+    set cdata [dict get $clients $handle]
+    set write_ch [dict get $cdata write_ch]
+    set read_ch  [dict get $cdata read_ch]
+
+    set req_id [::copilot::jsonrpc::send_request $write_ch "session.getLastId" [dict create]]
+    ::copilot::jsonrpc::register_pending $req_id
+
+    set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+
+    if {[dict exists $result sessionId]} {
+        return [dict get $result sessionId]
+    }
+    return ""
+}
+
+# ---- Get session metadata ---------------------------------------------------
+
+proc ::copilot::client::get_session_metadata {handle session_id} {
+    variable clients
+    if {![dict exists $clients $handle]} {
+        error "Client not found: $handle"
+    }
+
+    set cdata [dict get $clients $handle]
+    set write_ch [dict get $cdata write_ch]
+    set read_ch  [dict get $cdata read_ch]
+
+    set params [dict create sessionId $session_id]
+    set req_id [::copilot::jsonrpc::send_request $write_ch "session.getMetadata" $params]
+    ::copilot::jsonrpc::register_pending $req_id
+
+    set result [::copilot::session::_wait_for_response $read_ch $write_ch $req_id]
+    return $result
 }
 
 # ---- Get connection state ---------------------------------------------------

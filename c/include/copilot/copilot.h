@@ -778,6 +778,56 @@ copilot_error_t copilot_client_delete_session(
 );
 
 /**
+ * Gets the ID of the most recently updated session.
+ *
+ * @param client  The client.
+ * @param out     Output: session ID string (may be NULL if no sessions). Caller must free().
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_get_last_session_id(
+    copilot_client_t *client,
+    char **out
+);
+
+/**
+ * Gets metadata for a specific session.
+ *
+ * @param client      The client.
+ * @param session_id  The session ID to get metadata for.
+ * @param out_json    Output: JSON string with session metadata. Caller must free().
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_get_session_metadata(
+    copilot_client_t *client,
+    const char *session_id,
+    char **out_json
+);
+
+/**
+ * Gets the CLI status including version and protocol information.
+ *
+ * @param client    The client.
+ * @param out_json  Output: JSON string with status information. Caller must free().
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_get_status(
+    copilot_client_t *client,
+    char **out_json
+);
+
+/**
+ * Gets the current authentication status.
+ *
+ * @param client    The client.
+ * @param out_json  Output: JSON string with auth status. Caller must free().
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_get_auth_status(
+    copilot_client_t *client,
+    char **out_json
+);
+
+/**
  * Gets the foreground session ID.
  *
  * @param client  The client.

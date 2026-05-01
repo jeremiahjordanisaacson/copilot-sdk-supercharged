@@ -30,6 +30,7 @@
     list_sessions/1,
     delete_session/2,
     get_session_metadata/2,
+    get_last_session_id/1,
     get_foreground_session_id/1,
     set_foreground_session_id/2,
     state/1
@@ -119,6 +120,10 @@ delete_session(Pid, SessionId) ->
 -spec get_session_metadata(pid(), binary()) -> {ok, map()} | {error, term()}.
 get_session_metadata(Pid, SessionId) ->
     gen_server:call(Pid, {get_session_metadata, SessionId}, ?DEFAULT_TIMEOUT).
+
+-spec get_last_session_id(pid()) -> {ok, binary() | undefined} | {error, term()}.
+get_last_session_id(Pid) ->
+    gen_server:call(Pid, get_last_session_id, ?DEFAULT_TIMEOUT).
 
 -spec get_foreground_session_id(pid()) -> {ok, binary()} | {error, term()}.
 get_foreground_session_id(Pid) ->
@@ -257,6 +262,17 @@ handle_call({get_session_metadata, SessionId}, _From, #state{rpc = Rpc} = State)
     Result = copilot_jsonrpc:request(Rpc, <<"session.getMetadata">>,
                                      #{<<"sessionId">> => SessionId}),
     {reply, Result, State};
+
+handle_call(get_last_session_id, _From, #state{rpc = Rpc} = State)
+  when Rpc =/= undefined ->
+    case copilot_jsonrpc:request(Rpc, <<"session.getLastId">>, #{}) of
+        {ok, #{<<"sessionId">> := SessionId}} ->
+            {reply, {ok, SessionId}, State};
+        {ok, _} ->
+            {reply, {ok, undefined}, State};
+        {error, _} = Err ->
+            {reply, Err, State}
+    end;
 
 handle_call(get_foreground_session_id, _From, #state{rpc = Rpc} = State)
   when Rpc =/= undefined ->

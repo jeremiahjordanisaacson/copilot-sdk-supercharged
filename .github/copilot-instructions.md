@@ -70,6 +70,15 @@
 - Tests rely on YAML snapshot exchanges under `test/snapshots/` — to add test scenarios, add or edit the appropriate YAML files and update tests.
 - The harness prints `Listening: http://...` — tests parse this URL to configure CLI or proxy.
 
+## MANDATORY: Feature parity rule 🚨
+
+**This is the #1 rule of this repo.** Every feature that exists in the official `github/copilot-sdk` (Node, Python, Go, .NET) MUST be implemented in ALL 40 SDKs. No exceptions. No aspirational claims.
+
+- **Never claim a feature in the README that isn't implemented in actual code across all 40 SDKs.**
+- **After every upstream sync**, audit what changed and port ALL new features/methods/types to all 36 additional SDKs before shipping.
+- **Run `node scripts/verify-sdk-coverage.mjs`** before every release. It checks all 36 additional SDKs for required RPC methods AND feature implementations. CI will block if any SDK has gaps.
+- **If a feature can't be implemented in a language**, document why explicitly in that SDK's README — don't silently skip it.
+
 ## Git commit conventions 🚫
 
 - **Do NOT include `Co-authored-by: Copilot` trailers in any commits.** The repo owner does not want AI co-author attribution in the commit history. This applies to all commits — merges, features, fixes, releases, etc.

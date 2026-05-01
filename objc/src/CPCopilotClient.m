@@ -504,4 +504,49 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
     }];
 }
 
+- (void)getLastSessionIdWithCompletion:(void (^)(NSString * _Nullable, NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"session.getLastId"
+                         params:@{}
+                     completion:^(NSDictionary *result, NSError *error) {
+        if (error) {
+            completion(nil, error);
+            return;
+        }
+        NSString *sessionId = result[@"sessionId"];
+        completion(sessionId, nil);
+    }];
+}
+
+- (void)getSessionMetadata:(NSString *)sessionId
+                completion:(void (^)(NSDictionary * _Nullable, NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"session.getMetadata"
+                         params:@{@"sessionId": sessionId}
+                     completion:completion];
+}
+
+- (void)listModelsWithCompletion:(void (^)(NSArray * _Nullable, NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"models.list"
+                         params:@{}
+                     completion:^(NSDictionary *result, NSError *error) {
+        if (error) {
+            completion(nil, error);
+            return;
+        }
+        NSArray *models = result[@"models"] ?: @[];
+        completion(models, nil);
+    }];
+}
+
+- (void)getStatusWithCompletion:(void (^)(NSDictionary * _Nullable, NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"status.get"
+                         params:@{}
+                     completion:completion];
+}
+
+- (void)getAuthStatusWithCompletion:(void (^)(NSDictionary * _Nullable, NSError * _Nullable))completion {
+    [self.rpcClient sendRequest:@"auth.getStatus"
+                         params:@{}
+                     completion:completion];
+}
+
 @end

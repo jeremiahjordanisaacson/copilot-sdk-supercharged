@@ -159,6 +159,12 @@ defmodule Copilot.Client do
     GenServer.call(client, :list_sessions, 10_000)
   end
 
+  @doc "Get metadata for a session by ID."
+  @spec get_session_metadata(GenServer.server(), String.t()) :: {:ok, map()} | {:error, any()}
+  def get_session_metadata(client, session_id) do
+    GenServer.call(client, {:get_session_metadata, session_id}, 10_000)
+  end
+
   @doc "Get the last session ID."
   @spec get_last_session_id(GenServer.server()) :: {:ok, String.t() | nil} | {:error, any()}
   def get_last_session_id(client) do
@@ -345,6 +351,15 @@ defmodule Copilot.Client do
 
       {:error, _} = err ->
         {:reply, err, state}
+    end
+  end
+
+  def handle_call({:get_session_metadata, session_id}, _from, state) do
+    state = maybe_auto_start(state)
+
+    case JsonRpcClient.request(state.rpc, "session.getMetadata", %{"sessionId" => session_id}) do
+      {:ok, metadata} -> {:reply, {:ok, metadata}, state}
+      {:error, _} = err -> {:reply, err, state}
     end
   end
 
