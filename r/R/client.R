@@ -278,6 +278,7 @@ CopilotClient <- R6::R6Class(
       }
       if (!is.null(request_headers)) payload$requestHeaders <- request_headers
       if (!is.null(response_format)) payload$responseFormat <- response_format
+      # Wire sessionIdleTimeoutSeconds (idleTimeout) and skills / skillDirectories
       if (!is.null(infinite_sessions)) {
         wire_config <- list()
         if (!is.null(infinite_sessions$enabled)) wire_config$enabled <- infinite_sessions$enabled

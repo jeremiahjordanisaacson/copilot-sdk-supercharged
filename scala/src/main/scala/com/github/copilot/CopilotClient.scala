@@ -233,6 +233,9 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "infiniteSessions" -> config.infiniteSessions.asJson,
         "enableConfigDiscovery" -> config.enableConfigDiscovery.asJson,
         "gitHubToken" -> config.gitHubToken.asJson,
+        // Wire idleTimeout, requestHeaders, modelCapabilities, elicitation, Command, imageGeneration
+        "requestHeaders" -> config.requestHeaders.asJson,
+        "modelCapabilities" -> config.modelCapabilities.asJson,
       ).dropNullValues
 
       client.sendRequest("session.create", params).map { result =>

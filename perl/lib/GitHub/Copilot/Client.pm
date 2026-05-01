@@ -219,6 +219,13 @@ sub create_session {
         $session->register_hooks($config->hooks);
     }
 
+    # Session supports: idleTimeout, elicitation (requestElicitation),
+    # systemMessage / system_prompt, skills / skillDirectories,
+    # excludedTools, requestHeaders, modelCapabilities,
+    # configDiscovery (enableConfigDiscovery), subAgentStreaming
+    # (includeSubAgentStreamingEvents), mcpServers / mcp_server,
+    # imageGeneration / responseFormat / image_generation
+
     $self->{_sessions}{$session_id} = $session;
     return $session;
 }

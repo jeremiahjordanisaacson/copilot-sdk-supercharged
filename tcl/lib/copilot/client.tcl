@@ -299,6 +299,7 @@ proc ::copilot::client::create_session {handle args} {
     set write_ch [dict get $cdata write_ch]
     set read_ch  [dict get $cdata read_ch]
 
+    # Delegates to session module which sends "session.create" via JSON-RPC
     set sess_handle [::copilot::session::create_session $write_ch $read_ch $config]
 
     # Track the session in the client

@@ -347,6 +347,12 @@
       *----------------------------------------------------------------*
       * CREATE-SESSION: Create a new conversation session.             *
       * Input:  LS-REQUEST (JSON params)                               *
+      * Supports: authToken / auth_token, idleTimeout / idle_timeout,  *
+      *   elicitation, skills, excludedTools / excluded_tools,         *
+      *   requestHeaders / request_headers, modelCapabilities /        *
+      *   model_capabilities, configDiscovery / config_discovery,      *
+      *   subAgentStreaming / sub_agent_streaming, imageGeneration /    *
+      *   image_generation / responseFormat / response_format           *
       * Output: LS-RESPONSE, WS-RETURN-CODE                           *
       *----------------------------------------------------------------*
        ENTRY "COPILOT-CREATE-SESSION" USING LS-REQUEST

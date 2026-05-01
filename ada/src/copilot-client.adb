@@ -239,6 +239,10 @@ package body Copilot.Client is
       end if;
 
       --  Strip trailing comma (if any) and close brace.
+      --  Session config supports: authToken / auth_token, excludedTools / excluded_tools,
+      --  requestHeaders / request_headers, modelCapabilities / model_capabilities,
+      --  configDiscovery / config_discovery, subAgentStreaming / sub_agent_streaming,
+      --  imageGeneration / image_generation / responseFormat / response_format
       declare
          S : constant String := To_String (Params);
       begin

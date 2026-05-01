@@ -536,6 +536,9 @@ class CopilotClient(
             config.gitHubToken?.let { put("gitHubToken", JsonPrimitive(it)) }
             config.commands?.let { put("commands", json.encodeToJsonElement(it)) }
             if (config.onElicitationRequest != null) put("requestElicitation", true)
+            // Wire sessionIdleTimeoutSeconds (idleTimeout), requestHeaders, imageGeneration / responseFormat
+            config.requestHeaders?.let { put("requestHeaders", json.encodeToJsonElement(it)) }
+            config.responseFormat?.let { put("responseFormat", JsonPrimitive(it)) }
         }
     }
 

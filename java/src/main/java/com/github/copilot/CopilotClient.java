@@ -469,6 +469,9 @@ public class CopilotClient {
             payload.put("commands", cmdDefs);
         }
         if (config.getOnElicitationRequest() != null) payload.put("requestElicitation", true);
+        // Wire requestHeaders and imageGeneration / responseFormat for the session
+        if (config.getRequestHeaders() != null) payload.put("requestHeaders", config.getRequestHeaders());
+        if (config.getResponseFormat() != null) payload.put("responseFormat", config.getResponseFormat());
         return payload;
     }
 
