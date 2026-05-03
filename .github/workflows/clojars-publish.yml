@@ -6,6 +6,8 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
+  attestations: write
   contents: read
 
 jobs:
@@ -29,6 +31,10 @@ jobs:
         with:
           cli: latest
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: clojure/target/*.jar
       - name: Build and deploy to Clojars
         run: |
           VERSION=${GITHUB_REF_NAME#v}

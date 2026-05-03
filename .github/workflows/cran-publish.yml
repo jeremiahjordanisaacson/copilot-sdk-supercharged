@@ -6,6 +6,8 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
+  attestations: write
   contents: read
 
 jobs:
@@ -38,6 +40,11 @@ jobs:
 
       - name: Check package
         run: R CMD check copilot.sdk.supercharged_*.tar.gz --as-cran --no-manual
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: r/copilot.sdk.supercharged_*.tar.gz
 
       - name: Submit to CRAN
         run: |

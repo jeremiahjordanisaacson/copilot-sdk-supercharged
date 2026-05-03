@@ -6,6 +6,8 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
+  attestations: write
   contents: read
 
 jobs:
@@ -15,6 +17,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: php/composer.json
       - name: Notify Packagist
         run: |
           curl -XPOST \

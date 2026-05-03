@@ -6,6 +6,8 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
+  attestations: write
   contents: read
 
 jobs:
@@ -33,6 +35,11 @@ jobs:
           perl Makefile.PL
           make manifest
           make dist
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: perl/GitHub-Copilot-*.tar.gz
 
       - name: Upload to CPAN
         run: |

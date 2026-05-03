@@ -6,6 +6,8 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
+  attestations: write
   contents: read
 
 jobs:
@@ -32,6 +34,11 @@ jobs:
 
       - name: Build sdist
         run: cabal sdist
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: haskell/dist-newstyle/sdist/*.tar.gz
 
       - name: Upload to Hackage
         run: |

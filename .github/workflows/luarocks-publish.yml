@@ -6,6 +6,8 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
+  attestations: write
   contents: read
 
 jobs:
@@ -29,6 +31,10 @@ jobs:
       - name: Install dependencies
         run: luarocks install dkjson
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: lua/copilot-sdk-supercharged-*.rockspec
       - name: Set version and publish
         run: |
           VERSION=${GITHUB_REF_NAME#v}
