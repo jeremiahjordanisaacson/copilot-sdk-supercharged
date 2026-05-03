@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
 
 jobs:
   publish:
@@ -34,6 +36,11 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: nodejs/dist/**
 
       - name: Publish to npm
         run: npm publish --access public

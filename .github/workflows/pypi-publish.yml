@@ -6,6 +6,8 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
+  attestations: write
   contents: read
 
 jobs:
@@ -33,6 +35,11 @@ jobs:
 
       - name: Build package
         run: python -m build
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: python/dist/*
 
       - name: Publish to PyPI
         run: twine upload dist/*

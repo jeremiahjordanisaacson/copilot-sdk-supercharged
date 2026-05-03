@@ -6,6 +6,8 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
+  attestations: write
   contents: read
 
 jobs:
@@ -31,6 +33,11 @@ jobs:
 
       - name: Install dependencies
         run: mix deps.get
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: elixir/_build/**/*.tar
 
       - name: Publish to Hex
         run: mix hex.publish --yes

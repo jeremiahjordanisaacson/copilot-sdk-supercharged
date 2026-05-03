@@ -6,6 +6,8 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
+  attestations: write
   contents: read
 
 jobs:
@@ -25,6 +27,11 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           sed -i "s/^version = .*/version = \"$VERSION\"/" Cargo.toml
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: rust/target/package/*.crate
 
       - name: Publish to crates.io
         run: cargo publish --allow-dirty

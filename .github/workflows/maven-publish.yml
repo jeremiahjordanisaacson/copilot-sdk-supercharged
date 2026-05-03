@@ -6,6 +6,8 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
+  attestations: write
   contents: read
 
 jobs:
@@ -64,6 +66,11 @@ jobs:
           # Create bundle zip
           cd staging
           zip -r ../bundle.jar .
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: java/build/staging/bundle.jar
 
       - name: Upload to Maven Central Portal
         run: |

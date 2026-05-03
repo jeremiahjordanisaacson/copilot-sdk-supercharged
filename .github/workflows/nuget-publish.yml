@@ -6,6 +6,8 @@ on:
       - 'v*'
 
 permissions:
+  id-token: write
+  attestations: write
   contents: read
 
 jobs:
@@ -35,6 +37,11 @@ jobs:
 
       - name: Build and pack
         run: dotnet pack dotnet/src/GitHub.Copilot.SDK.csproj -c Release -o ./nupkg
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dotnet/**/*.nupkg
 
       - name: Publish to NuGet
         run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
