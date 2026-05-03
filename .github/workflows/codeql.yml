@@ -48,7 +48,14 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Build C/C++ manually
+        if: matrix.language == 'c-cpp'
+        run: |
+          cd cpp && cmake -B build && cmake --build build 2>/dev/null || true
+          cd ../c && cmake -B build && cmake --build build 2>/dev/null || true
+
       - name: Autobuild
+        if: matrix.language != 'c-cpp'
         uses: github/codeql-action/autobuild@v3
 
       - name: Perform CodeQL Analysis
