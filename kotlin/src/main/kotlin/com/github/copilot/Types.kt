@@ -393,6 +393,11 @@ data class ResumeSessionConfig(
 @Serializable
 data class SessionEvent(
     val type: String,
+    val id: String = "",
+    val timestamp: String = "",
+    val parentId: String? = null,
+    val agentId: String? = null,
+    val ephemeral: Boolean? = null,
     val data: JsonObject? = null
 )
 

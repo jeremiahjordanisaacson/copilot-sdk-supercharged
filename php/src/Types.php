@@ -970,6 +970,11 @@ class SessionEvent
 {
     public function __construct(
         public readonly string $type,
+        public readonly string $id = '',
+        public readonly string $timestamp = '',
+        public readonly ?string $parentId = null,
+        public readonly ?string $agentId = null,
+        public readonly ?bool $ephemeral = null,
         public readonly array $data = [],
     ) {}
 
@@ -977,6 +982,11 @@ class SessionEvent
     {
         return new self(
             type: $data['type'] ?? 'unknown',
+            id: $data['id'] ?? '',
+            timestamp: $data['timestamp'] ?? '',
+            parentId: $data['parentId'] ?? null,
+            agentId: $data['agentId'] ?? null,
+            ephemeral: $data['ephemeral'] ?? null,
             data: $data['data'] ?? $data,
         );
     }

@@ -236,8 +236,10 @@ copilot_session_send_and_wait() {
             method=$(echo "$msg" | jq -r '.method // empty' 2>/dev/null)
 
             if [[ "$method" == "session.event" ]]; then
-                local event_type
+                local event_type event_id event_agent_id
                 event_type=$(echo "$msg" | jq -r '.params.event.type // empty' 2>/dev/null)
+                event_id=$(echo "$msg" | jq -r '.params.event.id // empty' 2>/dev/null)
+                event_agent_id=$(echo "$msg" | jq -r '.params.event.agentId // empty' 2>/dev/null)
 
                 case "$event_type" in
                     "assistant.message")

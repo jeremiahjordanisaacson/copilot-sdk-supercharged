@@ -85,6 +85,7 @@ function M.SessionEvent(fields)
         type      = fields.type or "",
         id        = fields.id or "",
         parentId  = fields.parentId,        -- optional string
+        agentId   = fields.agentId,         -- optional string
         timestamp = fields.timestamp or "",
         data      = fields.data or {},
         ephemeral = fields.ephemeral,        -- optional boolean

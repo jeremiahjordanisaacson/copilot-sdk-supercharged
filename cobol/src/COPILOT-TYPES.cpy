@@ -122,6 +122,11 @@
       *----------------------------------------------------------------*
        01  WS-SESSION-EVENT.
            05 WS-EVT-TYPE           PIC X(64)  VALUE SPACES.
+           05 WS-EVT-ID             PIC X(64)  VALUE SPACES.
+           05 WS-EVT-TIMESTAMP      PIC X(32)  VALUE SPACES.
+           05 WS-EVT-PARENT-ID      PIC X(64)  VALUE SPACES.
+           05 WS-EVT-AGENT-ID       PIC X(64)  VALUE SPACES.
+           05 WS-EVT-EPHEMERAL      PIC 9      VALUE 0.
            05 WS-EVT-SESSION-ID     PIC X(64)  VALUE SPACES.
            05 WS-EVT-DATA           PIC X(4096) VALUE SPACES.
            05 WS-EVT-DATA-LEN       PIC 9(5)   VALUE 0.

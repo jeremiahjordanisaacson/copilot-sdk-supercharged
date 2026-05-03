@@ -456,12 +456,13 @@ module Copilot
 
   # Session event from the server.
   # Uses an open struct-style approach so new event types are forward-compatible.
-  SessionEvent = Struct.new(:id, :timestamp, :parent_id, :ephemeral, :type, :data, keyword_init: true) do
+  SessionEvent = Struct.new(:id, :timestamp, :parent_id, :agent_id, :ephemeral, :type, :data, keyword_init: true) do
     def self.from_hash(h)
       new(
         id: h["id"],
         timestamp: h["timestamp"],
         parent_id: h["parentId"],
+        agent_id: h["agentId"],
         ephemeral: h["ephemeral"],
         type: h["type"],
         data: h["data"] || {}

@@ -527,3 +527,15 @@
    :host             (:host m)
    :login            (:login m)
    :status-message   (:statusMessage m)})
+
+;; ---------------------------------------------------------------------------
+;; Session Event Envelope
+;; ---------------------------------------------------------------------------
+;; Session events are plain Clojure maps with these envelope keys:
+;;   :type      - event type string (e.g. "assistant.message")
+;;   :id        - unique event UUID
+;;   :timestamp - ISO 8601 timestamp
+;;   :parentId  - UUID of preceding event (or nil)
+;;   :agentId   - sub-agent identifier (or nil for root agent)
+;;   :ephemeral - boolean, true if transient
+;;   :data      - event payload map

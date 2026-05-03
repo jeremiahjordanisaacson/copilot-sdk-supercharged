@@ -368,7 +368,19 @@ public final class Types {
     /** Session event (generic). */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class SessionEvent {
+        /** Sub-agent instance identifier. Absent for root/main agent events. */
+        @JsonProperty("agentId") public String agentId;
+        /** When true, the event is transient and not persisted. */
+        public Boolean ephemeral;
+        /** Unique event identifier (UUID). */
+        public String id;
+        /** ID of the chronologically preceding event. Null for the first event. */
+        @JsonProperty("parentId") public String parentId;
+        /** ISO 8601 timestamp when the event was created. */
+        public String timestamp;
+        /** The event type discriminator. */
         public String type;
+        /** The event data payload. */
         public Map<String, Object> data;
     }
 

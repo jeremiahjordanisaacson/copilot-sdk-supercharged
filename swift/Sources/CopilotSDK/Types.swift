@@ -1090,12 +1090,13 @@ public struct SessionEvent: Sendable {
     public let id: String
     public let timestamp: String
     public let parentId: String?
+    public let agentId: String?
     public let ephemeral: Bool?
     public let type: String
     public let data: [String: Any]
 
     public init(
-        id: String, timestamp: String, parentId: String?, ephemeral: Bool?,
+        id: String, timestamp: String, parentId: String?, agentId: String? = nil, ephemeral: Bool?,
         type: String, data: [String: Any]
     ) {
         self.id = id
@@ -1118,6 +1119,7 @@ public struct SessionEvent: Sendable {
             id: id,
             timestamp: timestamp,
             parentId: dict["parentId"] as? String,
+            agentId: dict["agentId"] as? String,
             ephemeral: dict["ephemeral"] as? Bool,
             type: type,
             data: data

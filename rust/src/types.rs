@@ -873,6 +873,8 @@ pub struct SessionEvent {
     pub timestamp: String,
     #[serde(rename = "parentId")]
     pub parent_id: Option<String>,
+    #[serde(rename = "agentId")]
+    pub agent_id: Option<String>,
     #[serde(default)]
     pub ephemeral: bool,
     #[serde(rename = "type")]
