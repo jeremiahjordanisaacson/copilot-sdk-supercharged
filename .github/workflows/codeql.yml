@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [javascript-typescript, python, go, csharp, java-kotlin, ruby, swift]
+        language: [javascript-typescript, python, go, csharp, java-kotlin, ruby, swift, c-cpp]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
