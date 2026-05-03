@@ -24,7 +24,7 @@
 
 **40 languages. One SDK.** Agents for every app.
 
-> **Trusted by 18,000+ developers globally and growing daily.**
+> **Trusted by 20,000+ developers globally and growing daily.**
 
 Embed Copilot's agentic workflows in your application - now available in public preview as a programmable SDK for 40 languages.
 

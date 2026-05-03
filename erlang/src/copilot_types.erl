@@ -97,7 +97,12 @@
 
 -record(session_event, {
     type :: binary(),
-    data :: map() | undefined
+    data :: map() | undefined,
+    id :: binary() | undefined,
+    timestamp :: binary() | undefined,
+    parent_id :: binary() | undefined,
+    agent_id :: binary() | undefined,
+    ephemeral :: boolean() | undefined
 }).
 
 -record(tool_definition, {

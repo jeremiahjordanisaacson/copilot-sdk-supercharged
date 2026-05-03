@@ -1251,6 +1251,7 @@ data SessionEvent = SessionEvent
   , seTimestamp :: !Text
   , seParentId  :: !(Maybe Text)
   , seEphemeral :: !(Maybe Bool)
+  , seAgentId   :: !(Maybe Text)
   , seType      :: !Text
   , seData      :: !Value
   } deriving (Show, Eq, Generic)
@@ -1261,6 +1262,7 @@ instance ToJSON SessionEvent where
     , "timestamp" .= seTimestamp
     , "parentId"  .= seParentId
     , "ephemeral" .= seEphemeral
+    , "agentId"   .= seAgentId
     , "type"      .= seType
     , "data"      .= seData
     ]
@@ -1272,6 +1274,7 @@ instance FromJSON SessionEvent where
       <*> o .:  "timestamp"
       <*> o .:? "parentId"
       <*> o .:? "ephemeral"
+      <*> o .:? "agentId"
       <*> o .:  "type"
       <*> o .:  "data"
 

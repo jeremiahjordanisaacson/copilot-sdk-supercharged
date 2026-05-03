@@ -118,7 +118,11 @@ proc ::copilot::types::make_session_event {type {data {}}} {
     return [dict create \
         type $type \
         data $data \
+        id "" \
         timestamp [clock milliseconds] \
+        parentId "" \
+        agentId "" \
+        ephemeral 0 \
     ]
 }
 

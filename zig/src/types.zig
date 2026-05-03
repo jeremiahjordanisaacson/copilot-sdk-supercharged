@@ -186,6 +186,10 @@ pub const ElicitationResult = struct {
 
 pub const SessionEvent = struct {
     id: []const u8 = "",
+    timestamp: []const u8 = "",
+    parent_id: ?[]const u8 = null,
+    agent_id: ?[]const u8 = null,
+    ephemeral: bool = false,
     session_id: []const u8 = "",
     event_type: []const u8 = "",
     content: ?[]const u8 = null,

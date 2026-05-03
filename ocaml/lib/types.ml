@@ -396,6 +396,11 @@ let session_event_type_of_string = function
 
 type session_event = {
   event_type : session_event_type;
+  id : string;
+  timestamp : string;
+  parent_id : string option;
+  agent_id : string option;
+  ephemeral : bool option;
   data : Yojson.Safe.t;
 }
 
@@ -403,7 +408,12 @@ let session_event_of_yojson (json : Yojson.Safe.t) : (session_event, string) res
   try
     let etype = json |> member "type" |> to_string in
     let data = try json |> member "data" with _ -> `Null in
-    Ok { event_type = session_event_type_of_string etype; data }
+    let id = try json |> member "id" |> to_string with _ -> "" in
+    let timestamp = try json |> member "timestamp" |> to_string with _ -> "" in
+    let parent_id = try Some (json |> member "parentId" |> to_string) with _ -> None in
+    let agent_id = try Some (json |> member "agentId" |> to_string) with _ -> None in
+    let ephemeral = try Some (json |> member "ephemeral" |> to_bool) with _ -> None in
+    Ok { event_type = session_event_type_of_string etype; id; timestamp; parent_id; agent_id; ephemeral; data }
   with exn -> Error (Printexc.to_string exn)
 
 (* ========================================================================== *)

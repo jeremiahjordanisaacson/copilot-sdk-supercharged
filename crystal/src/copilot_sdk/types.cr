@@ -197,8 +197,17 @@ module CopilotSDK
 
     property type : String
     property data : JSON::Any?
+    @[JSON::Field(key: "id")]
+    property id : String?
+    @[JSON::Field(key: "timestamp")]
+    property timestamp : String?
+    @[JSON::Field(key: "parentId")]
+    property parent_id : String?
+    @[JSON::Field(key: "agentId")]
+    property agent_id : String?
+    property ephemeral : Bool?
 
-    def initialize(@type, @data = nil)
+    def initialize(@type, @data = nil, @id = nil, @timestamp = nil, @parent_id = nil, @agent_id = nil, @ephemeral = nil)
     end
 
     # Helper to extract assistant message content from an event.

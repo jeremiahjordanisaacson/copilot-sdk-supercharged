@@ -78,8 +78,13 @@ pub:
 // SessionEvent is the envelope for every event received from the server.
 pub struct SessionEvent {
 pub:
-	event_type string [json: 'type'] // e.g. "assistant.message", "assistant.message_delta"
-	raw_data   string [json: 'data'] // raw JSON of the data payload
+	event_type string [json: 'type']
+	raw_data   string [json: 'data']
+	id         string [json: 'id']
+	timestamp  string [json: 'timestamp']
+	parent_id  string [json: 'parentId']
+	agent_id   string [json: 'agentId']
+	ephemeral  bool   [json: 'ephemeral']
 }
 
 // MessageData holds a completed assistant message.

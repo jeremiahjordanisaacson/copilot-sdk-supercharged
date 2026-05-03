@@ -96,6 +96,11 @@ typedef void (^CPElicitationHandler)(NSDictionary<NSString *, id> *request,
 @interface CPSessionEvent : NSObject
 
 @property (nonatomic, copy, readonly) NSString *type;
+@property (nonatomic, copy, readonly, nullable) NSString *eventId;
+@property (nonatomic, copy, readonly, nullable) NSString *timestamp;
+@property (nonatomic, copy, readonly, nullable) NSString *parentId;
+@property (nonatomic, copy, readonly, nullable) NSString *agentId;
+@property (nonatomic, readonly) BOOL ephemeral;
 @property (nonatomic, copy, readonly, nullable) NSDictionary<NSString *, id> *rawData;
 @property (nonatomic, copy, readonly, nullable) NSString *content;
 @property (nonatomic, copy, readonly, nullable) NSString *deltaContent;

@@ -126,6 +126,11 @@ type
   SessionEvent* = object
     kind*: SessionEventKind
     data*: JsonNode
+    id*: string
+    timestamp*: string
+    parentId*: string
+    agentId*: string
+    ephemeral*: bool
 
 # ---------------------------------------------------------------------------
 # Tool types

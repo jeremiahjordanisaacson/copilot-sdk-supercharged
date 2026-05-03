@@ -459,6 +459,21 @@ struct SessionEvent
     /// Full JSON payload of the event.
     JSONValue payload;
 
+    /// Unique event identifier (UUID).
+    string id;
+
+    /// ISO 8601 timestamp when the event was created.
+    string timestamp;
+
+    /// ID of the preceding event. Null for the first event.
+    Nullable!string parentId;
+
+    /// Sub-agent instance identifier. Absent for root agent events.
+    Nullable!string agentId;
+
+    /// When true, the event is transient and not persisted.
+    Nullable!bool ephemeral;
+
     /// Convenience: extract a string field from payload.
     Nullable!string stringField(string key) const @safe
     {

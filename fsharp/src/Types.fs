@@ -458,6 +458,15 @@ module SessionEvent =
         | "session.compaction_complete" -> SessionCompactionComplete (deserializeAs raw)
         | other -> UnknownEvent (other, raw)
 
+/// Envelope wrapping a session event with metadata.
+type SessionEventEnvelope =
+    { Id: string
+      Timestamp: string
+      ParentId: string option
+      AgentId: string option
+      Ephemeral: bool option
+      Event: SessionEvent }
+
 // ---------------------------------------------------------------------------
 // Model info
 // ---------------------------------------------------------------------------

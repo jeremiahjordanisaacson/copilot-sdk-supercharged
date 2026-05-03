@@ -138,6 +138,11 @@ module copilot_types
   ! --------------------------------------------------------------------------
   type :: session_event
     character(len=:), allocatable :: event_type
+    character(len=:), allocatable :: id
+    character(len=:), allocatable :: timestamp
+    character(len=:), allocatable :: parent_id
+    character(len=:), allocatable :: agent_id
+    logical :: ephemeral = .false.
     character(len=:), allocatable :: session_id
     character(len=:), allocatable :: data_json
   end type session_event

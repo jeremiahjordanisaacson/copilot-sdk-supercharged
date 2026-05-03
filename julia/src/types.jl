@@ -158,9 +158,15 @@ end
 struct SessionEvent
     type::String
     data::Dict{String, Any}
+    id::String
+    timestamp::String
+    parent_id::Union{String, Nothing}
+    agent_id::Union{String, Nothing}
+    ephemeral::Union{Bool, Nothing}
 end
 
-SessionEvent(type::String) = SessionEvent(type, Dict{String, Any}())
+SessionEvent(type::String) = SessionEvent(type, Dict{String, Any}(), "", "", nothing, nothing, nothing)
+SessionEvent(type::String, data::Dict{String, Any}) = SessionEvent(type, data, "", "", nothing, nothing, nothing)
 
 """Status information returned by the CLI server."""
 struct ServerStatus

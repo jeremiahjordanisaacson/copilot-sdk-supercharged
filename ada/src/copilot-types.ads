@@ -203,6 +203,10 @@ package Copilot.Types is
 
    type Session_Event is record
       Id            : UString := Null_UString;
+      Timestamp     : UString := Null_UString;
+      Parent_Id     : UString := Null_UString;
+      Agent_Id      : UString := Null_UString;
+      Ephemeral     : Boolean := False;
       Event_Type    : UString := Null_UString;
       Session_Id    : UString := Null_UString;
       Content       : UString := Null_UString;

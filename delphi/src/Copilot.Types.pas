@@ -85,6 +85,11 @@ type
   // Session event
   TSessionEvent = record
     EventType: string;
+    Id: string;
+    Timestamp: string;
+    ParentId: string;
+    AgentId: string;
+    Ephemeral: Boolean;
     SessionId: string;
     Data: TJSONObject;
   end;

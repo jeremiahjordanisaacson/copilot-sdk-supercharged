@@ -186,6 +186,11 @@ final class Types {
     static class SessionEvent {
         String type
         Map<String, Object> data = [:]
+        String id
+        String timestamp
+        String parentId
+        String agentId
+        Boolean ephemeral
     }
 
     /** Provider configuration for BYOK. */

@@ -23,6 +23,7 @@ defmodule Copilot.Types do
           required(:timestamp) => String.t(),
           optional(:parentId) => String.t() | nil,
           optional(:ephemeral) => boolean(),
+          optional(:agentId) => String.t() | nil,
           required(:data) => map()
         }
 

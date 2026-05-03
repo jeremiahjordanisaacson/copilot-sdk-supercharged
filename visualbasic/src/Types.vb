@@ -517,6 +517,21 @@ Namespace GitHub.Copilot.SDK
         <JsonPropertyName("type")>
         Public Property Type As String
 
+        <JsonPropertyName("id")>
+        Public Property Id As String
+
+        <JsonPropertyName("timestamp")>
+        Public Property Timestamp As String
+
+        <JsonPropertyName("parentId")>
+        Public Property ParentId As String
+
+        <JsonPropertyName("agentId")>
+        Public Property AgentId As String
+
+        <JsonPropertyName("ephemeral")>
+        Public Property Ephemeral As Boolean?
+
         <JsonPropertyName("sessionId")>
         Public Property SessionId As String
 
