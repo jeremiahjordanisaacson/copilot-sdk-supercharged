@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-use Test::More tests => 19;
+use Test::More tests => 20;
 use File::Spec;
 use File::Basename;
 use Cwd qw(abs_path);
@@ -382,6 +382,32 @@ subtest 'system message customization' => sub {
         },
     });
     ok(defined $session, 'Session with system message created without error');
+
+    $client->stop();
+    $proxy->stop();
+};
+
+subtest 'session fs provider' => sub {
+    plan tests => 2;
+
+    my $proxy = TestHarness->new();
+    $proxy->start();
+    $proxy->configure('test/snapshots/basic.yaml', $repo_root);
+
+    my $client = GitHub::Copilot::Client->new(
+        cli_url    => $proxy->url(),
+        auto_start => 0,
+        session_fs => {
+            initial_cwd        => File::Spec->tmpdir(),
+            session_state_path => File::Spec->catdir(File::Spec->tmpdir(), 'copilot-state'),
+            conventions        => 'posix',
+        },
+    );
+    $client->start();
+
+    my $session = $client->create_session();
+    ok(defined $session, 'Session with FS provider created');
+    ok(length($session->id()) > 0, 'Session with FS provider has non-empty ID');
 
     $client->stop();
     $proxy->stop();
