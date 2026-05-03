@@ -164,8 +164,12 @@ classdef CopilotSession < handle
             if strcmp(method, 'session/event')
                 if isfield(params, 'event')
                     evtType = '';
+                    agentId = '';
                     if isfield(params.event, 'type')
                         evtType = params.event.type;
+                    end
+                    if isfield(params.event, 'agentId')
+                        agentId = params.event.agentId;
                     end
 
                     % Collect assistant messages.

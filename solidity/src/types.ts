@@ -264,3 +264,25 @@ export interface SolidityExtendedSessionConfig extends SoliditySessionConfig {
     /** Per-session auth token override. */
     authToken?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Session Event Envelope
+// ---------------------------------------------------------------------------
+
+/** Session event with envelope metadata, re-exported from the base SDK. */
+export interface SessionEventEnvelope {
+    /** Unique event identifier (UUID v4). */
+    id: string;
+    /** ISO 8601 timestamp when the event was created. */
+    timestamp: string;
+    /** ID of the preceding event. Null for the first event. */
+    parentId: string | null;
+    /** Sub-agent instance identifier. Absent for root agent events. */
+    agentId?: string;
+    /** When true, the event is transient and not persisted. */
+    ephemeral?: boolean;
+    /** The event type discriminator. */
+    type: string;
+    /** The event data payload. */
+    data: Record<string, unknown>;
+}
