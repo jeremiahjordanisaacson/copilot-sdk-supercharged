@@ -1,0 +1,79 @@
+name: "CI: Sync Wiki on Release"
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Checkout wiki
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update changelog in wiki
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          DATE=$(date +%Y-%m-%d)
+
+          # Update the Changelog page with the new version header
+          if ! grep -q "## v${VERSION}" wiki/Changelog.md 2>/dev/null; then
+            # Prepend new version section after the title
+            sed -i "/^# Changelog/a\\
+            \\
+            ## v${VERSION} (${DATE})\\
+            \\
+            See [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/${GITHUB_REF_NAME}) for full details." wiki/Changelog.md
+            echo "Added v${VERSION} to changelog"
+          else
+            echo "v${VERSION} already in changelog"
+          fi
+
+      - name: Update download counts
+        run: |
+          # Fetch latest download counts
+          NPM=$(curl -sf "https://api.npmjs.org/downloads/point/1000-01-01:3000-01-01/copilot-sdk-supercharged" | jq -r '.downloads // 0')
+          PYPI=$(curl -sf "https://pypistats.org/api/packages/copilot-sdk-supercharged/overall" | python3 -c "import sys,json; print(sum(r['downloads'] for r in json.load(sys.stdin).get('data',[])))" 2>/dev/null || echo "0")
+          CRATES=$(curl -sf -H 'User-Agent: wiki-sync' "https://crates.io/api/v1/crates/copilot-sdk-supercharged" | jq -r '.crate.downloads // 0')
+          RUBYGEMS=$(curl -sf "https://rubygems.org/api/v1/gems/copilot-sdk-supercharged.json" | jq -r '.downloads // 0')
+          NUGET=$(curl -sf "https://azuresearch-usnc.nuget.org/query?q=CopilotSDK.Supercharged&take=1" | jq -r '.data[0].totalDownloads // 0')
+          HEX=$(curl -sf "https://hex.pm/api/packages/copilot_sdk_supercharged" | jq -r '.downloads.all // 0')
+
+          TOTAL=$((NPM + PYPI + CRATES + RUBYGEMS + NUGET + HEX))
+          echo "Total downloads: $TOTAL"
+
+          # Round to nearest thousand
+          ROUNDED=$(( (TOTAL / 1000) * 1000 ))
+          COUNT="${ROUNDED}+"
+
+          # Update Home.md
+          if [ -f wiki/Home.md ]; then
+            sed -i "s/Trusted by [0-9,]*+ developers/Trusted by ${COUNT} developers/" wiki/Home.md
+            echo "Updated Home.md to ${COUNT}"
+          fi
+
+      - name: Push wiki updates
+        run: |
+          cd wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No wiki changes to push"
+          else
+            git commit -m "Auto-update wiki for ${GITHUB_REF_NAME}"
+            git push
+            echo "Wiki updated for ${GITHUB_REF_NAME}"
+          fi
