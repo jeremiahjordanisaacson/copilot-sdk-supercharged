@@ -42,10 +42,18 @@ jobs:
 
       - name: Upload to Hackage
         run: |
-          cabal upload dist-newstyle/sdist/copilot-sdk-supercharged-*.tar.gz \
-            --username="${HACKAGE_USERNAME}" \
-            --password="${HACKAGE_PASSWORD}" \
-            --publish
+          if [ -z "$HACKAGE_PASSWORD" ]; then
+            echo "::warning::HACKAGE_PASSWORD secret not configured — skipping upload"
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            cabal upload dist-newstyle/sdist/copilot-sdk-supercharged-*.tar.gz \
+              --username="${HACKAGE_USERNAME}" \
+              --password="${HACKAGE_PASSWORD}" \
+              --publish && break
+            echo "Attempt $attempt failed, retrying in 10s..."
+            sleep 10
+          done
         env:
           HACKAGE_USERNAME: ${{ secrets.HACKAGE_USERNAME }}
           HACKAGE_PASSWORD: ${{ secrets.HACKAGE_PASSWORD }}

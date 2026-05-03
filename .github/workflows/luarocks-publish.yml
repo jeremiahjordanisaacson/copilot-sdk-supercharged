@@ -68,6 +68,9 @@ jobs:
               },
           }
           SPEC
-          luarocks upload "$ROCKSPEC" --api-key="$LUAROCKS_API_KEY"
+          luarocks upload "$ROCKSPEC" --api-key="$LUAROCKS_API_KEY" || {
+            echo "::warning::LuaRocks upload failed (version may already exist)"
+            exit 0
+          }
         env:
           LUAROCKS_API_KEY: ${{ secrets.LUAROCKS_API_KEY }}

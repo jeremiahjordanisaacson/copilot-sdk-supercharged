@@ -42,6 +42,13 @@ jobs:
           subject-path: perl/GitHub-Copilot-*.tar.gz
 
       - name: Upload to CPAN
+        env:
+          CPAN_USER: ${{ secrets.CPAN_USERNAME }}
+          CPAN_PASS: ${{ secrets.CPAN_PASSWORD }}
         run: |
+          if [ -z "$CPAN_PASS" ]; then
+            echo "::warning::CPAN_PASSWORD secret not configured — skipping upload"
+            exit 0
+          fi
           cpanm CPAN::Uploader
-          cpan-upload --user ${{ secrets.CPAN_USERNAME }} --password ${{ secrets.CPAN_PASSWORD }} GitHub-Copilot-*.tar.gz
+          cpan-upload --user "$CPAN_USER" --password "$CPAN_PASS" GitHub-Copilot-*.tar.gz
