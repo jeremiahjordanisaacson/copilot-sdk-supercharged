@@ -81,4 +81,10 @@ jobs:
         env:
           COPILOT_HMAC_KEY: ${{ secrets.COPILOT_DEVELOPER_CLI_INTEGRATION_HMAC_KEY }}
           COPILOT_CLI_PATH: ${{ steps.setup-copilot.outputs.cli-path }}
-        run: /bin/bash test.sh
+        run: |
+          if [ -z "$COPILOT_HMAC_KEY" ]; then
+            echo "::warning::COPILOT_HMAC_KEY not set — running fmt, lint, and build checks only"
+            cd go && go fmt ./... && go vet ./... && go build ./...
+          else
+            /bin/bash test.sh
+          fi

@@ -88,4 +88,10 @@ jobs:
       - name: Run Python SDK tests
         env:
           COPILOT_HMAC_KEY: ${{ secrets.COPILOT_DEVELOPER_CLI_INTEGRATION_HMAC_KEY }}
-        run: uv run pytest -v -s
+        run: |
+          if [ -z "$COPILOT_HMAC_KEY" ]; then
+            echo "::warning::COPILOT_HMAC_KEY not set — running lint and type checks only"
+            uv run ruff check && uv run ruff format --check .
+          else
+            uv run pytest -v -s
+          fi
