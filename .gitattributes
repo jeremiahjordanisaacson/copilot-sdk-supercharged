@@ -6,3 +6,53 @@ dotnet/src/Generated/* eol=lf linguist-generated=true
 python/copilot/generated/* eol=lf linguist-generated=true
 go/generated_session_events.go eol=lf linguist-generated=true
 go/rpc/generated_rpc.go eol=lf linguist-generated=true
+
+# Vendor/dependency code — exclude from language stats
+solidity/node_modules/** linguist-vendored=true
+test/harness/** linguist-vendored=true
+test/snapshots/** linguist-vendored=true
+
+# Ensure all SDK languages are properly detected
+java/**/*.java linguist-language=Java
+rust/**/*.rs linguist-language=Rust
+ruby/**/*.rb linguist-language=Ruby
+php/**/*.php linguist-language=PHP
+kotlin/**/*.kt linguist-language=Kotlin
+dart/**/*.dart linguist-language=Dart
+lua/**/*.lua linguist-language=Lua
+swift/**/*.swift linguist-language=Swift
+cpp/**/*.cpp linguist-language=C++
+cpp/**/*.h linguist-language=C++
+c/**/*.c linguist-language=C
+c/**/*.h linguist-language=C
+scala/**/*.scala linguist-language=Scala
+r/**/*.R linguist-language=R
+perl/**/*.pm linguist-language=Perl
+perl/**/*.pl linguist-language=Perl
+elixir/**/*.ex linguist-language=Elixir
+elixir/**/*.exs linguist-language=Elixir
+haskell/**/*.hs linguist-language=Haskell
+clojure/**/*.clj linguist-language=Clojure
+matlab/**/*.m linguist-language=MATLAB
+delphi/**/*.pas linguist-language=Pascal
+ada/**/*.adb linguist-language=Ada
+ada/**/*.ads linguist-language=Ada
+vlang/**/*.v linguist-language=V
+crystal/**/*.cr linguist-language=Crystal
+ocaml/**/*.ml linguist-language=OCaml
+ocaml/**/*.mli linguist-language=OCaml
+dlang/**/*.d linguist-language=D
+cobol/**/*.cob linguist-language=COBOL
+cobol/**/*.cpy linguist-language=COBOL
+erlang/**/*.erl linguist-language=Erlang
+groovy/**/*.groovy linguist-language=Groovy
+nim/**/*.nim linguist-language=Nim
+tcl/**/*.tcl linguist-language=Tcl
+visualbasic/**/*.vb linguist-language=Visual Basic .NET
+fortran/**/*.f90 linguist-language=Fortran
+objc/**/*.m linguist-language=Objective-C
+objc/**/*.h linguist-language=Objective-C
+fsharp/**/*.fs linguist-language=F#
+julia/**/*.jl linguist-language=Julia
+zig/**/*.zig linguist-language=Zig
+solidity/src/**/*.sol linguist-language=Solidity
