@@ -1,4 +1,4 @@
-name: "Update @github/copilot Dependency"
+name: "CI: Update Copilot Dependency"
 
 on:
   workflow_dispatch:

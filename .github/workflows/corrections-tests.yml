@@ -1,4 +1,4 @@
-name: "Triage Agent Corrections Tests"
+name: "Test: Triage Agent Corrections"
 
 on:
   push:

@@ -1,4 +1,4 @@
-name: Submit triage agent feedback
+name: "CI: Submit Triage Feedback"
 
 on:
   repository_dispatch:

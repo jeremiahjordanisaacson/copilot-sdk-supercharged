@@ -1,4 +1,4 @@
-name: ".NET SDK Tests"
+name: "Test: .NET SDK"
 
 on:
   push:
@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   test:
-    name: ".NET SDK Tests"
+    name: "Test: .NET SDK"
     env:
       POWERSHELL_UPDATECHECK: Off
     strategy:

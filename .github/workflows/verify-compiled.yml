@@ -1,4 +1,4 @@
-name: Verify compiled workflows
+name: "CI: Verify Compiled Workflows"
 
 on:
   pull_request:

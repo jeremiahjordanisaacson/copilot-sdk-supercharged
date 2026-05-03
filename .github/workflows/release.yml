@@ -1,4 +1,4 @@
-name: Create Release with SDK Packages
+name: "Release: Create GitHub Release"
 
 on:
   push:

@@ -1,4 +1,4 @@
-name: Publish SDK packages
+name: "Publish: All SDK Packages"
 
 env:
   HUSKY: 0

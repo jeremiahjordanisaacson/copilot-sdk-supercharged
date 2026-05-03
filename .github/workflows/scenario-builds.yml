@@ -1,4 +1,4 @@
-name: "Scenario Build Verification"
+name: "CI: Scenario Build Verification"
 
 on:
   pull_request:

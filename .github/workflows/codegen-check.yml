@@ -1,4 +1,4 @@
-name: "Codegen Check"
+name: "CI: Codegen Check"
 
 on:
   push:

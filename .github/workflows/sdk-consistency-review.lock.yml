@@ -37,7 +37,7 @@
 #   - actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
 #   - github/gh-aw-actions/setup@63aa903fe409698e15e5718ad89366a72bfe6a89 # v0.67.4
 
-name: "SDK Consistency Review Agent"
+name: "Agent: SDK Consistency Review"
 "on":
   pull_request:
     paths:
@@ -68,7 +68,7 @@ concurrency:
   group: "gh-aw-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}"
   cancel-in-progress: true
 
-run-name: "SDK Consistency Review Agent"
+run-name: "Agent: SDK Consistency Review"
 
 jobs:
   activation:

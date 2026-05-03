@@ -1,4 +1,4 @@
-name: Check Upstream Updates
+name: "CI: Check Upstream Updates"
 
 on:
   schedule:

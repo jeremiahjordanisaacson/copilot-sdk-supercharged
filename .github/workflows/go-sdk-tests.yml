@@ -1,4 +1,4 @@
-name: "Go SDK Tests"
+name: "Test: Go SDK"
 
 on:
   push:
@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   test:
-    name: "Go SDK Tests"
+    name: "Test: Go SDK"
     env:
       POWERSHELL_UPDATECHECK: Off
     strategy:

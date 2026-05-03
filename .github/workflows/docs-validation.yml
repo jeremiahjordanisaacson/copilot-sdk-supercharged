@@ -1,4 +1,4 @@
-name: "Documentation Validation"
+name: "CI: Documentation Validation"
 
 on:
   pull_request:

@@ -1,4 +1,4 @@
-name: "Python SDK Tests"
+name: "Test: Python SDK"
 
 env:
   PYTHONUTF8: 1
@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   test:
-    name: "Python SDK Tests"
+    name: "Test: Python SDK"
     env:
       POWERSHELL_UPDATECHECK: Off
     strategy:

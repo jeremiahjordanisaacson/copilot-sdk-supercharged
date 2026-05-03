@@ -1,4 +1,4 @@
-name: "Node.js SDK Tests"
+name: "Test: Node.js SDK"
 
 env:
   HUSKY: 0
@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   test:
-    name: "Node.js SDK Tests"
+    name: "Test: Node.js SDK"
     env:
       POWERSHELL_UPDATECHECK: Off
     strategy:

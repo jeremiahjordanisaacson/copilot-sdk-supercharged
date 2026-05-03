@@ -37,7 +37,7 @@
 #   - actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
 #   - github/gh-aw-actions/setup@63aa903fe409698e15e5718ad89366a72bfe6a89 # v0.67.4
 
-name: "Question Handler"
+name: "Agent: Question Handler"
 "on":
   workflow_call:
     inputs:
@@ -60,7 +60,7 @@ permissions: {}
 concurrency:
   group: "gh-aw-${{ github.workflow }}"
 
-run-name: "Question Handler"
+run-name: "Agent: Question Handler"
 
 jobs:
   activation:

@@ -24,7 +24,7 @@
 #
 # gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"bbe407b2d324d84d7c6653015841817713551b010318cee1ec12dd5c1c077977","compiler_version":"v0.65.5","strict":true,"agent_id":"copilot"}
 
-name: "SDK Runtime Triage"
+name: "Agent: SDK Runtime Triage"
 "on":
   issues:
     types:
@@ -46,7 +46,7 @@ permissions: {}
 concurrency:
   group: "gh-aw-${{ github.workflow }}-${{ github.event.issue.number || github.run_id }}"
 
-run-name: "SDK Runtime Triage"
+run-name: "Agent: SDK Runtime Triage"
 
 jobs:
   activation:
