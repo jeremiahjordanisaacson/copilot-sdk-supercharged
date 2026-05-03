@@ -41,9 +41,9 @@ jobs:
 
       - name: Submit to CRAN
         run: |
-          Rscript -e "
-          pkg <- list.files(pattern = 'copilot\\.sdk\\.supercharged_.+\\.tar\\.gz')
+          Rscript -e '
+          pkg <- list.files(pattern = "copilot\\.sdk\\.supercharged_.+\\.tar\\.gz")
           devtools::submit_cran(pkg)
-          "
+          '
         env:
           CRAN_MAINTAINER_EMAIL: ${{ secrets.CRAN_MAINTAINER_EMAIL }}
