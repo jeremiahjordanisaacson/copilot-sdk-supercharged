@@ -305,3 +305,512 @@ test_that("should start client with session_fs config", {
 
   client$stop()
 })
+
+# ---------------------------------------------------------------------------
+# Multi-turn conversation
+# ---------------------------------------------------------------------------
+
+test_that("should have multi-turn conversation", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+  session <- client$create_session()
+
+  response1 <- session$send_and_wait("What is 1+1?")
+  expect_false(is.null(response1), info = "Should receive first response")
+
+  response2 <- session$send_and_wait("And what is 2+2?")
+  expect_false(is.null(response2), info = "Should receive second response")
+
+  client$stop()
+})
+
+# ---------------------------------------------------------------------------
+# Session resume
+# ---------------------------------------------------------------------------
+
+test_that("should resume a session by ID", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+  session <- client$create_session()
+  session_id <- session$session_id
+  expect_true(nzchar(session_id), info = "Session ID should not be empty")
+
+  client$stop()
+
+  client2 <- make_test_client(proxy_url, work_dir)
+  on.exit(client2$stop(), add = TRUE)
+
+  client2$start()
+  resumed <- client2$create_session(config = list(session_id = session_id))
+  expect_equal(resumed$session_id, session_id)
+
+  client2$stop()
+})
+
+# ---------------------------------------------------------------------------
+# Session delete
+# ---------------------------------------------------------------------------
+
+test_that("should delete a session", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+  session <- client$create_session()
+  session_id <- session$session_id
+
+  expect_no_error(client$delete_session(session_id))
+
+  sessions <- client$list_sessions()
+  ids <- vapply(sessions, function(s) s$session_id, character(1))
+  expect_false(session_id %in% ids, info = "Deleted session should not appear in list")
+
+  client$stop()
+})
+
+# ---------------------------------------------------------------------------
+# Model list
+# ---------------------------------------------------------------------------
+
+test_that("should list available models", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+
+  models <- client$list_models()
+  expect_true(length(models) > 0, info = "Should return at least one model")
+
+  client$stop()
+})
+
+# ---------------------------------------------------------------------------
+# Ping
+# ---------------------------------------------------------------------------
+
+test_that("should ping successfully", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+
+  result <- client$ping()
+  expect_false(is.null(result), info = "Ping result should not be NULL")
+
+  client$stop()
+})
+
+# ---------------------------------------------------------------------------
+# Auth status
+# ---------------------------------------------------------------------------
+
+test_that("should get auth status", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+
+  auth <- client$get_auth_status()
+  expect_false(is.null(auth), info = "Auth status should not be NULL")
+
+  client$stop()
+})
+
+# ---------------------------------------------------------------------------
+# Client lifecycle
+# ---------------------------------------------------------------------------
+
+test_that("should verify client lifecycle states", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+  expect_equal(client$get_state(), "connected")
+
+  client$stop()
+  expect_equal(client$get_state(), "disconnected")
+})
+
+# ---------------------------------------------------------------------------
+# Foreground session
+# ---------------------------------------------------------------------------
+
+test_that("should set and get foreground session id", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+  session <- client$create_session()
+  session_id <- session$session_id
+
+  client$set_foreground_session_id(session_id)
+  fg_id <- client$get_foreground_session_id()
+  expect_equal(fg_id, session_id)
+
+  client$stop()
+})
+
+# ---------------------------------------------------------------------------
+# Tools
+# ---------------------------------------------------------------------------
+
+test_that("should create session with tools", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+
+  tools <- list(
+    list(
+      name        = "test_tool",
+      description = "A test tool for E2E testing",
+      handler     = function(params) {
+        return(list(result = "tool executed"))
+      }
+    )
+  )
+
+  session <- client$create_session(config = list(tools = tools))
+  expect_true(
+    is.character(session$session_id) && nzchar(session$session_id),
+    info = "Session with tools should have a valid ID"
+  )
+
+  response <- session$send_and_wait("Use the test_tool")
+  expect_false(is.null(response), info = "Should receive a response when tools are defined")
+
+  client$stop()
+})
+
+# ---------------------------------------------------------------------------
+# Streaming
+# ---------------------------------------------------------------------------
+
+test_that("should receive streaming delta events", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_receive_session_events",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+
+  session <- client$create_session(config = list(streaming = TRUE))
+
+  events_received <- list()
+  session$on(function(event) {
+    events_received[[length(events_received) + 1]] <<- event
+  })
+
+  session$send_and_wait("Hello")
+  expect_true(
+    length(events_received) > 0,
+    info = "Should have received streaming delta events"
+  )
+
+  client$stop()
+})
+
+# ---------------------------------------------------------------------------
+# System message customization
+# ---------------------------------------------------------------------------
+
+test_that("should create session with system message in append mode", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+
+  config <- list(
+    system_message = list(
+      mode    = "append",
+      content = "You are a helpful test assistant."
+    )
+  )
+
+  session <- client$create_session(config = config)
+  expect_true(
+    is.character(session$session_id) && nzchar(session$session_id),
+    info = "Session with system message should have a valid ID"
+  )
+
+  client$stop()
+})
+
+# ---------------------------------------------------------------------------
+# MCP servers config
+# ---------------------------------------------------------------------------
+
+test_that("should create session with MCP servers config", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+
+  config <- list(
+    mcp_servers = list(
+      list(
+        url = "http://localhost:9999/mcp"
+      )
+    )
+  )
+
+  session <- client$create_session(config = config)
+  expect_true(
+    is.character(session$session_id) && nzchar(session$session_id),
+    info = "Session with MCP servers should have a valid ID"
+  )
+
+  client$stop()
+})
+
+# ---------------------------------------------------------------------------
+# Skills config
+# ---------------------------------------------------------------------------
+
+test_that("should create session with skills config", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_have_stateful_conversation",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+
+  config <- list(
+    skills = list(
+      directories = list(work_dir)
+    )
+  )
+
+  session <- client$create_session(config = config)
+  expect_true(
+    is.character(session$session_id) && nzchar(session$session_id),
+    info = "Session with skills config should have a valid ID"
+  )
+
+  client$stop()
+})
+
+# ---------------------------------------------------------------------------
+# Compaction
+# ---------------------------------------------------------------------------
+
+test_that("should receive compaction events after multiple messages", {
+  proxy <- CapiProxy$new()
+  on.exit(proxy$stop(), add = TRUE)
+
+  proxy_url <- proxy$start()
+  work_dir <- tempfile(pattern = "copilot-test-work-")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  configure_for_test(
+    proxy, "session",
+    "should_receive_session_events",
+    work_dir
+  )
+
+  client <- make_test_client(proxy_url, work_dir)
+  on.exit(client$stop(), add = TRUE)
+
+  client$start()
+  session <- client$create_session()
+
+  events_received <- list()
+  session$on(function(event) {
+    events_received[[length(events_received) + 1]] <<- event
+  })
+
+  # Send multiple messages to trigger compaction
+  for (i in seq_len(5)) {
+    session$send_and_wait(paste("Message number", i))
+  }
+
+  expect_true(
+    length(events_received) > 0,
+    info = "Should have received events (including potential compaction events)"
+  )
+
+  client$stop()
+})

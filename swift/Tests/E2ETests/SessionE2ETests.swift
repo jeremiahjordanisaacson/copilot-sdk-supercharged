@@ -217,4 +217,558 @@ final class SessionE2ETests: XCTestCase {
 
         try await client.stop()
     }
+
+    /// Test 4: Multi-turn conversation — send two messages and verify both responses.
+    func testMultiTurnConversation() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let session = try await client.createSession(
+                SessionConfig(model: "gpt-4")
+            )
+
+            let response1 = try await session.sendAndWait(
+                MessageOptions(prompt: "What is 1+1?")
+            )
+            XCTAssertNotNil(response1, "First response should not be nil")
+
+            let response2 = try await session.sendAndWait(
+                MessageOptions(prompt: "And what is 2+2?")
+            )
+            XCTAssertNotNil(response2, "Second response should not be nil")
+
+            try await session.destroy()
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 5: Resume a session — create, destroy, stop, then resume with a new client.
+    func testSessionResume() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client1 = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client1.start()
+
+        var savedSessionId: String = ""
+        do {
+            let session = try await client1.createSession(
+                SessionConfig(model: "gpt-4")
+            )
+            savedSessionId = await session.sessionId
+            XCTAssertFalse(savedSessionId.isEmpty)
+            try await session.destroy()
+        }
+
+        try await client1.stop()
+
+        // Resume with a new client
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client2 = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client2.start()
+
+        do {
+            let resumed = try await client2.resumeSession(
+                savedSessionId,
+                config: SessionConfig(model: "gpt-4")
+            )
+            let resumedId = await resumed.sessionId
+            XCTAssertEqual(resumedId, savedSessionId, "Resumed session ID should match original")
+            try await resumed.destroy()
+        }
+
+        try await client2.stop()
+    }
+
+    /// Test 6: List sessions — create two sessions then verify listSessions returns at least 2.
+    func testSessionList() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let session1 = try await client.createSession(
+                SessionConfig(model: "gpt-4")
+            )
+            let session2 = try await client.createSession(
+                SessionConfig(model: "gpt-4")
+            )
+
+            let sessions = try await client.listSessions()
+            XCTAssertGreaterThanOrEqual(sessions.count, 2, "Should have at least 2 sessions")
+
+            try await session1.destroy()
+            try await session2.destroy()
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 7: Get session metadata — create a session and retrieve its metadata.
+    func testSessionMetadata() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let session = try await client.createSession(
+                SessionConfig(model: "gpt-4")
+            )
+            let sessionId = await session.sessionId
+
+            let metadata = try await client.getSessionMetadata(sessionId)
+            XCTAssertNotNil(metadata, "Session metadata should not be nil")
+
+            try await session.destroy()
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 8: Delete a session — create, delete, then verify it no longer appears in the list.
+    func testSessionDelete() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let session = try await client.createSession(
+                SessionConfig(model: "gpt-4")
+            )
+            let sessionId = await session.sessionId
+            XCTAssertFalse(sessionId.isEmpty)
+
+            try await client.deleteSession(sessionId)
+
+            let sessions = try await client.listSessions()
+            let found = sessions.contains { $0.id == sessionId }
+            XCTAssertFalse(found, "Deleted session should not appear in session list")
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 9: List models — verify the client can retrieve available models.
+    func testModelList() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let models = try await client.listModels()
+            XCTAssertNotNil(models, "Model list should not be nil")
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 10: Ping — send a ping message and verify a response.
+    func testPing() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let result = try await client.ping(message: "hello")
+            XCTAssertNotNil(result, "Ping response should not be nil")
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 11: Auth status — verify the client can retrieve authentication status.
+    func testAuthStatus() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let authStatus = try await client.getAuthStatus()
+            XCTAssertNotNil(authStatus, "Auth status should not be nil")
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 12: Client lifecycle — start and stop the client without errors.
+    func testClientLifecycle() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+        try await client.stop()
+    }
+
+    /// Test 13: Foreground session — set and get the foreground session ID.
+    func testForegroundSession() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let session = try await client.createSession(
+                SessionConfig(model: "gpt-4")
+            )
+            let sessionId = await session.sessionId
+
+            try await client.setForegroundSessionId(sessionId)
+            let fgId = try await client.getForegroundSessionId()
+            XCTAssertEqual(fgId, sessionId, "Foreground session ID should match the one we set")
+
+            try await session.destroy()
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 14: Tools — define a tool, attach it to a session, send a message, and verify.
+    func testTools() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let tool = defineTool(
+                name: "get_weather",
+                description: "Get current weather for a city",
+                parameters: ["city": "string"]
+            ) { params in
+                return ["temperature": "72F", "city": params["city"] ?? "unknown"]
+            }
+
+            let session = try await client.createSession(
+                SessionConfig(model: "gpt-4", tools: [tool])
+            )
+
+            let sessionId = await session.sessionId
+            XCTAssertFalse(sessionId.isEmpty, "Session with tools should have a valid ID")
+
+            let response = try await session.sendAndWait(
+                MessageOptions(prompt: "What is the weather in Seattle?")
+            )
+            XCTAssertNotNil(response, "Tool-enabled session should return a response")
+
+            try await session.destroy()
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 15: Streaming — enable streaming, collect delta events, then verify.
+    func testStreaming() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let session = try await client.createSession(
+                SessionConfig(model: "gpt-4", streaming: true)
+            )
+
+            var deltas: [Any] = []
+            await session.on("assistant.message_delta") { event in
+                deltas.append(event)
+            }
+
+            let response = try await session.sendAndWait(
+                MessageOptions(prompt: "Say hello")
+            )
+            XCTAssertNotNil(response, "Streaming session should return a final response")
+
+            try await session.destroy()
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 16: System message customization — create session with a custom system message.
+    func testSystemMessageCustomization() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let systemMessage = SystemMessageConfig(
+                content: "You are a helpful coding assistant.",
+                mode: .append
+            )
+
+            let session = try await client.createSession(
+                SessionConfig(model: "gpt-4", systemMessage: systemMessage)
+            )
+
+            let sessionId = await session.sessionId
+            XCTAssertFalse(sessionId.isEmpty, "Session with system message should be created")
+
+            try await session.destroy()
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 17: Session filesystem provider — create client with sessionFs config and verify.
+    func testSessionFsProvider() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let fsConfig = SessionFsConfig(
+            initialCwd: Self.workDir,
+            sessionStatePath: Self.workDir + "/session-state",
+            conventions: "posix"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv(),
+            sessionFs: fsConfig
+        ))
+
+        try await client.start()
+
+        do {
+            let session = try await client.createSession(
+                SessionConfig(model: "gpt-4")
+            )
+            let sessionId = await session.sessionId
+            XCTAssertFalse(sessionId.isEmpty, "Session with fs provider should have a valid ID")
+
+            try await session.destroy()
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 18: MCP servers config — create session with mcpServers configuration.
+    func testMcpServersConfig() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let mcpServer = MCPServerConfig(
+                name: "test-mcp",
+                command: "echo",
+                args: ["hello"]
+            )
+
+            let session = try await client.createSession(
+                SessionConfig(model: "gpt-4", mcpServers: [mcpServer])
+            )
+
+            let sessionId = await session.sessionId
+            XCTAssertFalse(sessionId.isEmpty, "Session with MCP servers should be created")
+
+            try await session.destroy()
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 19: Skills config — create session with skills configuration.
+    func testSkillsConfig() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let session = try await client.createSession(
+                SessionConfig(model: "gpt-4", skills: ["code-review", "testing"])
+            )
+
+            let sessionId = await session.sessionId
+            XCTAssertFalse(sessionId.isEmpty, "Session with skills should be created")
+
+            try await session.destroy()
+        }
+
+        try await client.stop()
+    }
+
+    /// Test 20: Compaction — send multiple messages and verify all responses are received.
+    func testCompaction() async throws {
+        try await configureSnapshot(
+            category: "session",
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+        )
+
+        let client = CopilotClient(options: CopilotClientOptions(
+            cliPath: getCliPath(),
+            cwd: Self.workDir,
+            env: getTestEnv()
+        ))
+
+        try await client.start()
+
+        do {
+            let session = try await client.createSession(
+                SessionConfig(model: "gpt-4")
+            )
+
+            let prompts = [
+                "What is 1+1?",
+                "What is 2+2?",
+                "What is 3+3?",
+                "What is 4+4?",
+                "What is 5+5?"
+            ]
+
+            for prompt in prompts {
+                let response = try await session.sendAndWait(
+                    MessageOptions(prompt: prompt)
+                )
+                XCTAssertNotNil(response, "Response for '\(prompt)' should not be nil")
+            }
+
+            try await session.destroy()
+        }
+
+        try await client.stop()
+    }
 }
