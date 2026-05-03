@@ -229,18 +229,31 @@ export class ReplayingCapiProxy extends CapturingHttpProxy {
 
         const state = this.state;
         if (!state) {
-          throw new Error(
-            "ReplayingCapiProxy not yet initialized. Either pass filePath and workDir to the constructor, " +
-              "or post configuration to /config before making other HTTP requests.",
-          );
+          // Wait briefly for /config to arrive — eliminates race conditions
+          // where the CLI sends a request before the test harness has posted config.
+          const deadline = Date.now() + 5000;
+          let resolved = this.state;
+          while (!resolved && Date.now() < deadline) {
+            await sleep(25);
+            resolved = this.state;
+          }
+          if (!resolved) {
+            throw new Error(
+              "ReplayingCapiProxy not yet initialized. Either pass filePath and workDir to the constructor, " +
+                "or post configuration to /config before making other HTTP requests.",
+            );
+          }
         }
+
+        // Re-read state after potential wait
+        const resolvedState = this.state!;
 
         // Handle /models endpoint
         // Use stored models if available, otherwise use default model
         if (options.requestOptions.path === "/models") {
           const models =
-            state.storedData?.models && state.storedData.models.length > 0
-              ? state.storedData.models
+            resolvedState.storedData?.models && resolvedState.storedData.models.length > 0
+              ? resolvedState.storedData.models
               : [defaultModel];
           const modelsResponse = createGetModelsResponse(models);
           const body = JSON.stringify(modelsResponse);
@@ -298,15 +311,15 @@ export class ReplayingCapiProxy extends CapturingHttpProxy {
 
         // Handle /chat/completions endpoint
         if (
-          state.storedData &&
+          resolvedState.storedData &&
           options.requestOptions.path === chatCompletionEndpoint &&
           options.body
         ) {
           const savedResponse = await findSavedChatCompletionResponse(
-            state.storedData,
+            resolvedState.storedData,
             options.body,
-            state.workDir,
-            state.toolResultNormalizers,
+            resolvedState.workDir,
+            resolvedState.toolResultNormalizers,
           );
 
           if (savedResponse) {
@@ -351,10 +364,10 @@ export class ReplayingCapiProxy extends CapturingHttpProxy {
           // If so, hang forever so the client-side timeout can trigger.
           if (
             await isRequestOnlySnapshot(
-              state.storedData,
+              resolvedState.storedData,
               options.body,
-              state.workDir,
-              state.toolResultNormalizers,
+              resolvedState.workDir,
+              resolvedState.toolResultNormalizers,
             )
           ) {
             const streamingIsRequested =
@@ -396,10 +409,10 @@ export class ReplayingCapiProxy extends CapturingHttpProxy {
         if (isCI) {
           await exitWithNoMatchingRequestError(
             options,
-            state.testInfo,
-            state.workDir,
-            state.toolResultNormalizers,
-            state.storedData,
+            resolvedState.testInfo,
+            resolvedState.workDir,
+            resolvedState.toolResultNormalizers,
+            resolvedState.storedData,
           );
           return;
         }
