@@ -908,9 +908,12 @@ class SessionConfig(TypedDict, total=False):
     reasoning_effort: ReasoningEffort
     tools: list[Tool]
     system_message: SystemMessageConfig  # System message configuration
-    # List of tool names to allow (takes precedence over excluded_tools)
+    # List of tool names to allow. When specified, only these tools will be available.
+    # Applies to the full merged tool catalog (built-in, MCP, and custom tools
+    # registered via tools=). Takes precedence over excluded_tools.
     available_tools: list[str]
-    # List of tool names to disable (ignored if available_tools is set)
+    # List of tool names to disable. Applies to all tools including custom tools
+    # registered via tools=. Ignored if available_tools is set.
     excluded_tools: list[str]
     # Handler for permission requests from the server
     on_permission_request: _PermissionHandlerFn
@@ -949,6 +952,8 @@ class SessionConfig(TypedDict, total=False):
     config_dir: str
     # Directories to load skills from
     skill_directories: list[str]
+    # Additional directories to search for custom instruction files.
+    instruction_directories: list[str]
     # List of skill names to disable
     disabled_skills: list[str]
     # Infinite session configuration for persistent workspaces and automatic compaction.
@@ -980,9 +985,12 @@ class ResumeSessionConfig(TypedDict, total=False):
     model: str
     tools: list[Tool]
     system_message: SystemMessageConfig  # System message configuration
-    # List of tool names to allow (takes precedence over excluded_tools)
+    # List of tool names to allow. When specified, only these tools will be available.
+    # Applies to the full merged tool catalog (built-in, MCP, and custom tools
+    # registered via tools=). Takes precedence over excluded_tools.
     available_tools: list[str]
-    # List of tool names to disable (ignored if available_tools is set)
+    # List of tool names to disable. Applies to all tools including custom tools
+    # registered via tools=. Ignored if available_tools is set.
     excluded_tools: list[str]
     provider: ProviderConfig
     # Reasoning effort level for models that support it.
@@ -1016,6 +1024,8 @@ class ResumeSessionConfig(TypedDict, total=False):
     agent: str
     # Directories to load skills from
     skill_directories: list[str]
+    # Additional directories to search for custom instruction files.
+    instruction_directories: list[str]
     # List of skill names to disable
     disabled_skills: list[str]
     # Infinite session configuration for persistent workspaces and automatic compaction.
