@@ -56,6 +56,12 @@ struct CopilotClientOptions
 
     /// Idle timeout in seconds before a session is reaped.
     Nullable!uint sessionIdleTimeoutSeconds;
+
+    /// Override the Copilot home directory.
+    Nullable!string copilotHome;
+
+    /// Token for TCP connection authentication.
+    Nullable!string tcpConnectionToken;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +232,9 @@ struct SessionConfig
     /// Additional HTTP headers sent with each model request.
     string[string] requestHeaders;
 
+    /// Directories containing instruction files for the session.
+    string[] instructionDirectories;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
@@ -314,6 +323,13 @@ struct SessionConfig
             obj["requestHeaders"] = hdrObj;
         }
 
+        if (instructionDirectories.length > 0)
+        {
+            JSONValue[] arr;
+            foreach (s; instructionDirectories) arr ~= JSONValue(s);
+            obj["instructionDirectories"] = JSONValue(arr);
+        }
+
         return obj;
     }
 }
@@ -330,6 +346,9 @@ struct ResumeSessionConfig
     /// Tools available in this session.
     Tool[] tools;
 
+    /// Directories containing instruction files for the session.
+    string[] instructionDirectories;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
@@ -342,6 +361,13 @@ struct ResumeSessionConfig
             foreach (ref t; tools)
                 arr ~= t.toJson();
             obj["tools"] = JSONValue(arr);
+        }
+
+        if (instructionDirectories.length > 0)
+        {
+            JSONValue[] arr;
+            foreach (s; instructionDirectories) arr ~= JSONValue(s);
+            obj["instructionDirectories"] = JSONValue(arr);
         }
         return obj;
     }

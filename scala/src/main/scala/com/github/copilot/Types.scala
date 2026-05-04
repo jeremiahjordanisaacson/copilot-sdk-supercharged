@@ -388,6 +388,8 @@ case class SessionConfig(
   responseFormat: Option[String] = None,
   /** Idle timeout in seconds before the session is automatically closed. */
   idleTimeout: Option[Int] = None,
+  /** Custom instruction directory paths. */
+  instructionDirectories: Option[Seq[String]] = None,
 )
 
 /** Configuration for resuming an existing session. */
@@ -430,7 +432,9 @@ case class ResumeSessionConfig(
   /** Handler for elicitation requests from the server. */
   onElicitationRequest: Option[ElicitationHandler] = None,
 
-  disableResume: Option[Boolean] = None
+  disableResume: Option[Boolean] = None,
+  /** Custom instruction directory paths. */
+  instructionDirectories: Option[Seq[String]] = None,
 )
 
 // ============================================================================
@@ -1153,5 +1157,11 @@ case class CopilotClientOptions(
   sessionIdleTimeoutSeconds: Option[Int] = None,
 
   /** Custom session filesystem provider configuration. */
-  sessionFs: Option[SessionFsConfig] = None
+  sessionFs: Option[SessionFsConfig] = None,
+
+  /** Configurable data directory, passed as COPILOT_HOME env var. */
+  copilotHome: Option[String] = None,
+
+  /** Auth token for TCP server connections. */
+  tcpConnectionToken: Option[String] = None
 )

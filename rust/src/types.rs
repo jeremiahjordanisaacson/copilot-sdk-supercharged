@@ -583,6 +583,9 @@ pub struct SessionConfig {
     /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
+    /// Directories containing instruction files for the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction_directories: Option<Vec<String>>,
     /// Set by the SDK based on whether handlers are registered (not user-set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_permission: Option<bool>,
@@ -727,6 +730,9 @@ pub struct ResumeSessionConfig {
     /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
+    /// Directories containing instruction files for the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction_directories: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disable_resume: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1188,6 +1194,10 @@ pub struct CopilotClientOptions {
     pub session_idle_timeout_seconds: Option<u64>,
     /// Custom session filesystem configuration.
     pub session_fs: Option<SessionFsConfig>,
+    /// Override the Copilot home directory.
+    pub copilot_home: Option<String>,
+    /// Token for TCP connection authentication.
+    pub tcp_connection_token: Option<String>,
 }
 
 impl Default for CopilotClientOptions {
@@ -1207,6 +1217,8 @@ impl Default for CopilotClientOptions {
             use_logged_in_user: None,
             session_idle_timeout_seconds: None,
             session_fs: None,
+            copilot_home: None,
+            tcp_connection_token: None,
         }
     }
 }

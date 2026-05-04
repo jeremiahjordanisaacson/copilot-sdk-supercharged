@@ -47,6 +47,8 @@ module copilot_types
     logical :: use_stdio        = .true.
     integer :: session_idle_timeout_seconds = 0
     type(session_fs_config), allocatable :: session_fs
+    character(len=:), allocatable :: copilot_home
+    character(len=:), allocatable :: tcp_connection_token
   contains
     procedure :: set_defaults => client_options_set_defaults
   end type copilot_client_options
@@ -120,6 +122,7 @@ module copilot_types
     type(command_definition), allocatable :: commands(:)
     type(image_options) :: img_options
     character(len=:), allocatable :: response_format
+    character(len=:), allocatable :: instruction_directories(:)
   end type session_config
 
   ! --------------------------------------------------------------------------

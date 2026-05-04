@@ -26,6 +26,8 @@ proc ::copilot::types::make_client_options {args} {
         use_logged_in_user              1 \
         session_idle_timeout_seconds    0 \
         session_fs                      {} \
+        copilot_home                    "" \
+        tcp_connection_token            "" \
     ]
     set opts $defaults
     foreach {key value} $args {
@@ -62,6 +64,7 @@ proc ::copilot::types::make_session_config {args} {
         response_format                     "" \
         request_headers                     {} \
         elicitation_handler                 "" \
+        instruction_directories             {} \
     ]
     set cfg $defaults
     foreach {key value} $args {

@@ -711,6 +711,7 @@ data SessionConfig = SessionConfig
   , scGitHubToken                    :: !(Maybe Text)  -- ^ GitHub token for authentication. Overrides client-level token for this session only.
   , scCommands                       :: !(Maybe [CommandDefinition])  -- ^ Slash commands registered for this session
   , scOnElicitationRequest           :: !(Maybe ElicitationHandler)  -- ^ Handler for elicitation requests from the server
+  , scInstructionDirectories         :: !(Maybe [Text])  -- ^ Directories to search for instruction files
   }
 
 -- | Default (empty) session configuration.
@@ -741,6 +742,7 @@ defaultSessionConfig = SessionConfig
   , scGitHubToken                    = Nothing
   , scCommands                       = Nothing
   , scOnElicitationRequest           = Nothing
+  , scInstructionDirectories         = Nothing
   }
 
 -- | Configuration for resuming a session.
@@ -770,6 +772,7 @@ data ResumeSessionConfig = ResumeSessionConfig
   , rscCommands                       :: !(Maybe [CommandDefinition])  -- ^ Slash commands registered for this session
   , rscOnElicitationRequest           :: !(Maybe ElicitationHandler)  -- ^ Handler for elicitation requests from the server
   , rscDisableResume                  :: !(Maybe Bool)
+  , rscInstructionDirectories         :: !(Maybe [Text])  -- ^ Directories to search for instruction files
   }
 
 -- | Default (empty) resume session configuration.
@@ -800,6 +803,7 @@ defaultResumeSessionConfig = ResumeSessionConfig
   , rscCommands                       = Nothing
   , rscOnElicitationRequest           = Nothing
   , rscDisableResume                  = Nothing
+  , rscInstructionDirectories         = Nothing
   }
 
 -- ============================================================================
@@ -1636,6 +1640,8 @@ data CopilotClientOptions = CopilotClientOptions
   , ccoUseLoggedInUser           :: !(Maybe Bool)
   , ccoSessionIdleTimeoutSeconds :: !(Maybe Int)  -- ^ Server-wide idle timeout for sessions in seconds
   , ccoSessionFs                 :: !(Maybe SessionFsConfig)  -- ^ Custom session filesystem provider configuration
+  , ccoCopilotHome               :: !(Maybe Text)  -- ^ Custom path to the copilot home directory
+  , ccoTcpConnectionToken        :: !(Maybe Text)  -- ^ Token for TCP connections
   }
 
 -- | Default client options.
@@ -1652,4 +1658,6 @@ defaultClientOptions = CopilotClientOptions
   , ccoUseLoggedInUser           = Nothing
   , ccoSessionIdleTimeoutSeconds = Nothing
   , ccoSessionFs                 = Nothing
+  , ccoCopilotHome               = Nothing
+  , ccoTcpConnectionToken        = Nothing
   }

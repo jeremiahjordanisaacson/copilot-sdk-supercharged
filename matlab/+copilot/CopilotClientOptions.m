@@ -46,6 +46,12 @@ classdef CopilotClientOptions
         % Session filesystem configuration (struct with InitialCwd,
         % SessionStatePath, Conventions fields).
         SessionFs
+
+        % Path to the Copilot home directory.
+        CopilotHome (1,:) char = ''
+
+        % TCP connection token for authenticated server connections.
+        TcpConnectionToken (1,:) char = ''
     end
 
     methods
@@ -68,6 +74,8 @@ classdef CopilotClientOptions
             p.addParameter('Port', obj.Port);
             p.addParameter('SessionIdleTimeoutSeconds', obj.SessionIdleTimeoutSeconds);
             p.addParameter('SessionFs', struct());
+            p.addParameter('CopilotHome', obj.CopilotHome);
+            p.addParameter('TcpConnectionToken', obj.TcpConnectionToken);
             p.parse(varargin{:});
 
             obj.CliPath          = p.Results.CliPath;
@@ -82,6 +90,8 @@ classdef CopilotClientOptions
             obj.Port             = p.Results.Port;
             obj.SessionIdleTimeoutSeconds = p.Results.SessionIdleTimeoutSeconds;
             obj.SessionFs        = p.Results.SessionFs;
+            obj.CopilotHome      = p.Results.CopilotHome;
+            obj.TcpConnectionToken = p.Results.TcpConnectionToken;
         end
 
         function s = toStruct(obj)
@@ -97,6 +107,12 @@ classdef CopilotClientOptions
                 'useStdio',        obj.UseStdio, ...
                 'port',            obj.Port, ...
                 'sessionIdleTimeoutSeconds', obj.SessionIdleTimeoutSeconds);
+            if ~isempty(obj.CopilotHome)
+                s.copilotHome = obj.CopilotHome;
+            end
+            if ~isempty(obj.TcpConnectionToken)
+                s.tcpConnectionToken = obj.TcpConnectionToken;
+            end
         end
     end
 end

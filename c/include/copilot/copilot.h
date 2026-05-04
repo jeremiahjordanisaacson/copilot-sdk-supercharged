@@ -504,6 +504,8 @@ typedef struct {
     const char **extra_args;   /**< NULL-terminated array of extra CLI args, or NULL */
     int session_idle_timeout_seconds; /**< Server-wide idle timeout for sessions in seconds (0 = not set) */
     const copilot_session_fs_config_t *session_fs; /**< Session filesystem config, or NULL */
+    const char *copilot_home;  /**< Override the Copilot home directory (NULL = default) */
+    const char *tcp_connection_token; /**< Token for TCP connection authentication (NULL = none) */
 } copilot_client_options_t;
 
 /**
@@ -557,6 +559,10 @@ typedef struct {
 
     /* GitHub token */
     const char *github_token;      /**< GitHub token for authentication. Overrides client-level token for this session only. (NULL = none) */
+
+    /* Instruction directories */
+    const char **instruction_directories;  /**< NULL-terminated array of instruction directory paths, or NULL */
+    int instruction_directories_count;     /**< Number of entries in instruction_directories (0 if NULL) */
 
     /* Handlers */
     copilot_permission_handler_fn on_permission_request;

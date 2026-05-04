@@ -788,6 +788,9 @@ public struct SessionConfig: Sendable {
     /// Handler for elicitation requests from the server.
     public var onElicitationRequest: ElicitationHandler?
 
+    /// Directories to search for instruction files.
+    public var instructionDirectories: [String]?
+
     public init(
         sessionId: String? = nil,
         model: String? = nil,
@@ -813,7 +816,8 @@ public struct SessionConfig: Sendable {
         enableConfigDiscovery: Bool? = nil,
         gitHubToken: String? = nil,
         commands: [CommandDefinition]? = nil,
-        onElicitationRequest: ElicitationHandler? = nil
+        onElicitationRequest: ElicitationHandler? = nil,
+        instructionDirectories: [String]? = nil
     ) {
         self.sessionId = sessionId
         self.model = model
@@ -840,6 +844,7 @@ public struct SessionConfig: Sendable {
         self.gitHubToken = gitHubToken
         self.commands = commands
         self.onElicitationRequest = onElicitationRequest
+        self.instructionDirectories = instructionDirectories
     }
 }
 
@@ -877,6 +882,9 @@ public struct ResumeSessionConfig: Sendable {
     /// Handler for elicitation requests from the server.
     public var onElicitationRequest: ElicitationHandler?
 
+    /// Directories to search for instruction files.
+    public var instructionDirectories: [String]?
+
     public init(
         model: String? = nil,
         reasoningEffort: ReasoningEffort? = nil,
@@ -902,7 +910,8 @@ public struct ResumeSessionConfig: Sendable {
         gitHubToken: String? = nil,
         disableResume: Bool? = nil,
         commands: [CommandDefinition]? = nil,
-        onElicitationRequest: ElicitationHandler? = nil
+        onElicitationRequest: ElicitationHandler? = nil,
+        instructionDirectories: [String]? = nil
     ) {
         self.model = model
         self.reasoningEffort = reasoningEffort
@@ -929,6 +938,7 @@ public struct ResumeSessionConfig: Sendable {
         self.disableResume = disableResume
         self.commands = commands
         self.onElicitationRequest = onElicitationRequest
+        self.instructionDirectories = instructionDirectories
     }
 }
 
@@ -1347,6 +1357,12 @@ public struct CopilotClientOptions: Sendable {
     /// Configuration for a custom session filesystem provider.
     public var sessionFs: SessionFsConfig?
 
+    /// Override path to the Copilot home directory.
+    public var copilotHome: String?
+
+    /// Token for TCP connection authentication.
+    public var tcpConnectionToken: String?
+
     public init(
         cliPath: String? = nil,
         cliArgs: [String]? = nil,
@@ -1361,7 +1377,9 @@ public struct CopilotClientOptions: Sendable {
         githubToken: String? = nil,
         useLoggedInUser: Bool? = nil,
         sessionIdleTimeoutSeconds: Int? = nil,
-        sessionFs: SessionFsConfig? = nil
+        sessionFs: SessionFsConfig? = nil,
+        copilotHome: String? = nil,
+        tcpConnectionToken: String? = nil
     ) {
         self.cliPath = cliPath
         self.cliArgs = cliArgs
@@ -1377,6 +1395,8 @@ public struct CopilotClientOptions: Sendable {
         self.useLoggedInUser = useLoggedInUser
         self.sessionIdleTimeoutSeconds = sessionIdleTimeoutSeconds
         self.sessionFs = sessionFs
+        self.copilotHome = copilotHome
+        self.tcpConnectionToken = tcpConnectionToken
     }
 }
 

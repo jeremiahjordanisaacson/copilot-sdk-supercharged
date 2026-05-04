@@ -64,6 +64,8 @@ package Copilot.Types is
       Session_Fs_Initial_Cwd      : UString := Null_UString;
       Session_Fs_State_Path       : UString := Null_UString;
       Session_Fs_Conventions      : UString := Null_UString;
+      Copilot_Home                : UString := Null_UString;
+      Tcp_Connection_Token        : UString := Null_UString;
    end record;
 
    Default_Options : constant Client_Options :=
@@ -81,7 +83,9 @@ package Copilot.Types is
       Session_Idle_Timeout_Seconds => 0,
       Session_Fs_Initial_Cwd      => Null_UString,
       Session_Fs_State_Path       => Null_UString,
-      Session_Fs_Conventions      => Null_UString);
+      Session_Fs_Conventions      => Null_UString,
+      Copilot_Home                => Null_UString,
+      Tcp_Connection_Token        => Null_UString);
 
    --  -----------------------------------------------------------------------
    --  Session configuration
@@ -110,6 +114,7 @@ package Copilot.Types is
       Available_Tools_Json          : UString  := Null_UString;
       Auth_Token                    : UString  := Null_UString;
       Elicitation_Handler_Set       : Boolean  := False;
+      Instruction_Directories_Json  : UString  := Null_UString;
    end record;
 
    Default_Session_Config : constant Session_Config :=
@@ -134,15 +139,17 @@ package Copilot.Types is
       Image_Style                      => Null_UString,
        Available_Tools_Json          => Null_UString,
        Auth_Token                    => Null_UString,
-       Elicitation_Handler_Set       => False);
+       Elicitation_Handler_Set       => False,
+       Instruction_Directories_Json  => Null_UString);
 
    --  -----------------------------------------------------------------------
    --  Resume session configuration
    --  -----------------------------------------------------------------------
 
    type Resume_Session_Config is record
-      Session_Id : UString := Null_UString;
-      Model      : UString := Null_UString;
+      Session_Id                    : UString := Null_UString;
+      Model                         : UString := Null_UString;
+      Instruction_Directories_Json  : UString := Null_UString;
    end record;
 
    --  -----------------------------------------------------------------------

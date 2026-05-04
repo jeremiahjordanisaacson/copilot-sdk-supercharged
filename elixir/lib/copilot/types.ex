@@ -557,7 +557,8 @@ defmodule Copilot.Types do
             github_token: String.t() | nil,
             commands: [Copilot.Types.CommandDefinition.t()] | nil,
             on_elicitation_request: Copilot.Types.elicitation_handler() | nil,
-            session_fs: Copilot.Types.SessionFsConfig.t() | nil
+            session_fs: Copilot.Types.SessionFsConfig.t() | nil,
+            instruction_directories: [String.t()] | nil
           }
     defstruct [
       :session_id,
@@ -592,7 +593,9 @@ defmodule Copilot.Types do
       # Handler for elicitation requests from the server
       :on_elicitation_request,
       # Custom session filesystem provider configuration
-      :session_fs
+      :session_fs,
+      # Directories to search for instruction files
+      :instruction_directories
     ]
   end
 
@@ -623,7 +626,8 @@ defmodule Copilot.Types do
             include_sub_agent_streaming_events: boolean() | nil,
             github_token: String.t() | nil,
             commands: [Copilot.Types.CommandDefinition.t()] | nil,
-            on_elicitation_request: Copilot.Types.elicitation_handler() | nil
+            on_elicitation_request: Copilot.Types.elicitation_handler() | nil,
+            instruction_directories: [String.t()] | nil
           }
     defstruct [
       :model,
@@ -656,7 +660,9 @@ defmodule Copilot.Types do
       # Slash commands registered for this session
       :commands,
       # Handler for elicitation requests from the server
-      :on_elicitation_request
+      :on_elicitation_request,
+      # Directories to search for instruction files
+      :instruction_directories
     ]
   end
 
@@ -777,7 +783,9 @@ defmodule Copilot.Types do
             github_token: String.t() | nil,
             use_logged_in_user: boolean() | nil,
             session_idle_timeout_seconds: integer() | nil,
-            session_fs: Copilot.Types.SessionFsConfig.t() | nil
+            session_fs: Copilot.Types.SessionFsConfig.t() | nil,
+            copilot_home: String.t() | nil,
+            tcp_connection_token: String.t() | nil
           }
     defstruct [
       cli_path: nil,
@@ -792,7 +800,11 @@ defmodule Copilot.Types do
       # Server-wide idle timeout for sessions in seconds
       session_idle_timeout_seconds: nil,
       # Custom session filesystem provider configuration
-      session_fs: nil
+      session_fs: nil,
+      # Custom path to the copilot home directory
+      copilot_home: nil,
+      # Token for TCP connections
+      tcp_connection_token: nil
     ]
   end
 

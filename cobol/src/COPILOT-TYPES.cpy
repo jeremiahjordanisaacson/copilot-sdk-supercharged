@@ -12,6 +12,8 @@
            05 WS-CLI-URL            PIC X(256) VALUE SPACES.
            05 WS-AUTO-START         PIC 9      VALUE 1.
            05 WS-GITHUB-TOKEN       PIC X(256) VALUE SPACES.
+           05 WS-COPILOT-HOME       PIC X(256) VALUE SPACES.
+           05 WS-TCP-CONN-TOKEN     PIC X(256) VALUE SPACES.
 
       *----------------------------------------------------------------*
       * Client state                                                   *
@@ -61,6 +63,10 @@
                88 STREAMING-ON                 VALUE 1.
                88 STREAMING-OFF                VALUE 0.
            05 WS-SESS-HISTORY-LEN   PIC 9(5)   VALUE 100.
+           05 WS-SESS-INSTR-DIRS.
+               10 WS-INSTR-DIR-COUNT PIC 9(3)  VALUE 0.
+               10 WS-INSTR-DIR-ENTRY OCCURS 10 TIMES.
+                   15 WS-INSTR-DIR-PATH PIC X(256) VALUE SPACES.
 
       *----------------------------------------------------------------*
       * Session state                                                  *

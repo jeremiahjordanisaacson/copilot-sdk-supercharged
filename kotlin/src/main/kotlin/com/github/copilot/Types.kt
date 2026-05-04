@@ -328,6 +328,8 @@ data class SessionConfig(
     val responseFormat: String? = null,
     /** Idle timeout in seconds before the session is automatically closed. */
     val idleTimeout: Int? = null,
+    /** Custom instruction directory paths. */
+    val instructionDirectories: List<String>? = null,
 )
 
 /**
@@ -380,7 +382,9 @@ data class ResumeSessionConfig(
     /** Handler for elicitation requests from the server. */
     val onElicitationRequest: ElicitationHandler? = null,
 
-    val disableResume: Boolean? = null
+    val disableResume: Boolean? = null,
+    /** Custom instruction directory paths. */
+    val instructionDirectories: List<String>? = null,
 )
 
 // ============================================================================
@@ -860,5 +864,15 @@ data class CopilotClientOptions(
     /**
      * Configuration for a custom session filesystem provider.
      */
-    val sessionFs: SessionFsConfig? = null
+    val sessionFs: SessionFsConfig? = null,
+
+    /**
+     * Configurable data directory, passed as COPILOT_HOME env var.
+     */
+    val copilotHome: String? = null,
+
+    /**
+     * Auth token for TCP server connections.
+     */
+    val tcpConnectionToken: String? = null
 )

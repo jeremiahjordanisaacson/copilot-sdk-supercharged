@@ -268,6 +268,8 @@ module CopilotSDK
     property request_headers : Hash(String, String)?
     @[JSON::Field(key: "elicitationHandler")]
     property elicitation_handler : Bool?
+    @[JSON::Field(key: "instructionDirectories")]
+    property instruction_directories : Array(String)?
 
     def initialize(@model = nil, @streaming = nil, @system_message = nil,
                    @tools = nil, @instructions = nil, @agent_mode = nil,
@@ -275,7 +277,8 @@ module CopilotSDK
                    @enable_config_discovery = nil, @include_sub_agent_streaming_events = nil,
                    @commands = nil, @skill_directories = nil, @disabled_skills = nil,
                    @working_directory = nil, @github_token = nil, @reasoning_effort = nil,
-                   @response_format = nil, @request_headers = nil, @elicitation_handler = nil)
+                   @response_format = nil, @request_headers = nil, @elicitation_handler = nil,
+                   @instruction_directories = nil)
     end
   end
 
@@ -287,8 +290,10 @@ module CopilotSDK
     property session_id : String
     property model : String?
     property streaming : Bool?
+    @[JSON::Field(key: "instructionDirectories")]
+    property instruction_directories : Array(String)?
 
-    def initialize(@session_id, @model = nil, @streaming = nil)
+    def initialize(@session_id, @model = nil, @streaming = nil, @instruction_directories = nil)
     end
   end
 
@@ -364,10 +369,13 @@ module CopilotSDK
     property use_logged_in_user : Bool?
     property session_idle_timeout_seconds : Int32?
     property session_fs : SessionFsConfig?
+    property copilot_home : String?
+    property tcp_connection_token : String?
 
     def initialize(@cli_path = nil, @cli_url = nil, @auto_start = true, @request_timeout = 30,
                    @github_token = nil, @use_logged_in_user = nil,
-                   @session_idle_timeout_seconds = nil, @session_fs = nil)
+                   @session_idle_timeout_seconds = nil, @session_fs = nil,
+                   @copilot_home = nil, @tcp_connection_token = nil)
     end
   end
 

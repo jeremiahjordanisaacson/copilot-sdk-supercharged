@@ -204,6 +204,7 @@ type
     ResponseFormat: TResponseFormat;
     ImageOptions: TImageOptions;
     AuthToken: string;
+    InstructionDirectories: TArray<string>;
   end;
 
   // Resume session config
@@ -219,6 +220,7 @@ type
     Commands: TArray<TCommandDefinition>;
     ExcludedTools: TArray<string>;
     IncludeSubAgentStreamingEvents: Boolean;
+    InstructionDirectories: TArray<string>;
   end;
 
   // Session metadata
@@ -262,6 +264,8 @@ type
     LogLevel: string;
     SessionIdleTimeoutSeconds: Integer;
     SessionFs: TSessionFsConfig;
+    CopilotHome: string;
+    TcpConnectionToken: string;
   end;
 
   // Unsubscribe token

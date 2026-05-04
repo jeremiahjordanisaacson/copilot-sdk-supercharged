@@ -58,6 +58,12 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Session idle timeout in seconds (Nothing = no timeout).</summary>
         Public Property SessionIdleTimeoutSeconds As Integer? = Nothing
 
+        ''' <summary>Override the Copilot home directory.</summary>
+        Public Property CopilotHome As String
+
+        ''' <summary>Token for TCP connection authentication.</summary>
+        Public Property TcpConnectionToken As String
+
     End Class
 
     ' -----------------------------------------------------------------------
@@ -126,6 +132,9 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Image generation options.</summary>
         Public Property ImageOptions As ImageOptions
 
+        ''' <summary>Directories to search for instruction files.</summary>
+        Public Property InstructionDirectories As List(Of String)
+
     End Class
 
     ''' <summary>
@@ -156,6 +165,9 @@ Namespace GitHub.Copilot.SDK
 
         ''' <summary>Include sub-agent streaming events.</summary>
         Public Property IncludeSubAgentStreamingEvents As Boolean = False
+
+        ''' <summary>Directories to search for instruction files.</summary>
+        Public Property InstructionDirectories As List(Of String)
 
     End Class
 

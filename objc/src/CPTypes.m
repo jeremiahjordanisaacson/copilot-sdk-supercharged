@@ -173,6 +173,7 @@
     if (self.tools) dict[@"tools"] = self.tools;
     if (self.systemMessage) dict[@"systemMessage"] = self.systemMessage;
     if (self.githubToken) dict[@"githubToken"] = self.githubToken;
+    if (self.instructionDirectories) dict[@"instructionDirectories"] = self.instructionDirectories;
 
     return [dict copy];
 }

@@ -716,6 +716,9 @@ struct SessionConfig {
     /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
     std::optional<std::string> gitHubToken;
 
+    /// Directories containing instruction files for the session.
+    std::optional<std::vector<std::string>> instructionDirectories;
+
     /// Slash commands registered for this session.
     std::vector<CommandDefinition> commands;
     /// Handler for elicitation requests from the server.
@@ -755,6 +758,9 @@ struct ResumeSessionConfig {
 
     /// GitHub token for authentication. When set on session config, overrides the client-level token for this session only.
     std::optional<std::string> gitHubToken;
+
+    /// Directories containing instruction files for the session.
+    std::optional<std::vector<std::string>> instructionDirectories;
 
     /// Slash commands registered for this session.
     std::vector<CommandDefinition> commands;
@@ -1149,6 +1155,12 @@ struct CopilotClientOptions {
 
     /// Configuration for a custom session filesystem provider.
     std::optional<SessionFsConfig> sessionFs;
+
+    /// Override the Copilot home directory.
+    std::optional<std::string> copilotHome;
+
+    /// Token for TCP connection authentication.
+    std::optional<std::string> tcpConnectionToken;
 };
 
 } // namespace copilot

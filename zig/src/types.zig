@@ -49,6 +49,8 @@ pub const ClientOptions = struct {
     use_logged_in_user: ?bool = null,
     session_idle_timeout_seconds: ?u32 = null,
     session_fs: ?SessionFsConfig = null,
+    copilot_home: ?[]const u8 = null,
+    tcp_connection_token: ?[]const u8 = null,
 };
 
 pub const SessionFsConfig = struct {
@@ -88,6 +90,7 @@ pub const SessionConfig = struct {
     mcp_servers_json: ?[]const u8 = null,
     commands_json: ?[]const u8 = null,
     github_token: ?[]const u8 = null,
+    instruction_directories: ?[]const []const u8 = null,
 };
 
 pub const ProviderConfig = struct {

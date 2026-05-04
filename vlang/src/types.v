@@ -23,6 +23,8 @@ pub mut:
 	use_logged_in_user            bool = true // use the currently logged-in user
 	session_idle_timeout_seconds  int    // idle timeout in seconds
 	session_fs                    SessionFsConfig // session filesystem config
+	copilot_home                  string // override path to the Copilot home directory
+	tcp_connection_token          string // token for TCP connection authentication
 }
 
 // SessionConfig defines how to create a new conversation session.
@@ -50,6 +52,7 @@ pub mut:
 	request_headers                     map[string]string // additional request headers
 	elicitation_handler                 fn (map[string]string) map[string]string = unsafe { nil }
 	idle_timeout                        int    // session idle timeout in seconds
+	instruction_directories             []string // directories to search for instruction files
 }
 
 // HistoryEntry is a single turn in a conversation.

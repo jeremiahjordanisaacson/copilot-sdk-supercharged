@@ -68,6 +68,8 @@ class CopilotClient {
     private boolean useLoggedInUser = true
     private SessionFsConfig sessionFsConfig
     private Integer sessionIdleTimeoutSeconds
+    private String copilotHome
+    private String tcpConnectionToken
 
     // Session config defaults (stored for createSession)
     private List<Tool> defaultTools
@@ -98,6 +100,8 @@ class CopilotClient {
      *   <li>{@code env} - Environment variables</li>
      *   <li>{@code githubToken} - GitHub auth token</li>
      *   <li>{@code useLoggedInUser} - Use logged-in user for auth</li>
+     *   <li>{@code copilotHome} - Configurable data directory, passed as COPILOT_HOME env var</li>
+     *   <li>{@code tcpConnectionToken} - Auth token for TCP server connections</li>
      * </ul>
      */
     CopilotClient(Map<String, Object> options) {
@@ -150,6 +154,8 @@ class CopilotClient {
             if (options.sessionIdleTimeoutSeconds != null) {
                 this.sessionIdleTimeoutSeconds = options.sessionIdleTimeoutSeconds as Integer
             }
+            if (options.copilotHome) this.copilotHome = options.copilotHome as String
+            if (options.tcpConnectionToken) this.tcpConnectionToken = options.tcpConnectionToken as String
         }
 
         this.isExternalServer = external
@@ -282,6 +288,7 @@ class CopilotClient {
      *   <li>{@code requestHeaders} - Additional HTTP headers for model requests</li>
      *   <li>{@code responseFormat} - Response format ("text", "image", "json_object")</li>
      *   <li>{@code imageGeneration} - Image generation config map</li>
+     *   <li>{@code instructionDirectories} - Custom instruction directory paths</li>
      * </ul>
      */
     @SuppressWarnings('unchecked')
@@ -552,6 +559,7 @@ class CopilotClient {
         if (config.requestHeaders) payload.requestHeaders = config.requestHeaders
         if (config.responseFormat) payload.responseFormat = config.responseFormat
         if (config.imageGeneration) payload.imageGeneration = config.imageGeneration
+        if (config.instructionDirectories) payload.instructionDirectories = config.instructionDirectories
         payload
     }
 

@@ -162,6 +162,8 @@ function M.ClientOptions(fields)
         autoRestart                = fields.autoRestart ~= false,  -- default true
         sessionIdleTimeoutSeconds  = fields.sessionIdleTimeoutSeconds, -- optional integer, server-wide idle timeout
         sessionFs                  = fields.sessionFs,                  -- optional table, session filesystem provider
+        copilotHome                = fields.copilotHome,                -- optional string, copilot home directory path
+        tcpConnectionToken         = fields.tcpConnectionToken,         -- optional string, TCP connection token
     }
 end
 
@@ -327,6 +329,7 @@ function M.SessionConfig(fields)
         gitHubToken                     = fields.gitHubToken,
         commands                        = fields.commands,                        -- array of CommandDefinition
         onElicitationRequest            = fields.onElicitationRequest,            -- function(ElicitationContext) -> ElicitationResult
+        instructionDirectories          = fields.instructionDirectories,          -- array of strings, instruction directories
     }
 end
 
@@ -362,6 +365,7 @@ function M.ResumeSessionConfig(fields)
         gitHubToken                     = fields.gitHubToken,
         commands                        = fields.commands,                        -- array of CommandDefinition
         onElicitationRequest            = fields.onElicitationRequest,            -- function(ElicitationContext) -> ElicitationResult
+        instructionDirectories          = fields.instructionDirectories,          -- array of strings, instruction directories
     }
 end
 

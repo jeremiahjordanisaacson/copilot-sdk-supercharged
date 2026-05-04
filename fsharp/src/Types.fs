@@ -96,7 +96,11 @@ type CopilotClientOptions =
       /// Session idle timeout in seconds (None = no timeout).
       SessionIdleTimeoutSeconds: int option
       /// Session filesystem provider configuration.
-      SessionFs: SessionFsConfig option }
+      SessionFs: SessionFsConfig option
+      /// Override the Copilot home directory.
+      CopilotHome: string option
+      /// Token for TCP connection authentication.
+      TcpConnectionToken: string option }
 
 module CopilotClientOptions =
     /// Default client options (stdio, auto-start, info log level).
@@ -114,7 +118,9 @@ module CopilotClientOptions =
           UseLoggedInUser = None
           Telemetry = None
           SessionIdleTimeoutSeconds = None
-          SessionFs = None }
+          SessionFs = None
+          CopilotHome = None
+          TcpConnectionToken = None }
 
 // ---------------------------------------------------------------------------
 // Session filesystem configuration
@@ -237,7 +243,9 @@ type SessionConfig =
       /// Handler for elicitation requests from the server.
       OnElicitationRequest: ElicitationHandler option
       /// Per-session GitHub token.
-      GitHubToken: string option }
+      GitHubToken: string option
+      /// Directories to search for instruction files.
+      InstructionDirectories: string list option }
 
 module SessionConfig =
     /// Approve all permission requests automatically.
@@ -266,7 +274,8 @@ module SessionConfig =
           ResponseFormat = None
           ImageOptions = None
           OnElicitationRequest = None
-          GitHubToken = None }
+          GitHubToken = None
+          InstructionDirectories = None }
 
 // ---------------------------------------------------------------------------
 // Resume session configuration
@@ -279,7 +288,9 @@ type ResumeSessionConfig =
       /// Handler for permission requests.
       OnPermissionRequest: PermissionRequestHandler
       /// Model override for the resumed session.
-      Model: string option }
+      Model: string option
+      /// Directories to search for instruction files.
+      InstructionDirectories: string list option }
 
 // ---------------------------------------------------------------------------
 // Elicitation handling

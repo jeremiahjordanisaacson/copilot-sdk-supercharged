@@ -43,6 +43,8 @@ type
     extraArgs*: seq[string]
     sessionIdleTimeoutSeconds*: int
     sessionFs*: SessionFsConfig
+    copilotHome*: string
+    tcpConnectionToken*: string
 
   SessionFsConfig* = object
     initialCwd*: string
@@ -71,11 +73,13 @@ type
     imageStyle*: string
     includeSubAgentStreamingEvents*: bool
     authToken*: string
+    instructionDirectories*: seq[string]
 
   ResumeSessionConfig* = object
     sessionId*: string
     systemPrompt*: string
     githubToken*: string
+    instructionDirectories*: seq[string]
 
 # ---------------------------------------------------------------------------
 # Message types
@@ -207,10 +211,13 @@ type
 proc newClientConfig*(cliPath = ""; cliUrl = "";
                       extraArgs: seq[string] = @[];
                       sessionIdleTimeoutSeconds = 0;
-                      sessionFs = SessionFsConfig()): ClientConfig =
+                      sessionFs = SessionFsConfig();
+                      copilotHome = "";
+                      tcpConnectionToken = ""): ClientConfig =
   ClientConfig(cliPath: cliPath, cliUrl: cliUrl, extraArgs: extraArgs,
                sessionIdleTimeoutSeconds: sessionIdleTimeoutSeconds,
-               sessionFs: sessionFs)
+               sessionFs: sessionFs, copilotHome: copilotHome,
+               tcpConnectionToken: tcpConnectionToken)
 
 proc newSessionConfig*(systemPrompt = ""; githubToken = "";
                        sessionIdleTimeoutSeconds = 0;
@@ -226,7 +233,8 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
                        imageQuality = "";
                        imageStyle = "";
                        includeSubAgentStreamingEvents = false;
-                       authToken = ""): SessionConfig =
+                       authToken = "";
+                       instructionDirectories: seq[string] = @[]): SessionConfig =
   SessionConfig(
     systemPrompt: systemPrompt,
     githubToken: githubToken,
@@ -244,14 +252,17 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
     imageStyle: imageStyle,
     includeSubAgentStreamingEvents: includeSubAgentStreamingEvents,
     authToken: authToken,
+    instructionDirectories: instructionDirectories,
   )
 
 proc newResumeSessionConfig*(sessionId: string; systemPrompt = "";
-                             githubToken = ""): ResumeSessionConfig =
+                             githubToken = "";
+                             instructionDirectories: seq[string] = @[]): ResumeSessionConfig =
   ResumeSessionConfig(
     sessionId: sessionId,
     systemPrompt: systemPrompt,
     githubToken: githubToken,
+    instructionDirectories: instructionDirectories,
   )
 
 proc newMessageOptions*(message: string; streaming = false;

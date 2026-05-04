@@ -289,6 +289,7 @@ module Copilot
     :model_capabilities, :enable_config_discovery,
     :github_token,
     :commands, :on_elicitation_request,
+    :instruction_directories,
     keyword_init: true
   )
 
@@ -303,6 +304,7 @@ module Copilot
     :model_capabilities, :enable_config_discovery,
     :github_token,
     :commands, :on_elicitation_request,
+    :instruction_directories,
     :disable_resume,
     keyword_init: true
   )
@@ -593,6 +595,7 @@ module Copilot
     :log_level, :auto_start, :auto_restart, :env,
     :github_token, :use_logged_in_user, :session_idle_timeout_seconds,
     :session_fs,
+    :copilot_home, :tcp_connection_token,
     keyword_init: true
   )
 end

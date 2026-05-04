@@ -48,6 +48,8 @@ public class SessionConfig {
     private Map<String, String> requestHeaders;
     /** Response format for image generation ("text", "image", "json_object"). */
     private String responseFormat;
+    /** Custom instruction directory paths. */
+    private List<String> instructionDirectories;
 
     public SessionConfig() {}
 
@@ -80,6 +82,7 @@ public class SessionConfig {
     public SessionConfig authToken(String token) { this.authToken = token; return this; }
     public SessionConfig requestHeaders(Map<String, String> headers) { this.requestHeaders = headers; return this; }
     public SessionConfig responseFormat(String format) { this.responseFormat = format; return this; }
+    public SessionConfig instructionDirectories(List<String> dirs) { this.instructionDirectories = dirs; return this; }
 
     // Getters
     public String getSessionId() { return sessionId; }
@@ -110,4 +113,5 @@ public class SessionConfig {
     public String getAuthToken() { return authToken; }
     public Map<String, String> getRequestHeaders() { return requestHeaders; }
     public String getResponseFormat() { return responseFormat; }
+    public List<String> getInstructionDirectories() { return instructionDirectories; }
 }

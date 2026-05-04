@@ -59,6 +59,9 @@ classdef SessionConfig
 
         % Handler for elicitation requests (function handle or empty).
         ElicitationHandler
+
+        % Directories containing instruction files (cell array of char).
+        InstructionDirectories (1,:) cell = {}
     end
 
     methods
@@ -87,6 +90,7 @@ classdef SessionConfig
             p.addParameter('ResponseFormat',      obj.ResponseFormat);
             p.addParameter('ImageOptions',        struct());
             p.addParameter('ElicitationHandler',  []);
+            p.addParameter('InstructionDirectories', obj.InstructionDirectories);
             p.parse(varargin{:});
 
             obj.Model              = p.Results.Model;
@@ -107,6 +111,7 @@ classdef SessionConfig
             obj.ResponseFormat     = p.Results.ResponseFormat;
             obj.ImageOptions       = p.Results.ImageOptions;
             obj.ElicitationHandler = p.Results.ElicitationHandler;
+            obj.InstructionDirectories = p.Results.InstructionDirectories;
         end
 
         function s = toStruct(obj)
@@ -136,6 +141,9 @@ classdef SessionConfig
             end
             if ~isempty(obj.ExcludedTools)
                 s.excludedTools = obj.ExcludedTools;
+            end
+            if ~isempty(obj.InstructionDirectories)
+                s.instructionDirectories = obj.InstructionDirectories;
             end
         end
     end

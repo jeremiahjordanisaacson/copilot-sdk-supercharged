@@ -25,6 +25,10 @@ public class CopilotClientOptions {
     private Integer sessionIdleTimeoutSeconds;
     /** Custom session filesystem configuration. */
     private Types.SessionFsConfig sessionFs;
+    /** Configurable data directory, passed as COPILOT_HOME env var. */
+    private String copilotHome;
+    /** Auth token for TCP server connections. */
+    private String tcpConnectionToken;
 
     public CopilotClientOptions() {}
 
@@ -43,6 +47,8 @@ public class CopilotClientOptions {
     public CopilotClientOptions useLoggedInUser(boolean use) { this.useLoggedInUser = use; return this; }
     public CopilotClientOptions sessionIdleTimeoutSeconds(int seconds) { this.sessionIdleTimeoutSeconds = seconds; return this; }
     public CopilotClientOptions sessionFs(Types.SessionFsConfig sessionFs) { this.sessionFs = sessionFs; return this; }
+    public CopilotClientOptions copilotHome(String copilotHome) { this.copilotHome = copilotHome; return this; }
+    public CopilotClientOptions tcpConnectionToken(String tcpConnectionToken) { this.tcpConnectionToken = tcpConnectionToken; return this; }
 
     // Getters
     public String getCliPath() { return cliPath; }
@@ -59,4 +65,6 @@ public class CopilotClientOptions {
     public Boolean getUseLoggedInUser() { return useLoggedInUser; }
     public Integer getSessionIdleTimeoutSeconds() { return sessionIdleTimeoutSeconds; }
     public Types.SessionFsConfig getSessionFs() { return sessionFs; }
+    public String getCopilotHome() { return copilotHome; }
+    public String getTcpConnectionToken() { return tcpConnectionToken; }
 }

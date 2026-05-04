@@ -1449,6 +1449,9 @@ class SessionConfig {
   /// Handler for elicitation requests from the server.
   final ElicitationHandler? onElicitationRequest;
 
+  /// Directories to search for instruction files.
+  final List<String>? instructionDirectories;
+
   const SessionConfig({
     this.sessionId,
     this.model,
@@ -1475,6 +1478,7 @@ class SessionConfig {
     this.gitHubToken,
     this.commands,
     this.onElicitationRequest,
+    this.instructionDirectories,
   });
 }
 
@@ -1520,6 +1524,9 @@ class ResumeSessionConfig {
 
   final bool? disableResume;
 
+  /// Directories to search for instruction files.
+  final List<String>? instructionDirectories;
+
   const ResumeSessionConfig({
     this.model,
     this.reasoningEffort,
@@ -1546,6 +1553,7 @@ class ResumeSessionConfig {
     this.commands,
     this.onElicitationRequest,
     this.disableResume,
+    this.instructionDirectories,
   });
 }
 
@@ -1689,6 +1697,12 @@ class CopilotClientOptions {
   /// Custom session filesystem provider configuration.
   final SessionFsConfig? sessionFs;
 
+  /// Override path to the Copilot home directory.
+  final String? copilotHome;
+
+  /// Token for TCP connection authentication.
+  final String? tcpConnectionToken;
+
   const CopilotClientOptions({
     this.cliPath,
     this.cliArgs,
@@ -1704,6 +1718,8 @@ class CopilotClientOptions {
     this.useLoggedInUser,
     this.sessionIdleTimeoutSeconds,
     this.sessionFs,
+    this.copilotHome,
+    this.tcpConnectionToken,
   });
 }
 

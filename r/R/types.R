@@ -992,15 +992,24 @@ CopilotClientOptions <- R6::R6Class(
     session_fs = NULL,
     ## GitHub token for authentication.
     github_token = NULL,
+    ## Copilot home directory path.
+    copilot_home = NULL,
+    ## TCP connection token for authentication.
+    tcp_connection_token = NULL,
 
     #' @description Create new CopilotClientOptions.
     #' @param session_idle_timeout_seconds Integer or NULL. Server-wide idle timeout in seconds.
     #' @param session_fs List or NULL. Session filesystem provider (list of callback functions).
     #' @param github_token Character or NULL. GitHub token for authentication.
-    initialize = function(session_idle_timeout_seconds = NULL, session_fs = NULL, github_token = NULL) {
+    #' @param copilot_home Character or NULL. Copilot home directory path.
+    #' @param tcp_connection_token Character or NULL. TCP connection token for authentication.
+    initialize = function(session_idle_timeout_seconds = NULL, session_fs = NULL, github_token = NULL,
+                          copilot_home = NULL, tcp_connection_token = NULL) {
       self$session_idle_timeout_seconds <- session_idle_timeout_seconds
       self$session_fs <- session_fs
       self$github_token <- github_token
+      self$copilot_home <- copilot_home
+      self$tcp_connection_token <- tcp_connection_token
     },
 
     #' @description Convert to list.
@@ -1014,6 +1023,12 @@ CopilotClientOptions <- R6::R6Class(
       }
       if (!is.null(self$github_token)) {
         result$gitHubToken <- self$github_token
+      }
+      if (!is.null(self$copilot_home)) {
+        result$copilotHome <- self$copilot_home
+      }
+      if (!is.null(self$tcp_connection_token)) {
+        result$tcpConnectionToken <- self$tcp_connection_token
       }
       result
     }
@@ -1432,6 +1447,7 @@ SessionConfig <- R6::R6Class(
     commands = NULL,
     on_elicitation_request = NULL,
     excluded_tools = NULL,
+    instruction_directories = NULL,
 
     #' @description Create a new SessionConfig.
     #' @param model Character or NULL.
@@ -1445,6 +1461,7 @@ SessionConfig <- R6::R6Class(
     #' @param commands List of CommandDefinition or NULL.
     #' @param on_elicitation_request Function or NULL.
     #' @param excluded_tools Character vector or NULL.
+    #' @param instruction_directories Character vector or NULL. Instruction directories for prompt customization.
     initialize = function(model = NULL, system_message = NULL,
                           model_capabilities = NULL,
                           enable_config_discovery = NULL,
@@ -1454,7 +1471,8 @@ SessionConfig <- R6::R6Class(
                           github_token = NULL,
                           commands = NULL,
                           on_elicitation_request = NULL,
-                          excluded_tools = NULL) {
+                          excluded_tools = NULL,
+                          instruction_directories = NULL) {
       self$model <- model
       self$system_message <- system_message
       self$model_capabilities <- model_capabilities
@@ -1466,6 +1484,7 @@ SessionConfig <- R6::R6Class(
       self$commands <- commands
       self$on_elicitation_request <- on_elicitation_request
       self$excluded_tools <- excluded_tools
+      self$instruction_directories <- instruction_directories
     },
 
     #' @description Convert to list.
@@ -1502,6 +1521,7 @@ SessionConfig <- R6::R6Class(
       if (!is.null(self$github_token)) result$gitHubToken <- self$github_token
       if (!is.null(self$excluded_tools)) result$excludedTools <- self$excluded_tools
       if (!is.null(self$on_elicitation_request)) result$requestElicitation <- TRUE
+      if (!is.null(self$instruction_directories)) result$instructionDirectories <- self$instruction_directories
       if (!is.null(self$commands)) {
         cmds_list <- lapply(self$commands, function(cmd) {
           c_list <- list(name = cmd$name)

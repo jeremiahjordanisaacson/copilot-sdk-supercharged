@@ -571,6 +571,8 @@ has include_sub_agent_streaming_events => (is => 'ro', default => sub { undef })
 has github_token              => (is => 'ro', default => sub { undef });
 has commands                => (is => 'ro', default => sub { undef });
 has on_elicitation_request  => (is => 'ro', default => sub { undef });
+# Instruction directories for prompt customization
+has instruction_directories => (is => 'ro', default => sub { undef });
 # System prompt text (alias for system_message, maps to systemPrompt on wire)
 has system_prompt           => (is => 'ro', default => sub { undef });
 # List of skill names to enable
@@ -630,6 +632,9 @@ sub to_wire {
     }
     if (defined $self->idle_timeout) {
         $payload{idleTimeout} = $self->idle_timeout;
+    }
+    if (defined $self->instruction_directories) {
+        $payload{instructionDirectories} = $self->instruction_directories;
     }
 
     $payload{requestPermission} = \1 if defined $self->on_permission_request;
@@ -735,6 +740,10 @@ has session_idle_timeout_seconds => (is => 'ro', default => sub { undef });
 has session_fs => (is => 'ro', default => sub { undef });
 # GitHub token for authentication.
 has github_token => (is => 'ro', default => sub { undef });
+# Copilot home directory path
+has copilot_home => (is => 'ro', default => sub { undef });
+# TCP connection token for authentication
+has tcp_connection_token => (is => 'ro', default => sub { undef });
 
 sub TO_JSON {
     my ($self) = @_;
@@ -743,6 +752,10 @@ sub TO_JSON {
         if defined $self->session_idle_timeout_seconds;
     $h{gitHubToken} = $self->github_token
         if defined $self->github_token;
+    $h{copilotHome} = $self->copilot_home
+        if defined $self->copilot_home;
+    $h{tcpConnectionToken} = $self->tcp_connection_token
+        if defined $self->tcp_connection_token;
     return \%h;
 }
 

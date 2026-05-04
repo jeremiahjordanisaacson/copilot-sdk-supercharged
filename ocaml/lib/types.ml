@@ -247,6 +247,7 @@ type session_config = {
   response_format : image_response_format option;
   request_headers : (string * string) list;
   on_elicitation_request : bool;
+  instruction_directories : string list;
 }
 
 let default_session_config () =
@@ -268,6 +269,7 @@ let default_session_config () =
   ; response_format = None
   ; request_headers = []
   ; on_elicitation_request = false
+  ; instruction_directories = []
   }
 
 let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
@@ -365,6 +367,11 @@ let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
     if c.on_elicitation_request then
       ("requestElicitation", `Bool true) :: fields
     else fields
+  in
+  let fields =
+    match c.instruction_directories with
+    | [] -> fields
+    | dirs -> ("instructionDirectories", `List (List.map (fun s -> `String s) dirs)) :: fields
   in
   `Assoc fields
 
@@ -493,6 +500,8 @@ type client_options = {
   use_logged_in_user : bool option;
   session_idle_timeout_seconds : int option;
   session_fs : session_fs_config option;
+  copilot_home : string option;
+  tcp_connection_token : string option;
 }
 
 let default_client_options () =
@@ -503,6 +512,8 @@ let default_client_options () =
   ; use_logged_in_user = None
   ; session_idle_timeout_seconds = None
   ; session_fs = None
+  ; copilot_home = None
+  ; tcp_connection_token = None
   }
 
 (* ========================================================================== *)

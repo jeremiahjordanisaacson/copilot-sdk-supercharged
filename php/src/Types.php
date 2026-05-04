@@ -743,6 +743,8 @@ class SessionConfig
         public readonly ?array $commands = null,
         /** @var callable|null $onElicitationRequest Elicitation handler */
         public /* readonly */ $onElicitationRequest = null,
+        /** @var string[]|null $instructionDirectories Instruction directories for prompt customization */
+        public readonly ?array $instructionDirectories = null,
     ) {}
 
     public function toServerParams(): array
@@ -821,6 +823,9 @@ class SessionConfig
         if ($this->gitHubToken !== null) {
             $params['gitHubToken'] = $this->gitHubToken;
         }
+        if ($this->instructionDirectories !== null) {
+            $params['instructionDirectories'] = $this->instructionDirectories;
+        }
         return $params;
     }
 }
@@ -879,6 +884,8 @@ class ResumeSessionConfig
         public readonly ?array $commands = null,
         /** @var callable|null $onElicitationRequest Elicitation handler */
         public /* readonly */ $onElicitationRequest = null,
+        /** @var string[]|null $instructionDirectories Instruction directories for prompt customization */
+        public readonly ?array $instructionDirectories = null,
         public readonly ?bool $disableResume = null,
     ) {}
 
@@ -954,6 +961,9 @@ class ResumeSessionConfig
         }
         if ($this->gitHubToken !== null) {
             $params['gitHubToken'] = $this->gitHubToken;
+        }
+        if ($this->instructionDirectories !== null) {
+            $params['instructionDirectories'] = $this->instructionDirectories;
         }
         if ($this->disableResume !== null) {
             $params['disableResume'] = $this->disableResume;
@@ -1911,5 +1921,7 @@ class CopilotClientOptions
         public readonly ?bool $useLoggedInUser = null,
         public readonly ?int $sessionIdleTimeoutSeconds = null,
         public readonly ?SessionFsConfig $sessionFs = null,
+        public readonly ?string $copilotHome = null,
+        public readonly ?string $tcpConnectionToken = null,
     ) {}
 }

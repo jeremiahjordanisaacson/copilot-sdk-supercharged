@@ -125,14 +125,15 @@
     :model-capabilities :enable-config-discovery
     :include-sub-agent-streaming-events
     :github-token :commands :on-elicitation-request
-    :session-fs (session filesystem provider map)"
+    :session-fs (session filesystem provider map)
+    :instruction-directories (list of directories to search for instruction files)"
   [& {:as opts}]
   (or opts {}))
 
 (defn resume-session-config
   "Create a resume-session configuration map.  Accepts the same keys as
   `session-config` plus :disable-resume, :github-token,
-  :commands, and :on-elicitation-request."
+  :commands, :on-elicitation-request, and :instruction-directories."
   [& {:as opts}]
   (or opts {}))
 
@@ -505,7 +506,9 @@
     :github-token     - GitHub auth token
     :use-logged-in-user - use logged-in user auth (default true unless :github-token set)
     :session-idle-timeout-seconds - server-wide idle timeout for sessions in seconds
-    :session-fs       - session filesystem provider map (see session-fs-config)"
+    :session-fs       - session filesystem provider map (see session-fs-config)
+    :copilot-home     - custom path to the copilot home directory
+    :tcp-connection-token - token for TCP connections"
   [& {:as opts}]
   (or opts {}))
 

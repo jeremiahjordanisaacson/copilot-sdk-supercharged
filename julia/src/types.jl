@@ -103,6 +103,8 @@ Base.@kwdef mutable struct CopilotClientOptions
     use_logged_in_user::Bool = true
     session_idle_timeout_seconds::Union{Int, Nothing} = nothing
     session_fs::Union{SessionFsConfig, Nothing} = nothing
+    copilot_home::Union{String, Nothing} = nothing
+    tcp_connection_token::Union{String, Nothing} = nothing
 end
 
 """Configuration for creating a session."""
@@ -129,6 +131,7 @@ Base.@kwdef mutable struct SessionConfig
     response_format::Union{ImageResponseFormat, Nothing} = nothing
     request_headers::Union{Dict{String, String}, Nothing} = nothing
     on_elicitation_request::Union{Function, Nothing} = nothing
+    instruction_directories::Vector{String} = String[]
 end
 
 """Payload for sending a message to a session."""

@@ -200,6 +200,7 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *imageOptions;
 @property (nonatomic, copy, nullable) CPElicitationHandler elicitationHandler;
 @property (nonatomic, copy, nullable) NSString *authToken;
+@property (nonatomic, copy, nullable) NSArray<NSString *> *instructionDirectories;
 
 - (NSDictionary<NSString *, id> *)toDictionary;
 
@@ -221,6 +222,8 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, copy, nullable) NSArray<NSString *> *extraArgs;
 @property (nonatomic, strong, nullable) CPSessionFsConfig *sessionFs;
 @property (nonatomic, assign) NSInteger sessionIdleTimeoutSeconds;
+@property (nonatomic, copy, nullable) NSString *copilotHome;
+@property (nonatomic, copy, nullable) NSString *tcpConnectionToken;
 
 + (instancetype)defaultOptions;
 

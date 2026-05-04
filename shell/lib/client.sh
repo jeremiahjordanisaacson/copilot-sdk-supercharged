@@ -11,6 +11,12 @@ COPILOT_CLIENT_STATE="disconnected"  # disconnected | connecting | connected | e
 COPILOT_CLIENT_CLI_PATH=""
 COPILOT_CLIENT_LOG_LEVEL="info"
 
+# --- Client Config Variables ---
+# Path to the Copilot home directory (string, optional)
+COPILOT_HOME=""
+# TCP connection token for authenticated server connections (string, optional)
+COPILOT_TCP_CONNECTION_TOKEN=""
+
 # --- Session Config Variables ---
 # Set these before calling copilot_client_create_session to include in the payload.
 # Server-wide idle timeout for sessions in seconds (integer, optional)
@@ -40,6 +46,10 @@ COPILOT_MCP_SERVERS=""
 # GitHub token for authentication (string, optional)
 # When set, overrides the client-level token for this session only.
 COPILOT_GITHUB_TOKEN=""
+
+# Instruction directories (JSON array string of directory paths, optional)
+# Example: '["./instructions","/etc/copilot/instructions"]'
+COPILOT_INSTRUCTION_DIRECTORIES=""
 
 # Excluded built-in tools (JSON array string, optional)
 # Example: '["view","edit"]'
@@ -307,6 +317,9 @@ copilot_client_create_session() {
     if [[ -n "$COPILOT_COMMANDS" ]]; then
         params=$(echo "$params" | jq -c --argjson cmds "$COPILOT_COMMANDS" '. + {"commands":$cmds}')
     fi
+    if [[ -n "$COPILOT_INSTRUCTION_DIRECTORIES" ]]; then
+        params=$(echo "$params" | jq -c --argjson id "$COPILOT_INSTRUCTION_DIRECTORIES" '. + {"instructionDirectories":$id}')
+    fi
 
     if ! copilot_jsonrpc_request "session.create" "$params"; then
         echo "ERROR: Failed to create session" >&2
@@ -352,6 +365,11 @@ copilot_client_resume_session() {
             '{"sessionId":$sid,"model":$model}')
     else
         params=$(jq -c -n --arg sid "$session_id" '{"sessionId":$sid}')
+    fi
+
+    # Append optional session config fields for resume
+    if [[ -n "$COPILOT_INSTRUCTION_DIRECTORIES" ]]; then
+        params=$(echo "$params" | jq -c --argjson id "$COPILOT_INSTRUCTION_DIRECTORIES" '. + {"instructionDirectories":$id}')
     fi
 
     if ! copilot_jsonrpc_request "session.resume" "$params"; then

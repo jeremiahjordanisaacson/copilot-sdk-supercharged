@@ -123,6 +123,10 @@ export interface CopilotSolidityClientOptions extends CopilotClientOptions {
     defaultTestFramework?: TestFramework;
     /** Whether to include gas optimization hints in every audit. */
     includeGasHints?: boolean;
+    /** Path to the Copilot home directory. */
+    copilotHome?: string;
+    /** TCP connection token for authenticated server connections. */
+    tcpConnectionToken?: string;
 }
 
 /** Configuration for a Solidity-focused session. */
@@ -131,6 +135,8 @@ export interface SoliditySessionConfig extends SessionConfig {
     solidityTools?: Tool[];
     /** Project root for Hardhat/Foundry detection. Defaults to cwd. */
     projectRoot?: string;
+    /** Directories containing instruction files. */
+    instructionDirectories?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +269,8 @@ export interface SolidityExtendedSessionConfig extends SoliditySessionConfig {
     idleTimeout?: number;
     /** Per-session auth token override. */
     authToken?: string;
+    /** Directories containing instruction files. */
+    instructionDirectories?: string[];
 }
 
 // ---------------------------------------------------------------------------

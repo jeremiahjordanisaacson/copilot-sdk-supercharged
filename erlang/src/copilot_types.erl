@@ -46,7 +46,9 @@
     auto_start       :: boolean() | undefined,
     auto_restart     :: boolean() | undefined,
     session_idle_timeout_seconds :: non_neg_integer() | undefined,
-    session_fs       :: #session_fs_config{} | undefined
+    session_fs       :: #session_fs_config{} | undefined,
+    copilot_home     :: binary() | undefined,
+    tcp_connection_token :: binary() | undefined
 }).
 
 -record(session_config, {
@@ -71,7 +73,8 @@
     enable_config_discovery :: boolean() | undefined,
     github_token         :: binary() | undefined,
     commands             :: [#command_definition{}] | undefined,
-    on_elicitation_request :: fun() | undefined
+    on_elicitation_request :: fun() | undefined,
+    instruction_directories :: [binary()] | undefined
 }).
 
 -record(command_context, {
