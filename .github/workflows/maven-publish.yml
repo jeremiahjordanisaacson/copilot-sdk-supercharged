@@ -70,7 +70,7 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: java/build/staging/bundle.jar
+          subject-path: java/bundle.jar
 
       - name: Upload to Maven Central Portal
         run: |
