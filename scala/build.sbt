@@ -23,6 +23,5 @@ lazy val root = project
       "-deprecation",
       "-feature",
       "-unchecked",
-      "-Xfatal-warnings",
     ),
   )

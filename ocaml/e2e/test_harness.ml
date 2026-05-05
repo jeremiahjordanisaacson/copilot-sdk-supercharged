@@ -14,13 +14,12 @@ type proxy = {
 
 let start_proxy () =
   let abs_server =
-    (* Navigate from ocaml/e2e to repo root test/harness/server.ts *)
-    let base = Filename.dirname (Sys.getcwd ()) in
-    let repo_root = Filename.dirname base in
+    (* Navigate from ocaml/ (cwd) to repo root test/harness/server.ts *)
+    let repo_root = Filename.dirname (Sys.getcwd ()) in
     Filename.concat repo_root
       (Filename.concat "test" (Filename.concat "harness" "server.ts"))
   in
-  let cwd = Filename.dirname (Filename.dirname abs_server) in
+  let cwd = Filename.dirname abs_server in
   let cmd = Printf.sprintf "cd %s && npx tsx %s" (Filename.quote cwd) (Filename.quote abs_server) in
   let ic = Unix.open_process_in cmd in
   let line = input_line ic in

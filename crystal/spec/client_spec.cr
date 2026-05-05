@@ -102,8 +102,8 @@ describe CopilotSDK::SessionConfig do
     config = CopilotSDK::SessionConfig.new
     json = config.to_json
     parsed = JSON.parse(json)
-    parsed["model"].as_s?.should be_nil
-    parsed["streaming"].as_bool?.should be_nil
+    parsed["model"]?.try(&.as_s).should be_nil
+    parsed["streaming"]?.try(&.as_bool).should be_nil
   end
 
   it "serializes with all fields" do

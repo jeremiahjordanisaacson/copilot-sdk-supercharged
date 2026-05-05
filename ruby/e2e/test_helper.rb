@@ -9,7 +9,7 @@ require "tmpdir"
 require "fileutils"
 
 # Add the SDK lib to the load path
-$LOAD_PATH.unshift(File.expand_path("../../lib", __dir__))
+$LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "copilot"
 
 require_relative "test_harness"

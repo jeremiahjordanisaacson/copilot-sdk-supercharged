@@ -60,4 +60,14 @@ export get_session_metadata, set_session_fs_provider
 export on, send, send_and_wait, disconnect
 export approve_all, deny_all, tool_to_wire
 
+# Enum values & constants used by tests and consumers
+export DISCONNECTED, CONNECTING, CONNECTED, CONNECTION_ERROR
+export LOG_NONE, LOG_ERROR, LOG_WARNING, LOG_INFO, LOG_DEBUG, LOG_ALL
+export LOG_LEVEL_STRINGS
+export TOOL_SUCCESS, TOOL_FAILURE, TOOL_REJECTED, TOOL_DENIED, TOOL_TIMEOUT
+export TOOL_RESULT_STRINGS
+
+# Error types
+export JsonRpcError, ProcessExitedError
+
 end # module CopilotSDK
