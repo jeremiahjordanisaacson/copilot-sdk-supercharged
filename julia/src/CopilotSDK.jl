@@ -51,11 +51,12 @@ include("client.jl")
 
 # Public API
 export CopilotClient, CopilotClientOptions, CopilotSession
-export SessionConfig, MessageOptions, SessionEvent
+export SessionConfig, SessionFsConfig, MessageOptions, SessionEvent
 export Tool, ToolResult, ToolInvocation, ToolResultType, define_tool
 export PermissionRequest, ServerStatus, AuthStatus, ModelInfo, SessionMetadata
 export ConnectionState, LogLevel
-export start!, stop!, create_session, get_status, get_models, list_sessions
+export start!, stop!, create_session, resume_session, get_status, get_models, list_sessions
+export get_session_metadata, set_session_fs_provider
 export on, send, send_and_wait, disconnect
 export approve_all, deny_all, tool_to_wire
 

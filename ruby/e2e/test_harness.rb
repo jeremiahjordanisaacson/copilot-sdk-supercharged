@@ -18,7 +18,7 @@ module E2E
     attr_reader :proxy_url
 
     # Compute the repo root: ruby/e2e/../../ = repo root
-    REPO_ROOT = File.expand_path("../../..", __dir__)
+    REPO_ROOT = File.expand_path("../..", __dir__)
     SNAPSHOTS_DIR = File.join(REPO_ROOT, "test", "snapshots")
 
     def initialize

@@ -1266,7 +1266,7 @@ public struct ForegroundSessionInfo: Codable, Sendable {
 // MARK: - Session Filesystem
 
 /// Configuration for a custom session filesystem provider.
-public struct SessionFsConfig: Codable {
+public struct SessionFsConfig: Codable, Sendable {
     public var initialCwd: String
     public var sessionStatePath: String
     public var conventions: String
@@ -1403,7 +1403,7 @@ public struct CopilotClientOptions: Sendable {
 // MARK: - AnyCodable (Type-erased Codable wrapper)
 
 /// A type-erased Codable value. Used for dynamic JSON fields.
-public struct AnyCodable: Codable, Sendable, @unchecked Sendable {
+public struct AnyCodable: Codable, @unchecked Sendable {
     public let value: Any
 
     public init(_ value: Any) {

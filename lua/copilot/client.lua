@@ -830,6 +830,8 @@ function CopilotClient:_build_create_session_request(config)
     if config.workingDirectory then req.workingDirectory = config.workingDirectory end
     if config.systemMessage then req.systemMessage = config.systemMessage end
     if config.provider then req.provider = config.provider end
+    if config.instructions then req.instructions = config.instructions end
+    if config.agent then req.agent = config.agent end
 
     -- Tools: serialize without the handler function
     if config.tools and #config.tools > 0 then

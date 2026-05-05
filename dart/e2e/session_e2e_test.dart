@@ -498,7 +498,7 @@ void main() {
             'input': {'type': 'string', 'description': 'test input'},
           },
         },
-        handler: (args) async => {'result': 'ok'},
+        handler: (args, invocation) async => {'result': 'ok'},
       );
 
       final session = await client.createSession(

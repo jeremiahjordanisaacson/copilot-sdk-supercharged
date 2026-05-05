@@ -184,7 +184,7 @@ type CopilotClient(options: CopilotClientOptions) =
                        conventions = fs.Conventions |}
                 let t = transport |> Option.get
                 do! t.SendRequestAsync<obj>("sessionFs.setProvider", fsParams)
-                    |> Async.AwaitTask |> Async.Ignore
+                    |> Async.Ignore
             | None -> ()
 
             lock stateLock (fun () -> connectionState <- Connected)

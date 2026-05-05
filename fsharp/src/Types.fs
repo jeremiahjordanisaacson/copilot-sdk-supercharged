@@ -64,6 +64,19 @@ type TelemetryConfig =
       CaptureContent: bool option }
 
 // ---------------------------------------------------------------------------
+// Session filesystem configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for a custom session filesystem provider.
+type SessionFsConfig =
+    { /// Initial working directory for sessions.
+      InitialCwd: string
+      /// Path where the runtime stores session-scoped files.
+      SessionStatePath: string
+      /// Path conventions ("posix" or "windows").
+      Conventions: string }
+
+// ---------------------------------------------------------------------------
 // Client options
 // ---------------------------------------------------------------------------
 
@@ -121,19 +134,6 @@ module CopilotClientOptions =
           SessionFs = None
           CopilotHome = None
           TcpConnectionToken = None }
-
-// ---------------------------------------------------------------------------
-// Session filesystem configuration
-// ---------------------------------------------------------------------------
-
-/// Configuration for a custom session filesystem provider.
-type SessionFsConfig =
-    { /// Initial working directory for sessions.
-      InitialCwd: string
-      /// Path where the runtime stores session-scoped files.
-      SessionStatePath: string
-      /// Path conventions ("posix" or "windows").
-      Conventions: string }
 
 // ---------------------------------------------------------------------------
 // MCP server configuration
@@ -203,6 +203,25 @@ type MessageOptions =
       Attachments: Attachment list option
       /// Optional mode override.
       Mode: string option }
+
+// ---------------------------------------------------------------------------
+// Elicitation handling
+// ---------------------------------------------------------------------------
+
+/// Context for an elicitation request from the server.
+type ElicitationContext =
+    { SessionId: string
+      Message: string
+      RequestedSchema: IDictionary<string, obj> option
+      Mode: string option }
+
+/// Result returned from an elicitation handler.
+type ElicitationResult =
+    { Action: string
+      Content: IDictionary<string, obj> option }
+
+/// Handler for elicitation requests.
+type ElicitationHandler = ElicitationContext -> Async<ElicitationResult>
 
 // ---------------------------------------------------------------------------
 // Session configuration
@@ -291,25 +310,6 @@ type ResumeSessionConfig =
       Model: string option
       /// Directories to search for instruction files.
       InstructionDirectories: string list option }
-
-// ---------------------------------------------------------------------------
-// Elicitation handling
-// ---------------------------------------------------------------------------
-
-/// Context for an elicitation request from the server.
-type ElicitationContext =
-    { SessionId: string
-      Message: string
-      RequestedSchema: IDictionary<string, obj> option
-      Mode: string option }
-
-/// Result returned from an elicitation handler.
-type ElicitationResult =
-    { Action: string
-      Content: IDictionary<string, obj> option }
-
-/// Handler for elicitation requests.
-type ElicitationHandler = ElicitationContext -> Async<ElicitationResult>
 
 // ---------------------------------------------------------------------------
 // Tool definition

@@ -2,6 +2,7 @@ module CopilotSDK.Supercharged.FSharp.E2E.TestHarness
 
 open System
 open System.Diagnostics
+open System.IO
 open System.Runtime.InteropServices
 open System.Text.RegularExpressions
 

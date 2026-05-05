@@ -242,7 +242,7 @@ let ``JsonRpcTransport sends request and receives response`` () =
     // The transport will read the pre-canned response
     // We cannot easily test the full round-trip without a real server,
     // but we can verify the transport doesn't throw on initialization
-    Threading.Thread.Sleep(100)
+    Thread.Sleep(100)
     // Transport is alive and processing
     ()
 

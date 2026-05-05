@@ -52,9 +52,10 @@ module CopilotSDK
     # Register a handler that only fires for a specific event type.
     # Returns a subscription ID for unsubscribing.
     def on(event_type : String, &handler : SessionEvent -> Nil) : String
-      wrapped = SessionEventHandler.new do |event|
-        handler.call(event) if event.type == event_type
-      end
+      captured_handler = handler
+      wrapped : SessionEventHandler = ->(event : SessionEvent) : Nil {
+        captured_handler.call(event) if event.type == event_type
+      }
       id = @mutex.synchronize do
         @next_handler_id += 1
         "handler_#{@next_handler_id}"
