@@ -2,10 +2,11 @@
 --  Copyright (c) Microsoft Corporation. All rights reserved.
 ---------------------------------------------------------------------------------------------
 
-{-# LANGUAGE DeriveGeneric     #-}
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE DeriveGeneric         #-}
+{-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE RecordWildCards       #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 
 -- | Type definitions for the Copilot SDK.
 --
@@ -120,14 +121,15 @@ module Copilot.Types
   , defaultClientOptions
   ) where
 
-import           Data.Aeson
-import           Data.Aeson.Types  (Parser, toJSONKeyText, FromJSONKeyFunction (..))
-import qualified Data.Aeson        as Aeson
-import qualified Data.Map.Strict   as Map
-import           Data.Maybe        (catMaybes)
-import           Data.Text         (Text)
-import qualified Data.Text         as T
-import           GHC.Generics      (Generic)
+import           Control.Applicative ((<|>))
+import           Data.Aeson         hiding (Success)
+import           Data.Aeson.Types   (Parser, toJSONKeyText, FromJSONKeyFunction (..))
+import qualified Data.Aeson         as Aeson
+import qualified Data.Map.Strict    as Map
+import           Data.Maybe         (catMaybes)
+import           Data.Text          (Text)
+import qualified Data.Text          as T
+import           GHC.Generics       (Generic)
 
 -- ============================================================================
 -- Connection State
@@ -563,9 +565,6 @@ instance ToJSON MCPServerConfig where
 
 instance FromJSON MCPServerConfig where
   parseJSON v = (MCPHTTP <$> parseJSON v) <|> (MCPStdio <$> parseJSON v)
-    where
-      (<|>) :: Parser a -> Parser a -> Parser a
-      (<|>) = (Aeson.<|>)
 
 -- ============================================================================
 -- Custom Agent Configuration

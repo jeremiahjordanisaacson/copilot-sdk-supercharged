@@ -22,6 +22,11 @@
  Information about an available model.
 </summary>
 </member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SessionEventEnvelope">
+<summary>
+ Envelope wrapping a session event with metadata.
+</summary>
+</member>
 <member name="T:CopilotSDK.Supercharged.FSharp.SessionEvent">
 <summary>
  All session events emitted by the Copilot CLI, represented as a discriminated union.
@@ -107,6 +112,11 @@
  Schema for a tool&apos;s parameters (JSON Schema object).
 </summary>
 </member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.InstructionDirectories">
+<summary>
+ Directories to search for instruction files.
+</summary>
+</member>
 <member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.Model">
 <summary>
  Model override for the resumed session.
@@ -125,6 +135,61 @@
 <member name="T:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig">
 <summary>
  Configuration for resuming an existing session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.InstructionDirectories">
+<summary>
+ Directories to search for instruction files.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.GitHubToken">
+<summary>
+ Per-session GitHub token.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnElicitationRequest">
+<summary>
+ Handler for elicitation requests from the server.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ImageOptions">
+<summary>
+ Image generation options.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ResponseFormat">
+<summary>
+ Response format (&quot;text&quot;, &quot;image&quot;, &quot;json_object&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.McpServers">
+<summary>
+ MCP server configurations (keyed by name).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.EnableConfigDiscovery">
+<summary>
+ Enable automatic config discovery.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ModelCapabilities">
+<summary>
+ Override model capabilities.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.RequestHeaders">
+<summary>
+ Additional request headers sent with each turn.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.Commands">
+<summary>
+ Slash commands registered for this session.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.ExcludedTools">
+<summary>
+ Tools to exclude from the session.
 </summary>
 </member>
 <member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.IncludeSubAgentStreamingEvents">
@@ -167,6 +232,21 @@
  Configuration for creating a new session.
 </summary>
 </member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ElicitationHandler">
+<summary>
+ Handler for elicitation requests.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ElicitationResult">
+<summary>
+ Result returned from an elicitation handler.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ElicitationContext">
+<summary>
+ Context for an elicitation request from the server.
+</summary>
+</member>
 <member name="P:CopilotSDK.Supercharged.FSharp.MessageOptions.Mode">
 <summary>
  Optional mode override.
@@ -190,6 +270,41 @@
 <member name="T:CopilotSDK.Supercharged.FSharp.Attachment">
 <summary>
  File attachment for a message.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ImageOptions">
+<summary>
+ Image generation options.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CommandDefinition">
+<summary>
+ Definition of a slash command.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.MCPHttpServerConfig">
+<summary>
+ Configuration for an MCP HTTP (remote) server.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.MCPStdioServerConfig">
+<summary>
+ Configuration for an MCP stdio (local) server.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.TcpConnectionToken">
+<summary>
+ Token for TCP connection authentication.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.CopilotHome">
+<summary>
+ Override the Copilot home directory.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.SessionFs">
+<summary>
+ Session filesystem provider configuration.
 </summary>
 </member>
 <member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.SessionIdleTimeoutSeconds">
@@ -260,6 +375,26 @@
 <member name="T:CopilotSDK.Supercharged.FSharp.CopilotClientOptions">
 <summary>
  Configuration options for creating a CopilotClient.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionFsConfig.Conventions">
+<summary>
+ Path conventions (&quot;posix&quot; or &quot;windows&quot;).
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionFsConfig.SessionStatePath">
+<summary>
+ Path where the runtime stores session-scoped files.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionFsConfig.InitialCwd">
+<summary>
+ Initial working directory for sessions.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SessionFsConfig">
+<summary>
+ Configuration for a custom session filesystem provider.
 </summary>
 </member>
 <member name="T:CopilotSDK.Supercharged.FSharp.TelemetryConfig">
@@ -450,9 +585,24 @@
  existing server.
 </summary>
 </member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.SetForegroundSessionIdAsync(System.String,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Set the foreground session ID.
+</summary>
+</member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.ResumeSessionAsync(CopilotSDK.Supercharged.FSharp.ResumeSessionConfig,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
 <summary>
  Resume an existing session by ID.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.PingAsync(Microsoft.FSharp.Core.FSharpOption{System.String},Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Ping the server to verify connectivity.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.ListSessionsAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ List all sessions known to the server.
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.ListModelsAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
@@ -468,6 +618,16 @@
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.GetSessionMetadataAsync(System.String,Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
 <summary>
  Get metadata for a session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.GetLastSessionIdAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Get the ID of the most recently updated session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.GetForegroundSessionIdAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">
+<summary>
+ Get the foreground session ID.
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotClient.GetAuthStatusAsync(Microsoft.FSharp.Core.FSharpOption{System.Threading.CancellationToken})">

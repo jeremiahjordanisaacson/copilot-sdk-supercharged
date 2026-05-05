@@ -15,7 +15,7 @@ pub struct CopilotClient {
 mut:
 	options   CopilotClientOptions
 	state     ConnectionState = .disconnected
-	process   os.Process
+	process   &os.Process = unsafe { nil }
 	transport &RpcTransport = unsafe { nil }
 	sessions  shared []&CopilotSession
 	mu        sync.Mutex
@@ -247,30 +247,16 @@ fn (mut c CopilotClient) connect_to_server() ! {
 fn (mut c CopilotClient) spawn_cli_process() ! {
 	cli_path := c.resolve_cli_path()!
 
-	mut cmd := os.Command{
-		path: '${cli_path} --stdio'
-		redirect_stdout: true
-	}
-	cmd.start() or {
-		c.state = .error
-		return error('failed to spawn CLI process at ${cli_path}: ${err}')
-	}
+	mut proc := os.new_process(cli_path)
+	proc.set_args(['--stdio'])
+	proc.set_redirect_stdio()
+	proc.run()
 
-	// For stdio-based transport we rely on the process stdin/stdout.
-	// In V, os.Command gives limited pipe access, so we open a socket
-	// connection if the CLI prints a port. This is a simplified model.
-	// For production, you would pipe stdin/stdout directly.
-	c.process = os.Process{
-		filename: cli_path
-		args: ['--stdio']
-	}
-	c.process.set_redirect_stdio()
-	c.process.run()
-
-	if c.process.status != .running && c.process.status != .exited {
+	if proc.status != .running && proc.status != .exited {
 		c.state = .error
 		return error('CLI process failed to start')
 	}
+	c.process = proc
 }
 
 fn (c &CopilotClient) resolve_cli_path() !string {

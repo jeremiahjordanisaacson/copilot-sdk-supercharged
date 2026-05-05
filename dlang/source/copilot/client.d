@@ -361,7 +361,6 @@ final class CopilotClient
     private void _startExternal() @trusted
     {
         import std.socket : TcpSocket, InternetAddress, AddressFamily;
-        import std.uri : URI;
 
         // For external servers we would open a TCP socket.
         // This is a simplified placeholder: real implementation would

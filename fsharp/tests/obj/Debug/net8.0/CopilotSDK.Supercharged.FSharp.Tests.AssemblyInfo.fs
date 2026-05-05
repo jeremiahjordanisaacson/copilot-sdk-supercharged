@@ -10,7 +10,7 @@ open System.Reflection
 [<assembly: System.Reflection.AssemblyCompanyAttribute("CopilotSDK.Supercharged.FSharp.Tests")>]
 [<assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")>]
 [<assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")>]
-[<assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8bd29092d762bb28e03be901bddf4553719d67b1")>]
+[<assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+53598e6cb49ce1eb241f571045b0442375c76392")>]
 [<assembly: System.Reflection.AssemblyProductAttribute("CopilotSDK.Supercharged.FSharp.Tests")>]
 [<assembly: System.Reflection.AssemblyTitleAttribute("CopilotSDK.Supercharged.FSharp.Tests")>]
 [<assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")>]

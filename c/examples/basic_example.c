@@ -241,10 +241,11 @@ int main(int argc, char *argv[])
     /* ---- 8. v2.0 Features ---- */
 
     /* Session Metadata */
-    copilot_session_metadata_t *meta = copilot_get_session_metadata(client, copilot_session_get_id(session));
-    if (meta) {
-        printf("Session ID: %s\n", meta->session_id);
-        copilot_free_metadata(meta);
+    char *meta_json = NULL;
+    err = copilot_client_get_session_metadata(client, copilot_session_get_id(session), &meta_json);
+    if (err == COPILOT_OK && meta_json) {
+        printf("Session metadata: %s\n", meta_json);
+        free(meta_json);
     }
 
     /* Skills (uncomment to use) */

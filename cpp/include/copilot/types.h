@@ -745,7 +745,6 @@ struct ResumeSessionConfig {
     std::optional<std::vector<std::string>> disabledSkills;
     std::optional<InfiniteSessionConfig> infiniteSessions;
     bool disableResume = false;
-    bool streaming = false;
 
     /// Include sub-agent streaming events in the event stream. Default: true.
     std::optional<bool> includeSubAgentStreamingEvents;

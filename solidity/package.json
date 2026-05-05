@@ -3,14 +3,14 @@
     "version": "2.0.0",
     "description": "Solidity / Web3 SDK for GitHub Copilot CLI - smart contract auditing, gas optimization, and test generation",
     "main": "./dist/index.js",
+    "module": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "type": "module",
     "exports": {
         ".": {
-            "import": {
-                "types": "./dist/index.d.ts",
-                "default": "./dist/index.js"
-            }
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
         }
     },
     "scripts": {
@@ -36,7 +36,7 @@
     ],
     "author": "jeremiahjordanisaacson",
     "license": "MIT",
-    "peerDependencies": {
+    "dependencies": {
         "copilot-sdk-supercharged": ">=2.0.0"
     },
     "devDependencies": {

@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use copilot_sdk::*;
+use copilot_sdk_supercharged::*;
 
 /// A simple weather tool that returns mock weather data.
 fn create_weather_tool() -> (ToolDefinition, ToolHandler) {

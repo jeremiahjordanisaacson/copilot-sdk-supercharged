@@ -35,6 +35,9 @@
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
+    "scripts": {
+        "test": "phpunit"
+    },
     "config": {
         "sort-packages": true
     }
