@@ -14,3 +14,6 @@ brain-graph.html
 
 **/bin/Debug/
 **/obj/
+
+# C# Dev Kit
+*.csproj.lscache
