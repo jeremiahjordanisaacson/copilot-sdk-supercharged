@@ -44,7 +44,8 @@ module Copilot.DefineTool
   , defineSimpleTool
   ) where
 
-import           Data.Aeson    (Value (..), FromJSON, fromJSON, Result (..))
+import           Data.Aeson    (Value (..), FromJSON, fromJSON)
+import qualified Data.Aeson    as Aeson
 import           Data.Text     (Text)
 import qualified Data.Text     as T
 
@@ -83,10 +84,10 @@ defineSimpleTool name desc params handler = Tool
   , toolParameters  = params
   , toolHandler     = \args inv -> do
       case fromJSON args of
-        Success parsed -> do
+        Aeson.Success parsed -> do
           resultText <- handler parsed inv
           pure $ ToolResultText resultText
-        Error e ->
+        Aeson.Error e ->
           pure $ ToolResultStruct $ ToolResultObject
             { troTextResultForLlm    = "Failed to parse tool arguments"
             , troBinaryResultsForLlm = Nothing

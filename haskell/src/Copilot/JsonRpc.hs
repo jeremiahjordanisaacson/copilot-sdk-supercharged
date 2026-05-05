@@ -342,7 +342,7 @@ handleServerNotification client method val = do
   handlers <- atomically $ readTVar (jrcRequestHandlers client)
   case Map.lookup method handlers of
     Nothing  -> pure ()
-    Just handler -> void $ try $ handler mParams :: IO (Either SomeException (Either JsonRpcError Value))
+    Just handler -> void (try (handler mParams) :: IO (Either SomeException (Either JsonRpcError Value)))
 
 -- | Send a success response back to the server.
 sendSuccessResponse :: JsonRpcClient -> Value -> Value -> IO ()

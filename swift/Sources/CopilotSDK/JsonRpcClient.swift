@@ -73,6 +73,7 @@ public actor JsonRpcClient {
 
         let readTask = Task { [weak self] in
             await self?.readLoop(readHandle: readHandle)
+            return
         }
         self.readTask = readTask
     }

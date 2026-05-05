@@ -117,7 +117,7 @@ impl Drop for Subscription {
 /// # Examples
 ///
 /// ```rust,no_run
-/// # use copilot_sdk::*;
+/// # use copilot_sdk_supercharged::*;
 /// # async fn example() -> Result<(), CopilotError> {
 /// let client = CopilotClient::new(CopilotClientOptions::default());
 /// let session = client.create_session(SessionConfig::default()).await?;

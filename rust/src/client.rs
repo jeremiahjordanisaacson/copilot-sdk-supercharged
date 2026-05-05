@@ -32,7 +32,7 @@ use crate::CopilotError;
 /// # Examples
 ///
 /// ```rust,no_run
-/// # use copilot_sdk::*;
+/// # use copilot_sdk_supercharged::*;
 /// # async fn example() -> Result<(), CopilotError> {
 /// // Create a client with default options (spawns CLI server via stdio)
 /// let client = CopilotClient::new(CopilotClientOptions::default());

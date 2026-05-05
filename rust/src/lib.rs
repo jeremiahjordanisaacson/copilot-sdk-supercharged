@@ -10,7 +10,7 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use copilot_sdk::*;
+//! use copilot_sdk_supercharged::*;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), CopilotError> {
