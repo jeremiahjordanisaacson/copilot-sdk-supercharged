@@ -156,7 +156,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - run: ./gradlew test
+      - uses: gradle/actions/setup-gradle@v4
+      - run: gradle test
 
   dart:
     name: "Test: Dart SDK"
@@ -182,6 +183,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - uses: sbt/setup-sbt@v1
       - run: sbt test
 
   elixir:
@@ -331,6 +333,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: fortran-lang/setup-fpm@v5
+        with:
+          github-token: ${{ github.token }}
       - run: fpm test
 
   zig:
@@ -369,6 +373,10 @@ jobs:
         working-directory: perl
     steps:
       - uses: actions/checkout@v6
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.38'
+          install-modules-with: cpanm
       - run: |
           cpanm --installdeps --notest .
           prove -l t/ e2e/
@@ -385,6 +393,7 @@ jobs:
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           working-directory: r
+          extra-packages: any::devtools
       - run: Rscript -e "devtools::test()"
 
   groovy:
@@ -399,7 +408,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - run: ./gradlew test
+      - uses: gradle/actions/setup-gradle@v4
+      - run: gradle test
 
   clojure:
     name: "Test: Clojure SDK"
@@ -425,6 +435,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: '27'
+          rebar3-version: '3'
       - run: rebar3 ct
 
   dlang:
@@ -449,6 +460,7 @@ jobs:
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: '5.2'
+      - run: opam install . --deps-only --with-test -y
       - run: opam exec -- dune test
 
   tcl:
