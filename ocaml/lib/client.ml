@@ -246,13 +246,11 @@ let get_last_session_id (t : t) : string option Lwt.t =
   Lwt.return sid
 
 let get_session_metadata (t : t) (session_id : string) : Yojson.Safe.t Lwt.t =
-  let open Lwt.Syntax in
   let rpc = get_rpc t in
   let params = `Assoc [ ("sessionId", `String session_id) ] in
   Jsonrpc.send_request rpc "session.getMetadata" params
 
 let ping ?(message = "ping") (t : t) : Yojson.Safe.t Lwt.t =
-  let open Lwt.Syntax in
   let rpc = get_rpc t in
   let params = `Assoc [ ("message", `String message) ] in
   Jsonrpc.send_request rpc "ping" params
@@ -282,18 +280,15 @@ let delete_session (t : t) (session_id : string) : unit Lwt.t =
   Lwt.return_unit
 
 let list_sessions (t : t) : Yojson.Safe.t Lwt.t =
-  let open Lwt.Syntax in
   let rpc = get_rpc t in
   Jsonrpc.send_request rpc "session.list" (`Assoc [])
 
 let get_auth_status (t : t) : Yojson.Safe.t Lwt.t =
-  let open Lwt.Syntax in
   let rpc = get_rpc t in
   Jsonrpc.send_request rpc "auth.getStatus" (`Assoc [])
 
 let set_session_fs_provider(t : t) (config : Types.session_fs_config)
     : Yojson.Safe.t Lwt.t =
-  let open Lwt.Syntax in
   let rpc = get_rpc t in
   let params = Types.session_fs_config_to_yojson config in
   Jsonrpc.send_request rpc "sessionFs.setProvider" params

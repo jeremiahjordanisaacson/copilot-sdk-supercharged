@@ -48,6 +48,7 @@ import qualified Data.Aeson                as Aeson
 import           Data.Aeson.Types          (parseMaybe)
 import           Data.IORef
 import qualified Data.Map.Strict           as Map
+import           Data.Maybe                (isJust)
 import           Data.Text                 (Text)
 import qualified Data.Text                 as T
 import           System.Exit               (ExitCode)

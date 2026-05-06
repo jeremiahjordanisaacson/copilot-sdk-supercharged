@@ -24,11 +24,6 @@ let package = Package(
             name: "CopilotSDK",
             path: "Sources/CopilotSDK"
         ),
-        .executableTarget(
-            name: "BasicExample",
-            dependencies: ["CopilotSDK"],
-            path: "Examples/BasicExample"
-        ),
         .testTarget(
             name: "E2ETests",
             dependencies: ["CopilotSDK"],

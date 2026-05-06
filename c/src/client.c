@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <cjson/cJSON.h>
+#include "cJSON.h"
 
 #ifdef _WIN32
 #include <windows.h>

@@ -19,6 +19,7 @@ module copilot_types
   public :: mcp_server_config, command_definition, image_options
   public :: COPILOT_STATE_DISCONNECTED, COPILOT_STATE_CONNECTING
   public :: COPILOT_STATE_CONNECTED, COPILOT_STATE_ERROR
+  public :: tool_callback_interface
 
   ! --------------------------------------------------------------------------
   ! Connection state enum

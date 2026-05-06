@@ -51,6 +51,49 @@ type tool_invocation = {
 
 val tool_invocation_of_yojson : Yojson.Safe.t -> (tool_invocation, string) result
 
+(** {1 Session Filesystem Configuration} *)
+
+type session_fs_config = {
+  initial_cwd : string;
+  session_state_path : string;
+  conventions : string;
+}
+
+val default_session_fs_config : unit -> session_fs_config
+val session_fs_config_to_yojson : session_fs_config -> Yojson.Safe.t
+
+(** {1 MCP Server Configuration} *)
+
+type mcp_server_type = Stdio | Http
+
+val mcp_server_type_to_string : mcp_server_type -> string
+
+type mcp_server_config = {
+  mcp_type : mcp_server_type;
+  command : string option;
+  args : string list;
+  url : string option;
+  env : (string * string) list;
+  headers : (string * string) list;
+}
+
+val mcp_server_config_to_yojson : mcp_server_config -> Yojson.Safe.t
+
+(** {1 Command Definition} *)
+
+type command_definition = {
+  cmd_name : string;
+  cmd_description : string;
+}
+
+val command_definition_to_yojson : command_definition -> Yojson.Safe.t
+
+(** {1 Image Response Format} *)
+
+type image_response_format = FormatText | FormatImage | FormatJsonObject
+
+val image_response_format_to_string : image_response_format -> string
+
 (** {1 Session Configuration} *)
 
 type reasoning_effort =
@@ -68,18 +111,32 @@ type message_options = {
 
 val message_options_to_yojson : message_options -> Yojson.Safe.t
 
+type tool_definition = {
+  tool_name : string;
+  tool_description : string;
+  tool_parameters : Yojson.Safe.t option;
+}
+
 type session_config = {
   model : string option;
   system_prompt : string option;
   reasoning_effort : reasoning_effort option;
   streaming : bool;
   tools : tool_definition list;
-}
-
-and tool_definition = {
-  tool_name : string;
-  tool_description : string;
-  tool_parameters : Yojson.Safe.t option;
+  excluded_tools : string list;
+  mcp_servers : (string * mcp_server_config) list;
+  model_capabilities : (string * Yojson.Safe.t) list;
+  enable_config_discovery : bool;
+  include_sub_agent_streaming_events : bool;
+  commands : command_definition list;
+  skill_directories : string list;
+  disabled_skills : string list;
+  working_directory : string option;
+  github_token : string option;
+  response_format : image_response_format option;
+  request_headers : (string * string) list;
+  on_elicitation_request : bool;
+  instruction_directories : string list;
 }
 
 val default_session_config : unit -> session_config
@@ -103,6 +160,11 @@ val session_event_type_of_string : string -> session_event_type
 
 type session_event = {
   event_type : session_event_type;
+  id : string;
+  timestamp : string;
+  parent_id : string option;
+  agent_id : string option;
+  ephemeral : bool option;
   data : Yojson.Safe.t;
 }
 
@@ -146,6 +208,12 @@ type client_options = {
   cli_path : string option;
   cli_url : string option;
   log_level : string option;
+  github_token : string option;
+  use_logged_in_user : bool option;
+  session_idle_timeout_seconds : int option;
+  session_fs : session_fs_config option;
+  copilot_home : string option;
+  tcp_connection_token : string option;
 }
 
 val default_client_options : unit -> client_options

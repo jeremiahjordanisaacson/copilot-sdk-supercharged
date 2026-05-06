@@ -4,6 +4,7 @@
 
 #include "copilot/session.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace copilot {

@@ -21,7 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <pthread.h>
-#include <cjson/cJSON.h>
+#include "cJSON.h"
 
 #ifdef __cplusplus
 extern "C" {

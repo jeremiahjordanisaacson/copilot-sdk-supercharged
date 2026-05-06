@@ -328,9 +328,10 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, #state{port = Port, sessions = Sessions}) ->
-    maps:foreach(fun(_Id, Pid) ->
-        catch copilot_session:stop(Pid)
-    end, Sessions),
+    maps:fold(fun(_Id, Pid, _) ->
+        catch copilot_session:stop(Pid),
+        ok
+    end, ok, Sessions),
     case Port of
         undefined -> ok;
         _         -> catch port_close(Port)

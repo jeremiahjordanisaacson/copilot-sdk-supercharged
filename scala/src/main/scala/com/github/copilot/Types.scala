@@ -993,12 +993,14 @@ case class SelectionPosition(line: Int, character: Int)
 
 object SelectionPosition:
   given Encoder[SelectionPosition] = deriveEncoder
+  given Decoder[SelectionPosition] = deriveDecoder
 
 /** Selection range. */
 case class SelectionRange(start: SelectionPosition, end: SelectionPosition)
 
 object SelectionRange:
   given Encoder[SelectionRange] = deriveEncoder
+  given Decoder[SelectionRange] = deriveDecoder
 
 /** Selection attachment. */
 case class SelectionAttachment(

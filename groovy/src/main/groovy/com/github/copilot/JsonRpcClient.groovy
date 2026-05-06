@@ -12,6 +12,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
 
 /**
@@ -31,11 +32,11 @@ class JsonRpcClient {
     private volatile boolean running
     private Thread readThread
     private final Object writeLock = new Object()
-    private final ExecutorService handlerExecutor = Executors.newCachedThreadPool { Runnable r ->
+    private final ExecutorService handlerExecutor = Executors.newCachedThreadPool({ Runnable r ->
         Thread t = new Thread(r, 'jsonrpc-handler')
         t.daemon = true
         t
-    }
+    } as ThreadFactory)
 
     JsonRpcClient(InputStream inputStream, OutputStream outputStream) {
         this.inputStream = inputStream

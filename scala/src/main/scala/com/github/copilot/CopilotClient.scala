@@ -514,7 +514,8 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         while line != null do
           System.err.println(s"[CLI subprocess] $line")
           line = reader.readLine()
-      catch case _: Exception => // ignore
+      catch
+        case _: Exception => // ignore
     }, "cli-stderr-reader")
     stderrThread.setDaemon(true)
     stderrThread.start()
