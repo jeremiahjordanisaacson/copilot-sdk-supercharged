@@ -96,6 +96,18 @@ function CopilotClient:start()
     -- Build command string
     local cmd = table.concat(args, " ")
 
+    -- Prepend custom environment variables (from options.env)
+    if self._env and type(self._env) == "table" then
+        local is_windows = (package.config:sub(1, 1) == "\\")
+        for k, v in pairs(self._env) do
+            if is_windows then
+                cmd = string.format("set %s=%s && %s", k, v, cmd)
+            else
+                cmd = string.format("%s=%s %s", k, v, cmd)
+            end
+        end
+    end
+
     -- Set environment variable for auth token if needed
     if self._github_token and self._github_token ~= "" then
         -- On POSIX systems, we can prepend env vars

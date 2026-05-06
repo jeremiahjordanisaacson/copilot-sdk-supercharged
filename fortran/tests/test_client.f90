@@ -63,7 +63,7 @@ contains
   ! ------------------------------------------------------------------
   subroutine test_protocol_version(failures)
     integer, intent(inout) :: failures
-    call assert_eq_str('protocol version', '2', SDK_PROTOCOL_VERSION, failures)
+    call assert_eq_str('protocol version', '3', SDK_PROTOCOL_VERSION, failures)
   end subroutine
 
   ! ------------------------------------------------------------------
@@ -91,12 +91,12 @@ contains
     integer, intent(inout) :: failures
     character(len=:), allocatable :: msg
 
-    msg = jsonrpc_build_request(1, 'ping', '{"protocolVersion":"2"}')
+    msg = jsonrpc_build_request(1, 'ping', '{"protocolVersion":"3"}')
     call assert_true('request contains jsonrpc', index(msg, '"jsonrpc":"2.0"') > 0, failures)
     call assert_true('request contains method', index(msg, '"method":"ping"') > 0, failures)
     call assert_true('request contains id', index(msg, '"id":1') > 0, failures)
     call assert_true('request contains params', &
-                     index(msg, '"params":{"protocolVersion":"2"}') > 0, failures)
+                     index(msg, '"params":{"protocolVersion":"3"}') > 0, failures)
   end subroutine
 
   ! ------------------------------------------------------------------

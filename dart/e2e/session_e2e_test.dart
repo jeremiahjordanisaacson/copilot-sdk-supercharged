@@ -40,7 +40,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -69,7 +69,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -122,7 +122,7 @@ void main() {
 
     final options = CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
       sessionFs: fsConfig,
     );
 
@@ -161,7 +161,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -205,7 +205,7 @@ void main() {
 
     final client1 = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     late String savedSessionId;
@@ -226,7 +226,7 @@ void main() {
 
     final client2 = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -253,7 +253,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -288,7 +288,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -319,7 +319,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -352,7 +352,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -377,7 +377,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -402,7 +402,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -428,7 +428,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -451,7 +451,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -483,7 +483,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -530,7 +530,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -576,7 +576,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -618,7 +618,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
       sessionFs: fsConfig,
     ));
 
@@ -647,7 +647,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -683,7 +683,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {
@@ -716,7 +716,7 @@ void main() {
 
     final client = CopilotClient(CopilotClientOptions(
       cwd: harness.repoRoot,
-      env: {'COPILOT_API_URL': harness.proxyUrl!},
+      cliUrl: harness.proxyUrl!,
     ));
 
     try {

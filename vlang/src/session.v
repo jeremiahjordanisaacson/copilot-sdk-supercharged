@@ -92,7 +92,7 @@ pub fn (mut s CopilotSession) send_and_wait(opts SendOptions, timeout_ms int) !s
 		result := <-done {
 			return result
 		}
-		effective_timeout * time.millisecond {
+		time.Duration(i64(effective_timeout) * i64(time.millisecond)) {
 			return error('send_and_wait timed out after ${effective_timeout}ms')
 		}
 	}

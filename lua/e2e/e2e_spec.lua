@@ -13,12 +13,13 @@ local CapiProxy     = require("e2e.testharness.proxy")
 -- ---------------------------------------------------------------------------
 
 --- Build a CopilotClient configured to talk through the replay proxy.
--- The proxy sets COPILOT_API_URL in the environment before the CLI spawns.
+-- Passes the proxy URL via env so the CLI subprocess uses the proxy.
 -- @param extra_opts table|nil  Additional options merged into client config
 -- @return CopilotClient
 local function make_client(extra_opts)
     local opts = {
         logLevel = "info",
+        env = { COPILOT_API_URL = proxy and proxy:url() or "" },
     }
     if extra_opts then
         for k, v in pairs(extra_opts) do

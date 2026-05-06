@@ -8,4 +8,5 @@ use File::Spec;
 use File::Basename;
 
 my $e2e_test = File::Spec->catfile(dirname(__FILE__), '..', 'e2e', 'test_e2e.t');
-do "./$e2e_test" or die "Failed to load $e2e_test: $@\n$!\n";
+$e2e_test = Cwd::abs_path($e2e_test) if eval { require Cwd; 1 };
+do $e2e_test or die "Failed to load $e2e_test: $@\n$!\n";

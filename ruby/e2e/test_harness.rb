@@ -145,6 +145,9 @@ module E2E
       env["COPILOT_HOME"]     = home_dir
       env["XDG_CONFIG_HOME"]  = home_dir
       env["XDG_STATE_HOME"]   = home_dir
+      # Provide a fake token so the CLI authenticates against the replay proxy
+      env["GH_TOKEN"]         = env["GH_TOKEN"] || "fake-test-token"
+      env["GITHUB_TOKEN"]     = env["GITHUB_TOKEN"] || "fake-test-token"
       env
     end
   end

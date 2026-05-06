@@ -26,7 +26,8 @@
     "autoload": {
         "psr-4": {
             "GitHub\\Copilot\\": "src/"
-        }
+        },
+        "classmap": ["src/Types.php"]
     },
     "autoload-dev": {
         "psr-4": {
