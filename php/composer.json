@@ -30,7 +30,8 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "GitHub\\Copilot\\Tests\\": "tests/"
+            "GitHub\\Copilot\\Tests\\": "tests/",
+            "GitHub\\Copilot\\E2E\\": "e2e/"
         }
     },
     "minimum-stability": "stable",

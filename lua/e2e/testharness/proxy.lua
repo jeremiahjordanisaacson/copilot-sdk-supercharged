@@ -61,11 +61,12 @@ function CapiProxy:start()
     end
 
     -- Build the command. On Windows we need shell to find npx.
+    -- Since we cd into the harness dir, just reference server.ts directly.
     local cmd
     if is_windows then
-        cmd = string.format('cd /d "%s" && npx tsx "%s"', harness_dir, server_path)
+        cmd = string.format('cd /d "%s" && npx tsx server.ts', harness_dir)
     else
-        cmd = string.format('cd "%s" && npx tsx "%s"', harness_dir, server_path)
+        cmd = string.format('cd "%s" && npx tsx server.ts', harness_dir)
     end
 
     -- Spawn the process, reading stdout to capture the listening URL

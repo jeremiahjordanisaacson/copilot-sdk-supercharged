@@ -182,6 +182,9 @@ async fn main() -> Result<(), CopilotError> {
                     .to_string(),
                 attachments: None,
                 mode: None,
+                response_format: None,
+                image_options: None,
+                request_headers: None,
             },
             Some(120_000), // 2 minute timeout
         )
@@ -208,6 +211,9 @@ async fn main() -> Result<(), CopilotError> {
                 prompt: "Now what about New York?".to_string(),
                 attachments: None,
                 mode: None,
+                response_format: None,
+                image_options: None,
+                request_headers: None,
             },
             None, // default 60s timeout
         )

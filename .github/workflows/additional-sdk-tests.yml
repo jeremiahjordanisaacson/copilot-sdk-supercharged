@@ -98,6 +98,9 @@ jobs:
         working-directory: java
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -117,6 +120,9 @@ jobs:
         working-directory: rust
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -133,6 +139,9 @@ jobs:
         working-directory: ruby
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -153,6 +162,9 @@ jobs:
         working-directory: php
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -172,6 +184,9 @@ jobs:
         working-directory: kotlin
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -192,6 +207,9 @@ jobs:
         working-directory: dart
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -209,6 +227,9 @@ jobs:
         working-directory: scala
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -229,6 +250,9 @@ jobs:
         working-directory: elixir
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -249,6 +273,9 @@ jobs:
         working-directory: crystal
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -266,6 +293,9 @@ jobs:
         working-directory: julia
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -284,6 +314,9 @@ jobs:
         working-directory: nim
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -297,6 +330,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -316,6 +352,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -332,6 +371,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -351,6 +393,9 @@ jobs:
         working-directory: swift
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -366,6 +411,9 @@ jobs:
         working-directory: haskell
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -386,6 +434,9 @@ jobs:
         working-directory: fsharp
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -404,6 +455,9 @@ jobs:
         working-directory: visualbasic
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -422,6 +476,9 @@ jobs:
         working-directory: fortran
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -441,6 +498,9 @@ jobs:
         working-directory: zig
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -459,6 +519,9 @@ jobs:
         working-directory: objc
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -479,6 +542,9 @@ jobs:
         working-directory: perl
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -500,6 +566,9 @@ jobs:
         working-directory: r
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -520,6 +589,9 @@ jobs:
         working-directory: groovy
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -540,6 +612,9 @@ jobs:
         working-directory: clojure
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -558,6 +633,9 @@ jobs:
         working-directory: erlang
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -577,6 +655,9 @@ jobs:
         working-directory: dlang
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -593,6 +674,9 @@ jobs:
         working-directory: ocaml
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -612,6 +696,9 @@ jobs:
         working-directory: tcl
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -629,6 +716,9 @@ jobs:
         working-directory: shell
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -660,6 +750,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -675,6 +768,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -689,6 +785,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -703,6 +802,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
@@ -718,6 +820,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Install SDK and test harness
         run: |
           cd $GITHUB_WORKSPACE/nodejs && npm ci
