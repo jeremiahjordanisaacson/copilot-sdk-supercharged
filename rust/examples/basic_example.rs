@@ -230,8 +230,8 @@ async fn main() -> Result<(), CopilotError> {
     // ========================================================================
 
     // Session Metadata
-    if let Ok(Some(meta)) = client.get_session_metadata(&session.session_id()).await {
-        println!("Session ID: {}", meta.session_id);
+    if let Ok(meta) = client.get_session_metadata(&session.session_id()).await {
+        println!("Session metadata: {:?}", meta);
     }
 
     // Skills (uncomment to use)
