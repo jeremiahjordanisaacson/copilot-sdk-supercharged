@@ -374,8 +374,8 @@ do_start_cli(#state{cli_path = CliPath, options = Options} = State) ->
                 {error, Reason}
         end
     catch
-        _:Reason ->
-            {error, {start_failed, Reason}}
+        _:CrashReason ->
+            {error, {start_failed, CrashReason}}
     end.
 
 build_cli_args(CliPath, LogLevel, Options) ->

@@ -114,6 +114,12 @@ let perform_handshake (rpc : Jsonrpc.t) : unit Lwt.t =
          server_version Version.min_protocol_version)
   else Lwt.return_unit
 
+let set_session_fs_provider (t : t) (config : Types.session_fs_config)
+    : Yojson.Safe.t Lwt.t =
+  let rpc = get_rpc t in
+  let params = Types.session_fs_config_to_yojson config in
+  Jsonrpc.send_request rpc "sessionFs.setProvider" params
+
 (* ========================================================================== *)
 (* Lifecycle                                                                  *)
 (* ========================================================================== *)
@@ -286,12 +292,6 @@ let list_sessions (t : t) : Yojson.Safe.t Lwt.t =
 let get_auth_status (t : t) : Yojson.Safe.t Lwt.t =
   let rpc = get_rpc t in
   Jsonrpc.send_request rpc "auth.getStatus" (`Assoc [])
-
-let set_session_fs_provider(t : t) (config : Types.session_fs_config)
-    : Yojson.Safe.t Lwt.t =
-  let rpc = get_rpc t in
-  let params = Types.session_fs_config_to_yojson config in
-  Jsonrpc.send_request rpc "sessionFs.setProvider" params
 
 (* ========================================================================== *)
 (* State inspection                                                           *)
