@@ -116,7 +116,10 @@ let perform_handshake (rpc : Jsonrpc.t) : unit Lwt.t =
 
 let set_session_fs_provider (t : t) (config : Types.session_fs_config)
     : Yojson.Safe.t Lwt.t =
-  let rpc = get_rpc t in
+  let rpc = match t.rpc with
+    | Some rpc -> rpc
+    | None -> failwith "Client is not connected. Call start() first."
+  in
   let params = Types.session_fs_config_to_yojson config in
   Jsonrpc.send_request rpc "sessionFs.setProvider" params
 
