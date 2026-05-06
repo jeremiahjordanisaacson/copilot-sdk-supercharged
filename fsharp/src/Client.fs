@@ -29,7 +29,7 @@ open System.Threading.Tasks
 ///   } |> Async.RunSynchronously
 type CopilotClient(options: CopilotClientOptions) =
 
-    static let minProtocolVersion = 2
+    static let minProtocolVersion = 3
 
     let sessions = ConcurrentDictionary<string, CopilotSession>()
     let mutable transport : JsonRpcTransport option = None

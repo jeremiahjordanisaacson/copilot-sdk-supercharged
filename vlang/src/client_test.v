@@ -14,7 +14,7 @@ fn test_sdk_version_is_set() {
 
 fn test_protocol_version_value() {
 	assert protocol_version == 3
-	assert min_protocol_version == 2
+	assert min_protocol_version == 3
 }
 
 fn test_sdk_name() {

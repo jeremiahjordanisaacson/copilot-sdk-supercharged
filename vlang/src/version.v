@@ -10,7 +10,7 @@ pub const sdk_version = '0.1.0'
 pub const protocol_version = 3
 
 // min_protocol_version is the minimum protocol version the server must support.
-pub const min_protocol_version = 2
+pub const min_protocol_version = 3
 
 // sdk_name identifies this SDK in handshake metadata.
 pub const sdk_name = 'copilot-sdk-vlang'

@@ -244,7 +244,7 @@ proc start*(client: CopilotClient) {.async.} =
     let ver = pingResult["protocolVersion"].getStr()
     if not ver.startsWith("2"):
       raise newException(IOError,
-        "Unsupported protocol version: " & ver & ". Requires v2.x")
+        "Unsupported protocol version: " & ver & ". Requires v3.x")
 
   # Set up session filesystem provider if configured
   if client.config.sessionFs.initialCwd.len > 0:

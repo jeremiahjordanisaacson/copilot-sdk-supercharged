@@ -19,7 +19,7 @@ final class SdkProtocolVersion
     /**
      * The SDK protocol version number.
      */
-    public const VERSION = 2;
+    public const VERSION = 3;
 
     /**
      * Gets the SDK protocol version.

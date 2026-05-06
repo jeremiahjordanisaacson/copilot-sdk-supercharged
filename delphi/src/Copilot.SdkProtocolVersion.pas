@@ -7,7 +7,7 @@ unit Copilot.SdkProtocolVersion;
 interface
 
 const
-  SDK_PROTOCOL_VERSION = '2';
+  SDK_PROTOCOL_VERSION = '3';
 
 implementation
 

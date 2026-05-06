@@ -4,7 +4,7 @@
 
 /// The SDK protocol version.
 /// This must match the version expected by the copilot-agent-runtime server.
-const int sdkProtocolVersion = 2;
+const int sdkProtocolVersion = 3;
 
 /// Gets the SDK protocol version.
 int getSdkProtocolVersion() => sdkProtocolVersion;

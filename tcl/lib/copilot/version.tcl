@@ -5,7 +5,7 @@
 namespace eval ::copilot::version {
     variable sdk_version "2.0.0"
     variable sdk_name    "copilot-sdk-tcl"
-    variable min_protocol_version 2
+    variable min_protocol_version 3
 }
 
 proc ::copilot::version::get {} {

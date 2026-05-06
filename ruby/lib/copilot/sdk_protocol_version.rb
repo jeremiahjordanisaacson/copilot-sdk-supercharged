@@ -7,7 +7,7 @@
 module Copilot
   # The SDK protocol version.
   # This must match the version expected by the copilot-agent-runtime server.
-  SDK_PROTOCOL_VERSION = 2
+  SDK_PROTOCOL_VERSION = 3
 
   # @return [Integer] the SDK protocol version number
   def self.sdk_protocol_version

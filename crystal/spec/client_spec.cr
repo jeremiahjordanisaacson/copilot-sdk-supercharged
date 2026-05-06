@@ -12,7 +12,7 @@ describe CopilotSDK do
 
   describe "MIN_PROTOCOL_VERSION" do
     it "is at least 2" do
-      CopilotSDK::MIN_PROTOCOL_VERSION.should be >= 2
+      CopilotSDK::MIN_PROTOCOL_VERSION.should be >= 3
     end
   end
 end

@@ -11,7 +11,7 @@ package com.github.copilot
 object SdkProtocolVersion:
 
   /** The current SDK protocol version. */
-  val Version: Int = 2
+  val Version: Int = 3
 
   /** Gets the SDK protocol version. */
   def get: Int = Version

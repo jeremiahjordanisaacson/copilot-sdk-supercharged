@@ -13,7 +13,7 @@ import groovy.transform.CompileStatic
  */
 @CompileStatic
 final class SdkProtocolVersion {
-    static final int SDK_PROTOCOL_VERSION = 2
+    static final int SDK_PROTOCOL_VERSION = 3
 
     private SdkProtocolVersion() {}
 

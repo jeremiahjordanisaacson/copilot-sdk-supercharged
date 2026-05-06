@@ -5,7 +5,7 @@
 local M = {}
 
 --- The SDK protocol version constant.
-M.SDK_PROTOCOL_VERSION = 2
+M.SDK_PROTOCOL_VERSION = 3
 
 --- Returns the SDK protocol version.
 -- @return number The protocol version

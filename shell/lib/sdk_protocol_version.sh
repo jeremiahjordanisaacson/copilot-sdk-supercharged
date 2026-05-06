@@ -4,7 +4,7 @@
 # SDK Protocol Version for the Copilot SDK.
 # This must match the version expected by the copilot-agent-runtime server.
 
-COPILOT_SDK_PROTOCOL_VERSION=2
+COPILOT_SDK_PROTOCOL_VERSION=3
 
 # Gets the SDK protocol version.
 # Usage: version=$(copilot_get_sdk_protocol_version)

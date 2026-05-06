@@ -4,7 +4,7 @@
 
 let sdk_protocol_version = 3
 
-let min_protocol_version = 2
+let min_protocol_version = 3
 
 let sdk_name = "copilot-sdk-supercharged-ocaml"
 

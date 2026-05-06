@@ -10,7 +10,7 @@ package com.github.copilot
  * The SDK protocol version.
  * This must match the version expected by the copilot-agent-runtime server.
  */
-const val SDK_PROTOCOL_VERSION: Int = 2
+const val SDK_PROTOCOL_VERSION: Int = 3
 
 /**
  * Gets the SDK protocol version.

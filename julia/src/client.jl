@@ -7,7 +7,7 @@
 # Manages the connection to the Copilot CLI server (spawned or external) and
 # provides session creation, status queries, and lifecycle management.
 
-const MIN_PROTOCOL_VERSION = 2
+const MIN_PROTOCOL_VERSION = 3
 const SDK_PROTOCOL_VERSION = 3
 
 """

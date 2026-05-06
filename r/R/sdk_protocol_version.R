@@ -4,7 +4,7 @@
 #'
 #' This must match the version expected by the copilot-agent-runtime server.
 #' @export
-SDK_PROTOCOL_VERSION <- 2L
+SDK_PROTOCOL_VERSION <- 3L
 
 #' Get the SDK protocol version.
 #'

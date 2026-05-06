@@ -114,7 +114,7 @@ uses
   System.IOUtils;
 
 const
-  MIN_PROTOCOL_VERSION = 2;
+  MIN_PROTOCOL_VERSION = 3;
 
 { TCopilotClient }
 

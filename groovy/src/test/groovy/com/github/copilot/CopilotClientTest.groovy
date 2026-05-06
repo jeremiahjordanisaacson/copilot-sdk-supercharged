@@ -19,8 +19,8 @@ class CopilotClientTest extends Specification {
 
     def 'SdkProtocolVersion returns expected version'() {
         expect:
-        SdkProtocolVersion.get() == 2
-        SdkProtocolVersion.SDK_PROTOCOL_VERSION == 2
+        SdkProtocolVersion.get() == 3
+        SdkProtocolVersion.SDK_PROTOCOL_VERSION == 3
     }
 
     // --- Types ---

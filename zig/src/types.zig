@@ -286,7 +286,7 @@ pub const SdkError = error{
 // Protocol constants
 // ---------------------------------------------------------------------------
 
-pub const PROTOCOL_VERSION: i64 = 2;
+pub const PROTOCOL_VERSION: i64 = 3;
 
 // ---------------------------------------------------------------------------
 // Tests

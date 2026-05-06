@@ -10,7 +10,7 @@ package com.github.copilot;
  * This must match the version expected by the copilot-agent-runtime server.
  */
 public final class SdkProtocolVersion {
-    public static final int SDK_PROTOCOL_VERSION = 2;
+    public static final int SDK_PROTOCOL_VERSION = 3;
 
     private SdkProtocolVersion() {}
 

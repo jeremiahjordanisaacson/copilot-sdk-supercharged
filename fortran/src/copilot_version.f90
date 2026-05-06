@@ -8,6 +8,6 @@ module copilot_version
   private
   public :: SDK_PROTOCOL_VERSION
 
-  character(len=*), parameter :: SDK_PROTOCOL_VERSION = '2'
+  character(len=*), parameter :: SDK_PROTOCOL_VERSION = '3'
 
 end module copilot_version
