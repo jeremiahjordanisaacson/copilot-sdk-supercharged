@@ -1112,6 +1112,7 @@ public struct SessionEvent: Sendable {
         self.id = id
         self.timestamp = timestamp
         self.parentId = parentId
+        self.agentId = agentId
         self.ephemeral = ephemeral
         self.type = type
         self.data = data
