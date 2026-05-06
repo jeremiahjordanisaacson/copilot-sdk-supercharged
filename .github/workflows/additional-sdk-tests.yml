@@ -88,6 +88,10 @@ on:
 permissions:
   contents: read
 
+env:
+  GH_TOKEN: "fake-token-for-e2e-tests"
+  GITHUB_TOKEN: "fake-token-for-e2e-tests"
+
 jobs:
   # ---- Tier 1: SDKs with standard package managers ----
   java:

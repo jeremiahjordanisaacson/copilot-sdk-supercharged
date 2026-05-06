@@ -152,6 +152,8 @@ impl TestHarness {
         env.insert("COPILOT_HOME".into(), home_dir.to_string());
         env.insert("XDG_CONFIG_HOME".into(), home_dir.to_string());
         env.insert("XDG_STATE_HOME".into(), home_dir.to_string());
+        env.insert("GH_TOKEN".into(), "fake-token-for-e2e-tests".to_string());
+        env.insert("GITHUB_TOKEN".into(), "fake-token-for-e2e-tests".to_string());
         env
     }
 
