@@ -98,6 +98,9 @@ jobs:
         working-directory: java
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -112,6 +115,9 @@ jobs:
         working-directory: rust
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
 
@@ -123,6 +129,9 @@ jobs:
         working-directory: ruby
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
@@ -138,6 +147,9 @@ jobs:
         working-directory: php
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
@@ -152,6 +164,9 @@ jobs:
         working-directory: kotlin
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -167,6 +182,9 @@ jobs:
         working-directory: dart
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: dart-lang/setup-dart@v1
       - run: dart pub get
       - run: dart test
@@ -179,6 +197,9 @@ jobs:
         working-directory: scala
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -194,6 +215,9 @@ jobs:
         working-directory: elixir
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.17'
@@ -209,6 +233,9 @@ jobs:
         working-directory: crystal
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: crystal-lang/install-crystal@v1
       - run: shards install
       - run: crystal spec
@@ -221,6 +248,9 @@ jobs:
         working-directory: julia
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1'
@@ -234,6 +264,9 @@ jobs:
         working-directory: nim
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: jiro4989/setup-nim-action@v2
       - run: nimble test -y
 
@@ -242,6 +275,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: leafo/gh-actions-lua@v10
       - uses: leafo/gh-actions-luarocks@v4
       - run: |
@@ -256,6 +292,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - run: |
           cd cpp
           cmake -B build
@@ -267,6 +306,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - run: |
           cd c
           cmake -B build
@@ -281,6 +323,9 @@ jobs:
         working-directory: swift
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - run: swift test
 
   haskell:
@@ -291,10 +336,13 @@ jobs:
         working-directory: haskell
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: haskell-actions/setup@v2
         with:
-          ghc-version: '9.8'
-          cabal-version: '3.10'
+          ghc-version: '9.6'
+          cabal-version: 'latest'
       - run: cabal update
       - run: cabal test
 
@@ -306,10 +354,13 @@ jobs:
         working-directory: fsharp
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0'
-      - run: dotnet test
+      - run: dotnet test tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj
 
   visualbasic:
     name: "Test: Visual Basic SDK"
@@ -319,6 +370,9 @@ jobs:
         working-directory: visualbasic
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0'
@@ -332,6 +386,9 @@ jobs:
         working-directory: fortran
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: fortran-lang/setup-fpm@v5
         with:
           github-token: ${{ github.token }}
@@ -346,6 +403,9 @@ jobs:
         working-directory: zig
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: '0.13.0'
@@ -359,6 +419,9 @@ jobs:
         working-directory: objc
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - run: |
           xcodebuild test \
             -scheme CopilotSDK \
@@ -374,6 +437,9 @@ jobs:
         working-directory: perl
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: shogo82148/actions-setup-perl@v1
         with:
           perl-version: '5.38'
@@ -390,6 +456,9 @@ jobs:
         working-directory: r
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: r-lib/actions/setup-r@v2
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
@@ -405,6 +474,9 @@ jobs:
         working-directory: groovy
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -420,6 +492,9 @@ jobs:
         working-directory: clojure
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: DeLaGuardo/setup-clojure@12.5
         with:
           cli: latest
@@ -433,6 +508,9 @@ jobs:
         working-directory: erlang
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: erlef/setup-beam@v1
         with:
           otp-version: '27'
@@ -447,6 +525,9 @@ jobs:
         working-directory: dlang
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: dlang-community/setup-dlang@v2
       - run: dub test
 
@@ -458,6 +539,9 @@ jobs:
         working-directory: ocaml
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: '5.2'
@@ -472,6 +556,9 @@ jobs:
         working-directory: tcl
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - run: |
           sudo apt-get update && sudo apt-get install -y tcl tcllib
           tclsh tests/run_tests.tcl || echo "::warning::Tcl test runner may need configuration"
@@ -484,6 +571,9 @@ jobs:
         working-directory: shell
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - run: |
           sudo apt-get update && sudo apt-get install -y jq
           bash -n lib/*.sh
@@ -500,8 +590,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - run: cd ../test/harness && npm ci
-      - run: npm ci
+      - run: cd ../test/harness && npm install
+      - run: npm install
       - run: npm test
 
   # ---- Tier 4: Specialized environments (syntax check only) ----
@@ -510,6 +600,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - run: |
           wget -q https://github.com/nickelca/vlang-action/releases/download/v0.4.8/vlang-ubuntu-latest.tar.gz -O /tmp/v.tar.gz
           tar xf /tmp/v.tar.gz -C /tmp
@@ -520,6 +613,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - run: |
           sudo apt-get update && sudo apt-get install -y gnat
           cd ada && gnatmake -c src/*.adb 2>/dev/null || echo "::warning::Ada compilation check completed"
@@ -529,6 +625,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - run: |
           sudo apt-get update && sudo apt-get install -y gnucobol
           cd cobol && cobc -fsyntax-only src/*.cob 2>/dev/null || echo "::warning::COBOL syntax check completed"
@@ -538,6 +637,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - run: |
           # Delphi/Free Pascal syntax check
           sudo apt-get update && sudo apt-get install -y fp-compiler
@@ -548,6 +650,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install test harness deps
+        run: cd $GITHUB_WORKSPACE/test/harness && npm ci --ignore-scripts
+        working-directory: .
       - run: |
           # MATLAB syntax validation via Octave
           sudo apt-get update && sudo apt-get install -y octave
