@@ -21,16 +21,21 @@ mutable struct CopilotSession
     tools::Dict{String, Tool}
     connected::Bool
     listener_lock::ReentrantLock
+    exit_plan_mode_handler::Union{Function, Nothing}
+    trace_context_provider::Union{Function, Nothing}
 end
 
-function CopilotSession(session_id::String, rpc::JsonRpcClient, config::SessionConfig)
+function CopilotSession(session_id::String, rpc::JsonRpcClient, config::SessionConfig;
+                        exit_plan_mode_handler::Union{Function, Nothing}=nothing,
+                        trace_context_provider::Union{Function, Nothing}=nothing)
     tools = Dict{String, Tool}()
     for t in config.tools
         if t isa Tool
             tools[t.name] = t
         end
     end
-    CopilotSession(session_id, rpc, config, Function[], tools, true, ReentrantLock())
+    CopilotSession(session_id, rpc, config, Function[], tools, true, ReentrantLock(),
+                   exit_plan_mode_handler, trace_context_provider)
 end
 
 # -- Event handling ---------------------------------------------------------------
@@ -205,4 +210,44 @@ function disconnect(session::CopilotSession)
             Dict{String, Any}("sessionId" => session.session_id); timeout=5)
     catch; end
     return nothing
+end
+
+# -- Exit plan mode handling ------------------------------------------------------
+
+"""Handle an exit-plan-mode request from the server."""
+function handle_exit_plan_mode(session::CopilotSession, request::ExitPlanModeRequest)
+    if session.exit_plan_mode_handler === nothing
+        return Dict{String, Any}("approved" => true)
+    end
+    result = session.exit_plan_mode_handler(request, session.session_id)
+    if isa(result, ExitPlanModeResult)
+        d = Dict{String, Any}("approved" => result.approved)
+        result.selected_action !== nothing && (d["selectedAction"] = result.selected_action)
+        result.feedback !== nothing && (d["feedback"] = result.feedback)
+        return d
+    end
+    return result
+end
+
+# -- Trace context ----------------------------------------------------------------
+
+"""Get trace context from the provider, if any."""
+function get_trace_context(session::CopilotSession)
+    if session.trace_context_provider === nothing
+        return Dict{String, Any}()
+    end
+    try
+        ctx = session.trace_context_provider()
+        result = Dict{String, Any}()
+        if isa(ctx, TraceContext)
+            ctx.traceparent !== nothing && (result["traceparent"] = ctx.traceparent)
+            ctx.tracestate !== nothing && (result["tracestate"] = ctx.tracestate)
+        elseif isa(ctx, Dict)
+            haskey(ctx, "traceparent") && (result["traceparent"] = ctx["traceparent"])
+            haskey(ctx, "tracestate") && (result["tracestate"] = ctx["tracestate"])
+        end
+        return result
+    catch
+        return Dict{String, Any}()
+    end
 end

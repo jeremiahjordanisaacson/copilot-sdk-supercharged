@@ -45,11 +45,14 @@ type
       const Params: TJSONValue): TJSONValue;
     function HandleUserInputRequest(const Method: string;
       const Params: TJSONValue): TJSONValue;
+    function HandleExitPlanModeRequest(const Method: string;
+      const Params: TJSONValue): TJSONValue;
     function HandleHooksInvoke(const Method: string;
       const Params: TJSONValue): TJSONValue;
     function FindSession(const ASessionId: string): TCopilotSession;
     function BuildToolsArray(const ATools: TArray<TTool>): TJSONArray;
     function GetCliArgs: TArray<string>;
+    function GetTraceContextParams: TJSONObject;
     function PermissionDecisionToString(D: TPermissionDecision): string;
   public
     constructor Create; overload;
@@ -157,6 +160,8 @@ begin
   begin
     Result[3] := FOptions.LogLevel;
   end;
+  if FOptions.Remote then
+    Result := Result + TArray<string>.Create('--remote');
 end;
 
 procedure TCopilotClient.SpawnProcess;
@@ -258,6 +263,12 @@ begin
     function(const Method: string; const Params: TJSONValue): TJSONValue
     begin
       Result := HandleHooksInvoke(Method, Params);
+    end);
+
+  FRpc.OnRequest('exitPlanMode.request',
+    function(const Method: string; const Params: TJSONValue): TJSONValue
+    begin
+      Result := HandleExitPlanModeRequest(Method, Params);
     end);
 end;
 
@@ -445,6 +456,21 @@ begin
     Params.AddPair('sessionFs', FsObj);
   end;
 
+  if Assigned(Config.OnExitPlanMode) then
+    Params.AddPair('requestExitPlanMode', TJSONBool.Create(True));
+
+  if Config.EnableSessionTelemetry then
+    Params.AddPair('enableSessionTelemetry', TJSONBool.Create(True));
+
+  // Merge trace context
+  var TraceCtx := GetTraceContextParams;
+  if TraceCtx.Count > 0 then
+  begin
+    for var Pair in TraceCtx do
+      Params.AddPair(Pair.JsonString.Value, Pair.JsonValue.Clone);
+  end;
+  TraceCtx.Free;
+
   ResultVal := FRpc.SendRequest('session.create', Params);
   try
     if not (ResultVal is TJSONObject) then
@@ -461,6 +487,7 @@ begin
   Session.Tools := Config.Tools;
   Session.OnPermissionRequest := Config.OnPermissionRequest;
   Session.OnUserInputRequest := Config.OnUserInputRequest;
+  Session.OnExitPlanMode := Config.OnExitPlanMode;
   Session.Hooks := Config.Hooks;
 
   FSessionsLock.Enter;
@@ -491,6 +518,21 @@ begin
   if Length(Config.Tools) > 0 then
     Params.AddPair('tools', BuildToolsArray(Config.Tools));
 
+  if Assigned(Config.OnExitPlanMode) then
+    Params.AddPair('requestExitPlanMode', TJSONBool.Create(True));
+
+  if Config.EnableSessionTelemetry then
+    Params.AddPair('enableSessionTelemetry', TJSONBool.Create(True));
+
+  // Merge trace context
+  var ResumeTraceCtx := GetTraceContextParams;
+  if ResumeTraceCtx.Count > 0 then
+  begin
+    for var Pair in ResumeTraceCtx do
+      Params.AddPair(Pair.JsonString.Value, Pair.JsonValue.Clone);
+  end;
+  ResumeTraceCtx.Free;
+
   ResultVal := FRpc.SendRequest('session.resume', Params);
   ResultVal.Free;
 
@@ -498,6 +540,7 @@ begin
   Session.Tools := Config.Tools;
   Session.OnPermissionRequest := Config.OnPermissionRequest;
   Session.OnUserInputRequest := Config.OnUserInputRequest;
+  Session.OnExitPlanMode := Config.OnExitPlanMode;
   Session.Hooks := Config.Hooks;
 
   FSessionsLock.Enter;
@@ -908,6 +951,70 @@ begin
   end
   else
     Result := TJSONObject.Create;
+end;
+
+function TCopilotClient.GetTraceContextParams: TJSONObject;
+var
+  Ctx: TTraceContext;
+begin
+  Result := TJSONObject.Create;
+  if Assigned(FOptions.OnGetTraceContext) then
+  begin
+    try
+      Ctx := FOptions.OnGetTraceContext();
+      if Ctx.Traceparent <> '' then
+        Result.AddPair('traceparent', Ctx.Traceparent);
+      if Ctx.Tracestate <> '' then
+        Result.AddPair('tracestate', Ctx.Tracestate);
+    except
+      // Swallow trace context errors
+    end;
+  end;
+end;
+
+function TCopilotClient.HandleExitPlanModeRequest(const Method: string;
+  const Params: TJSONValue): TJSONValue;
+var
+  Obj: TJSONObject;
+  Request: TExitPlanModeRequest;
+  Session: TCopilotSession;
+  PlanResult: TExitPlanModeResult;
+  ResultObj: TJSONObject;
+  ActionsArr: TJSONArray;
+  I: Integer;
+begin
+  Obj := Params as TJSONObject;
+  Request.Summary := Obj.GetValue<string>('summary', '');
+  Request.PlanContent := Obj.GetValue<string>('planContent', '');
+  Request.RecommendedAction := Obj.GetValue<string>('recommendedAction', '');
+  Request.SessionId := Obj.GetValue<string>('sessionId', '');
+
+  var ActionsVal := Obj.GetValue('actions');
+  if Assigned(ActionsVal) and (ActionsVal is TJSONArray) then
+  begin
+    ActionsArr := TJSONArray(ActionsVal);
+    SetLength(Request.Actions, ActionsArr.Count);
+    for I := 0 to ActionsArr.Count - 1 do
+      Request.Actions[I] := ActionsArr.Items[I].Value;
+  end;
+
+  Session := FindSession(Request.SessionId);
+  if Assigned(Session) then
+    PlanResult := Session.HandleExitPlanMode(Request)
+  else
+  begin
+    PlanResult.Approved := True;
+    PlanResult.SelectedAction := '';
+    PlanResult.Feedback := '';
+  end;
+
+  ResultObj := TJSONObject.Create;
+  ResultObj.AddPair('approved', TJSONBool.Create(PlanResult.Approved));
+  if PlanResult.SelectedAction <> '' then
+    ResultObj.AddPair('selectedAction', PlanResult.SelectedAction);
+  if PlanResult.Feedback <> '' then
+    ResultObj.AddPair('feedback', PlanResult.Feedback);
+  Result := ResultObj;
 end;
 
 end.

@@ -145,6 +145,28 @@ type
     Conventions: string;
   end;
 
+  // Exit plan mode types
+  TExitPlanModeRequest = record
+    Summary: string;
+    PlanContent: string;
+    Actions: TArray<string>;
+    RecommendedAction: string;
+    SessionId: string;
+  end;
+  TExitPlanModeResult = record
+    Approved: Boolean;
+    SelectedAction: string;
+    Feedback: string;
+  end;
+  TExitPlanModeHandler = reference to function(const Request: TExitPlanModeRequest): TExitPlanModeResult;
+
+  // Trace context types
+  TTraceContext = record
+    Traceparent: string;
+    Tracestate: string;
+  end;
+  TTraceContextProvider = reference to function: TTraceContext;
+
   // Elicitation handler callback
   TElicitationRequest = record
     Id: string;
@@ -205,6 +227,8 @@ type
     ImageOptions: TImageOptions;
     AuthToken: string;
     InstructionDirectories: TArray<string>;
+    EnableSessionTelemetry: Boolean;
+    OnExitPlanMode: TExitPlanModeHandler;
   end;
 
   // Resume session config
@@ -221,6 +245,8 @@ type
     ExcludedTools: TArray<string>;
     IncludeSubAgentStreamingEvents: Boolean;
     InstructionDirectories: TArray<string>;
+    EnableSessionTelemetry: Boolean;
+    OnExitPlanMode: TExitPlanModeHandler;
   end;
 
   // Session metadata
@@ -266,6 +292,8 @@ type
     SessionFs: TSessionFsConfig;
     CopilotHome: string;
     TcpConnectionToken: string;
+    Remote: Boolean;
+    OnGetTraceContext: TTraceContextProvider;
   end;
 
   // Unsubscribe token

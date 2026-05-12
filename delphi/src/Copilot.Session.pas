@@ -25,6 +25,7 @@ type
     FTools: TArray<TTool>;
     FOnPermissionRequest: TPermissionHandler;
     FOnUserInputRequest: TUserInputHandler;
+    FOnExitPlanMode: TExitPlanModeHandler;
     FHooks: TSessionHooks;
     procedure DispatchEvent(const Event: TSessionEvent);
     function GetNextHandlerId: Integer;
@@ -73,6 +74,9 @@ type
     // Handle a user input request from the server
     function HandleUserInput(const Request: TUserInputRequest): TUserInputResponse;
 
+    // Handle an exit plan mode request from the server
+    function HandleExitPlanMode(const Request: TExitPlanModeRequest): TExitPlanModeResult;
+
     property SessionId: string read FSessionId;
     property Streaming: Boolean read FStreaming write FStreaming;
     property Model: string read FModel write FModel;
@@ -81,6 +85,8 @@ type
       read FOnPermissionRequest write FOnPermissionRequest;
     property OnUserInputRequest: TUserInputHandler
       read FOnUserInputRequest write FOnUserInputRequest;
+    property OnExitPlanMode: TExitPlanModeHandler
+      read FOnExitPlanMode write FOnExitPlanMode;
     property Hooks: TSessionHooks read FHooks write FHooks;
   end;
 
@@ -321,6 +327,19 @@ begin
   begin
     Result.Answer := '';
     Result.Accepted := False;
+  end;
+end;
+
+function TCopilotSession.HandleExitPlanMode(
+  const Request: TExitPlanModeRequest): TExitPlanModeResult;
+begin
+  if Assigned(FOnExitPlanMode) then
+    Result := FOnExitPlanMode(Request)
+  else
+  begin
+    Result.Approved := True;
+    Result.SelectedAction := '';
+    Result.Feedback := '';
   end;
 end;
 

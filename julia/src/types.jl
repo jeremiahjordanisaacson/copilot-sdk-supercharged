@@ -105,6 +105,8 @@ Base.@kwdef mutable struct CopilotClientOptions
     session_fs::Union{SessionFsConfig, Nothing} = nothing
     copilot_home::Union{String, Nothing} = nothing
     tcp_connection_token::Union{String, Nothing} = nothing
+    remote::Bool = false
+    on_get_trace_context::Union{Function, Nothing} = nothing
 end
 
 """Configuration for creating a session."""
@@ -132,6 +134,8 @@ Base.@kwdef mutable struct SessionConfig
     request_headers::Union{Dict{String, String}, Nothing} = nothing
     on_elicitation_request::Union{Function, Nothing} = nothing
     instruction_directories::Vector{String} = String[]
+    enable_session_telemetry::Union{Bool, Nothing} = nothing
+    on_exit_plan_mode::Union{Function, Nothing} = nothing
 end
 
 """Payload for sending a message to a session."""
@@ -229,5 +233,35 @@ function PermissionRequest(d::Dict)
         tool_name     = get(d, "toolName", get(d, "tool_name", "")),
         description   = get(d, "description", ""),
         arguments     = get(d, "arguments", Dict{String, Any}()),
+    )
+end
+
+"""Exit plan mode request from the agent."""
+Base.@kwdef struct ExitPlanModeRequest
+    summary::String = ""
+    plan_content::Union{String, Nothing} = nothing
+    actions::Vector{String} = String[]
+    recommended_action::String = ""
+end
+
+"""Response to an exit-plan-mode request."""
+Base.@kwdef struct ExitPlanModeResult
+    approved::Bool = true
+    selected_action::Union{String, Nothing} = nothing
+    feedback::Union{String, Nothing} = nothing
+end
+
+"""W3C Trace Context for distributed tracing."""
+Base.@kwdef struct TraceContext
+    traceparent::Union{String, Nothing} = nothing
+    tracestate::Union{String, Nothing} = nothing
+end
+
+function ExitPlanModeRequest(d::Dict)
+    ExitPlanModeRequest(;
+        summary = get(d, "summary", ""),
+        plan_content = get(d, "planContent", nothing),
+        actions = get(d, "actions", String[]),
+        recommended_action = get(d, "recommendedAction", ""),
     )
 end

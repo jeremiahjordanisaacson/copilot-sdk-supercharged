@@ -182,6 +182,13 @@ function create_session(client::CopilotClient, config::SessionConfig)
         params["tools"] = [tool_to_wire(t) for t in tool_list]
     end
 
+    if config.on_exit_plan_mode !== nothing
+        params["requestExitPlanMode"] = true
+    end
+    if config.enable_session_telemetry !== nothing && config.enable_session_telemetry
+        params["enableSessionTelemetry"] = true
+    end
+
     result = send_request(client.rpc, "session.create", params; timeout=30)
 
     session_id = if result isa Dict
@@ -190,7 +197,16 @@ function create_session(client::CopilotClient, config::SessionConfig)
         string(UUIDs.uuid4())
     end
 
-    session = CopilotSession(session_id, client.rpc, config)
+    session = CopilotSession(session_id, client.rpc, config;
+        exit_plan_mode_handler=config.on_exit_plan_mode,
+        trace_context_provider=client.options.on_get_trace_context)
+
+    # Merge trace context into params (for initial create)
+    trace_ctx = get_trace_context(session)
+    for (k, v) in trace_ctx
+        params[k] = v
+    end
+
     client.sessions[session_id] = session
 
     # Register session-level RPC handlers
@@ -292,6 +308,13 @@ function resume_session(client::CopilotClient, session_id::AbstractString, confi
         params["systemMessage"] = config.system_message
     end
 
+    if config.on_exit_plan_mode !== nothing
+        params["requestExitPlanMode"] = true
+    end
+    if config.enable_session_telemetry !== nothing && config.enable_session_telemetry
+        params["enableSessionTelemetry"] = true
+    end
+
     result = send_request(client.rpc, "session.resume", params; timeout=30)
 
     sid = if result isa Dict
@@ -300,7 +323,16 @@ function resume_session(client::CopilotClient, session_id::AbstractString, confi
         session_id
     end
 
-    session = CopilotSession(sid, client.rpc, config)
+    session = CopilotSession(sid, client.rpc, config;
+        exit_plan_mode_handler=config.on_exit_plan_mode,
+        trace_context_provider=client.options.on_get_trace_context)
+
+    # Merge trace context
+    trace_ctx = get_trace_context(session)
+    for (k, v) in trace_ctx
+        params[k] = v
+    end
+
     client.sessions[sid] = session
     _register_session_handlers!(client, session)
     return session
@@ -436,6 +468,9 @@ function _spawn_stdio!(client::CopilotClient)
     push!(args, "--stdio")
     log_str = get(LOG_LEVEL_STRINGS, client.options.log_level, "error")
     push!(args, "--log-level=$log_str")
+    if client.options.remote
+        push!(args, "--remote")
+    end
 
     env_pairs = something(client.options.env, copy(ENV))
 
@@ -546,6 +581,17 @@ function _register_session_handlers!(client::CopilotClient, session::CopilotSess
             return Dict{String, Any}("decision" => "deny")
         end
         _handle_permission(s, params)
+    end
+
+    # Exit plan mode requests
+    on_request!(rpc, "exitPlanMode.request") do params
+        sid = get(params, "sessionId", "")
+        s = get(client.sessions, sid, nothing)
+        if s === nothing
+            return Dict{String, Any}("approved" => true)
+        end
+        req = ExitPlanModeRequest(params)
+        handle_exit_plan_mode(s, req)
     end
 end
 
