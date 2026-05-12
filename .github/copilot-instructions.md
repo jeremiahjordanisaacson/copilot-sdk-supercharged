@@ -127,7 +127,7 @@
 
 ## Where to add new code or tests 🧭
 
-- SDK code: `nodejs/src`, `python/copilot`, `go`, `dotnet/src`, and `{java,rust,ruby,php,swift,kotlin,cpp,c,dart,scala,r,perl,lua,shell,elixir,haskell,clojure,visualbasic,delphi,fortran,matlab,ada,objc,fsharp,groovy,julia,cobol,ocaml,zig,nim,dlang,erlang,crystal,tcl,solidity,vlang}/` (see each SDK's README for directory layout)
-- Unit tests: `nodejs/test`, `python/*`, `go/*`, `dotnet/test`, and test directories within each of the 36 additional SDK directories
+- SDK code: `nodejs/src`, `python/copilot`, `go`, `dotnet/src`, `rust/src`, and `{java,ruby,php,swift,kotlin,cpp,c,dart,scala,r,perl,lua,shell,elixir,haskell,clojure,visualbasic,delphi,fortran,matlab,ada,objc,fsharp,groovy,julia,cobol,ocaml,zig,nim,dlang,erlang,crystal,tcl,solidity,vlang}/` (see each SDK's README for directory layout)
+- Unit tests: `nodejs/test`, `python/*`, `go/*`, `dotnet/test`, `rust/tests`, and test directories within each of the 36 additional SDK directories
 - E2E tests: `*/e2e/` folders that use the shared replay proxy and `test/snapshots/`
 - Generated types: update schema in `@github/copilot` then run `cd nodejs && npm run generate:session-types` and commit generated files in `src/generated` or language generated location.

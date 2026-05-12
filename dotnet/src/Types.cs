@@ -13,6 +13,35 @@ using Microsoft.Extensions.Logging;
 
 namespace GitHub.Copilot.SDK;
 
+internal static class GeneratedStringEnumJson
+{
+    internal static string ReadValue(ref Utf8JsonReader reader, Type typeToConvert)
+    {
+        if (reader.TokenType != JsonTokenType.String)
+        {
+            throw new JsonException($"Expected a string token when reading {typeToConvert.Name}, but found {reader.TokenType}.");
+        }
+
+        var value = reader.GetString();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new JsonException($"Expected a non-empty string token when reading {typeToConvert.Name}.");
+        }
+
+        return value;
+    }
+
+    internal static void WriteValue(Utf8JsonWriter writer, string value, Type typeToConvert)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new JsonException($"Expected a non-empty string value when writing {typeToConvert.Name}.");
+        }
+
+        writer.WriteStringValue(value);
+    }
+}
+
 /// <summary>
 /// Represents the connection state of the Copilot client.
 /// </summary>
@@ -72,6 +101,7 @@ public class CopilotClientOptions
         SessionFs = other.SessionFs;
         SessionIdleTimeoutSeconds = other.SessionIdleTimeoutSeconds;
         TcpConnectionToken = other.TcpConnectionToken;
+        Remote = other.Remote;
     }
 
     /// <summary>
@@ -194,6 +224,15 @@ public class CopilotClientOptions
     /// listener is safe by default. Cannot be combined with <see cref="UseStdio"/> = true.
     /// </summary>
     public string? TcpConnectionToken { get; set; }
+
+    /// <summary>
+    /// Enable remote session support (Mission Control integration).
+    /// When true, sessions in a GitHub repository working directory are
+    /// accessible from GitHub web and mobile.
+    /// This option is only used when the SDK spawns the CLI process; it is ignored
+    /// when connecting to an external server via <see cref="CliUrl"/>.
+    /// </summary>
+    public bool Remote { get; set; }
 
     /// <summary>
     /// Creates a shallow clone of this <see cref="CopilotClientOptions"/> instance.
@@ -659,6 +698,129 @@ public class UserInputInvocation
 /// Handler for user input requests from the agent.
 /// </summary>
 public delegate Task<UserInputResponse> UserInputHandler(UserInputRequest request, UserInputInvocation invocation);
+
+/// <summary>
+/// Request to exit plan mode and continue with a selected action.
+/// </summary>
+public class ExitPlanModeRequest
+{
+    /// <summary>
+    /// Summary of the plan or proposed next step.
+    /// </summary>
+    [JsonPropertyName("summary")]
+    public string Summary { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Full plan content, when available.
+    /// </summary>
+    [JsonPropertyName("planContent")]
+    public string? PlanContent { get; set; }
+
+    /// <summary>
+    /// Available actions the user can select.
+    /// </summary>
+    [JsonPropertyName("actions")]
+    public IList<string> Actions { get => field ??= []; set; }
+
+    /// <summary>
+    /// The action recommended by the runtime.
+    /// </summary>
+    [JsonPropertyName("recommendedAction")]
+    public string RecommendedAction { get; set; } = "autopilot";
+}
+
+/// <summary>
+/// Response to an exit-plan-mode request.
+/// </summary>
+public class ExitPlanModeResult
+{
+    /// <summary>
+    /// Whether the user approved exiting plan mode.
+    /// </summary>
+    [JsonPropertyName("approved")]
+    public bool Approved { get; set; } = true;
+
+    /// <summary>
+    /// Selected action, if the user chose one.
+    /// </summary>
+    [JsonPropertyName("selectedAction")]
+    public string? SelectedAction { get; set; }
+
+    /// <summary>
+    /// Optional feedback provided by the user.
+    /// </summary>
+    [JsonPropertyName("feedback")]
+    public string? Feedback { get; set; }
+}
+
+/// <summary>
+/// Context for an exit-plan-mode request invocation.
+/// </summary>
+public class ExitPlanModeInvocation
+{
+    /// <summary>
+    /// Identifier of the session that triggered the request.
+    /// </summary>
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Handler for exit-plan-mode requests from the agent.
+/// </summary>
+public delegate Task<ExitPlanModeResult> ExitPlanModeHandler(ExitPlanModeRequest request, ExitPlanModeInvocation invocation);
+
+/// <summary>
+/// Request to switch to auto mode after an eligible rate limit.
+/// </summary>
+public class AutoModeSwitchRequest
+{
+    /// <summary>
+    /// The rate-limit error code that triggered the request.
+    /// </summary>
+    [JsonPropertyName("errorCode")]
+    public string? ErrorCode { get; set; }
+
+    /// <summary>
+    /// Seconds until the rate limit resets, when known.
+    /// </summary>
+    [JsonPropertyName("retryAfterSeconds")]
+    public double? RetryAfterSeconds { get; set; }
+}
+
+/// <summary>
+/// Response to an auto-mode-switch request.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<AutoModeSwitchResponse>))]
+public enum AutoModeSwitchResponse
+{
+    /// <summary>Approve the switch for this rate-limit cycle.</summary>
+    [JsonStringEnumMemberName("yes")]
+    Yes,
+
+    /// <summary>Approve and remember the choice for this session.</summary>
+    [JsonStringEnumMemberName("yes_always")]
+    YesAlways,
+
+    /// <summary>Decline the switch.</summary>
+    [JsonStringEnumMemberName("no")]
+    No
+}
+
+/// <summary>
+/// Context for an auto-mode-switch request invocation.
+/// </summary>
+public class AutoModeSwitchInvocation
+{
+    /// <summary>
+    /// Identifier of the session that triggered the request.
+    /// </summary>
+    public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Handler for auto-mode-switch requests from the agent.
+/// </summary>
+public delegate Task<AutoModeSwitchResponse> AutoModeSwitchHandler(AutoModeSwitchRequest request, AutoModeSwitchInvocation invocation);
 
 // ============================================================================
 // Command Handler Types
@@ -1528,6 +1690,40 @@ public class ProviderConfig
     /// </summary>
     [JsonPropertyName("headers")]
     public IDictionary<string, string>? Headers { get; set; }
+
+    /// <summary>
+    /// Well-known model name used by the runtime to look up agent configuration
+    /// (tools, prompts, reasoning behavior) and default token limits. Also used
+    /// as the wire model when <see cref="WireModel"/> is not set.
+    /// Falls back to <see cref="SessionConfig.Model"/>.
+    /// </summary>
+    [JsonPropertyName("modelId")]
+    public string? ModelId { get; set; }
+
+    /// <summary>
+    /// Model name sent to the provider API for inference. Use this when the
+    /// provider's model name (e.g. an Azure deployment name or a custom
+    /// fine-tune name) differs from <see cref="ModelId"/>.
+    /// Falls back to <see cref="ModelId"/>, then <see cref="SessionConfig.Model"/>.
+    /// </summary>
+    [JsonPropertyName("wireModel")]
+    public string? WireModel { get; set; }
+
+    /// <summary>
+    /// Overrides the resolved model's default max prompt tokens. The runtime
+    /// triggers conversation compaction before sending a request when the
+    /// prompt (system message, history, tool definitions, user message) would
+    /// exceed this limit.
+    /// </summary>
+    [JsonPropertyName("maxPromptTokens")]
+    public int? MaxInputTokens { get; set; }
+
+    /// <summary>
+    /// Overrides the resolved model's default max output tokens. When hit, the
+    /// model stops generating and returns a truncated response.
+    /// </summary>
+    [JsonPropertyName("maxOutputTokens")]
+    public int? MaxOutputTokens { get; set; }
 }
 
 /// <summary>
@@ -1810,11 +2006,14 @@ public class SessionConfig
             : null;
         Model = other.Model;
         ModelCapabilities = other.ModelCapabilities;
+        OnAutoModeSwitch = other.OnAutoModeSwitch;
         OnElicitationRequest = other.OnElicitationRequest;
         OnEvent = other.OnEvent;
+        OnExitPlanMode = other.OnExitPlanMode;
         OnPermissionRequest = other.OnPermissionRequest;
         OnUserInputRequest = other.OnUserInputRequest;
         Provider = other.Provider;
+        EnableSessionTelemetry = other.EnableSessionTelemetry;
         ReasoningEffort = other.ReasoningEffort;
         CreateSessionFsHandler = other.CreateSessionFsHandler;
         GitHubToken = other.GitHubToken;
@@ -1897,6 +2096,17 @@ public class SessionConfig
     public ProviderConfig? Provider { get; set; }
 
     /// <summary>
+    /// Enables or disables internal session telemetry for this session.
+    /// When <c>false</c>, disables session telemetry. When <c>null</c> (the default) or <c>true</c>,
+    /// telemetry is enabled for GitHub-authenticated sessions.
+    /// When a custom <see cref="Provider"/> (BYOK) is configured, session telemetry is
+    /// always disabled regardless of this setting.
+    /// This is independent of <see cref="CopilotClientOptions.Telemetry"/>, which configures
+    /// OpenTelemetry export for observability.
+    /// </summary>
+    public bool? EnableSessionTelemetry { get; set; }
+
+    /// <summary>
     /// Handler for permission requests from the server.
     /// When provided, the server will call this handler to request permission for operations.
     /// </summary>
@@ -1921,6 +2131,18 @@ public class SessionConfig
     /// and report elicitation as a supported capability.
     /// </summary>
     public ElicitationHandler? OnElicitationRequest { get; set; }
+
+    /// <summary>
+    /// Handler for exit-plan-mode requests from the server.
+    /// When provided, the server will route <c>exitPlanMode.request</c> callbacks to this handler.
+    /// </summary>
+    public ExitPlanModeHandler? OnExitPlanMode { get; set; }
+
+    /// <summary>
+    /// Handler for auto-mode-switch requests from the server.
+    /// When provided, the server will route <c>autoModeSwitch.request</c> callbacks to this handler.
+    /// </summary>
+    public AutoModeSwitchHandler? OnAutoModeSwitch { get; set; }
 
     /// <summary>
     /// Hook handlers for session lifecycle events.
@@ -2075,11 +2297,14 @@ public class ResumeSessionConfig
             : null;
         Model = other.Model;
         ModelCapabilities = other.ModelCapabilities;
+        OnAutoModeSwitch = other.OnAutoModeSwitch;
         OnElicitationRequest = other.OnElicitationRequest;
         OnEvent = other.OnEvent;
+        OnExitPlanMode = other.OnExitPlanMode;
         OnPermissionRequest = other.OnPermissionRequest;
         OnUserInputRequest = other.OnUserInputRequest;
         Provider = other.Provider;
+        EnableSessionTelemetry = other.EnableSessionTelemetry;
         ReasoningEffort = other.ReasoningEffort;
         CreateSessionFsHandler = other.CreateSessionFsHandler;
         GitHubToken = other.GitHubToken;
@@ -2131,6 +2356,17 @@ public class ResumeSessionConfig
     public ProviderConfig? Provider { get; set; }
 
     /// <summary>
+    /// Enables or disables internal session telemetry for this session.
+    /// When <c>false</c>, disables session telemetry. When <c>null</c> (the default) or <c>true</c>,
+    /// telemetry is enabled for GitHub-authenticated sessions.
+    /// When a custom <see cref="Provider"/> (BYOK) is configured, session telemetry is
+    /// always disabled regardless of this setting.
+    /// This is independent of <see cref="CopilotClientOptions.Telemetry"/>, which configures
+    /// OpenTelemetry export for observability.
+    /// </summary>
+    public bool? EnableSessionTelemetry { get; set; }
+
+    /// <summary>
     /// Reasoning effort level for models that support it.
     /// Valid values: "low", "medium", "high", "xhigh".
     /// </summary>
@@ -2166,6 +2402,18 @@ public class ResumeSessionConfig
     /// and report elicitation as a supported capability.
     /// </summary>
     public ElicitationHandler? OnElicitationRequest { get; set; }
+
+    /// <summary>
+    /// Handler for exit-plan-mode requests from the server.
+    /// When provided, the server will route <c>exitPlanMode.request</c> callbacks to this handler.
+    /// </summary>
+    public ExitPlanModeHandler? OnExitPlanMode { get; set; }
+
+    /// <summary>
+    /// Handler for auto-mode-switch requests from the server.
+    /// When provided, the server will route <c>autoModeSwitch.request</c> callbacks to this handler.
+    /// </summary>
+    public AutoModeSwitchHandler? OnAutoModeSwitch { get; set; }
 
     /// <summary>
     /// Hook handlers for session lifecycle events.
@@ -2702,7 +2950,7 @@ public class ModelBilling
     /// Billing cost multiplier relative to the base model rate.
     /// </summary>
     [JsonPropertyName("multiplier")]
-    public double Multiplier { get; set; }
+    public double? Multiplier { get; set; }
 }
 
 /// <summary>
@@ -2887,8 +3135,12 @@ public class SystemMessageTransformRpcResponse
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(AssistantImageData))]
 [JsonSerializable(typeof(AzureOptions))]
+[JsonSerializable(typeof(AutoModeSwitchRequest))]
+[JsonSerializable(typeof(AutoModeSwitchResponse))]
 [JsonSerializable(typeof(ContentBlock))]
 [JsonSerializable(typeof(CustomAgentConfig))]
+[JsonSerializable(typeof(ExitPlanModeRequest))]
+[JsonSerializable(typeof(ExitPlanModeResult))]
 [JsonSerializable(typeof(ImageOptions))]
 [JsonSerializable(typeof(GetAuthStatusResponse))]
 [JsonSerializable(typeof(GetForegroundSessionResponse))]

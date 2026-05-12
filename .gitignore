@@ -6,6 +6,10 @@ docs/.validation/
 visualbasic/bin/
 visualbasic/obj/
 
+# Rust scenario build artifacts
+test/scenarios/**/rust/target/
+test/scenarios/**/rust/Cargo.lock
+
 # Visual Studio
 .vs/
 

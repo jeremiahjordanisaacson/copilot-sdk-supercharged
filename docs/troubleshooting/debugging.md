@@ -1,19 +1,17 @@
-# Debugging Guide
+# Debugging guide
 
 This guide covers common issues and debugging techniques for the Copilot SDK across all supported languages.
 
-## Table of Contents
+## Table of contents
 
-- [Enable Debug Logging](#enable-debug-logging)
-- [Common Issues](#common-issues)
-- [MCP Server Debugging](#mcp-server-debugging)
-- [Connection Issues](#connection-issues)
-- [Tool Execution Issues](#tool-execution-issues)
-- [Platform-Specific Issues](#platform-specific-issues)
+* [Enable Debug Logging](#enable-debug-logging)
+* [Common Issues](#common-issues)
+* [MCP Server Debugging](#mcp-server-debugging)
+* [Connection Issues](#connection-issues)
+* [Tool Execution Issues](#tool-execution-issues)
+* [Platform-Specific Issues](#platform-specific-issues)
 
----
-
-## Enable Debug Logging
+## Enable debug logging
 
 The first step in debugging is enabling verbose logging to see what's happening under the hood.
 
@@ -134,7 +132,8 @@ const client = new CopilotClient({
 # the CLI when running in server mode.
 ```
 
-> **Note:** Python SDK logging configuration is limited. For advanced logging, run the CLI manually with `--log-dir` and connect via `cli_url`.
+> [!NOTE]
+> Python SDK logging configuration is limited. For advanced logging, run the CLI manually with `--log-dir` and connect via `cli_url`.
 
 </details>
 
@@ -184,11 +183,9 @@ var client = new CopilotClient(new CopilotClientOptions
 
 </details>
 
----
+## Common issues
 
-## Common Issues
-
-### "CLI not found" / "copilot: command not found"
+### "CLI not found" / "Copilot: command not found"
 
 **Cause:** The Copilot CLI is not installed or not in PATH.
 
@@ -196,12 +193,12 @@ var client = new CopilotClient(new CopilotClientOptions
 
 1. Install the CLI: [Installation guide](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)
 
-2. Verify installation:
+1. Verify installation:
    ```bash
    copilot --version
    ```
 
-3. Or specify the full path:
+1. Or specify the full path:
 
    <details open>
    <summary><strong>Node.js</strong></summary>
@@ -263,7 +260,7 @@ var client = new CopilotClient(new CopilotClientOptions
    copilot auth login
    ```
 
-2. Or provide a token programmatically:
+1. Or provide a token programmatically:
 
    <details open>
    <summary><strong>Node.js</strong></summary>
@@ -327,7 +324,7 @@ var client = new CopilotClient(new CopilotClientOptions
    // Don't use session after this!
    ```
 
-2. For resuming sessions, verify the session ID exists:
+1. For resuming sessions, verify the session ID exists:
    ```typescript
    const sessions = await client.listSessions();
    console.log("Available sessions:", sessions);
@@ -344,7 +341,7 @@ var client = new CopilotClient(new CopilotClientOptions
    copilot --server --stdio
    ```
 
-2. Check for port conflicts if using TCP mode:
+1. Check for port conflicts if using TCP mode:
    ```typescript
    const client = new CopilotClient({
      useStdio: false,
@@ -352,21 +349,19 @@ var client = new CopilotClient(new CopilotClientOptions
    });
    ```
 
----
-
-## MCP Server Debugging
+## MCP server debugging
 
 MCP (Model Context Protocol) servers can be tricky to debug. For comprehensive MCP debugging guidance, see the dedicated **[MCP Debugging Guide](./mcp-debugging.md)**.
 
-### Quick MCP Checklist
+### Quick MCP checklist
 
-- [ ] MCP server executable exists and runs independently
-- [ ] Command path is correct (use absolute paths)
-- [ ] Tools are enabled: `tools: ["*"]`
-- [ ] Server responds to `initialize` request correctly
-- [ ] Working directory (`cwd`) is set if needed
+* [ ] MCP server executable exists and runs independently
+* [ ] Command path is correct (use absolute paths)
+* [ ] Tools are enabled: `tools: ["*"]`
+* [ ] Server responds to `initialize` request correctly
+* [ ] Working directory (`cwd`) is set if needed
 
-### Test Your MCP Server
+### Test your MCP server
 
 Before integrating with the SDK, verify your MCP server works:
 
@@ -376,11 +371,9 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 
 See [MCP Debugging Guide](./mcp-debugging.md) for detailed troubleshooting.
 
----
+## Connection issues
 
-## Connection Issues
-
-### Stdio vs TCP Mode
+### stdio vs TCP mode
 
 The SDK supports two transport modes:
 
@@ -411,7 +404,7 @@ const client = new CopilotClient({
 });
 ```
 
-### Diagnosing Connection Failures
+### Diagnosing connection failures
 
 1. **Check client state:**
    ```typescript
@@ -419,24 +412,22 @@ const client = new CopilotClient({
    // Should be "connected" after start()
    ```
 
-2. **Listen for state changes:**
+1. **Listen for state changes:**
    ```typescript
    client.on("stateChange", (state) => {
      console.log("State changed to:", state);
    });
    ```
 
-3. **Verify CLI process is running:**
+1. **Verify CLI process is running:**
    ```bash
    # Check for copilot processes
    ps aux | grep copilot
    ```
 
----
+## Tool execution issues
 
-## Tool Execution Issues
-
-### Custom Tool Not Being Called
+### Custom tool not being called
 
 1. **Verify tool registration:**
    ```typescript
@@ -448,7 +439,7 @@ const client = new CopilotClient({
    console.log("Registered tools:", session.getTools?.());
    ```
 
-2. **Check tool schema is valid JSON Schema:**
+1. **Check tool schema is valid JSON Schema:**
    ```typescript
    const myTool = {
      name: "get_weather",
@@ -466,7 +457,7 @@ const client = new CopilotClient({
    };
    ```
 
-3. **Ensure handler returns valid result:**
+1. **Ensure handler returns valid result:**
    ```typescript
    handler: async (args) => {
      // Must return something JSON-serializable
@@ -476,7 +467,7 @@ const client = new CopilotClient({
    }
    ```
 
-### Tool Errors Not Surfacing
+### Tool errors not surfacing
 
 Subscribe to error events:
 
@@ -490,9 +481,7 @@ session.on("error", (event) => {
 });
 ```
 
----
-
-## Platform-Specific Issues
+## Platform-specific issues
 
 ### Windows
 
@@ -503,13 +492,13 @@ session.on("error", (event) => {
    CliPath = "C:/Program Files/GitHub/copilot.exe"
    ```
 
-2. **PATHEXT resolution:** The SDK handles this automatically, but if issues persist:
+1. **PATHEXT resolution:** The SDK handles this automatically, but if issues persist:
    ```csharp
    // Explicitly specify .exe
    Command = "myserver.exe"  // Not just "myserver"
    ```
 
-3. **Console encoding:** Ensure UTF-8 for proper JSON handling:
+1. **Console encoding:** Ensure UTF-8 for proper JSON handling:
    ```csharp
    Console.OutputEncoding = System.Text.Encoding.UTF8;
    ```
@@ -521,7 +510,7 @@ session.on("error", (event) => {
    xattr -d com.apple.quarantine /path/to/copilot
    ```
 
-2. **PATH issues in GUI apps:** GUI applications may not inherit shell PATH:
+1. **PATH issues in GUI apps:** GUI applications may not inherit shell PATH:
    ```typescript
    const client = new CopilotClient({
      cliPath: "/opt/homebrew/bin/copilot",  // Full path
@@ -535,29 +524,27 @@ session.on("error", (event) => {
    chmod +x /path/to/copilot
    ```
 
-2. **Missing libraries:** Check for required shared libraries:
+1. **Missing libraries:** Check for required shared libraries:
    ```bash
    ldd /path/to/copilot
    ```
 
----
-
-## Getting Help
+## Getting help
 
 If you're still stuck:
 
 1. **Collect debug information:**
-   - SDK version
-   - CLI version (`copilot --version`)
-   - Operating system
-   - Debug logs
-   - Minimal reproduction code
+   * SDK version
+   * CLI version (`copilot --version`)
+   * Operating system
+   * Debug logs
+   * Minimal reproduction code
 
 2. **Search existing issues:** [GitHub Issues](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/issues)
 
-3. **Open a new issue** with the collected information
+1. **Open a new issue** with the collected information
 
-## See Also
+## See also
 
 - [Getting Started Guide](../getting-started.md)
 - [MCP Overview](../features/mcp.md) - MCP configuration and setup

@@ -13,6 +13,13 @@ import type { MessageConnection } from "vscode-jsonrpc/node.js";
  */
 export type AuthInfoType = "hmac" | "env" | "user" | "gh-cli" | "api-key" | "token" | "copilot-api-token";
 /**
+ * Result of the queued command execution
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueuedCommandResult".
+ */
+export type QueuedCommandResult = QueuedCommandHandled | QueuedCommandNotHandled;
+/**
  * Server transport type: stdio, http, sse, or memory (local configs are normalized to stdio)
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -167,7 +174,9 @@ export type PermissionDecisionApproveForSessionApproval =
   | PermissionDecisionApproveForSessionApprovalMcp
   | PermissionDecisionApproveForSessionApprovalMcpSampling
   | PermissionDecisionApproveForSessionApprovalMemory
-  | PermissionDecisionApproveForSessionApprovalCustomTool;
+  | PermissionDecisionApproveForSessionApprovalCustomTool
+  | PermissionDecisionApproveForSessionApprovalExtensionManagement
+  | PermissionDecisionApproveForSessionApprovalExtensionPermissionAccess;
 /**
  * The approval to persist for this location
  *
@@ -181,7 +190,9 @@ export type PermissionDecisionApproveForLocationApproval =
   | PermissionDecisionApproveForLocationApprovalMcp
   | PermissionDecisionApproveForLocationApprovalMcpSampling
   | PermissionDecisionApproveForLocationApprovalMemory
-  | PermissionDecisionApproveForLocationApprovalCustomTool;
+  | PermissionDecisionApproveForLocationApprovalCustomTool
+  | PermissionDecisionApproveForLocationApprovalExtensionManagement
+  | PermissionDecisionApproveForLocationApprovalExtensionPermissionAccess;
 /**
  * Error classification
  *
@@ -391,6 +402,39 @@ export interface CommandsHandlePendingCommandRequest {
 export interface CommandsHandlePendingCommandResult {
   /**
    * Whether the command was handled successfully
+   */
+  success: boolean;
+}
+
+export interface CommandsRespondToQueuedCommandRequest {
+  /**
+   * Request ID from the queued command event
+   */
+  requestId: string;
+  result: QueuedCommandResult;
+}
+
+export interface QueuedCommandHandled {
+  /**
+   * The command was handled
+   */
+  handled: true;
+  /**
+   * If true, stop processing remaining queued items
+   */
+  stopProcessingQueue?: boolean;
+}
+
+export interface QueuedCommandNotHandled {
+  /**
+   * The command was not handled
+   */
+  handled: false;
+}
+
+export interface CommandsRespondToQueuedCommandResult {
+  /**
+   * Whether the response was accepted (false if the requestId was not found or already resolved)
    */
   success: boolean;
 }
@@ -1138,7 +1182,7 @@ export interface ModelBilling {
   /**
    * Billing cost multiplier relative to the base rate
    */
-  multiplier: number;
+  multiplier?: number;
 }
 /**
  * Override individual model capabilities resolved by the runtime
@@ -1294,6 +1338,16 @@ export interface PermissionDecisionApproveForSessionApprovalCustomTool {
   toolName: string;
 }
 
+export interface PermissionDecisionApproveForSessionApprovalExtensionManagement {
+  kind: "extension-management";
+  operation?: string;
+}
+
+export interface PermissionDecisionApproveForSessionApprovalExtensionPermissionAccess {
+  kind: "extension-permission-access";
+  extensionName: string;
+}
+
 export interface PermissionDecisionApproveForLocation {
   /**
    * Approved and persisted for this project location
@@ -1337,6 +1391,16 @@ export interface PermissionDecisionApproveForLocationApprovalMemory {
 export interface PermissionDecisionApproveForLocationApprovalCustomTool {
   kind: "custom-tool";
   toolName: string;
+}
+
+export interface PermissionDecisionApproveForLocationApprovalExtensionManagement {
+  kind: "extension-management";
+  operation?: string;
+}
+
+export interface PermissionDecisionApproveForLocationApprovalExtensionPermissionAccess {
+  kind: "extension-permission-access";
+  extensionName: string;
 }
 
 export interface PermissionDecisionApprovePermanently {
@@ -1475,6 +1539,18 @@ export interface PluginList {
    * Installed plugins
    */
   plugins: Plugin[];
+}
+
+/** @experimental */
+export interface RemoteEnableResult {
+  /**
+   * Mission Control frontend URL for this session
+   */
+  url?: string;
+  /**
+   * Whether remote steering is enabled
+   */
+  remoteSteerable: boolean;
 }
 
 export interface ServerSkill {
@@ -2074,6 +2150,34 @@ export interface TasksRemoveResult {
 }
 
 /** @experimental */
+export interface TasksSendMessageRequest {
+  /**
+   * Agent task identifier
+   */
+  id: string;
+  /**
+   * Message content to send to the agent
+   */
+  message: string;
+  /**
+   * Agent ID of the sender, if sent on behalf of another agent
+   */
+  fromAgentId?: string;
+}
+
+/** @experimental */
+export interface TasksSendMessageResult {
+  /**
+   * Whether the message was successfully delivered or steered
+   */
+  sent: boolean;
+  /**
+   * Error message if delivery failed
+   */
+  error?: string;
+}
+
+/** @experimental */
 export interface TasksStartAgentRequest {
   /**
    * Type of agent to start (e.g., 'explore', 'task', 'general-purpose')
@@ -2456,7 +2560,6 @@ export interface WorkspacesGetWorkspaceResult {
     branch?: string;
     name?: string;
     user_named?: boolean;
-    summary?: string;
     summary_count?: number;
     created_at?: string;
     updated_at?: string;
@@ -2464,7 +2567,6 @@ export interface WorkspacesGetWorkspaceResult {
     mc_task_id?: string;
     mc_session_id?: string;
     mc_last_event_id?: string;
-    session_sync_level?: "local" | "user" | "repo_and_user";
     chronicle_sync_dismissed?: boolean;
   } | null;
 }
@@ -2636,6 +2738,8 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
                 connection.sendRequest("session.tasks.cancel", { sessionId, ...params }),
             remove: async (params: TasksRemoveRequest): Promise<TasksRemoveResult> =>
                 connection.sendRequest("session.tasks.remove", { sessionId, ...params }),
+            sendMessage: async (params: TasksSendMessageRequest): Promise<TasksSendMessageResult> =>
+                connection.sendRequest("session.tasks.sendMessage", { sessionId, ...params }),
         },
         /** @experimental */
         skills: {
@@ -2687,6 +2791,8 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
         commands: {
             handlePendingCommand: async (params: CommandsHandlePendingCommandRequest): Promise<CommandsHandlePendingCommandResult> =>
                 connection.sendRequest("session.commands.handlePendingCommand", { sessionId, ...params }),
+            respondToQueuedCommand: async (params: CommandsRespondToQueuedCommandRequest): Promise<CommandsRespondToQueuedCommandResult> =>
+                connection.sendRequest("session.commands.respondToQueuedCommand", { sessionId, ...params }),
         },
         ui: {
             elicitation: async (params: UIElicitationRequest): Promise<UIElicitationResponse> =>
@@ -2721,6 +2827,13 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
         usage: {
             getMetrics: async (): Promise<UsageGetMetricsResult> =>
                 connection.sendRequest("session.usage.getMetrics", { sessionId }),
+        },
+        /** @experimental */
+        remote: {
+            enable: async (): Promise<RemoteEnableResult> =>
+                connection.sendRequest("session.remote.enable", { sessionId }),
+            disable: async (): Promise<void> =>
+                connection.sendRequest("session.remote.disable", { sessionId }),
         },
     };
 }

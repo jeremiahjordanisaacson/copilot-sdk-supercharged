@@ -325,7 +325,16 @@ let generatedEnums = new Map<string, { enumName: string; values: string[] }>();
 /** Schema definitions available during session event generation (for $ref resolution). */
 let sessionDefinitions: DefinitionCollections = { definitions: {}, $defs: {} };
 
-function getOrCreateEnum(parentClassName: string, propName: string, values: string[], enumOutput: string[], description?: string, explicitName?: string, deprecated?: boolean): string {
+/** Emits a schema enum as a string-backed value type that preserves unknown runtime values. */
+function getOrCreateEnum(
+    parentClassName: string,
+    propName: string,
+    values: string[],
+    enumOutput: string[],
+    description?: string,
+    explicitName?: string,
+    deprecated?: boolean
+): string {
     const enumName = explicitName ?? `${parentClassName}${propName}`;
     const existing = generatedEnums.get(enumName);
     if (existing) return existing.enumName;
@@ -334,11 +343,52 @@ function getOrCreateEnum(parentClassName: string, propName: string, values: stri
     const lines: string[] = [];
     lines.push(...xmlDocEnumComment(description, ""));
     if (deprecated) lines.push(`[Obsolete("This member is deprecated and will be removed in a future version.")]`);
-    lines.push(`[JsonConverter(typeof(JsonStringEnumConverter<${enumName}>))]`, `public enum ${enumName}`, `{`);
+    lines.push(`[JsonConverter(typeof(Converter))]`);
+    lines.push(`[DebuggerDisplay("{Value,nq}")]`);
+    lines.push(`public readonly struct ${enumName} : IEquatable<${enumName}>`);
+    lines.push(`{`);
+    lines.push(`    private readonly string? _value;`, "");
+    lines.push(`    /// <summary>Initializes a new instance of the <see cref="${enumName}"/> struct.</summary>`);
+    lines.push(`    /// <param name="value">The value to associate with this <see cref="${enumName}"/>.</param>`);
+    lines.push(`    [JsonConstructor]`);
+    lines.push(`    public ${enumName}(string value)`);
+    lines.push(`    {`);
+    lines.push(`        ArgumentException.ThrowIfNullOrWhiteSpace(value);`);
+    lines.push(`        _value = value;`);
+    lines.push(`    }`, "");
+    lines.push(`    /// <summary>Gets the value associated with this <see cref="${enumName}"/>.</summary>`);
+    lines.push(`    public string Value => _value ?? string.Empty;`, "");
     for (const value of values) {
-        lines.push(`    /// <summary>The <c>${escapeXml(value)}</c> variant.</summary>`);
-        lines.push(`    [JsonStringEnumMemberName("${value}")]`, `    ${toPascalCaseEnumMember(value)},`);
+        lines.push(`    /// <summary>Gets the <c>${escapeXml(value)}</c> value.</summary>`);
+        lines.push(`    public static ${enumName} ${toPascalCaseEnumMember(value)} { get; } = new("${value}");`, "");
     }
+    lines.push(`    /// <summary>Returns a value indicating whether two <see cref="${enumName}"/> instances are equivalent.</summary>`);
+    lines.push(`    public static bool operator ==(${enumName} left, ${enumName} right) => left.Equals(right);`, "");
+    lines.push(`    /// <summary>Returns a value indicating whether two <see cref="${enumName}"/> instances are not equivalent.</summary>`);
+    lines.push(`    public static bool operator !=(${enumName} left, ${enumName} right) => !(left == right);`, "");
+    lines.push(`    /// <inheritdoc />`);
+    lines.push(`    public override bool Equals(object? obj) => obj is ${enumName} other && Equals(other);`, "");
+    lines.push(`    /// <inheritdoc />`);
+    lines.push(`    public bool Equals(${enumName} other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);`, "");
+    lines.push(`    /// <inheritdoc />`);
+    lines.push(`    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);`, "");
+    lines.push(`    /// <inheritdoc />`);
+    lines.push(`    public override string ToString() => Value;`, "");
+    lines.push(`    /// <summary>Provides a <see cref="JsonConverter{${enumName}}"/> for serializing <see cref="${enumName}"/> instances.</summary>`);
+    lines.push(`    [EditorBrowsable(EditorBrowsableState.Never)]`);
+    lines.push(`    public sealed class Converter : JsonConverter<${enumName}>`);
+    lines.push(`    {`);
+    lines.push(`        /// <inheritdoc />`);
+    lines.push(`        public override ${enumName} Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)`);
+    lines.push(`        {`);
+    lines.push(`            return new(GitHub.Copilot.SDK.GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));`);
+    lines.push(`        }`, "");
+    lines.push(`        /// <inheritdoc />`);
+    lines.push(`        public override void Write(Utf8JsonWriter writer, ${enumName} value, JsonSerializerOptions options)`);
+    lines.push(`        {`);
+    lines.push(`            GitHub.Copilot.SDK.GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(${enumName}));`);
+    lines.push(`        }`);
+    lines.push(`    }`);
     lines.push(`}`, "");
     enumOutput.push(lines.join("\n"));
     return enumName;
@@ -366,10 +416,20 @@ function extractEventVariants(schema: JSONSchema7): EventVariant[] {
         });
 }
 
+interface DiscriminatorVariant {
+    value: unknown;
+    schema: JSONSchema7;
+}
+
+interface DiscriminatorInfo {
+    property: string;
+    mapping: Map<string, DiscriminatorVariant>;
+}
+
 /**
  * Find a discriminator property shared by all variants in an anyOf.
  */
-function findDiscriminator(variants: JSONSchema7[]): { property: string; mapping: Map<string, JSONSchema7> } | null {
+function findDiscriminator(variants: JSONSchema7[]): DiscriminatorInfo | null {
     if (variants.length === 0) return null;
     const firstVariant = variants[0];
     if (!firstVariant.properties) return null;
@@ -379,7 +439,7 @@ function findDiscriminator(variants: JSONSchema7[]): { property: string; mapping
         const schema = propSchema as JSONSchema7;
         if (schema.const === undefined) continue;
 
-        const mapping = new Map<string, JSONSchema7>();
+        const mapping = new Map<string, DiscriminatorVariant>();
         let isValidDiscriminator = true;
 
         for (const variant of variants) {
@@ -388,7 +448,9 @@ function findDiscriminator(variants: JSONSchema7[]): { property: string; mapping
             if (typeof variantProp !== "object") { isValidDiscriminator = false; break; }
             const variantSchema = variantProp as JSONSchema7;
             if (variantSchema.const === undefined) { isValidDiscriminator = false; break; }
-            mapping.set(String(variantSchema.const), variant);
+            const key = String(variantSchema.const);
+            if (mapping.has(key)) { isValidDiscriminator = false; break; }
+            mapping.set(key, { value: variantSchema.const, schema: variant });
         }
 
         if (isValidDiscriminator && mapping.size === variants.length) {
@@ -408,6 +470,94 @@ type PropertyTypeResolver = (
     nestedClasses: Map<string, string>,
     enumOutput: string[]
 ) => string;
+
+function isBooleanDiscriminator(discriminatorInfo: DiscriminatorInfo): boolean {
+    return Array.from(discriminatorInfo.mapping.values()).every((variant) => typeof variant.value === "boolean");
+}
+
+function escapeCSharpStringLiteral(value: string): string {
+    return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function generateDiscriminatedUnionClass(
+    baseClassName: string,
+    discriminatorInfo: DiscriminatorInfo,
+    variants: JSONSchema7[],
+    knownTypes: Map<string, string>,
+    nestedClasses: Map<string, string>,
+    enumOutput: string[],
+    description?: string,
+    propertyResolver?: PropertyTypeResolver
+): string {
+    if (isBooleanDiscriminator(discriminatorInfo)) {
+        return generateFlattenedBooleanDiscriminatedClass(baseClassName, discriminatorInfo, knownTypes, nestedClasses, enumOutput, description, propertyResolver);
+    }
+
+    return generatePolymorphicClasses(baseClassName, discriminatorInfo.property, variants, knownTypes, nestedClasses, enumOutput, description, propertyResolver);
+}
+
+function generateFlattenedBooleanDiscriminatedClass(
+    baseClassName: string,
+    discriminatorInfo: DiscriminatorInfo,
+    knownTypes: Map<string, string>,
+    nestedClasses: Map<string, string>,
+    enumOutput: string[],
+    description?: string,
+    propertyResolver?: PropertyTypeResolver
+): string {
+    const resolver = propertyResolver ?? resolveSessionPropertyType;
+    const renamedBase = applyTypeRename(baseClassName);
+    const lines: string[] = [];
+    const flattenedProperties = new Map<string, { schema: JSONSchema7; requiredCount: number; variantCount: number }>();
+    const variants = Array.from(discriminatorInfo.mapping.values()).map((variant) => variant.schema);
+
+    for (const variant of variants) {
+        const required = new Set(variant.required || []);
+        for (const [propName, propSchema] of Object.entries(variant.properties || {})) {
+            if (typeof propSchema !== "object" || propName === discriminatorInfo.property) continue;
+
+            const existing = flattenedProperties.get(propName);
+            if (existing) {
+                existing.variantCount++;
+                if (required.has(propName)) existing.requiredCount++;
+                continue;
+            }
+
+            flattenedProperties.set(propName, {
+                schema: propSchema as JSONSchema7,
+                requiredCount: required.has(propName) ? 1 : 0,
+                variantCount: 1,
+            });
+        }
+    }
+
+    lines.push(...xmlDocCommentWithFallback(description, `Data type discriminated by <c>${escapeXml(discriminatorInfo.property)}</c>.`, ""));
+    lines.push(`public partial class ${renamedBase}`);
+    lines.push(`{`);
+    lines.push(`    /// <summary>The boolean discriminator.</summary>`);
+    lines.push(`    [JsonPropertyName("${discriminatorInfo.property}")]`);
+    lines.push(`    public bool ${toPascalCase(discriminatorInfo.property)} { get; set; }`);
+
+    const propertyEntries = Array.from(flattenedProperties.entries()).sort(([a], [b]) => a.localeCompare(b));
+    for (const [propName, info] of propertyEntries) {
+        const isReq = info.variantCount === variants.length && info.requiredCount === variants.length;
+        const csharpName = toPascalCase(propName);
+        const csharpType = resolver(info.schema, renamedBase, csharpName, isReq, knownTypes, nestedClasses, enumOutput);
+
+        lines.push("");
+        lines.push(...xmlDocPropertyComment(info.schema.description, propName, "    "));
+        lines.push(...emitDataAnnotations(info.schema, "    "));
+        if (isSchemaDeprecated(info.schema)) lines.push(`    [Obsolete("This member is deprecated and will be removed in a future version.")]`);
+        if (isDurationProperty(info.schema)) lines.push(`    [JsonConverter(typeof(MillisecondsTimeSpanConverter))]`);
+        if (!isReq) lines.push(`    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`);
+        lines.push(`    [JsonPropertyName("${propName}")]`);
+        const reqMod = isReq && !csharpType.endsWith("?") ? "required " : "";
+        lines.push(`    public ${reqMod}${csharpType} ${csharpName} { get; set; }`);
+    }
+
+    lines.push(`}`);
+    return lines.join("\n");
+}
 
 /**
  * Generate a polymorphic base class and derived classes for a discriminated union.
@@ -432,9 +582,10 @@ function generatePolymorphicClasses(
     lines.push(`    TypeDiscriminatorPropertyName = "${discriminatorProperty}",`);
     lines.push(`    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]`);
 
-    for (const [constValue] of discriminatorInfo.mapping) {
+    for (const { value } of discriminatorInfo.mapping.values()) {
+        const constValue = String(value);
         const derivedClassName = applyTypeRename(`${baseClassName}${toPascalCase(constValue)}`);
-        lines.push(`[JsonDerivedType(typeof(${derivedClassName}), "${constValue}")]`);
+        lines.push(`[JsonDerivedType(typeof(${derivedClassName}), "${escapeCSharpStringLiteral(constValue)}")]`);
     }
 
     lines.push(`public partial class ${renamedBase}`);
@@ -445,9 +596,10 @@ function generatePolymorphicClasses(
     lines.push(`}`);
     lines.push("");
 
-    for (const [constValue, variant] of discriminatorInfo.mapping) {
+    for (const { value, schema } of discriminatorInfo.mapping.values()) {
+        const constValue = String(value);
         const derivedClassName = applyTypeRename(`${baseClassName}${toPascalCase(constValue)}`);
-        const derivedCode = generateDerivedClass(derivedClassName, renamedBase, discriminatorProperty, constValue, variant, knownTypes, nestedClasses, enumOutput, resolver);
+        const derivedCode = generateDerivedClass(derivedClassName, renamedBase, discriminatorProperty, constValue, schema, knownTypes, nestedClasses, enumOutput, resolver);
         nestedClasses.set(derivedClassName, derivedCode);
     }
 
@@ -591,7 +743,7 @@ function resolveSessionPropertyType(
                 const hasNull = propSchema.anyOf.length > nonNull.length;
                 const baseClassName = (propSchema.title as string) ?? `${parentClassName}${propName}`;
                 const renamedBase = applyTypeRename(baseClassName);
-                const polymorphicCode = generatePolymorphicClasses(baseClassName, discriminatorInfo.property, variants, knownTypes, nestedClasses, enumOutput, propSchema.description);
+                const polymorphicCode = generateDiscriminatedUnionClass(baseClassName, discriminatorInfo, variants, knownTypes, nestedClasses, enumOutput, propSchema.description);
                 nestedClasses.set(renamedBase, polymorphicCode);
                 return isRequired && !hasNull ? renamedBase : `${renamedBase}?`;
             }
@@ -718,6 +870,7 @@ function generateSessionEventsCode(schema: JSONSchema7): string {
 #pragma warning disable CS0612 // Type or member is obsolete
 #pragma warning disable CS0618 // Type or member is obsolete (with message)
 
+using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -930,7 +1083,7 @@ function resolveRpcType(schema: JSONSchema7, isRequired: boolean, parentClassNam
                         }
                         return result;
                     };
-                    const polymorphicCode = generatePolymorphicClasses(baseClassName, discriminatorInfo.property, variants, rpcKnownTypes, nestedMap, rpcEnumOutput, schema.description, rpcPropertyResolver);
+                    const polymorphicCode = generateDiscriminatedUnionClass(baseClassName, discriminatorInfo, variants, rpcKnownTypes, nestedMap, rpcEnumOutput, schema.description, rpcPropertyResolver);
                     classes.push(polymorphicCode);
                     for (const nested of nestedMap.values()) classes.push(nested);
                 }
@@ -1556,7 +1709,9 @@ function generateRpcCode(schema: ApiSchema): string {
 #pragma warning disable CS0612 // Type or member is obsolete
 #pragma warning disable CS0618 // Type or member is obsolete (with message)
 
+using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;

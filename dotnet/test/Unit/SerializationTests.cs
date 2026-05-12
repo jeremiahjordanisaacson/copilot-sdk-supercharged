@@ -5,6 +5,7 @@
 using Xunit;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using GitHub.Copilot.SDK.Rpc;
 
 namespace GitHub.Copilot.SDK.Test.Unit;
 
@@ -20,7 +21,11 @@ public class SerializationTests
         var original = new ProviderConfig
         {
             BaseUrl = "https://example.com/provider",
-            Headers = new Dictionary<string, string> { ["Authorization"] = "Bearer provider-token" }
+            Headers = new Dictionary<string, string> { ["Authorization"] = "Bearer provider-token" },
+            ModelId = "gpt-4o",
+            WireModel = "my-finetune-v3",
+            MaxInputTokens = 100_000,
+            MaxOutputTokens = 4096
         };
 
         var json = JsonSerializer.Serialize(original, options);
@@ -28,11 +33,19 @@ public class SerializationTests
         var root = document.RootElement;
         Assert.Equal("https://example.com/provider", root.GetProperty("baseUrl").GetString());
         Assert.Equal("Bearer provider-token", root.GetProperty("headers").GetProperty("Authorization").GetString());
+        Assert.Equal("gpt-4o", root.GetProperty("modelId").GetString());
+        Assert.Equal("my-finetune-v3", root.GetProperty("wireModel").GetString());
+        Assert.Equal(100_000, root.GetProperty("maxPromptTokens").GetInt32());
+        Assert.Equal(4096, root.GetProperty("maxOutputTokens").GetInt32());
 
         var deserialized = JsonSerializer.Deserialize<ProviderConfig>(json, options);
         Assert.NotNull(deserialized);
         Assert.Equal("https://example.com/provider", deserialized.BaseUrl);
         Assert.Equal("Bearer provider-token", deserialized.Headers!["Authorization"]);
+        Assert.Equal("gpt-4o", deserialized.ModelId);
+        Assert.Equal("my-finetune-v3", deserialized.WireModel);
+        Assert.Equal(100_000, deserialized.MaxInputTokens);
+        Assert.Equal(4096, deserialized.MaxOutputTokens);
     }
 
     [Fact]
@@ -99,6 +112,23 @@ public class SerializationTests
     }
 
     [Fact]
+    public void CreateSessionRequest_CanSerializeModeRequestFlags_WithSdkOptions()
+    {
+        var options = GetSerializerOptions();
+        var requestType = GetNestedType(typeof(CopilotClient), "CreateSessionRequest");
+        var request = CreateInternalRequest(
+            requestType,
+            ("RequestExitPlanMode", true),
+            ("RequestAutoModeSwitch", true));
+
+        var json = JsonSerializer.Serialize(request, requestType, options);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert.True(root.GetProperty("requestExitPlanMode").GetBoolean());
+        Assert.True(root.GetProperty("requestAutoModeSwitch").GetBoolean());
+    }
+
+    [Fact]
     public void ResumeSessionRequest_CanSerializeInstructionDirectories_WithSdkOptions()
     {
         var options = GetSerializerOptions();
@@ -112,6 +142,66 @@ public class SerializationTests
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         Assert.Equal("C:\\resume-instructions", root.GetProperty("instructionDirectories")[0].GetString());
+    }
+
+    [Fact]
+    public void CreateSessionRequest_CanSerializeEnableSessionTelemetry_WithSdkOptions()
+    {
+        var options = GetSerializerOptions();
+        var requestType = GetNestedType(typeof(CopilotClient), "CreateSessionRequest");
+        var request = CreateInternalRequest(
+            requestType,
+            ("SessionId", "session-id"),
+            ("EnableSessionTelemetry", false));
+
+        var json = JsonSerializer.Serialize(request, requestType, options);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert.False(root.GetProperty("enableSessionTelemetry").GetBoolean());
+    }
+
+    [Fact]
+    public void ResumeSessionRequest_CanSerializeEnableSessionTelemetry_WithSdkOptions()
+    {
+        var options = GetSerializerOptions();
+        var requestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
+        var request = CreateInternalRequest(
+            requestType,
+            ("SessionId", "session-id"),
+            ("EnableSessionTelemetry", false));
+
+        var json = JsonSerializer.Serialize(request, requestType, options);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert.False(root.GetProperty("enableSessionTelemetry").GetBoolean());
+    }
+
+    [Fact]
+    public void ResumeSessionRequest_CanSerializeModeRequestFlags_WithSdkOptions()
+    {
+        var options = GetSerializerOptions();
+        var requestType = GetNestedType(typeof(CopilotClient), "ResumeSessionRequest");
+        var request = CreateInternalRequest(
+            requestType,
+            ("SessionId", "session-id"),
+            ("RequestExitPlanMode", true),
+            ("RequestAutoModeSwitch", true));
+
+        var json = JsonSerializer.Serialize(request, requestType, options);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert.True(root.GetProperty("requestExitPlanMode").GetBoolean());
+        Assert.True(root.GetProperty("requestAutoModeSwitch").GetBoolean());
+    }
+
+    [Fact]
+    public void AutoModeSwitchResponse_CanSerialize_WithSdkOptions()
+    {
+        var options = GetSerializerOptions();
+
+        var json = JsonSerializer.Serialize(AutoModeSwitchResponse.YesAlways, options);
+
+        Assert.Equal("\"yes_always\"", json);
     }
 
     [Fact]
@@ -150,6 +240,28 @@ public class SerializationTests
         Assert.Equal(McpHttpServerConfigOauthGrantType.ClientCredentials, httpConfig.OauthGrantType);
         Assert.Equal("*", Assert.Single(httpConfig.Tools));
         Assert.Equal(3000, httpConfig.Timeout);
+    }
+
+    [Fact]
+    public void QueuedCommandResult_SerializesHandledAsBoolean_WithSdkOptions()
+    {
+        var options = GetSerializerOptions();
+        var original = new QueuedCommandResult
+        {
+            Handled = true,
+            StopProcessingQueue = false
+        };
+
+        var json = JsonSerializer.Serialize(original, options);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert.Equal(JsonValueKind.True, root.GetProperty("handled").ValueKind);
+        Assert.Equal(JsonValueKind.False, root.GetProperty("stopProcessingQueue").ValueKind);
+
+        var deserialized = JsonSerializer.Deserialize<QueuedCommandResult>("""{"handled":false}""", options);
+        Assert.NotNull(deserialized);
+        Assert.False(deserialized.Handled);
+        Assert.Null(deserialized.StopProcessingQueue);
     }
 
     private static JsonSerializerOptions GetSerializerOptions()

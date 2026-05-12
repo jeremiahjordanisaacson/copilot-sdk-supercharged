@@ -3,6 +3,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
@@ -159,6 +160,63 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     }
 
     [Fact]
+    public async Task Should_Forward_EnableSessionTelemetry_In_Wire_Request()
+    {
+        var (cliPath, capturePath) = await CreateFakeCliCaptureAsync();
+
+        await using var client = Ctx.CreateClient(options: new CopilotClientOptions
+        {
+            AutoStart = false,
+            CliPath = cliPath,
+            CliArgs = ["--capture-file", capturePath],
+            UseLoggedInUser = false,
+        });
+
+        await client.StartAsync();
+
+        // When explicitly set to false, it should appear in the wire request
+        var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            EnableSessionTelemetry = false,
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+        });
+
+        using var capture = JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var createRequest = GetCapturedRequestParams(capture.RootElement, "session.create");
+        Assert.False(createRequest.GetProperty("enableSessionTelemetry").GetBoolean());
+
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Should_Omit_EnableSessionTelemetry_When_Not_Set()
+    {
+        var (cliPath, capturePath) = await CreateFakeCliCaptureAsync();
+
+        await using var client = Ctx.CreateClient(options: new CopilotClientOptions
+        {
+            AutoStart = false,
+            CliPath = cliPath,
+            CliArgs = ["--capture-file", capturePath],
+            UseLoggedInUser = false,
+        });
+
+        await client.StartAsync();
+
+        // When omitted (null/default), the field should not be present in the wire request
+        var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+        });
+
+        using var capture = JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var createRequest = GetCapturedRequestParams(capture.RootElement, "session.create");
+        Assert.False(createRequest.TryGetProperty("enableSessionTelemetry", out _));
+
+        await session.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Should_Propagate_Activity_TraceContext_To_Session_Create_And_Send()
     {
         var (cliPath, capturePath) = await CreateFakeCliCaptureAsync();
@@ -200,6 +258,55 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Assert.Equal("vendor=create-send", sendRequest.GetProperty("tracestate").GetString());
 
         await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ForceStop_Does_Not_Rethrow_When_Tcp_Cli_Drops_During_Startup()
+    {
+        var cliPath = Path.Join(Ctx.WorkDir, $"fake-tcp-drop-cli-{Guid.NewGuid():N}.js");
+        await File.WriteAllTextAsync(cliPath, FakeTcpDropDuringStartupCliScript);
+
+        await using var client = Ctx.CreateClient(
+            useStdio: false,
+            options: new CopilotClientOptions
+            {
+                AutoStart = false,
+                CliPath = cliPath,
+                UseLoggedInUser = false,
+            });
+
+        var ex = await Assert.ThrowsAsync<IOException>(() => client.StartAsync());
+        Assert.Contains("Communication error", ex.Message, StringComparison.Ordinal);
+
+        await client.ForceStopAsync();
+        Assert.Equal(ConnectionState.Disconnected, client.State);
+    }
+
+    [Fact]
+    public async Task StartAsync_Cleans_Up_Tcp_Cli_Process_When_Connect_Fails()
+    {
+        var cliPath = Path.Join(Ctx.WorkDir, $"fake-tcp-unavailable-port-cli-{Guid.NewGuid():N}.js");
+        var pidPath = Path.Join(Ctx.WorkDir, $"fake-tcp-unavailable-port-cli-{Guid.NewGuid():N}.pid");
+        var unavailablePort = GetAvailableTcpPort();
+        await File.WriteAllTextAsync(cliPath, FakeTcpUnavailablePortCliScript);
+
+        await using var client = Ctx.CreateClient(
+            useStdio: false,
+            options: new CopilotClientOptions
+            {
+                AutoStart = false,
+                CliPath = cliPath,
+                CliArgs = ["--pid-file", pidPath, "--announce-port", unavailablePort.ToString(CultureInfo.InvariantCulture)],
+                UseLoggedInUser = false,
+            });
+
+        await Assert.ThrowsAnyAsync<Exception>(() => client.StartAsync());
+
+        var pid = int.Parse(await File.ReadAllTextAsync(pidPath), CultureInfo.InvariantCulture);
+        await AssertProcessExitedAsync(pid);
+
+        await client.ForceStopAsync();
+        Assert.Equal(ConnectionState.Disconnected, client.State);
     }
 
     [Fact]
@@ -361,6 +468,64 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             .Single(request => request.GetProperty("method").GetString() == method)
             .GetProperty("params");
     }
+
+    private static async Task AssertProcessExitedAsync(int pid)
+    {
+        for (var i = 0; i < 50; i++)
+        {
+            if (!IsProcessRunning(pid))
+            {
+                return;
+            }
+
+            await Task.Delay(100);
+        }
+
+        Assert.False(IsProcessRunning(pid), $"Expected process {pid} to have exited.");
+    }
+
+    private static bool IsProcessRunning(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private const string FakeTcpUnavailablePortCliScript = """
+        const fs = require("fs");
+
+        const pidFileIndex = process.argv.indexOf("--pid-file");
+        const portIndex = process.argv.indexOf("--announce-port");
+
+        fs.writeFileSync(process.argv[pidFileIndex + 1], String(process.pid));
+        console.log(`listening on port ${process.argv[portIndex + 1]}`);
+
+        setInterval(() => {}, 1000);
+        """;
+
+    private const string FakeTcpDropDuringStartupCliScript = """
+        const net = require("net");
+
+        const server = net.createServer(socket => {
+          socket.on("data", () => {
+            socket.destroy();
+            server.close(() => process.exit(0));
+          });
+        });
+
+        server.listen(0, "localhost", () => {
+          const address = server.address();
+          console.log(`listening on port ${address.port}`);
+        });
+
+        setTimeout(() => process.exit(2), 30000).unref();
+        """;
 
     private const string FakeStdioCliScript = """
         const fs = require("fs");

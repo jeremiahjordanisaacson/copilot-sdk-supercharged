@@ -27,6 +27,7 @@ public class CloneTests
             GitHubToken = "ghp_test",
             UseLoggedInUser = false,
             CopilotHome = "/custom/copilot/home",
+            Remote = true,
             SessionIdleTimeoutSeconds = 600,
         };
 
@@ -45,6 +46,7 @@ public class CloneTests
         Assert.Equal(original.GitHubToken, clone.GitHubToken);
         Assert.Equal(original.UseLoggedInUser, clone.UseLoggedInUser);
         Assert.Equal(original.CopilotHome, clone.CopilotHome);
+        Assert.Equal(original.Remote, clone.Remote);
         Assert.Equal(original.SessionIdleTimeoutSeconds, clone.SessionIdleTimeoutSeconds);
     }
 
@@ -90,6 +92,7 @@ public class CloneTests
             ExcludedTools = ["tool3"],
             WorkingDirectory = "/workspace",
             Streaming = true,
+            EnableSessionTelemetry = false,
             IncludeSubAgentStreamingEvents = false,
             McpServers = new Dictionary<string, McpServerConfig> { ["server1"] = new McpStdioServerConfig { Command = "echo" } },
             CustomAgents = [new CustomAgentConfig { Name = "agent1" }],
@@ -98,6 +101,8 @@ public class CloneTests
             SkillDirectories = ["/skills"],
             InstructionDirectories = ["/instructions"],
             DisabledSkills = ["skill1"],
+            OnExitPlanMode = static (_, _) => Task.FromResult(new ExitPlanModeResult()),
+            OnAutoModeSwitch = static (_, _) => Task.FromResult(AutoModeSwitchResponse.No),
         };
 
         var clone = original.Clone();
@@ -111,6 +116,7 @@ public class CloneTests
         Assert.Equal(original.ExcludedTools, clone.ExcludedTools);
         Assert.Equal(original.WorkingDirectory, clone.WorkingDirectory);
         Assert.Equal(original.Streaming, clone.Streaming);
+        Assert.Equal(original.EnableSessionTelemetry, clone.EnableSessionTelemetry);
         Assert.Equal(original.IncludeSubAgentStreamingEvents, clone.IncludeSubAgentStreamingEvents);
         Assert.Equal(original.McpServers.Count, clone.McpServers!.Count);
         Assert.Equal(original.CustomAgents.Count, clone.CustomAgents!.Count);
@@ -119,6 +125,8 @@ public class CloneTests
         Assert.Equal(original.SkillDirectories, clone.SkillDirectories);
         Assert.Equal(original.InstructionDirectories, clone.InstructionDirectories);
         Assert.Equal(original.DisabledSkills, clone.DisabledSkills);
+        Assert.Same(original.OnExitPlanMode, clone.OnExitPlanMode);
+        Assert.Same(original.OnAutoModeSwitch, clone.OnAutoModeSwitch);
     }
 
     [Fact]
@@ -293,6 +301,21 @@ public class CloneTests
     }
 
     [Fact]
+    public void ResumeSessionConfig_Clone_CopiesModeSwitchHandlers()
+    {
+        var original = new ResumeSessionConfig
+        {
+            OnExitPlanMode = static (_, _) => Task.FromResult(new ExitPlanModeResult()),
+            OnAutoModeSwitch = static (_, _) => Task.FromResult(AutoModeSwitchResponse.No),
+        };
+
+        var clone = original.Clone();
+
+        Assert.Same(original.OnExitPlanMode, clone.OnExitPlanMode);
+        Assert.Same(original.OnAutoModeSwitch, clone.OnAutoModeSwitch);
+    }
+
+    [Fact]
     public void ResumeSessionConfig_Clone_CopiesIncludeSubAgentStreamingEvents()
     {
         var original = new ResumeSessionConfig
@@ -316,6 +339,19 @@ public class CloneTests
     }
 
     [Fact]
+    public void ResumeSessionConfig_Clone_CopiesEnableSessionTelemetry()
+    {
+        var original = new ResumeSessionConfig
+        {
+            EnableSessionTelemetry = false,
+        };
+
+        var clone = original.Clone();
+
+        Assert.False(clone.EnableSessionTelemetry);
+    }
+
+    [Fact]
     public void ResumeSessionConfig_Clone_CopiesContinuePendingWork()
     {
         var original = new ResumeSessionConfig
@@ -336,5 +372,25 @@ public class CloneTests
         var clone = original.Clone();
 
         Assert.Null(clone.ContinuePendingWork);
+    }
+
+    [Fact]
+    public void SessionConfig_Clone_PreservesEnableSessionTelemetryDefault()
+    {
+        var original = new SessionConfig();
+
+        var clone = original.Clone();
+
+        Assert.Null(clone.EnableSessionTelemetry);
+    }
+
+    [Fact]
+    public void ResumeSessionConfig_Clone_PreservesEnableSessionTelemetryDefault()
+    {
+        var original = new ResumeSessionConfig();
+
+        var clone = original.Clone();
+
+        Assert.Null(clone.EnableSessionTelemetry);
     }
 }

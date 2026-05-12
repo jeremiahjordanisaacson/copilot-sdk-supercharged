@@ -10,6 +10,8 @@ export type SessionEvent =
   | ErrorEvent
   | IdleEvent
   | TitleChangedEvent
+  | ScheduleCreatedEvent
+  | ScheduleCancelledEvent
   | InfoEvent
   | WarningEvent
   | ModelChangeEvent
@@ -128,6 +130,10 @@ export type AssistantMessageToolRequestType = "function" | "custom";
  */
 export type ModelCallFailureSource = "top_level" | "subagent" | "mcp_sampling";
 /**
+ * Finite reason code describing why the current turn was aborted
+ */
+export type AbortReason = "user_initiated" | "remote_command" | "user_abort";
+/**
  * A content block within a tool result, which may be text, terminal output, image, audio, or a resource
  */
 export type ToolExecutionCompleteContent =
@@ -174,7 +180,9 @@ export type PermissionRequest =
   | PermissionRequestUrl
   | PermissionRequestMemory
   | PermissionRequestCustomTool
-  | PermissionRequestHook;
+  | PermissionRequestHook
+  | PermissionRequestExtensionManagement
+  | PermissionRequestExtensionPermissionAccess;
 /**
  * Whether this is a store or vote memory operation
  */
@@ -195,7 +203,9 @@ export type PermissionPromptRequest =
   | PermissionPromptRequestMemory
   | PermissionPromptRequestCustomTool
   | PermissionPromptRequestPath
-  | PermissionPromptRequestHook;
+  | PermissionPromptRequestHook
+  | PermissionPromptRequestExtensionManagement
+  | PermissionPromptRequestExtensionPermissionAccess;
 /**
  * Whether this is a store or vote memory operation
  */
@@ -230,7 +240,9 @@ export type UserToolSessionApproval =
   | UserToolSessionApprovalWrite
   | UserToolSessionApprovalMcp
   | UserToolSessionApprovalMemory
-  | UserToolSessionApprovalCustomTool;
+  | UserToolSessionApprovalCustomTool
+  | UserToolSessionApprovalExtensionManagement
+  | UserToolSessionApprovalExtensionPermissionAccess;
 /**
  * Elicitation mode; "form" for structured input, "url" for browser-based. Defaults to "form" when absent.
  */
@@ -306,6 +318,10 @@ export interface StartData {
    * Version string of the Copilot application
    */
   copilotVersion: string;
+  /**
+   * When set, identifies a parent session whose context this session continues — e.g., a detached headless rem-agent run launched on the parent's interactive shutdown. Telemetry from this session is reported under the parent's session_id.
+   */
+  detachedFromSpawningParentSessionId?: string;
   /**
    * Identifier of the software producing the events (e.g., "copilot-agent")
    */
@@ -584,6 +600,80 @@ export interface TitleChangedData {
    * The new display title for the session
    */
   title: string;
+}
+export interface ScheduleCreatedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: ScheduleCreatedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  type: "session.schedule_created";
+}
+/**
+ * Scheduled prompt registered via /every
+ */
+export interface ScheduleCreatedData {
+  /**
+   * Sequential id assigned to the scheduled prompt within the session
+   */
+  id: number;
+  /**
+   * Interval between ticks in milliseconds
+   */
+  intervalMs: number;
+  /**
+   * Prompt text that gets enqueued on every tick
+   */
+  prompt: string;
+}
+export interface ScheduleCancelledEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: ScheduleCancelledData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  type: "session.schedule_cancelled";
+}
+/**
+ * Scheduled prompt cancelled from the schedule manager dialog
+ */
+export interface ScheduleCancelledData {
+  /**
+   * Id of the scheduled prompt that was cancelled
+   */
+  id: number;
 }
 export interface InfoEvent {
   /**
@@ -1885,6 +1975,14 @@ export interface AssistantMessageEvent {
  */
 export interface AssistantMessageData {
   /**
+   * Raw Anthropic content array with advisor blocks (server_tool_use, advisor_tool_result) for verbatim round-tripping
+   */
+  anthropicAdvisorBlocks?: unknown[];
+  /**
+   * Anthropic advisor model ID used for this response, for timeline display on replay
+   */
+  anthropicAdvisorModel?: string;
+  /**
    * The assistant's text response content
    */
   content: string;
@@ -1900,6 +1998,10 @@ export interface AssistantMessageData {
    * Unique identifier for this assistant message
    */
   messageId: string;
+  /**
+   * Model that produced this assistant message, if known
+   */
+  model?: string;
   /**
    * Actual output token count from the API response (completion_tokens), used for accurate token accounting
    */
@@ -1952,6 +2054,10 @@ export interface AssistantMessageToolRequest {
    * Name of the MCP server hosting this tool, when the tool is an MCP tool
    */
   mcpServerName?: string;
+  /**
+   * Original tool name on the MCP server, when the tool is an MCP tool
+   */
+  mcpToolName?: string;
   /**
    * Name of the tool being invoked
    */
@@ -2317,10 +2423,7 @@ export interface AbortEvent {
  * Turn abort information including the reason for termination
  */
 export interface AbortData {
-  /**
-   * Reason the current turn was aborted (e.g., "user initiated")
-   */
-  reason: string;
+  reason: AbortReason;
 }
 export interface ToolUserRequestedEvent {
   /**
@@ -2847,6 +2950,10 @@ export interface SubagentStartedData {
    * Internal name of the sub-agent
    */
   agentName: string;
+  /**
+   * Model the sub-agent will run with, when known at start. Surfaced in the timeline for auto-selected sub-agents (e.g. rubber-duck).
+   */
+  model?: string;
   /**
    * Tool call ID of the parent tool invocation that spawned this sub-agent
    */
@@ -3626,6 +3733,48 @@ export interface PermissionRequestHook {
   toolName: string;
 }
 /**
+ * Extension management permission request
+ */
+export interface PermissionRequestExtensionManagement {
+  /**
+   * Name of the extension being managed
+   */
+  extensionName?: string;
+  /**
+   * Permission kind discriminator
+   */
+  kind: "extension-management";
+  /**
+   * The extension management operation (scaffold, reload)
+   */
+  operation: string;
+  /**
+   * Tool call ID that triggered this permission request
+   */
+  toolCallId?: string;
+}
+/**
+ * Extension permission access request
+ */
+export interface PermissionRequestExtensionPermissionAccess {
+  /**
+   * Capabilities the extension is requesting
+   */
+  capabilities: string[];
+  /**
+   * Name of the extension requesting permission access
+   */
+  extensionName: string;
+  /**
+   * Permission kind discriminator
+   */
+  kind: "extension-permission-access";
+  /**
+   * Tool call ID that triggered this permission request
+   */
+  toolCallId?: string;
+}
+/**
  * Shell command permission prompt
  */
 export interface PermissionPromptRequestCommands {
@@ -3862,6 +4011,48 @@ export interface PermissionPromptRequestHook {
    */
   toolName: string;
 }
+/**
+ * Extension management permission prompt
+ */
+export interface PermissionPromptRequestExtensionManagement {
+  /**
+   * Name of the extension being managed
+   */
+  extensionName?: string;
+  /**
+   * Prompt kind discriminator
+   */
+  kind: "extension-management";
+  /**
+   * The extension management operation (scaffold, reload)
+   */
+  operation: string;
+  /**
+   * Tool call ID that triggered this permission request
+   */
+  toolCallId?: string;
+}
+/**
+ * Extension permission access prompt
+ */
+export interface PermissionPromptRequestExtensionPermissionAccess {
+  /**
+   * Capabilities the extension is requesting
+   */
+  capabilities: string[];
+  /**
+   * Name of the extension requesting permission access
+   */
+  extensionName: string;
+  /**
+   * Prompt kind discriminator
+   */
+  kind: "extension-permission-access";
+  /**
+   * Tool call ID that triggered this permission request
+   */
+  toolCallId?: string;
+}
 export interface PermissionCompletedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -3964,6 +4155,26 @@ export interface UserToolSessionApprovalCustomTool {
    * Custom tool name
    */
   toolName: string;
+}
+export interface UserToolSessionApprovalExtensionManagement {
+  /**
+   * Extension management approval kind
+   */
+  kind: "extension-management";
+  /**
+   * Optional operation identifier
+   */
+  operation?: string;
+}
+export interface UserToolSessionApprovalExtensionPermissionAccess {
+  /**
+   * Extension name
+   */
+  extensionName: string;
+  /**
+   * Extension permission access approval kind
+   */
+  kind: "extension-permission-access";
 }
 export interface PermissionApprovedForLocation {
   approval: UserToolSessionApproval;

@@ -48,6 +48,21 @@ public class RpcExtensionsLoadedE2ETests(E2ETestFixture fixture, ITestOutputHelp
     }
 
     /// <summary>
+    /// Creates a client with the EXTENSIONS feature flag and --yolo CLI arg.
+    /// --yolo auto-approves extension permission gates at the CLI level,
+    /// preventing tests from breaking when new permission gates are added
+    /// (e.g., extension-permission-access from copilot-agent-runtime#6024).
+    /// </summary>
+    private CopilotClient CreateExtensionsClient()
+    {
+        return Ctx.CreateClient(options: new CopilotClientOptions
+        {
+            CliArgs = ["--yolo"],
+            Environment = ExtensionsEnabledEnvironment(),
+        });
+    }
+
+    /// <summary>
     /// Writes a minimal user extension into <c>{HomeDir}/extensions/{name}/extension.mjs</c>.
     /// The body imports <c>@github/copilot-sdk/extension</c>, calls <c>joinSession</c>
     /// to establish the JSON-RPC handshake (so the extension transitions from
@@ -150,10 +165,11 @@ public class RpcExtensionsLoadedE2ETests(E2ETestFixture fixture, ITestOutputHelp
     }
 
     [Theory]
-    [InlineData(ExtensionSource.User)]
-    [InlineData(ExtensionSource.Project)]
-    public async Task Discovers_Loads_And_Reports_Running_Extension(ExtensionSource source)
+    [InlineData("user")]
+    [InlineData("project")]
+    public async Task Discovers_Loads_And_Reports_Running_Extension(string sourceValue)
     {
+        var source = new ExtensionSource(sourceValue);
         string extName;
         string extId;
         string? workingDirectory;
@@ -169,13 +185,10 @@ public class RpcExtensionsLoadedE2ETests(E2ETestFixture fixture, ITestOutputHelp
         }
         else
         {
-            throw new ArgumentOutOfRangeException(nameof(source), source, null);
+            throw new ArgumentOutOfRangeException(nameof(sourceValue), sourceValue, null);
         }
 
-        await using var client = Ctx.CreateClient(options: new CopilotClientOptions
-        {
-            Environment = ExtensionsEnabledEnvironment(),
-        });
+        await using var client = CreateExtensionsClient();
 
         await using var session = await client.CreateSessionAsync(new SessionConfig
         {
@@ -200,10 +213,7 @@ public class RpcExtensionsLoadedE2ETests(E2ETestFixture fixture, ITestOutputHelp
         var extName = CreateUserExtension();
         var extId = $"user:{extName}";
 
-        await using var client = Ctx.CreateClient(options: new CopilotClientOptions
-        {
-            Environment = ExtensionsEnabledEnvironment(),
-        });
+        await using var client = CreateExtensionsClient();
 
         await using var session = await client.CreateSessionAsync(new SessionConfig
         {
@@ -229,10 +239,7 @@ public class RpcExtensionsLoadedE2ETests(E2ETestFixture fixture, ITestOutputHelp
     public async Task Reload_Picks_Up_Extension_Added_After_Session_Create()
     {
         // Start the session BEFORE writing the extension so the initial discovery sees nothing.
-        await using var client = Ctx.CreateClient(options: new CopilotClientOptions
-        {
-            Environment = ExtensionsEnabledEnvironment(),
-        });
+        await using var client = CreateExtensionsClient();
 
         await using var session = await client.CreateSessionAsync(new SessionConfig
         {
@@ -277,10 +284,7 @@ public class RpcExtensionsLoadedE2ETests(E2ETestFixture fixture, ITestOutputHelp
 
         var extId = $"user:{extName}";
 
-        await using var client = Ctx.CreateClient(options: new CopilotClientOptions
-        {
-            Environment = ExtensionsEnabledEnvironment(),
-        });
+        await using var client = CreateExtensionsClient();
 
         await using var session = await client.CreateSessionAsync(new SessionConfig
         {
@@ -301,10 +305,7 @@ public class RpcExtensionsLoadedE2ETests(E2ETestFixture fixture, ITestOutputHelp
         var ext1Id = $"user:{ext1Name}";
         var ext2Id = $"user:{ext2Name}";
 
-        await using var client = Ctx.CreateClient(options: new CopilotClientOptions
-        {
-            Environment = ExtensionsEnabledEnvironment(),
-        });
+        await using var client = CreateExtensionsClient();
 
         await using var session = await client.CreateSessionAsync(new SessionConfig
         {
@@ -326,10 +327,7 @@ public class RpcExtensionsLoadedE2ETests(E2ETestFixture fixture, ITestOutputHelp
         var extName = CreateUserExtension(prefix: "persistent-disable");
         var extId = $"user:{extName}";
 
-        await using var client = Ctx.CreateClient(options: new CopilotClientOptions
-        {
-            Environment = ExtensionsEnabledEnvironment(),
-        });
+        await using var client = CreateExtensionsClient();
 
         await using var session = await client.CreateSessionAsync(new SessionConfig
         {

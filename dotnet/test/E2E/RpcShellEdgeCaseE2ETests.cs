@@ -35,7 +35,9 @@ public class RpcShellEdgeCaseE2ETests(E2ETestFixture fixture, ITestOutputHelper 
             ? $"echo started>\"{startedPath}\" & for /L %i in (1,1,2147483647) do @rem & echo should-not-exist>\"{markerPath}\""
             : $"printf 'started' > '{startedPath}'; sleep 30; printf 'should-not-exist' > '{markerPath}'";
 
-        var result = await session.Rpc.Shell.ExecAsync(command, timeout: TimeSpan.FromMilliseconds(200));
+        // On Windows, terminating the shell wrapper can briefly leave children alive.
+        // Keep this long-running command outside the fixture workspace so cleanup is not blocked by cwd handles.
+        var result = await session.Rpc.Shell.ExecAsync(command, cwd: Path.GetTempPath(), timeout: TimeSpan.FromMilliseconds(200));
         Assert.False(string.IsNullOrWhiteSpace(result.ProcessId));
 
         await TestHelper.WaitForConditionAsync(
@@ -111,16 +113,19 @@ public class RpcShellEdgeCaseE2ETests(E2ETestFixture fixture, ITestOutputHelper 
     }
 
     [Theory]
-    [InlineData(ShellKillSignal.SIGTERM)]
-    [InlineData(ShellKillSignal.SIGKILL)]
-    public async Task Shell_Kill_Cleans_Up_After_Terminating_Signal(ShellKillSignal signal)
+    [InlineData("SIGTERM")]
+    [InlineData("SIGKILL")]
+    public async Task Shell_Kill_Cleans_Up_After_Terminating_Signal(string signalValue)
     {
         var session = await CreateSessionAsync();
+        var signal = new ShellKillSignal(signalValue);
         var command = OperatingSystem.IsWindows()
             ? "powershell -NoLogo -NoProfile -Command \"Start-Sleep -Seconds 60\""
             : "sleep 60";
 
-        var execResult = await session.Rpc.Shell.ExecAsync(command);
+        // On Windows, terminating the shell wrapper can briefly leave grandchildren alive.
+        // Keep this command outside the fixture workspace so cleanup is not blocked by cwd handles.
+        var execResult = await session.Rpc.Shell.ExecAsync(command, cwd: Path.GetTempPath());
         Assert.False(string.IsNullOrWhiteSpace(execResult.ProcessId));
 
         var killResult = await session.Rpc.Shell.KillAsync(execResult.ProcessId, signal);

@@ -211,6 +211,16 @@ export interface CopilotClientOptions {
      * `useStdio: true` (stdio is pre-authenticated by transport).
      */
     tcpConnectionToken?: string;
+
+    /**
+     * Enable remote session support (Mission Control integration).
+     * When true, sessions in a GitHub repository working directory are
+     * accessible from GitHub web and mobile.
+     * This option is only used when the SDK spawns the CLI process; it is ignored
+     * when connecting to an external server via {@link cliUrl}.
+     * @default false
+     */
+    remote?: boolean;
 }
 
 /**
@@ -312,9 +322,13 @@ export function convertMcpCallToolResult(callResult: McpCallToolResult): ToolRes
                     textParts.push(block.resource.text);
                 }
                 if (block.resource?.blob) {
+                    const mimeType = block.resource.mimeType;
                     binaryResults.push({
                         data: block.resource.blob,
-                        mimeType: block.resource.mimeType ?? "application/octet-stream",
+                        mimeType:
+                            typeof mimeType === "string" && mimeType
+                                ? mimeType
+                                : "application/octet-stream",
                         type: "resource",
                         description: block.resource.uri,
                     });
@@ -836,6 +850,63 @@ export type UserInputHandler = (
     invocation: { sessionId: string }
 ) => Promise<UserInputResponse> | UserInputResponse;
 
+/**
+ * Request to exit plan mode and continue with a selected action.
+ */
+export interface ExitPlanModeRequest {
+    /** Summary of the plan or proposed next step. */
+    summary: string;
+    /** Full plan content, when available. */
+    planContent?: string;
+    /** Available actions the user can select. */
+    actions: string[];
+    /** The action recommended by the runtime. */
+    recommendedAction: string;
+}
+
+/**
+ * Response to an exit-plan-mode request.
+ */
+export interface ExitPlanModeResult {
+    /** Whether the user approved exiting plan mode. */
+    approved: boolean;
+    /** Selected action, if the user chose one. */
+    selectedAction?: string;
+    /** Optional feedback provided by the user. */
+    feedback?: string;
+}
+
+/**
+ * Handler for exit-plan-mode requests from the agent.
+ */
+export type ExitPlanModeHandler = (
+    request: ExitPlanModeRequest,
+    invocation: { sessionId: string }
+) => Promise<ExitPlanModeResult> | ExitPlanModeResult;
+
+/**
+ * Request to switch to auto mode after an eligible rate limit.
+ */
+export interface AutoModeSwitchRequest {
+    /** The rate-limit error code that triggered the request. */
+    errorCode?: string;
+    /** Seconds until the rate limit resets, when known. */
+    retryAfterSeconds?: number;
+}
+
+/**
+ * Response to an auto-mode-switch request.
+ */
+export type AutoModeSwitchResponse = "yes" | "yes_always" | "no";
+
+/**
+ * Handler for auto-mode-switch requests from the agent.
+ */
+export type AutoModeSwitchHandler = (
+    request: AutoModeSwitchRequest,
+    invocation: { sessionId: string }
+) => Promise<AutoModeSwitchResponse> | AutoModeSwitchResponse;
+
 // ============================================================================
 // Hook Types
 // ============================================================================
@@ -1274,6 +1345,16 @@ export interface SessionConfig {
     provider?: ProviderConfig;
 
     /**
+     * Enables or disables internal session telemetry for this session.
+     * When `false`, disables session telemetry. When omitted (the default) or `true`,
+     * telemetry is enabled for GitHub-authenticated sessions.
+     * When a custom {@link provider} (BYOK) is configured, session telemetry is always
+     * disabled regardless of this setting.
+     * This is independent of the OpenTelemetry configuration in {@link CopilotClientOptions.telemetry}.
+     */
+    enableSessionTelemetry?: boolean;
+
+    /**
      * Handler for permission requests from the server.
      * When provided, the server will call this handler to request permission for operations.
      */
@@ -1291,6 +1372,18 @@ export interface SessionConfig {
      * Also enables the `elicitation` capability on the session.
      */
     onElicitationRequest?: ElicitationHandler;
+
+    /**
+     * Handler for exit-plan-mode requests from the agent.
+     * When provided, enables `exitPlanMode.request` callbacks.
+     */
+    onExitPlanMode?: ExitPlanModeHandler;
+
+    /**
+     * Handler for auto-mode-switch requests from the agent.
+     * When provided, enables `autoModeSwitch.request` callbacks.
+     */
+    onAutoModeSwitch?: AutoModeSwitchHandler;
 
     /**
      * Hook handlers for intercepting session lifecycle events.
@@ -1415,6 +1508,7 @@ export type ResumeSessionConfig = Pick<
     | "availableTools"
     | "excludedTools"
     | "provider"
+    | "enableSessionTelemetry"
     | "modelCapabilities"
     | "streaming"
     | "includeSubAgentStreamingEvents"
@@ -1422,6 +1516,8 @@ export type ResumeSessionConfig = Pick<
     | "onPermissionRequest"
     | "onUserInputRequest"
     | "onElicitationRequest"
+    | "onExitPlanMode"
+    | "onAutoModeSwitch"
     | "hooks"
     | "workingDirectory"
     | "configDir"
@@ -1503,6 +1599,36 @@ export interface ProviderConfig {
      * Custom HTTP headers to include in outbound provider requests.
      */
     headers?: Record<string, string>;
+
+    /**
+     * Well-known model name used by the runtime to look up agent configuration
+     * (tools, prompts, reasoning behavior) and default token limits. Also used
+     * as the wire model when {@link wireModel} is not set.
+     * Falls back to {@link SessionConfig.model}.
+     */
+    modelId?: string;
+
+    /**
+     * Model name sent to the provider API for inference. Use this when the
+     * provider's model name (e.g. an Azure deployment name or a custom
+     * fine-tune name) differs from {@link modelId}.
+     * Falls back to {@link modelId}, then {@link SessionConfig.model}.
+     */
+    wireModel?: string;
+
+    /**
+     * Overrides the resolved model's default max prompt tokens. The runtime
+     * triggers conversation compaction before sending a request when the
+     * prompt (system message, history, tool definitions, user message) would
+     * exceed this limit.
+     */
+    maxInputTokens?: number;
+
+    /**
+     * Overrides the resolved model's default max output tokens. When hit, the
+     * model stops generating and returns a truncated response.
+     */
+    maxOutputTokens?: number;
 }
 
 /**
@@ -1771,7 +1897,7 @@ export interface ModelPolicy {
  * Model billing information
  */
 export interface ModelBilling {
-    multiplier: number;
+    multiplier?: number;
 }
 
 /**

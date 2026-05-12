@@ -90,6 +90,12 @@ type ClientOptions struct {
 	// This option is only used when the SDK spawns the CLI process; it is ignored
 	// when connecting to an external server via CLIUrl.
 	SessionIdleTimeoutSeconds int
+	// Remote enables remote session support (Mission Control integration).
+	// When true, sessions in a GitHub repository working directory are
+	// accessible from GitHub web and mobile.
+	// This option is only used when the SDK spawns the CLI process; it is ignored
+	// when connecting to an external server via CLIUrl.
+	Remote bool
 }
 
 // TelemetryConfig configures OpenTelemetry integration for the Copilot CLI process.
@@ -279,6 +285,55 @@ type UserInputHandler func(request UserInputRequest, invocation UserInputInvocat
 type UserInputInvocation struct {
 	SessionID string
 }
+
+// ExitPlanModeRequest represents a request to exit plan mode and continue with a selected action.
+type ExitPlanModeRequest struct {
+	Summary           string   `json:"summary"`
+	PlanContent       string   `json:"planContent,omitempty"`
+	Actions           []string `json:"actions"`
+	RecommendedAction string   `json:"recommendedAction"`
+}
+
+// ExitPlanModeResult is the response to an exit-plan-mode request.
+type ExitPlanModeResult struct {
+	Approved       bool   `json:"approved"`
+	SelectedAction string `json:"selectedAction,omitempty"`
+	Feedback       string `json:"feedback,omitempty"`
+}
+
+// ExitPlanModeInvocation provides context about an exit-plan-mode request.
+type ExitPlanModeInvocation struct {
+	SessionID string
+}
+
+// ExitPlanModeHandler handles exit-plan-mode requests from the agent.
+type ExitPlanModeHandler func(request ExitPlanModeRequest, invocation ExitPlanModeInvocation) (ExitPlanModeResult, error)
+
+// AutoModeSwitchRequest represents a request to switch to auto mode after an eligible rate limit.
+type AutoModeSwitchRequest struct {
+	ErrorCode         *string  `json:"errorCode,omitempty"`
+	RetryAfterSeconds *float64 `json:"retryAfterSeconds,omitempty"`
+}
+
+// AutoModeSwitchResponse is the user's response to an auto-mode-switch request.
+type AutoModeSwitchResponse string
+
+const (
+	// AutoModeSwitchResponseYes approves the switch for this rate-limit cycle.
+	AutoModeSwitchResponseYes AutoModeSwitchResponse = "yes"
+	// AutoModeSwitchResponseYesAlways approves and remembers the choice for this session.
+	AutoModeSwitchResponseYesAlways AutoModeSwitchResponse = "yes_always"
+	// AutoModeSwitchResponseNo declines the switch.
+	AutoModeSwitchResponseNo AutoModeSwitchResponse = "no"
+)
+
+// AutoModeSwitchInvocation provides context about an auto-mode-switch request.
+type AutoModeSwitchInvocation struct {
+	SessionID string
+}
+
+// AutoModeSwitchHandler handles auto-mode-switch requests from the agent.
+type AutoModeSwitchHandler func(request AutoModeSwitchRequest, invocation AutoModeSwitchInvocation) (AutoModeSwitchResponse, error)
 
 // PreToolUseHookInput is the input for a pre-tool-use hook
 type PreToolUseHookInput struct {
@@ -510,7 +565,7 @@ type SessionFsConfig struct {
 	// session-scoped files such as events, checkpoints, and temp files.
 	SessionStatePath string
 	// Conventions identifies the path conventions used by this filesystem provider.
-	Conventions rpc.SessionFSSetProviderConventions
+	Conventions rpc.SessionFsSetProviderConventions
 }
 
 // SessionConfig configures a new session
@@ -547,8 +602,7 @@ type SessionConfig struct {
 	// Ignored if AvailableTools is specified.
 	ExcludedTools []string
 	// OnPermissionRequest is a handler for permission requests from the server.
-	// If nil, all permission requests are denied by default.
-	// Provide a handler to approve operations (file writes, shell commands, URL fetches, etc.).
+	// This field is required; use PermissionHandler.ApproveAll to allow all permissions.
 	OnPermissionRequest PermissionHandlerFunc
 	// OnUserInputRequest is a handler for user input requests from the agent (enables ask_user tool)
 	OnUserInputRequest UserInputHandler
@@ -570,6 +624,13 @@ type SessionConfig struct {
 	IncludeSubAgentStreamingEvents *bool
 	// Provider configures a custom model provider (BYOK)
 	Provider *ProviderConfig
+	// EnableSessionTelemetry enables or disables internal session telemetry for this session.
+	// When false, disables session telemetry. When nil (the default) or true,
+	// telemetry is enabled for GitHub-authenticated sessions. When a custom
+	// Provider (BYOK) is configured, session telemetry is always disabled
+	// regardless of this setting. This is independent of the OpenTelemetry
+	// configuration in ClientOptions.Telemetry.
+	EnableSessionTelemetry *bool
 	// ModelCapabilities overrides individual model capabilities resolved by the runtime.
 	// Only non-nil fields are applied over the runtime-resolved capabilities.
 	ModelCapabilities *rpc.ModelCapabilitiesOverride
@@ -609,6 +670,12 @@ type SessionConfig struct {
 	// When provided, the server may call back to this client for form-based UI dialogs
 	// (e.g. from MCP tools). Also enables the elicitation capability on the session.
 	OnElicitationRequest ElicitationHandler
+	// OnExitPlanMode is a handler for exit-plan-mode requests from the server.
+	// When provided, enables exitPlanMode.request callbacks for the session.
+	OnExitPlanMode ExitPlanModeHandler
+	// OnAutoModeSwitch is a handler for auto-mode-switch requests from the server.
+	// When provided, enables autoModeSwitch.request callbacks for the session.
+	OnAutoModeSwitch AutoModeSwitchHandler
 	// GitHubToken is an optional per-session GitHub token used for authentication.
 	// When provided, the session authenticates as the token's owner instead of
 	// using the global client-level auth.
@@ -760,6 +827,13 @@ type ResumeSessionConfig struct {
 	ExcludedTools []string
 	// Provider configures a custom model provider
 	Provider *ProviderConfig
+	// EnableSessionTelemetry enables or disables internal session telemetry for this session.
+	// When false, disables session telemetry. When nil (the default) or true,
+	// telemetry is enabled for GitHub-authenticated sessions. When a custom
+	// Provider (BYOK) is configured, session telemetry is always disabled
+	// regardless of this setting. This is independent of the OpenTelemetry
+	// configuration in ClientOptions.Telemetry.
+	EnableSessionTelemetry *bool
 	// ModelCapabilities overrides individual model capabilities resolved by the runtime.
 	// Only non-nil fields are applied over the runtime-resolved capabilities.
 	ModelCapabilities *rpc.ModelCapabilitiesOverride
@@ -767,8 +841,7 @@ type ResumeSessionConfig struct {
 	// Valid values: "low", "medium", "high", "xhigh"
 	ReasoningEffort string
 	// OnPermissionRequest is a handler for permission requests from the server.
-	// If nil, all permission requests are denied by default.
-	// Provide a handler to approve operations (file writes, shell commands, URL fetches, etc.).
+	// This field is required; use PermissionHandler.ApproveAll to allow all permissions.
 	OnPermissionRequest PermissionHandlerFunc
 	// OnUserInputRequest is a handler for user input requests from the agent (enables ask_user tool)
 	OnUserInputRequest UserInputHandler
@@ -841,6 +914,12 @@ type ResumeSessionConfig struct {
 	// OnElicitationRequest is a handler for elicitation requests from the server.
 	// See SessionConfig.OnElicitationRequest.
 	OnElicitationRequest ElicitationHandler
+	// OnExitPlanMode is a handler for exit-plan-mode requests from the server.
+	// See SessionConfig.OnExitPlanMode.
+	OnExitPlanMode ExitPlanModeHandler
+	// OnAutoModeSwitch is a handler for auto-mode-switch requests from the server.
+	// See SessionConfig.OnAutoModeSwitch.
+	OnAutoModeSwitch AutoModeSwitchHandler
 }
 type ProviderConfig struct {
 	// Type is the provider type: "openai", "azure", or "anthropic". Defaults to "openai".
@@ -859,6 +938,25 @@ type ProviderConfig struct {
 	Azure *AzureProviderOptions `json:"azure,omitempty"`
 	// Headers are custom HTTP headers included in outbound provider requests.
 	Headers map[string]string `json:"headers,omitempty"`
+	// ModelID is the well-known model name used by the runtime to look up
+	// agent configuration (tools, prompts, reasoning behavior) and default
+	// token limits. Also used as the wire model when WireModel is not set.
+	// Falls back to SessionConfig.Model.
+	ModelID string `json:"modelId,omitempty"`
+	// WireModel is the model name sent to the provider API for inference. Use
+	// this when the provider's model name (e.g. an Azure deployment name or a
+	// custom fine-tune name) differs from ModelID.
+	// Falls back to ModelID, then SessionConfig.Model.
+	WireModel string `json:"wireModel,omitempty"`
+	// MaxInputTokens overrides the resolved model's default max prompt tokens.
+	// The runtime triggers conversation compaction before sending a request
+	// when the prompt (system message, history, tool definitions, user
+	// message) would exceed this limit.
+	MaxInputTokens int `json:"maxPromptTokens,omitempty"`
+	// MaxOutputTokens overrides the resolved model's default max output
+	// tokens. When hit, the model stops generating and returns a truncated
+	// response.
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
 }
 
 // AzureProviderOptions contains Azure-specific provider configuration
@@ -982,7 +1080,7 @@ type ModelPolicy struct {
 
 // ModelBilling contains model billing information
 type ModelBilling struct {
-	Multiplier float64 `json:"multiplier"`
+	Multiplier *float64 `json:"multiplier,omitempty"`
 }
 
 // ModelInfo contains information about an available model
@@ -1069,9 +1167,12 @@ type createSessionRequest struct {
 	AvailableTools                 []string                       `json:"availableTools"`
 	ExcludedTools                  []string                       `json:"excludedTools,omitempty"`
 	Provider                       *ProviderConfig                `json:"provider,omitempty"`
+	EnableSessionTelemetry         *bool                          `json:"enableSessionTelemetry,omitempty"`
 	ModelCapabilities              *rpc.ModelCapabilitiesOverride `json:"modelCapabilities,omitempty"`
 	RequestPermission              *bool                          `json:"requestPermission,omitempty"`
 	RequestUserInput               *bool                          `json:"requestUserInput,omitempty"`
+	RequestExitPlanMode            *bool                          `json:"requestExitPlanMode,omitempty"`
+	RequestAutoModeSwitch          *bool                          `json:"requestAutoModeSwitch,omitempty"`
 	Hooks                          *bool                          `json:"hooks,omitempty"`
 	WorkingDirectory               string                         `json:"workingDirectory,omitempty"`
 	Streaming                      *bool                          `json:"streaming,omitempty"`
@@ -1118,9 +1219,12 @@ type resumeSessionRequest struct {
 	AvailableTools                 []string                       `json:"availableTools"`
 	ExcludedTools                  []string                       `json:"excludedTools,omitempty"`
 	Provider                       *ProviderConfig                `json:"provider,omitempty"`
+	EnableSessionTelemetry         *bool                          `json:"enableSessionTelemetry,omitempty"`
 	ModelCapabilities              *rpc.ModelCapabilitiesOverride `json:"modelCapabilities,omitempty"`
 	RequestPermission              *bool                          `json:"requestPermission,omitempty"`
 	RequestUserInput               *bool                          `json:"requestUserInput,omitempty"`
+	RequestExitPlanMode            *bool                          `json:"requestExitPlanMode,omitempty"`
+	RequestAutoModeSwitch          *bool                          `json:"requestAutoModeSwitch,omitempty"`
 	Hooks                          *bool                          `json:"hooks,omitempty"`
 	WorkingDirectory               string                         `json:"workingDirectory,omitempty"`
 	ConfigDir                      string                         `json:"configDir,omitempty"`
@@ -1312,4 +1416,22 @@ type userInputRequest struct {
 type userInputResponse struct {
 	Answer      string `json:"answer"`
 	WasFreeform bool   `json:"wasFreeform"`
+}
+
+type exitPlanModeRequest struct {
+	SessionID         string   `json:"sessionId"`
+	Summary           string   `json:"summary"`
+	PlanContent       string   `json:"planContent,omitempty"`
+	Actions           []string `json:"actions"`
+	RecommendedAction string   `json:"recommendedAction"`
+}
+
+type autoModeSwitchRequest struct {
+	SessionID         string   `json:"sessionId"`
+	ErrorCode         *string  `json:"errorCode,omitempty"`
+	RetryAfterSeconds *float64 `json:"retryAfterSeconds,omitempty"`
+}
+
+type autoModeSwitchResponse struct {
+	Response AutoModeSwitchResponse `json:"response"`
 }

@@ -16,7 +16,11 @@ import (
 // Tests session-scoped MCP, skills, plugins, and extensions RPCs.
 func TestRpcMcpAndSkillsE2E(t *testing.T) {
 	ctx := testharness.NewTestContext(t)
-	client := ctx.NewClient()
+	// --yolo auto-approves extension permission gates at the CLI level,
+	// preventing breakage from new gates (e.g., extension-permission-access).
+	client := ctx.NewClient(func(o *copilot.ClientOptions) {
+		o.CLIArgs = []string{"--yolo"}
+	})
 	t.Cleanup(func() { client.ForceStop() })
 
 	t.Run("should list and toggle session skills", func(t *testing.T) {
@@ -189,11 +193,11 @@ func TestRpcMcpAndSkillsE2E(t *testing.T) {
 		}
 
 		assertRpcError(t, "Mcp.Enable", func() error {
-			_, e := session.RPC.Mcp.Enable(t.Context(), &rpc.MCPEnableRequest{ServerName: "missing-server"})
+			_, e := session.RPC.Mcp.Enable(t.Context(), &rpc.McpEnableRequest{ServerName: "missing-server"})
 			return e
 		}, "no mcp host initialized")
 		assertRpcError(t, "Mcp.Disable", func() error {
-			_, e := session.RPC.Mcp.Disable(t.Context(), &rpc.MCPDisableRequest{ServerName: "missing-server"})
+			_, e := session.RPC.Mcp.Disable(t.Context(), &rpc.McpDisableRequest{ServerName: "missing-server"})
 			return e
 		}, "no mcp host initialized")
 		assertRpcError(t, "Mcp.Reload", func() error {

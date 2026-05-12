@@ -1,4 +1,4 @@
-# Build Your First Copilot-Powered App
+# Build your first Copilot-powered app
 
 In this tutorial, you'll use the Copilot SDK to build a command-line assistant. You'll start with the basics, add streaming responses, then add custom tools - giving Copilot the ability to call your code.
 
@@ -22,8 +22,8 @@ Before you begin, make sure you have:
 
 - **GitHub Copilot CLI** installed and authenticated ([Installation guide](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli))
 - Your preferred language runtime:
-  - **Node.js** 18+ or **Python** 3.11+ or **Go** 1.21+ or **Java** 17+ or **.NET** 8.0+
-  - Additional languages: Rust, Ruby 3.1+, PHP 8.1+, Swift 5.9+, Kotlin 1.9+, C++17, C11, Dart 3.0+, Scala 3.4+, R 4.0+, Perl 5.32+, Lua 5.1+, Bash 4+, Elixir 1.15+, Haskell (GHC 9.4+), Clojure 1.12+
+  - **Node.js** 20+ or **Python** 3.11+ or **Go** 1.24+ or **Rust** 1.94+ or **Java** 17+ or **.NET** 8.0+
+  - Additional languages: Ruby 3.1+, PHP 8.1+, Swift 5.9+, Kotlin 1.9+, C++17, C11, Dart 3.0+, Scala 3.4+, R 4.0+, Perl 5.32+, Lua 5.1+, Bash 4+, Elixir 1.15+, Haskell (GHC 9.4+), Clojure 1.12+
 
 Verify the CLI is working:
 
@@ -31,7 +31,7 @@ Verify the CLI is working:
 copilot --version
 ```
 
-## Step 1: Install the SDK
+## Step 1: install the SDK
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
@@ -79,6 +79,28 @@ go get github.com/github/copilot-sdk/go
 </details>
 
 <details>
+<summary><strong>Rust</strong></summary>
+
+First, create a new binary crate:
+
+```bash
+cargo new copilot-demo && cd copilot-demo
+```
+
+Then install the SDK and direct dependencies used by the examples:
+
+```bash
+cargo add github-copilot-sdk --features derive
+# Used by #[tokio::main] and tokio::spawn
+cargo add tokio --features rt-multi-thread,macros
+# Used by custom-tool parameter derives later in this guide
+cargo add serde --features derive
+cargo add schemars
+```
+
+</details>
+
+<details>
 <summary><strong>.NET</strong></summary>
 
 First, create a new console project:
@@ -100,7 +122,7 @@ dotnet add package GitHub.Copilot.SDK
 
 First, create a new directory and initialize your project.
 
-**Maven** — add to your `pom.xml`:
+**Maven**—add to your `pom.xml`:
 
 ```xml
 <dependency>
@@ -110,7 +132,7 @@ First, create a new directory and initialize your project.
 </dependency>
 ```
 
-**Gradle** — add to your `build.gradle`:
+**Gradle**—add to your `build.gradle`:
 
 ```groovy
 implementation 'com.github:copilot-sdk-java:${copilotSdkVersion}'
@@ -309,6 +331,51 @@ Run it:
 
 ```bash
 go run main.go
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+Create `src/main.rs`:
+
+```rust
+use std::sync::Arc;
+use std::time::Duration;
+
+use github_copilot_sdk::handler::ApproveAllHandler;
+use github_copilot_sdk::{Client, ClientOptions, MessageOptions, SessionConfig};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::start(ClientOptions::default()).await?;
+    let session = client
+        .create_session(SessionConfig::default().with_handler(Arc::new(ApproveAllHandler)))
+        .await?;
+
+    let response = session
+        .send_and_wait(
+            MessageOptions::new("What is 2 + 2?").with_wait_timeout(Duration::from_secs(120)),
+        )
+        .await?;
+
+    if let Some(event) = response {
+        if let Some(content) = event.data.get("content").and_then(|value| value.as_str()) {
+            println!("{content}");
+        }
+    }
+
+    session.disconnect().await?;
+    client.stop().await?;
+    Ok(())
+}
+```
+
+Run it:
+
+```bash
+cargo run
 ```
 
 </details>
@@ -586,7 +653,7 @@ cmake -B build && cmake --build build && ./build/main
 
 Congratulations! You just built your first Copilot-powered app.
 
-## Step 3: Add Streaming Responses
+## Step 3: add streaming responses
 
 Right now, you wait for the complete response before seeing anything. Let's make it interactive by streaming the response as it's generated.
 
@@ -706,6 +773,63 @@ func main() {
 		log.Fatal(err)
 	}
 	os.Exit(0)
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+Update `src/main.rs`:
+
+```rust
+use std::io::{self, Write};
+use std::sync::Arc;
+use std::time::Duration;
+
+use github_copilot_sdk::handler::ApproveAllHandler;
+use github_copilot_sdk::{Client, ClientOptions, MessageOptions, SessionConfig};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::start(ClientOptions::default()).await?;
+
+    let mut config = SessionConfig::default();
+    config.streaming = Some(true);
+    let session = client
+        .create_session(config.with_handler(Arc::new(ApproveAllHandler)))
+        .await?;
+
+    // Listen for response chunks
+    let mut events = session.subscribe();
+    tokio::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            match event.event_type.as_str() {
+                "assistant.message_delta" => {
+                    if let Some(text) =
+                        event.data.get("deltaContent").and_then(|value| value.as_str())
+                    {
+                        print!("{text}");
+                        io::stdout().flush().ok();
+                    }
+                }
+                "assistant.message" => println!(),
+                _ => {}
+            }
+        }
+    });
+
+    session
+        .send_and_wait(
+            MessageOptions::new("Tell me a short joke")
+                .with_wait_timeout(Duration::from_secs(120)),
+        )
+        .await?;
+
+    session.disconnect().await?;
+    client.stop().await?;
+    Ok(())
 }
 ```
 
@@ -1005,7 +1129,7 @@ int main() {
 
 Run the code again. You'll see the response appear word by word.
 
-### Event Subscription Methods
+### Event subscription methods
 
 The SDK provides methods for subscribing to session events:
 
@@ -1013,6 +1137,7 @@ The SDK provides methods for subscribing to session events:
 |--------|-------------|
 | `on(handler)` | Subscribe to all events; returns unsubscribe function |
 | `on(eventType, handler)` | Subscribe to specific event type (Node.js/TypeScript only); returns unsubscribe function |
+| `subscribe()` | Subscribe to all events (Rust); filter by `event_type` |
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
@@ -1141,6 +1266,31 @@ session.On(func(event copilot.SessionEvent) {
 
 // Later, to unsubscribe:
 unsubscribe()
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+let mut events = session.subscribe();
+
+tokio::spawn(async move {
+    while let Ok(event) = events.recv().await {
+        println!("Event: {}", event.event_type);
+
+        match event.event_type.as_str() {
+            "session.idle" => println!("Session is idle"),
+            "assistant.message" => {
+                if let Some(content) = event.data.get("content").and_then(|value| value.as_str()) {
+                    println!("Message: {content}");
+                }
+            }
+            _ => {}
+        }
+    }
+});
 ```
 
 </details>
@@ -1565,6 +1715,84 @@ func main() {
 		log.Fatal(err)
 	}
 	os.Exit(0)
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+Update `src/main.rs`:
+
+```rust
+use std::io::{self, Write};
+use std::sync::Arc;
+use std::time::Duration;
+
+use github_copilot_sdk::handler::ApproveAllHandler;
+use github_copilot_sdk::tool::{JsonSchema, ToolHandlerRouter, define_tool};
+use github_copilot_sdk::{Client, ClientOptions, MessageOptions, SessionConfig, ToolResult};
+use serde::Deserialize;
+
+#[derive(Deserialize, JsonSchema)]
+struct GetWeatherParams {
+    city: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Define a tool that Copilot can call
+    let router = ToolHandlerRouter::new(
+        vec![define_tool(
+            "get_weather",
+            "Get the current weather for a city",
+            |_inv, params: GetWeatherParams| async move {
+                Ok(ToolResult::Text(format!(
+                    "{}: 62°F and sunny",
+                    params.city
+                )))
+            },
+        )],
+        Arc::new(ApproveAllHandler),
+    );
+    let tools = router.tools();
+
+    let client = Client::start(ClientOptions::default()).await?;
+
+    let mut config = SessionConfig::default();
+    config.streaming = Some(true);
+    config.tools = Some(tools);
+    let session = client.create_session(config.with_handler(Arc::new(router))).await?;
+
+    let mut events = session.subscribe();
+    tokio::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            match event.event_type.as_str() {
+                "assistant.message_delta" => {
+                    if let Some(text) =
+                        event.data.get("deltaContent").and_then(|value| value.as_str())
+                    {
+                        print!("{text}");
+                        io::stdout().flush().ok();
+                    }
+                }
+                "assistant.message" => println!(),
+                _ => {}
+            }
+        }
+    });
+
+    session
+        .send_and_wait(
+            MessageOptions::new("What's the weather like in Seattle and Tokyo?")
+                .with_wait_timeout(Duration::from_secs(120)),
+        )
+        .await?;
+
+    session.disconnect().await?;
+    client.stop().await?;
+    Ok(())
 }
 ```
 
@@ -2052,7 +2280,7 @@ int main() {
 
 Run it and you'll see Copilot call your tool to get weather data, then respond with the results!
 
-## Step 5: Build an Interactive Assistant
+## Step 5: build an interactive assistant
 
 Let's put it all together into a useful interactive assistant:
 
@@ -2298,6 +2526,112 @@ Run with:
 
 ```bash
 go run weather-assistant.go
+```
+
+</details>
+
+<details>
+<summary><strong>Rust</strong></summary>
+
+Create `src/main.rs`:
+
+```rust
+use std::io::{self, BufRead, Write};
+use std::sync::Arc;
+use std::time::Duration;
+
+use github_copilot_sdk::handler::ApproveAllHandler;
+use github_copilot_sdk::tool::{JsonSchema, ToolHandlerRouter, define_tool};
+use github_copilot_sdk::{Client, ClientOptions, MessageOptions, SessionConfig, ToolResult};
+use serde::Deserialize;
+
+#[derive(Deserialize, JsonSchema)]
+struct GetWeatherParams {
+    city: String,
+}
+
+fn read_line() -> Option<String> {
+    let stdin = io::stdin();
+    let mut line = String::new();
+    stdin.lock().read_line(&mut line).ok()?;
+    if line.is_empty() {
+        return None;
+    }
+    Some(line.trim_end_matches(&['\n', '\r'][..]).to_string())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let router = ToolHandlerRouter::new(
+        vec![define_tool(
+            "get_weather",
+            "Get the current weather for a city",
+            |_inv, params: GetWeatherParams| async move {
+                Ok(ToolResult::Text(format!(
+                    "{}: 62°F and sunny",
+                    params.city
+                )))
+            },
+        )],
+        Arc::new(ApproveAllHandler),
+    );
+    let tools = router.tools();
+
+    let client = Client::start(ClientOptions::default()).await?;
+
+    let mut config = SessionConfig::default();
+    config.streaming = Some(true);
+    config.tools = Some(tools);
+    let session = client.create_session(config.with_handler(Arc::new(router))).await?;
+
+    let mut events = session.subscribe();
+    tokio::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            match event.event_type.as_str() {
+                "assistant.message_delta" => {
+                    if let Some(text) =
+                        event.data.get("deltaContent").and_then(|value| value.as_str())
+                    {
+                        print!("{text}");
+                        io::stdout().flush().ok();
+                    }
+                }
+                "assistant.message" => println!(),
+                _ => {}
+            }
+        }
+    });
+
+    println!("Weather Assistant (type 'exit' to quit)");
+    println!("Try: 'What's the weather in Paris?' or 'Compare weather in NYC and LA'\n");
+
+    loop {
+        print!("You: ");
+        io::stdout().flush().ok();
+
+        let Some(input) = read_line() else { break };
+        if input.eq_ignore_ascii_case("exit") {
+            break;
+        }
+
+        print!("Assistant: ");
+        io::stdout().flush().ok();
+        session
+            .send_and_wait(MessageOptions::new(input).with_wait_timeout(Duration::from_secs(120)))
+            .await?;
+        println!();
+    }
+
+    session.disconnect().await?;
+    client.stop().await?;
+    Ok(())
+}
+```
+
+Run with:
+
+```bash
+cargo run
 ```
 
 </details>
@@ -2950,28 +3284,24 @@ You: exit
 
 You've built an assistant with a custom tool that Copilot can call!
 
----
-
-## How Tools Work
+## How tools work
 
 When you define a tool, you're telling Copilot:
 1. **What the tool does** (description)
-2. **What parameters it needs** (schema)
-3. **What code to run** (handler)
+1. **What parameters it needs** (schema)
+1. **What code to run** (handler)
 
 Copilot decides when to call your tool based on the user's question. When it does:
 1. Copilot sends a tool call request with the parameters
-2. The SDK runs your handler function
-3. The result is sent back to Copilot
-4. Copilot incorporates the result into its response
+1. The SDK runs your handler function
+1. The result is sent back to Copilot
+1. Copilot incorporates the result into its response
 
----
-
-## What's Next?
+## What's next?
 
 Now that you've got the basics, here are more powerful features to explore:
 
-### Connect to MCP Servers
+### Connect to MCP servers
 
 MCP (Model Context Protocol) servers provide pre-built tools. Connect to GitHub's MCP server to give Copilot access to repositories, issues, and pull requests:
 
@@ -2988,7 +3318,7 @@ const session = await client.createSession({
 
 📖 **[Full MCP documentation →](./features/mcp.md)** - Learn about local vs remote servers, all configuration options, and troubleshooting.
 
-### Create Custom Agents
+### Create custom agents
 
 Define specialized AI personas for specific tasks:
 
@@ -3003,9 +3333,10 @@ const session = await client.createSession({
 });
 ```
 
-> **Tip:** You can also set `agent: "pr-reviewer"` in the session config to pre-select this agent from the start. See the [Custom Agents guide](./features/custom-agents.md#selecting-an-agent-at-session-creation) for details.
+> [!TIP]
+> You can also set `agent: "pr-reviewer"` in the session config to pre-select this agent from the start. See the [Custom Agents guide](./features/custom-agents.md#selecting-an-agent-at-session-creation) for details.
 
-### Customize the System Message
+### Customize the system message
 
 Control the AI's behavior and personality by appending instructions:
 
@@ -3035,21 +3366,19 @@ const session = await client.createSession({
 
 Available section IDs: `identity`, `tone`, `tool_efficiency`, `environment_context`, `code_change_rules`, `guidelines`, `safety`, `tool_instructions`, `custom_instructions`, `last_instructions`.
 
-Each override supports four actions: `replace`, `remove`, `append`, and `prepend`. Unknown section IDs are handled gracefully — content is appended to additional instructions and a warning is emitted; `remove` on unknown sections is silently ignored.
+Each override supports four actions: `replace`, `remove`, `append`, and `prepend`. Unknown section IDs are handled gracefully—content is appended to additional instructions and a warning is emitted; `remove` on unknown sections is silently ignored.
 
-See the language-specific SDK READMEs for examples in [TypeScript](../nodejs/README.md), [Python](../python/README.md), [Go](../go/README.md), [Java](../java/README.md), and [C#](../dotnet/README.md).
+See the language-specific SDK READMEs for examples in [TypeScript](../nodejs/README.md), [Python](../python/README.md), [Go](../go/README.md), [Rust](../rust/README.md), [Java](../java/README.md), and [C#](../dotnet/README.md).
 
----
-
-## Connecting to an External CLI Server
+## Connecting to an external CLI server
 
 By default, the SDK automatically manages the Copilot CLI process lifecycle, starting and stopping the CLI as needed. However, you can also run the CLI in server mode separately and have the SDK connect to it. This can be useful for:
 
-- **Debugging**: Keep the CLI running between SDK restarts to inspect logs
-- **Resource sharing**: Multiple SDK clients can connect to the same CLI server
-- **Development**: Run the CLI with custom settings or in a different environment
+* **Debugging**: Keep the CLI running between SDK restarts to inspect logs
+* **Resource sharing**: Multiple SDK clients can connect to the same CLI server
+* **Development**: Run the CLI with custom settings or in a different environment
 
-### Running the CLI in Server Mode
+### Running the CLI in server mode
 
 Start the CLI in server mode using the `--headless` flag and optionally specify a port:
 
@@ -3066,9 +3395,10 @@ By default the headless server only accepts connections from loopback (`127.0.0.
 copilot --headless --host 0.0.0.0 --port 4321
 ```
 
-> **Warning:** Exposing the headless server on a non-loopback address makes it reachable by anyone who can route to that address. Pair it with network controls (firewall, private network, reverse proxy) and authentication appropriate for your environment.
+> [!WARNING]
+> Exposing the headless server on a non-loopback address makes it reachable by anyone who can route to that address. Pair it with network controls (firewall, private network, reverse proxy) and authentication appropriate for your environment.
 
-### Connecting the SDK to the External Server
+### Connecting the SDK to the external server
 
 Once the CLI is running in server mode, configure your SDK client to connect to it using the "cli url" option:
 
@@ -3164,6 +3494,31 @@ session, err := client.CreateSession(ctx, &copilot.SessionConfig{
 </details>
 
 <details>
+<summary><strong>Rust</strong></summary>
+
+```rust
+use std::sync::Arc;
+
+use github_copilot_sdk::handler::ApproveAllHandler;
+use github_copilot_sdk::{Client, ClientOptions, SessionConfig, Transport};
+
+let mut options = ClientOptions::default();
+options.transport = Transport::External {
+    host: "localhost".to_string(),
+    port: 4321,
+};
+let client = Client::start(options).await?;
+
+// Use the client normally
+let session = client
+    .create_session(SessionConfig::default().with_handler(Arc::new(ApproveAllHandler)))
+    .await?;
+// ...
+```
+
+</details>
+
+<details>
 <summary><strong>.NET</strong></summary>
 
 ```csharp
@@ -3206,17 +3561,15 @@ var session = client.createSession(
 
 </details>
 
-**Note:** When `cli_url` / `cliUrl` / `CLIUrl` is provided, the SDK will not spawn or manage a CLI process - it will only connect to the existing server at the specified URL.
+**Note:** When `cli_url` / `cliUrl` / `CLIUrl` is provided, or Rust uses `Transport::External`, the SDK will not spawn or manage a CLI process - it will only connect to the existing server at the specified URL.
 
----
-
-## Telemetry & Observability
+## Telemetry and observability
 
 The Copilot SDK supports [OpenTelemetry](https://opentelemetry.io/) for distributed tracing. Provide a `telemetry` configuration to the client to enable trace export from the CLI process and automatic [W3C Trace Context](https://www.w3.org/TR/trace-context/) propagation between the SDK and CLI.
 
-### Enabling Telemetry
+### Enabling telemetry
 
-Pass a `telemetry` (or `Telemetry`) config when creating the client. This is the opt-in — no separate "enabled" flag is needed.
+Pass a `telemetry` (or `Telemetry`) config when creating the client. This is the opt-in—no separate "enabled" flag is needed.
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
@@ -3271,6 +3624,26 @@ Dependency: `go.opentelemetry.io/otel`
 </details>
 
 <details>
+<summary><strong>Rust</strong></summary>
+
+<!-- docs-validate: skip -->
+```rust
+use github_copilot_sdk::{Client, ClientOptions, OtelExporterType, TelemetryConfig};
+
+let mut options = ClientOptions::default();
+options.telemetry = Some(
+    TelemetryConfig::new()
+        .with_exporter_type(OtelExporterType::OtlpHttp)
+        .with_otlp_endpoint("http://localhost:4318"),
+);
+let client = Client::start(options).await?;
+```
+
+No extra dependencies—the SDK injects telemetry environment variables for the spawned CLI process.
+
+</details>
+
+<details>
 <summary><strong>.NET</strong></summary>
 
 <!-- docs-validate: skip -->
@@ -3284,7 +3657,7 @@ var client = new CopilotClient(new CopilotClientOptions
 });
 ```
 
-No extra dependencies — uses built-in `System.Diagnostics.Activity`.
+No extra dependencies—uses built-in `System.Diagnostics.Activity`.
 
 </details>
 
@@ -3305,17 +3678,17 @@ Dependency: `io.opentelemetry:opentelemetry-api`
 
 </details>
 
-### TelemetryConfig Options
+### TelemetryConfig options
 
-| Option | Node.js | Python | Go | Java | .NET | Description |
-|---|---|---|---|---|---|---|
-| OTLP endpoint | `otlpEndpoint` | `otlp_endpoint` | `OTLPEndpoint` | `otlpEndpoint` | `OtlpEndpoint` | OTLP HTTP endpoint URL |
-| File path | `filePath` | `file_path` | `FilePath` | `filePath` | `FilePath` | File path for JSON-lines trace output |
-| Exporter type | `exporterType` | `exporter_type` | `ExporterType` | `exporterType` | `ExporterType` | `"otlp-http"` or `"file"` |
-| Source name | `sourceName` | `source_name` | `SourceName` | `sourceName` | `SourceName` | Instrumentation scope name |
-| Capture content | `captureContent` | `capture_content` | `CaptureContent` | `captureContent` | `CaptureContent` | Whether to capture message content |
+| Option | Node.js | Python | Go | Rust | Java | .NET | Description |
+|---|---|---|---|---|---|---|---|
+| OTLP endpoint | `otlpEndpoint` | `otlp_endpoint` | `OTLPEndpoint` | `otlp_endpoint` | `otlpEndpoint` | `OtlpEndpoint` | OTLP HTTP endpoint URL |
+| File path | `filePath` | `file_path` | `FilePath` | `file_path` | `filePath` | `FilePath` | File path for JSON-lines trace output |
+| Exporter type | `exporterType` | `exporter_type` | `ExporterType` | `exporter_type` | `exporterType` | `ExporterType` | `"otlp-http"` or `"file"` |
+| Source name | `sourceName` | `source_name` | `SourceName` | `source_name` | `sourceName` | `SourceName` | Instrumentation scope name |
+| Capture content | `captureContent` | `capture_content` | `CaptureContent` | `capture_content` | `captureContent` | `CaptureContent` | Whether to capture message content |
 
-### File Export
+### File export
 
 To write traces to a local file instead of an OTLP endpoint:
 
@@ -3329,18 +3702,16 @@ const client = new CopilotClient({
 });
 ```
 
-### Trace Context Propagation
+### Trace context propagation
 
-Trace context is propagated automatically — no manual instrumentation is needed:
+Trace context is propagated automatically—no manual instrumentation is needed:
 
-- **SDK → CLI**: `traceparent` and `tracestate` headers from the current span/activity are included in `session.create`, `session.resume`, and `session.send` RPC calls.
-- **CLI → SDK**: When the CLI invokes tool handlers, the trace context from the CLI's span is propagated so your tool code runs under the correct parent span.
+* **SDK → CLI**: `traceparent` and `tracestate` headers from the current span/activity are included in `session.create`, `session.resume`, and `session.send` RPC calls.
+* **CLI → SDK**: When the CLI invokes tool handlers, the trace context from the CLI's span is propagated so your tool code runs under the correct parent span.
 
-📖 **[OpenTelemetry Instrumentation Guide →](./observability/opentelemetry.md)** — TelemetryConfig options, trace context propagation, and per-language dependencies.
+📖 **[OpenTelemetry Instrumentation Guide →](./observability/opentelemetry.md)**—TelemetryConfig options, trace context propagation, and per-language dependencies.
 
----
-
-## Learn More
+## Learn more
 
 ### All SDK References
 - [Node.js](../nodejs/README.md) | [Python](../python/README.md) | [Go](../go/README.md) | [.NET](../dotnet/README.md) | [Java](../java/README.md) | [Rust](../rust/README.md) | [Ruby](../ruby/README.md)
@@ -3359,9 +3730,9 @@ Trace context is propagated automatically — no manual instrumentation is neede
 ---
 
 **You did it!** You've learned the core concepts of the GitHub Copilot SDK:
-- Creating a client and session
-- Sending messages and receiving responses
-- Streaming for real-time output
-- Defining custom tools that Copilot can call
+- ✅ Creating a client and session
+- ✅ Sending messages and receiving responses
+- ✅ Streaming for real-time output
+- ✅ Defining custom tools that Copilot can call
 
 Now go build something amazing in any of our **40 supported languages**!

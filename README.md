@@ -107,7 +107,7 @@ Quick steps:
 1. **(Optional) Install the Copilot CLI**
 
 For Node.js, Python, and .NET SDKs, the Copilot CLI is bundled automatically and no separate installation is required.
-For the Go SDK, [install the CLI manually](https://github.com/features/copilot/cli) or ensure `copilot` is available in your PATH.
+For the Go and Rust SDKs, [install the CLI manually](https://github.com/features/copilot/cli) or ensure `copilot` is available in your PATH unless you opt into their application-level CLI bundling features.
 
 2. **Install your preferred SDK** using the commands above.
 
@@ -158,26 +158,27 @@ See the **[Authentication documentation](./docs/auth/index.md)** for details on 
 
 No — for Node.js, Python, and .NET SDKs, the Copilot CLI is bundled automatically as a dependency. You do not need to install it separately.
 
-For Go SDK, you may still need to install the CLI manually.
+For Go and Rust SDKs, the CLI is not bundled by default. Install the CLI manually, ensure `copilot` is available in your PATH, or opt into their application-level CLI bundling features.
 
-Advanced: You can override the bundled CLI using `cliPath` or `cliUrl` if you want to use a custom CLI binary or connect to an external server.
+Advanced: You can override the CLI binary or connect to an external server. See the individual SDK README for language-specific options.
 
 ### What tools are enabled by default?
 
-By default, the SDK will operate the Copilot CLI in the equivalent of `--allow-all` being passed to the CLI, enabling all first-party tools, which means that the agents can perform a wide range of actions, including file system operations, Git operations, and web requests. You can customize tool availability by configuring the SDK client options to enable and disable specific tools. Refer to the individual SDK documentation for details on tool configuration and Copilot CLI for the list of tools available.
+By default, the SDK exposes the Copilot CLI's first-party tools, similar to running the CLI with `--allow-all`. Tool execution is still governed by each SDK's permission handler, so applications can approve, deny, or customize tool calls. You can customize tool availability by configuring the SDK client options to enable and disable specific tools. Refer to the individual SDK documentation for details on tool configuration and to the Copilot CLI documentation for the list of available tools.
 
 ### Can I use custom agents, skills or tools?
 
 Yes, the GitHub Copilot SDK allows you to define custom agents, skills, and tools. You can extend the functionality of the agents by implementing your own logic and integrating additional tools as needed. Refer to the SDK documentation of your preferred language for more details.
 
-### Are there instructions for Copilot to speed up development with the SDK?
+### Are there instructions or SDK guidance for Copilot to speed up development?
 
-Yes, check out the custom instructions for each SDK:
+Yes, check out the custom instructions and SDK-specific guidance:
 
 - **[Node.js / TypeScript](https://github.com/github/awesome-copilot/blob/main/instructions/copilot-sdk-nodejs.instructions.md)**
 - **[Python](https://github.com/github/awesome-copilot/blob/main/instructions/copilot-sdk-python.instructions.md)**
 - **[.NET](https://github.com/github/awesome-copilot/blob/main/instructions/copilot-sdk-csharp.instructions.md)**
 - **[Go](https://github.com/github/awesome-copilot/blob/main/instructions/copilot-sdk-go.instructions.md)**
+- **[Rust](./rust/README.md)** (SDK guidance; custom instructions not yet published)
 - **[Java](https://github.com/github/copilot-sdk-java/blob/main/instructions/copilot-sdk-java.instructions.md)**
 
 ### What models are supported?

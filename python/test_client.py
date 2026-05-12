@@ -544,6 +544,57 @@ class TestSessionConfigForwarding:
             await client.force_stop()
 
     @pytest.mark.asyncio
+    async def test_create_session_forwards_enable_session_telemetry(self):
+        client = CopilotClient(SubprocessConfig(cli_path=CLI_PATH))
+        await client.start()
+
+        try:
+            captured = {}
+            original_request = client._client.request
+
+            async def mock_request(method, params):
+                captured[method] = params
+                return await original_request(method, params)
+
+            client._client.request = mock_request
+            await client.create_session(
+                on_permission_request=PermissionHandler.approve_all,
+                enable_session_telemetry=False,
+            )
+            assert captured["session.create"]["enableSessionTelemetry"] is False
+        finally:
+            await client.force_stop()
+
+    @pytest.mark.asyncio
+    async def test_resume_session_forwards_enable_session_telemetry(self):
+        client = CopilotClient(SubprocessConfig(cli_path=CLI_PATH))
+        await client.start()
+
+        try:
+            session = await client.create_session(
+                on_permission_request=PermissionHandler.approve_all
+            )
+
+            captured = {}
+            original_request = client._client.request
+
+            async def mock_request(method, params):
+                captured[method] = params
+                if method == "session.resume":
+                    return {"sessionId": session.session_id}
+                return await original_request(method, params)
+
+            client._client.request = mock_request
+            await client.resume_session(
+                session.session_id,
+                on_permission_request=PermissionHandler.approve_all,
+                enable_session_telemetry=False,
+            )
+            assert captured["session.resume"]["enableSessionTelemetry"] is False
+        finally:
+            await client.force_stop()
+
+    @pytest.mark.asyncio
     async def test_create_session_forwards_provider_headers(self):
         client = CopilotClient(SubprocessConfig(cli_path=CLI_PATH))
         await client.start()
@@ -564,12 +615,20 @@ class TestSessionConfigForwarding:
                 provider={
                     "base_url": "https://example.com/provider",
                     "headers": {"Authorization": "Bearer provider-token"},
+                    "model_id": "gpt-4o",
+                    "wire_model": "my-finetune-v3",
+                    "max_input_tokens": 100_000,
+                    "max_output_tokens": 4096,
                 },
             )
 
             provider = captured["session.create"]["provider"]
             assert provider["baseUrl"] == "https://example.com/provider"
             assert provider["headers"] == {"Authorization": "Bearer provider-token"}
+            assert provider["modelId"] == "gpt-4o"
+            assert provider["wireModel"] == "my-finetune-v3"
+            assert provider["maxPromptTokens"] == 100_000
+            assert provider["maxOutputTokens"] == 4096
         finally:
             await client.force_stop()
 
@@ -599,12 +658,20 @@ class TestSessionConfigForwarding:
                 provider={
                     "base_url": "https://example.com/provider",
                     "headers": {"Authorization": "Bearer resume-token"},
+                    "model_id": "gpt-4o",
+                    "wire_model": "my-finetune-v3",
+                    "max_input_tokens": 100_000,
+                    "max_output_tokens": 4096,
                 },
             )
 
             provider = captured["session.resume"]["provider"]
             assert provider["baseUrl"] == "https://example.com/provider"
             assert provider["headers"] == {"Authorization": "Bearer resume-token"}
+            assert provider["modelId"] == "gpt-4o"
+            assert provider["wireModel"] == "my-finetune-v3"
+            assert provider["maxPromptTokens"] == 100_000
+            assert provider["maxOutputTokens"] == 4096
         finally:
             await client.force_stop()
 

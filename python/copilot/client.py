@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import KW_ONLY, dataclass, field
@@ -29,6 +31,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal, TypedDict, cast, overload
 
+from ._diagnostics import log_timing
 from ._jsonrpc import JsonRpcClient, JsonRpcError, ProcessExitedError
 from ._sdk_protocol_version import get_sdk_protocol_version
 from ._telemetry import get_trace_context, trace_context
@@ -45,12 +48,14 @@ from .generated.session_events import (
     session_event_from_dict,
 )
 from .session import (
+    AutoModeSwitchHandler,
     CommandDefinition,
     CopilotSession,
     CreateSessionFsHandler,
     CustomAgentConfig,
     DefaultAgentConfig,
     ElicitationHandler,
+    ExitPlanModeHandler,
     InfiniteSessionConfig,
     MCPServerConfig,
     ProviderConfig,
@@ -64,6 +69,8 @@ from .session import (
 )
 from .session_fs_provider import create_session_fs_adapter
 from .tools import Tool, ToolInvocation, ToolResult
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Connection Types
@@ -173,6 +180,14 @@ class SubprocessConfig:
 
     Sessions without activity for this duration are automatically cleaned up.
     Set to ``None`` or ``0`` to disable (sessions live indefinitely).
+    This option is only used when the SDK spawns the CLI process.
+    """
+
+    remote: bool = False
+    """Enable remote session support (Mission Control integration).
+
+    When ``True``, sessions in a GitHub repository working directory are
+    accessible from GitHub web and mobile.
     This option is only used when the SDK spawns the CLI process.
     """
 
@@ -525,19 +540,20 @@ class ModelPolicy:
 class ModelBilling:
     """Model billing information"""
 
-    multiplier: float
+    multiplier: float | None = None
 
     @staticmethod
     def from_dict(obj: Any) -> ModelBilling:
         assert isinstance(obj, dict)
         multiplier = obj.get("multiplier")
         if multiplier is None:
-            raise ValueError("Missing required field 'multiplier' in ModelBilling")
+            return ModelBilling()
         return ModelBilling(multiplier=float(multiplier))
 
     def to_dict(self) -> dict:
         result: dict = {}
-        result["multiplier"] = self.multiplier
+        if self.multiplier is not None:
+            result["multiplier"] = self.multiplier
         return result
 
 
@@ -923,14 +939,17 @@ class CopilotClient:
 
             # Resolve CLI path: explicit > COPILOT_CLI_PATH env var > bundled binary
             effective_env = config.env if config.env is not None else os.environ
+            self._cli_path_source: str | None = "explicit"
             if config.cli_path is None:
                 env_cli_path = effective_env.get("COPILOT_CLI_PATH")
                 if env_cli_path:
                     config.cli_path = env_cli_path
+                    self._cli_path_source = "environment"
                 else:
                     bundled_path = _get_bundled_cli_path()
                     if bundled_path:
                         config.cli_path = bundled_path
+                        self._cli_path_source = "bundled"
                     else:
                         raise RuntimeError(
                             "Copilot CLI not found. The bundled CLI binary is not available. "
@@ -1074,6 +1093,7 @@ class CopilotClient:
         if self._state == "connected":
             return
 
+        start_time = time.perf_counter()
         self._state = "connecting"
 
         try:
@@ -1083,20 +1103,59 @@ class CopilotClient:
 
             # Connect to the server
             await self._connect_to_server()
+            log_timing(
+                logger,
+                logging.DEBUG,
+                "CopilotClient.start transport setup complete",
+                start_time,
+            )
 
             # Verify protocol version compatibility
             await self._verify_protocol_version()
+            log_timing(
+                logger,
+                logging.DEBUG,
+                "CopilotClient.start protocol verification complete",
+                start_time,
+            )
 
             if self._session_fs_config:
+                session_fs_start = time.perf_counter()
                 await self._set_session_fs_provider()
+                log_timing(
+                    logger,
+                    logging.DEBUG,
+                    "CopilotClient.start session filesystem setup complete",
+                    session_fs_start,
+                )
 
             self._state = "connected"
+            log_timing(
+                logger,
+                logging.DEBUG,
+                "CopilotClient.start complete",
+                start_time,
+            )
         except ProcessExitedError as e:
             # Process exited with error - reraise as RuntimeError with stderr
             self._state = "error"
+            log_timing(
+                logger,
+                logging.WARNING,
+                "CopilotClient.start failed",
+                start_time,
+                exc_info=True,
+            )
             raise RuntimeError(str(e)) from None
         except Exception as e:
             self._state = "error"
+            log_timing(
+                logger,
+                logging.WARNING,
+                "CopilotClient.start failed",
+                start_time,
+                exc_info=True,
+            )
             # Check if process exited and capture any remaining stderr
             if self._process and hasattr(self._process, "poll"):
                 return_code = self._process.poll()
@@ -1143,6 +1202,11 @@ class CopilotClient:
             try:
                 await session.disconnect()
             except Exception as e:
+                logger.debug(
+                    "Error while cleaning up Copilot session %s",
+                    session.session_id,
+                    exc_info=True,
+                )
                 errors.append(
                     StopError(message=f"Failed to disconnect session {session.session_id}: {e}")
                 )
@@ -1204,14 +1268,16 @@ class CopilotClient:
                     self._process.kill()
                     self._process = None
             except Exception:
-                pass
+                logger.debug("Error while force-stopping Copilot CLI process", exc_info=True)
 
         # Then clean up the JSON-RPC client
         if self._client:
             try:
                 await self._client.stop()
             except Exception:
-                pass  # Ignore errors during force stop
+                logger.debug(
+                    "Error while stopping JSON-RPC client during force stop", exc_info=True
+                )
             self._client = None
         self._rpc = None
 
@@ -1239,6 +1305,7 @@ class CopilotClient:
         hooks: SessionHooks | None = None,
         working_directory: str | None = None,
         provider: ProviderConfig | None = None,
+        enable_session_telemetry: bool | None = None,
         model_capabilities: ModelCapabilitiesOverride | None = None,
         streaming: bool | None = None,
         include_sub_agent_streaming_events: bool | None = None,
@@ -1255,6 +1322,8 @@ class CopilotClient:
         on_event: Callable[[SessionEvent], None] | None = None,
         commands: list[CommandDefinition] | None = None,
         on_elicitation_request: ElicitationHandler | None = None,
+        on_exit_plan_mode: ExitPlanModeHandler | None = None,
+        on_auto_mode_switch: AutoModeSwitchHandler | None = None,
         create_session_fs_handler: CreateSessionFsHandler | None = None,
         github_token: str | None = None,
     ) -> CopilotSession:
@@ -1287,6 +1356,12 @@ class CopilotClient:
             hooks: Lifecycle hooks for the session.
             working_directory: Working directory for the session.
             provider: Provider configuration for Azure or custom endpoints.
+            enable_session_telemetry: Enables or disables internal session telemetry
+                for this session. When False, disables session telemetry. When omitted
+                or True, telemetry is enabled for GitHub-authenticated sessions. When
+                a custom provider (BYOK) is configured, session telemetry is always
+                disabled regardless of this setting. This is independent of the client
+                OpenTelemetry configuration.
             model_capabilities: Override individual model capabilities resolved by the runtime.
             streaming: Whether to enable streaming responses.
             include_sub_agent_streaming_events: Whether to include sub-agent streaming
@@ -1387,6 +1462,8 @@ class CopilotClient:
 
         # Enable elicitation request callback if handler provided
         payload["requestElicitation"] = bool(on_elicitation_request)
+        payload["requestExitPlanMode"] = bool(on_exit_plan_mode)
+        payload["requestAutoModeSwitch"] = bool(on_auto_mode_switch)
 
         # Serialize commands (name + description only) into payload
         if commands:
@@ -1420,6 +1497,9 @@ class CopilotClient:
         # Add provider configuration if provided
         if provider:
             payload["provider"] = self._convert_provider_to_wire_format(provider)
+
+        if enable_session_telemetry is not None:
+            payload["enableSessionTelemetry"] = enable_session_telemetry
 
         # Add model capabilities override if provided
         if model_capabilities:
@@ -1482,6 +1562,7 @@ class CopilotClient:
         if not self._client:
             raise RuntimeError("Client not connected")
 
+        total_start = time.perf_counter()
         actual_session_id = session_id or str(uuid.uuid4())
         payload["sessionId"] = actual_session_id
 
@@ -1491,6 +1572,7 @@ class CopilotClient:
 
         # Create and register the session before issuing the RPC so that
         # events emitted by the CLI (e.g. session.start) are not dropped.
+        setup_start = time.perf_counter()
         session = CopilotSession(actual_session_id, self._client, workspace_path=None)
         if self._session_fs_config:
             if create_session_fs_handler is None:
@@ -1508,6 +1590,10 @@ class CopilotClient:
             session._register_user_input_handler(on_user_input_request)
         if on_elicitation_request:
             session._register_elicitation_handler(on_elicitation_request)
+        if on_exit_plan_mode:
+            session._register_exit_plan_mode_handler(on_exit_plan_mode)
+        if on_auto_mode_switch:
+            session._register_auto_mode_switch_handler(on_auto_mode_switch)
         if hooks:
             session._register_hooks(hooks)
         if transform_callbacks:
@@ -1516,17 +1602,51 @@ class CopilotClient:
             session.on(on_event)
         with self._sessions_lock:
             self._sessions[actual_session_id] = session
+        log_timing(
+            logger,
+            logging.DEBUG,
+            "CopilotClient.create_session local setup complete",
+            setup_start,
+            session_id=actual_session_id,
+            tools_count=len(tools or []),
+            commands_count=len(commands or []),
+            has_hooks=hooks is not None,
+        )
 
         try:
+            rpc_start = time.perf_counter()
             response = await self._client.request("session.create", payload)
+            log_timing(
+                logger,
+                logging.DEBUG,
+                "CopilotClient.create_session session creation request completed successfully",
+                rpc_start,
+                session_id=actual_session_id,
+            )
             session._workspace_path = response.get("workspacePath")
             capabilities = response.get("capabilities")
             session._set_capabilities(capabilities)
-        except BaseException:
+        except BaseException as exc:
             with self._sessions_lock:
                 self._sessions.pop(actual_session_id, None)
+            if not isinstance(exc, asyncio.CancelledError):
+                log_timing(
+                    logger,
+                    logging.WARNING,
+                    "CopilotClient.create_session failed",
+                    total_start,
+                    exc_info=True,
+                    session_id=actual_session_id,
+                )
             raise
 
+        log_timing(
+            logger,
+            logging.DEBUG,
+            "CopilotClient.create_session complete",
+            total_start,
+            session_id=actual_session_id,
+        )
         return session
 
     async def resume_session(
@@ -1545,6 +1665,7 @@ class CopilotClient:
         hooks: SessionHooks | None = None,
         working_directory: str | None = None,
         provider: ProviderConfig | None = None,
+        enable_session_telemetry: bool | None = None,
         model_capabilities: ModelCapabilitiesOverride | None = None,
         streaming: bool | None = None,
         include_sub_agent_streaming_events: bool | None = None,
@@ -1561,6 +1682,8 @@ class CopilotClient:
         on_event: Callable[[SessionEvent], None] | None = None,
         commands: list[CommandDefinition] | None = None,
         on_elicitation_request: ElicitationHandler | None = None,
+        on_exit_plan_mode: ExitPlanModeHandler | None = None,
+        on_auto_mode_switch: AutoModeSwitchHandler | None = None,
         create_session_fs_handler: CreateSessionFsHandler | None = None,
         github_token: str | None = None,
         continue_pending_work: bool | None = None,
@@ -1594,6 +1717,12 @@ class CopilotClient:
             hooks: Lifecycle hooks for the session.
             working_directory: Working directory for the session.
             provider: Provider configuration for Azure or custom endpoints.
+            enable_session_telemetry: Enables or disables internal session telemetry
+                for this session. When False, disables session telemetry. When omitted
+                or True, telemetry is enabled for GitHub-authenticated sessions. When
+                a custom provider (BYOK) is configured, session telemetry is always
+                disabled regardless of this setting. This is independent of the client
+                OpenTelemetry configuration.
             model_capabilities: Override individual model capabilities resolved by the runtime.
             streaming: Whether to enable streaming responses.
             include_sub_agent_streaming_events: Whether to include sub-agent streaming
@@ -1690,6 +1819,8 @@ class CopilotClient:
             payload["excludedTools"] = excluded_tools
         if provider:
             payload["provider"] = self._convert_provider_to_wire_format(provider)
+        if enable_session_telemetry is not None:
+            payload["enableSessionTelemetry"] = enable_session_telemetry
         if model_capabilities:
             payload["modelCapabilities"] = _capabilities_to_dict(model_capabilities)
         if streaming is not None:
@@ -1710,6 +1841,8 @@ class CopilotClient:
 
         # Enable elicitation request callback if handler provided
         payload["requestElicitation"] = bool(on_elicitation_request)
+        payload["requestExitPlanMode"] = bool(on_exit_plan_mode)
+        payload["requestAutoModeSwitch"] = bool(on_auto_mode_switch)
 
         # Serialize commands (name + description only) into payload
         if commands:
@@ -1774,12 +1907,14 @@ class CopilotClient:
         if not self._client:
             raise RuntimeError("Client not connected")
 
+        total_start = time.perf_counter()
         # Propagate W3C Trace Context to CLI if OpenTelemetry is active
         trace_ctx = get_trace_context()
         payload.update(trace_ctx)
 
         # Create and register the session before issuing the RPC so that
         # events emitted by the CLI (e.g. session.start) are not dropped.
+        setup_start = time.perf_counter()
         session = CopilotSession(session_id, self._client, workspace_path=None)
         if self._session_fs_config:
             if create_session_fs_handler is None:
@@ -1797,6 +1932,10 @@ class CopilotClient:
             session._register_user_input_handler(on_user_input_request)
         if on_elicitation_request:
             session._register_elicitation_handler(on_elicitation_request)
+        if on_exit_plan_mode:
+            session._register_exit_plan_mode_handler(on_exit_plan_mode)
+        if on_auto_mode_switch:
+            session._register_auto_mode_switch_handler(on_auto_mode_switch)
         if hooks:
             session._register_hooks(hooks)
         if transform_callbacks:
@@ -1805,17 +1944,51 @@ class CopilotClient:
             session.on(on_event)
         with self._sessions_lock:
             self._sessions[session_id] = session
+        log_timing(
+            logger,
+            logging.DEBUG,
+            "CopilotClient.resume_session local setup complete",
+            setup_start,
+            session_id=session_id,
+            tools_count=len(tools or []),
+            commands_count=len(commands or []),
+            has_hooks=hooks is not None,
+        )
 
         try:
+            rpc_start = time.perf_counter()
             response = await self._client.request("session.resume", payload)
+            log_timing(
+                logger,
+                logging.DEBUG,
+                "CopilotClient.resume_session session resume request completed successfully",
+                rpc_start,
+                session_id=session_id,
+            )
             session._workspace_path = response.get("workspacePath")
             capabilities = response.get("capabilities")
             session._set_capabilities(capabilities)
-        except BaseException:
+        except BaseException as exc:
             with self._sessions_lock:
                 self._sessions.pop(session_id, None)
+            if not isinstance(exc, asyncio.CancelledError):
+                log_timing(
+                    logger,
+                    logging.WARNING,
+                    "CopilotClient.resume_session failed",
+                    total_start,
+                    exc_info=True,
+                    session_id=session_id,
+                )
             raise
 
+        log_timing(
+            logger,
+            logging.DEBUG,
+            "CopilotClient.resume_session complete",
+            total_start,
+            session_id=session_id,
+        )
         return session
 
     def get_state(self) -> ConnectionState:
@@ -2217,6 +2390,8 @@ class CopilotClient:
         that don't implement ``connect``."""
         if not self._client:
             raise RuntimeError("Client not connected")
+        handshake_start = time.perf_counter()
+        used_fallback_ping = False
         max_version = get_sdk_protocol_version()
 
         server_version: int | None
@@ -2229,6 +2404,7 @@ class CopilotClient:
             if err.code == -32601 or err.message == "Unhandled method connect":
                 # Legacy server without `connect`; fall back to `ping`. A token, if any,
                 # is silently dropped — the legacy server can't enforce one.
+                used_fallback_ping = True
                 ping_result = await self.ping()
                 server_version = ping_result.protocolVersion
             else:
@@ -2251,6 +2427,14 @@ class CopilotClient:
             )
 
         self._negotiated_protocol_version = server_version
+        log_timing(
+            logger,
+            logging.DEBUG,
+            "CopilotClient._verify_protocol_version protocol handshake complete",
+            handshake_start,
+            protocol_version=server_version,
+            used_fallback_ping=used_fallback_ping,
+        )
 
     def _convert_provider_to_wire_format(
         self, provider: ProviderConfig | dict[str, Any]
@@ -2275,6 +2459,14 @@ class CopilotClient:
             wire_provider["bearerToken"] = provider["bearer_token"]
         if "headers" in provider:
             wire_provider["headers"] = provider["headers"]
+        if "model_id" in provider:
+            wire_provider["modelId"] = provider["model_id"]
+        if "wire_model" in provider:
+            wire_provider["wireModel"] = provider["wire_model"]
+        if "max_input_tokens" in provider:
+            wire_provider["maxPromptTokens"] = provider["max_input_tokens"]
+        if "max_output_tokens" in provider:
+            wire_provider["maxOutputTokens"] = provider["max_output_tokens"]
         if "azure" in provider:
             azure = provider["azure"]
             wire_azure: dict[str, Any] = {}
@@ -2367,12 +2559,25 @@ class CopilotClient:
         if cfg.session_idle_timeout_seconds is not None and cfg.session_idle_timeout_seconds > 0:
             args.extend(["--session-idle-timeout", str(cfg.session_idle_timeout_seconds)])
 
+        if cfg.remote:
+            args.append("--remote")
+
         # If cli_path is a .js file, run it with node
         # Note that we can't rely on the shebang as Windows doesn't support it
         if cli_path.endswith(".js"):
             args = ["node", cli_path] + args
         else:
             args = [cli_path] + args
+        logger.info(
+            "CopilotClient._start_cli_server starting Copilot CLI",
+            extra={
+                "cli_path": cli_path,
+                "executable": args[0],
+                "cli_path_source": self._cli_path_source,
+                "use_stdio": cfg.use_stdio,
+                "port": None if cfg.use_stdio else cfg.port,
+            },
+        )
 
         # Get environment variables
         if cfg.env is None:
@@ -2412,6 +2617,7 @@ class CopilotClient:
         cwd = cfg.cwd or os.getcwd()
 
         # Choose transport mode
+        spawn_start = time.perf_counter()
         if cfg.use_stdio:
             args.append("--stdio")
             # Use regular Popen with pipes (buffering=0 for unbuffered)
@@ -2437,6 +2643,12 @@ class CopilotClient:
                 env=env,
                 creationflags=creationflags,
             )
+        log_timing(
+            logger,
+            logging.DEBUG,
+            "CopilotClient._start_cli_server subprocess spawned",
+            spawn_start,
+        )
 
         # For stdio mode, we're ready immediately
         if cfg.use_stdio:
@@ -2455,13 +2667,22 @@ class CopilotClient:
                     raise RuntimeError("CLI process exited before announcing port")
 
                 line_str = line.decode() if isinstance(line, bytes) else line
+                logger.debug("[CLI] %s", line_str.rstrip())
                 match = re.search(r"listening on port (\d+)", line_str, re.IGNORECASE)
                 if match:
                     self._actual_port = int(match.group(1))
                     return
 
         try:
+            port_wait_start = time.perf_counter()
             await asyncio.wait_for(read_port(), timeout=10.0)
+            log_timing(
+                logger,
+                logging.DEBUG,
+                "CopilotClient._start_cli_server TCP port wait complete",
+                port_wait_start,
+                port=self._actual_port,
+            )
         except TimeoutError:
             raise RuntimeError("Timeout waiting for CLI server to start")
 
@@ -2474,11 +2695,18 @@ class CopilotClient:
         Raises:
             RuntimeError: If the connection fails.
         """
+        setup_start = time.perf_counter()
         use_stdio = isinstance(self._config, SubprocessConfig) and self._config.use_stdio
         if use_stdio:
             await self._connect_via_stdio()
         else:
             await self._connect_via_tcp()
+        log_timing(
+            logger,
+            logging.DEBUG,
+            "CopilotClient._connect_to_server transport setup complete",
+            setup_start,
+        )
 
     async def _connect_via_stdio(self) -> None:
         """
@@ -2522,6 +2750,12 @@ class CopilotClient:
         self._client.set_request_handler("tool.call", self._handle_tool_call_request_v2)
         self._client.set_request_handler("permission.request", self._handle_permission_request_v2)
         self._client.set_request_handler("userInput.request", self._handle_user_input_request)
+        self._client.set_request_handler(
+            "exitPlanMode.request", self._handle_exit_plan_mode_request
+        )
+        self._client.set_request_handler(
+            "autoModeSwitch.request", self._handle_auto_mode_switch_request
+        )
         self._client.set_request_handler("hooks.invoke", self._handle_hooks_invoke)
         self._client.set_request_handler(
             "systemMessage.transform", self._handle_system_message_transform
@@ -2554,8 +2788,21 @@ class CopilotClient:
         sock.settimeout(TCP_CONNECTION_TIMEOUT)
 
         try:
+            tcp_connect_start = time.perf_counter()
+            logger.info(
+                "CopilotClient._connect_via_tcp connecting to CLI server",
+                extra={"host": self._actual_host, "port": self._actual_port},
+            )
             sock.connect((self._actual_host, self._actual_port))
             sock.settimeout(None)  # Remove timeout after connection
+            log_timing(
+                logger,
+                logging.DEBUG,
+                "CopilotClient._connect_via_tcp TCP connect complete",
+                tcp_connect_start,
+                host=self._actual_host,
+                port=self._actual_port,
+            )
         except OSError as e:
             raise RuntimeError(
                 f"Failed to connect to CLI server at {self._actual_host}:{self._actual_port}: {e}"
@@ -2627,6 +2874,12 @@ class CopilotClient:
         self._client.set_request_handler("tool.call", self._handle_tool_call_request_v2)
         self._client.set_request_handler("permission.request", self._handle_permission_request_v2)
         self._client.set_request_handler("userInput.request", self._handle_user_input_request)
+        self._client.set_request_handler(
+            "exitPlanMode.request", self._handle_exit_plan_mode_request
+        )
+        self._client.set_request_handler(
+            "autoModeSwitch.request", self._handle_auto_mode_switch_request
+        )
         self._client.set_request_handler("hooks.invoke", self._handle_hooks_invoke)
         self._client.set_request_handler(
             "systemMessage.transform", self._handle_system_message_transform
@@ -2683,6 +2936,39 @@ class CopilotClient:
 
         result = await session._handle_user_input_request(params)
         return {"answer": result["answer"], "wasFreeform": result["wasFreeform"]}
+
+    async def _handle_exit_plan_mode_request(self, params: dict) -> dict:
+        """Handle an exitPlanMode.request callback from the CLI server."""
+        session_id = params.get("sessionId")
+        summary = params.get("summary")
+        actions = params.get("actions")
+        recommended_action = params.get("recommendedAction")
+
+        if not session_id or not isinstance(summary, str):
+            raise ValueError("invalid exit plan mode request payload")
+        if not isinstance(actions, list) or not isinstance(recommended_action, str):
+            raise ValueError("invalid exit plan mode request payload")
+
+        with self._sessions_lock:
+            session = self._sessions.get(session_id)
+        if not session:
+            raise ValueError(f"unknown session {session_id}")
+
+        return dict(await session._handle_exit_plan_mode_request(params))
+
+    async def _handle_auto_mode_switch_request(self, params: dict) -> dict:
+        """Handle an autoModeSwitch.request callback from the CLI server."""
+        session_id = params.get("sessionId")
+        if not session_id:
+            raise ValueError("invalid auto mode switch request payload")
+
+        with self._sessions_lock:
+            session = self._sessions.get(session_id)
+        if not session:
+            raise ValueError(f"unknown session {session_id}")
+
+        response = await session._handle_auto_mode_switch_request(params)
+        return {"response": response}
 
     async def _handle_hooks_invoke(self, params: dict) -> dict:
         """
@@ -2771,9 +3057,19 @@ class CopilotClient:
 
         try:
             with trace_context(tp, ts):
+                handler_start = time.perf_counter()
                 result = handler(invocation)
                 if inspect.isawaitable(result):
                     result = await result
+                log_timing(
+                    logger,
+                    logging.DEBUG,
+                    "CopilotClient._handle_tool_call_request_v2 tool dispatch",
+                    handler_start,
+                    session_id=session_id,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                )
 
             tool_result: ToolResult = result  # type: ignore[assignment]
             return {
