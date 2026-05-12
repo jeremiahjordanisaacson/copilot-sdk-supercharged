@@ -190,7 +190,11 @@ copilot_client_start() {
     COPILOT_CLIENT_LOG_LEVEL="$log_level"
 
     # Start the JSON-RPC transport with the CLI process
-    if ! copilot_jsonrpc_start "$cli_path" "--log-level" "$log_level"; then
+    local extra_args=()
+    if [[ "${COPILOT_REMOTE:-}" == "true" ]]; then
+        extra_args+=("--remote")
+    fi
+    if ! copilot_jsonrpc_start "$cli_path" "--log-level" "$log_level" "${extra_args[@]}"; then
         COPILOT_CLIENT_STATE="error"
         echo "ERROR: Failed to start Copilot CLI process" >&2
         return 1
@@ -320,6 +324,12 @@ copilot_client_create_session() {
     if [[ -n "$COPILOT_INSTRUCTION_DIRECTORIES" ]]; then
         params=$(echo "$params" | jq -c --argjson id "$COPILOT_INSTRUCTION_DIRECTORIES" '. + {"instructionDirectories":$id}')
     fi
+    if [[ "${COPILOT_ENABLE_SESSION_TELEMETRY:-}" == "true" ]]; then
+        params=$(echo "$params" | jq -c '. + {"enableSessionTelemetry":true}')
+    fi
+    if [[ -n "$COPILOT_EXIT_PLAN_MODE_HANDLER" ]] && declare -f "$COPILOT_EXIT_PLAN_MODE_HANDLER" > /dev/null 2>&1; then
+        params=$(echo "$params" | jq -c '. + {"requestExitPlanMode":true}')
+    fi
 
     if ! copilot_jsonrpc_request "session.create" "$params"; then
         echo "ERROR: Failed to create session" >&2
@@ -370,6 +380,12 @@ copilot_client_resume_session() {
     # Append optional session config fields for resume
     if [[ -n "$COPILOT_INSTRUCTION_DIRECTORIES" ]]; then
         params=$(echo "$params" | jq -c --argjson id "$COPILOT_INSTRUCTION_DIRECTORIES" '. + {"instructionDirectories":$id}')
+    fi
+    if [[ "${COPILOT_ENABLE_SESSION_TELEMETRY:-}" == "true" ]]; then
+        params=$(echo "$params" | jq -c '. + {"enableSessionTelemetry":true}')
+    fi
+    if [[ -n "$COPILOT_EXIT_PLAN_MODE_HANDLER" ]] && declare -f "$COPILOT_EXIT_PLAN_MODE_HANDLER" > /dev/null 2>&1; then
+        params=$(echo "$params" | jq -c '. + {"requestExitPlanMode":true}')
     fi
 
     if ! copilot_jsonrpc_request "session.resume" "$params"; then

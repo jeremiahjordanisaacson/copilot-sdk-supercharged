@@ -139,6 +139,21 @@ copilot_session_send() {
         params=$(echo "$params" | jq -c --argjson rh "$COPILOT_REQUEST_HEADERS" '. + {"requestHeaders":$rh}')
     fi
 
+    # Inject trace context if provider is available
+    if [[ -n "$COPILOT_TRACE_CONTEXT_PROVIDER" ]] && declare -f "$COPILOT_TRACE_CONTEXT_PROVIDER" > /dev/null 2>&1; then
+        local tc_json
+        tc_json=$("$COPILOT_TRACE_CONTEXT_PROVIDER" 2>/dev/null) || tc_json='{}'
+        local tp ts
+        tp=$(echo "$tc_json" | jq -r '.traceparent // empty' 2>/dev/null)
+        ts=$(echo "$tc_json" | jq -r '.tracestate // empty' 2>/dev/null)
+        if [[ -n "$tp" ]]; then
+            params=$(echo "$params" | jq -c --arg tp "$tp" '. + {"traceparent":$tp}')
+        fi
+        if [[ -n "$ts" ]]; then
+            params=$(echo "$params" | jq -c --arg ts "$ts" '. + {"tracestate":$ts}')
+        fi
+    fi
+
     if ! copilot_jsonrpc_request "session.send" "$params"; then
         echo "ERROR: Failed to send message" >&2
         return 1
@@ -205,6 +220,21 @@ copilot_session_send_and_wait() {
     # Add custom HTTP headers for outbound model requests if set
     if [[ -n "$COPILOT_REQUEST_HEADERS" ]]; then
         params=$(echo "$params" | jq -c --argjson rh "$COPILOT_REQUEST_HEADERS" '. + {"requestHeaders":$rh}')
+    fi
+
+    # Inject trace context if provider is available
+    if [[ -n "$COPILOT_TRACE_CONTEXT_PROVIDER" ]] && declare -f "$COPILOT_TRACE_CONTEXT_PROVIDER" > /dev/null 2>&1; then
+        local tc_json
+        tc_json=$("$COPILOT_TRACE_CONTEXT_PROVIDER" 2>/dev/null) || tc_json='{}'
+        local tp ts
+        tp=$(echo "$tc_json" | jq -r '.traceparent // empty' 2>/dev/null)
+        ts=$(echo "$tc_json" | jq -r '.tracestate // empty' 2>/dev/null)
+        if [[ -n "$tp" ]]; then
+            params=$(echo "$params" | jq -c --arg tp "$tp" '. + {"traceparent":$tp}')
+        fi
+        if [[ -n "$ts" ]]; then
+            params=$(echo "$params" | jq -c --arg ts "$ts" '. + {"tracestate":$ts}')
+        fi
     fi
 
     if ! copilot_jsonrpc_request "session.send" "$params"; then
@@ -292,6 +322,25 @@ copilot_session_send_and_wait() {
                 if [[ -n "$req_id" ]]; then
                     local response
                     response=$(jq -c -n --argjson id "$req_id" --argjson res "$cmd_result" \
+                        '{"jsonrpc":"2.0","id":$id,"result":$res}')
+                    copilot_jsonrpc_send_message "$response"
+                fi
+
+            # Handle exit plan mode requests from the server
+            elif [[ "$method" == "exitPlanMode.request" ]]; then
+                local req_id
+                req_id=$(echo "$msg" | jq -r '.id // empty' 2>/dev/null)
+                local epm_result='{"approved":true}'
+
+                if [[ -n "$COPILOT_EXIT_PLAN_MODE_HANDLER" ]] && declare -f "$COPILOT_EXIT_PLAN_MODE_HANDLER" > /dev/null 2>&1; then
+                    local epm_context
+                    epm_context=$(echo "$msg" | jq -c '.params // {}' 2>/dev/null)
+                    epm_result=$("$COPILOT_EXIT_PLAN_MODE_HANDLER" "$epm_context" 2>/dev/null) || epm_result='{"approved":true}'
+                fi
+
+                if [[ -n "$req_id" ]]; then
+                    local response
+                    response=$(jq -c -n --argjson id "$req_id" --argjson res "$epm_result" \
                         '{"jsonrpc":"2.0","id":$id,"result":$res}')
                     copilot_jsonrpc_send_message "$response"
                 fi
