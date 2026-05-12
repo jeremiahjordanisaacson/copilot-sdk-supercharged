@@ -38,7 +38,9 @@ defmodule Copilot.Client do
     PermissionRequestResult,
     UserInputRequest,
     UserInputResponse,
-    SessionHooks
+    SessionHooks,
+    ExitPlanModeRequest,
+    ExitPlanModeResponse
   }
 
   # ---------------------------------------------------------------------------
@@ -302,7 +304,8 @@ defmodule Copilot.Client do
             tools: config.tools,
             on_permission_request: config.on_permission_request,
             on_user_input_request: config.on_user_input_request,
-            hooks: config.hooks
+            hooks: config.hooks,
+            trace_context_provider: state.options.on_get_trace_context
           )
 
         sessions = Map.put(state.sessions, session_id, session_pid)
@@ -330,7 +333,8 @@ defmodule Copilot.Client do
             tools: config.tools,
             on_permission_request: config.on_permission_request,
             on_user_input_request: config.on_user_input_request,
-            hooks: config.hooks
+            hooks: config.hooks,
+            trace_context_provider: state.options.on_get_trace_context
           )
 
         sessions = Map.put(state.sessions, sid, session_pid)
@@ -635,6 +639,11 @@ defmodule Copilot.Client do
       sessions = get_sessions(client_pid)
       handle_hooks_invoke(sessions, params)
     end)
+
+    JsonRpcClient.set_request_handler(rpc, "exitPlanMode.request", fn params ->
+      sessions = get_sessions(client_pid)
+      handle_exit_plan_mode_request(sessions, params)
+    end)
   end
 
   defp get_sessions(client_pid) do
@@ -753,6 +762,25 @@ defmodule Copilot.Client do
         case Session.handle_hooks_invoke(session_pid, hook_type, input) do
           {:ok, output} -> %{"output" => output}
           {:error, _} -> %{"output" => nil}
+        end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Internal: Exit plan mode request handling
+  # ---------------------------------------------------------------------------
+
+  defp handle_exit_plan_mode_request(sessions, params) do
+    session_id = params["sessionId"]
+
+    case Map.get(sessions, session_id) do
+      nil ->
+        %{"result" => %{"approved" => true}}
+
+      session_pid ->
+        case Session.handle_exit_plan_mode(session_pid, params) do
+          {:ok, result} -> %{"result" => result}
+          {:error, _} -> %{"result" => %{"approved" => true}}
         end
     end
   end

@@ -17,7 +17,8 @@
     user_input_response/2,
     image_options/1,
     elicitation_result/1,
-    elicitation_result/2
+    elicitation_result/2,
+    exit_plan_mode_response/1
 ]).
 
 %% ---------------------------------------------------------------------------
@@ -48,7 +49,9 @@
     session_idle_timeout_seconds :: non_neg_integer() | undefined,
     session_fs       :: #session_fs_config{} | undefined,
     copilot_home     :: binary() | undefined,
-    tcp_connection_token :: binary() | undefined
+    tcp_connection_token :: binary() | undefined,
+    remote           :: boolean() | undefined,
+    on_get_trace_context :: fun() | undefined
 }).
 
 -record(session_config, {
@@ -96,6 +99,11 @@
 -record(elicitation_result, {
     action  :: binary(),
     content :: map() | undefined
+}).
+
+-record(trace_context, {
+    traceparent :: binary() | undefined,
+    tracestate  :: binary() | undefined
 }).
 
 -record(session_event, {
@@ -161,7 +169,8 @@
     command_definition/0,
     command_context/0,
     elicitation_context/0,
-    elicitation_result/0
+    elicitation_result/0,
+    trace_context/0
 ]).
 
 -type client_options()           :: #client_options{}.
@@ -178,6 +187,7 @@
 -type command_context()          :: #command_context{}.
 -type elicitation_context()      :: #elicitation_context{}.
 -type elicitation_result()       :: #elicitation_result{}.
+-type trace_context()            :: #trace_context{}.
 -type connection_state()         :: disconnected | connecting | connected | error.
 -type session_event_type()       :: binary().
 
@@ -286,3 +296,7 @@ elicitation_result(Action, Content) ->
         undefined -> Base;
         _         -> Base#{<<"content">> => Content}
     end.
+
+-spec exit_plan_mode_response(boolean()) -> map().
+exit_plan_mode_response(Approved) ->
+    #{<<"approved">> => Approved}.

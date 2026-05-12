@@ -60,6 +60,16 @@ proc ::copilot::session::create_session {write_ch read_ch config} {
         dict set params streaming true
     }
 
+    set enable_telemetry [dict get $config enable_session_telemetry]
+    if {$enable_telemetry} {
+        dict set params enableSessionTelemetry true
+    }
+
+    set epm_handler [dict get $config on_exit_plan_mode]
+    if {$epm_handler ne ""} {
+        dict set params requestExitPlanMode true
+    }
+
     # Include tools in session creation
     set wire_tools [::copilot::tools::tools_to_wire]
     if {[llength $wire_tools] > 0} {
@@ -83,6 +93,8 @@ proc ::copilot::session::create_session {write_ch read_ch config} {
         listeners  {} \
         events     {} \
         state      {} \
+        exit_plan_mode_handler "" \
+        trace_context_provider "" \
     ]
 
     if {[dict exists $result sessionId]} {
@@ -135,6 +147,20 @@ proc ::copilot::session::send_and_wait {handle opts} {
     }
 
     set params [dict create sessionId $sid message $message]
+
+    # Inject trace context if provider is available
+    set sdata_tc [dict get $sessions $handle]
+    set tc_provider [dict get $sdata_tc trace_context_provider]
+    if {$tc_provider ne ""} {
+        if {![catch {set tc [uplevel #0 $tc_provider]} err]} {
+            if {[dict exists $tc traceparent] && [dict get $tc traceparent] ne ""} {
+                dict set params traceparent [dict get $tc traceparent]
+            }
+            if {[dict exists $tc tracestate] && [dict get $tc tracestate] ne ""} {
+                dict set params tracestate [dict get $tc tracestate]
+            }
+        }
+    }
 
     set req_id [::copilot::jsonrpc::send_request $write_ch "session/sendMessage" $params]
     ::copilot::jsonrpc::register_pending $req_id
@@ -271,6 +297,11 @@ proc ::copilot::session::_wait_for_response {read_ch write_ch req_id} {
                 continue
             }
 
+            if {$method eq "exitPlanMode.request"} {
+                _handle_exit_plan_mode $write_ch $msg
+                continue
+            }
+
             # Dispatch other notifications
             ::copilot::jsonrpc::dispatch_notification $method $params
         }
@@ -308,6 +339,67 @@ proc ::copilot::session::_handle_tool_call {write_ch msg} {
     } else {
         set err_msg [dict get $invoke_result error]
         ::copilot::jsonrpc::send_error_response $write_ch $call_id -32000 $err_msg
+    }
+}
+
+# -- Register exit plan mode handler -----------------------------------------
+
+proc ::copilot::session::register_exit_plan_mode_handler {handle handler} {
+    variable sessions
+    if {![dict exists $sessions $handle]} {
+        error "Session not found: $handle"
+    }
+    set sdata [dict get $sessions $handle]
+    dict set sdata exit_plan_mode_handler $handler
+    dict set sessions $handle $sdata
+}
+
+# -- Register trace context provider ------------------------------------------
+
+proc ::copilot::session::register_trace_context_provider {handle provider} {
+    variable sessions
+    if {![dict exists $sessions $handle]} {
+        error "Session not found: $handle"
+    }
+    set sdata [dict get $sessions $handle]
+    dict set sdata trace_context_provider $provider
+    dict set sessions $handle $sdata
+}
+
+# -- Internal: handle exit plan mode request from server ----------------------
+
+proc ::copilot::session::_handle_exit_plan_mode {write_ch msg} {
+    variable sessions
+
+    set call_id ""
+    if {[dict exists $msg id]} {
+        set call_id [dict get $msg id]
+    }
+
+    set params [dict get $msg params]
+    set session_id ""
+    if {[dict exists $params sessionId]} {
+        set session_id [dict get $params sessionId]
+    }
+
+    # Find session by server session_id
+    set handler ""
+    dict for {handle sdata} $sessions {
+        if {[dict get $sdata session_id] eq $session_id} {
+            set handler [dict get $sdata exit_plan_mode_handler]
+            break
+        }
+    }
+
+    set result [dict create approved 1]
+    if {$handler ne ""} {
+        if {[catch {set result [uplevel #0 [list {*}$handler $params]]} err]} {
+            set result [dict create approved 1]
+        }
+    }
+
+    if {$call_id ne ""} {
+        ::copilot::jsonrpc::send_response $write_ch $call_id $result
     }
 }
 

@@ -486,6 +486,47 @@
 ;;   :rename              (fn [session-id old-path new-path] ...) → nil
 
 ;; ============================================================================
+;; Exit Plan Mode
+;; ============================================================================
+
+(defn exit-plan-mode-request
+  "Construct an exit plan mode request map."
+  [session-id]
+  {:session-id session-id})
+
+(defn exit-plan-mode-response
+  "Construct an exit plan mode response map."
+  [approved]
+  {:approved approved})
+
+;; ============================================================================
+;; Trace Context
+;; ============================================================================
+
+(defn trace-context
+  "Construct a trace context map."
+  [& {:keys [traceparent tracestate]}]
+  (cond-> {}
+    traceparent (assoc :traceparent traceparent)
+    tracestate  (assoc :tracestate tracestate)))
+
+;; ============================================================================
+;; Model Capabilities Override
+;; ============================================================================
+
+(defn model-capabilities-override
+  "Construct a model capabilities override map.
+
+  `supports` - map of capability flags (e.g. {:vision true})
+  `limits`   - map of limits (e.g. {:max-prompt-tokens 4096})
+  `vision`   - optional vision limits map"
+  [& {:keys [supports limits vision]}]
+  (cond-> {}
+    supports (assoc :supports supports)
+    limits   (assoc :limits limits)
+    vision   (assoc :vision vision)))
+
+;; ============================================================================
 ;; Client options
 ;; ============================================================================
 

@@ -63,6 +63,7 @@ class CopilotSession(
   @volatile private var permissionHandler: Option[PermissionHandler] = None
   @volatile private var userInputHandler: Option[UserInputHandler] = None
   @volatile private var hooks: Option[SessionHooks] = None
+  @volatile private var exitPlanModeHandler: Option[ExitPlanModeHandler] = None
 
   // -------------------------------------------------------------------------
   // Sending Messages
@@ -211,6 +212,7 @@ class CopilotSession(
       permissionHandler = None
       userInputHandler = None
       hooks = None
+      exitPlanModeHandler = None
     }
 
   /**
@@ -245,6 +247,10 @@ class CopilotSession(
   /** Registers session hooks. */
   private[copilot] def registerHooks(h: SessionHooks): Unit =
     hooks = Some(h)
+
+  /** Registers an exit plan mode handler. */
+  private[copilot] def registerExitPlanModeHandler(handler: ExitPlanModeHandler): Unit =
+    exitPlanModeHandler = Some(handler)
 
   // -------------------------------------------------------------------------
   // Event Dispatch (internal)
@@ -357,3 +363,10 @@ class CopilotSession(
                     handler(parsed, invocation).map(_.map(_.asJson)).recover { case _ => None }
 
           case _ => Future.successful(None)
+
+  /** Handles an exit plan mode request from the server. */
+  private[copilot] def handleExitPlanModeRequest(request: ExitPlanModeRequest): Future[ExitPlanModeResponse] =
+    exitPlanModeHandler match
+      case None => Future.successful(ExitPlanModeResponse(approved = true))
+      case Some(handler) =>
+        handler(request).recover { case _ => ExitPlanModeResponse(approved = true) }

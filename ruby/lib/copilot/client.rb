@@ -55,7 +55,8 @@ module Copilot
       auto_restart: true,
       env: nil,
       github_token: nil,
-      use_logged_in_user: nil
+      use_logged_in_user: nil,
+      on_get_trace_context: nil
     )
       # Validate mutually exclusive options
       if cli_url && (use_stdio == false || cli_path)
@@ -95,6 +96,7 @@ module Copilot
         env: env,
         github_token: github_token,
         use_logged_in_user: use_logged_in_user,
+        on_get_trace_context: on_get_trace_context,
       )
 
       @process    = nil
@@ -281,6 +283,10 @@ module Copilot
       session._register_permission_handler(config[:on_permission_request]) if config[:on_permission_request]
       session._register_user_input_handler(config[:on_user_input_request]) if config[:on_user_input_request]
       session._register_hooks(config[:hooks]) if config[:hooks]
+      session._register_exit_plan_mode_handler(config[:on_exit_plan_mode]) if config[:on_exit_plan_mode]
+      if @options.on_get_trace_context
+        session._register_trace_context_provider(@options.on_get_trace_context)
+      end
 
       @sessions_lock.synchronize { @sessions[session_id] = session }
       session
@@ -305,6 +311,10 @@ module Copilot
       session._register_permission_handler(config[:on_permission_request]) if config[:on_permission_request]
       session._register_user_input_handler(config[:on_user_input_request]) if config[:on_user_input_request]
       session._register_hooks(config[:hooks]) if config[:hooks]
+      session._register_exit_plan_mode_handler(config[:on_exit_plan_mode]) if config[:on_exit_plan_mode]
+      if @options.on_get_trace_context
+        session._register_trace_context_provider(@options.on_get_trace_context)
+      end
 
       @sessions_lock.synchronize { @sessions[resumed_id] = session }
       session
@@ -633,6 +643,10 @@ module Copilot
       @rpc_client.on_request("hooks.invoke") do |params|
         handle_hooks_invoke(params)
       end
+
+      @rpc_client.on_request("exitPlanMode.request") do |params|
+        handle_exit_plan_mode_request(params)
+      end
     end
 
     def verify_protocol_version
@@ -769,6 +783,21 @@ module Copilot
       { output: output }
     end
 
+    def handle_exit_plan_mode_request(params)
+      session_id = params["sessionId"]
+      raise "Invalid exit plan mode request payload" unless session_id
+
+      session = @sessions_lock.synchronize { @sessions[session_id] }
+      raise "Session not found: #{session_id}" unless session
+
+      begin
+        result = session._handle_exit_plan_mode_request(params)
+        result
+      rescue StandardError
+        { approved: true }
+      end
+    end
+
     # ---- Payload builders ----
 
     def build_create_session_payload(config)
@@ -789,6 +818,7 @@ module Copilot
       payload[:requestPermission] = true if config[:on_permission_request]
       payload[:requestUserInput] = true if config[:on_user_input_request]
       payload[:hooks] = true if config[:hooks]&.respond_to?(:any_handler?) && config[:hooks].any_handler?
+      payload[:requestExitPlanMode] = true if config[:on_exit_plan_mode]
       payload[:workingDirectory] = config[:working_directory] if config[:working_directory]
       payload[:streaming] = config[:streaming] unless config[:streaming].nil?
 

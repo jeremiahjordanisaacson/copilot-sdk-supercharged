@@ -138,6 +138,11 @@ proc ::copilot::client::_spawn_process {handle} {
         lappend cmd "--log-level" $log_level
     }
 
+    set remote [dict get $opts remote]
+    if {$remote} {
+        lappend cmd "--remote"
+    }
+
     # Open bidirectional pipe to the CLI process
     set pipe [open "|$cmd" r+]
     fconfigure $pipe -translation binary -buffering full -blocking 1
@@ -301,6 +306,18 @@ proc ::copilot::client::create_session {handle args} {
 
     # Delegates to session module which sends "session.create" via JSON-RPC
     set sess_handle [::copilot::session::create_session $write_ch $read_ch $config]
+
+    # Register exit plan mode handler if configured
+    set epm_handler [dict get $config on_exit_plan_mode]
+    if {$epm_handler ne ""} {
+        ::copilot::session::register_exit_plan_mode_handler $sess_handle $epm_handler
+    }
+
+    # Register trace context provider if configured
+    set tc_provider [dict get [dict get $cdata opts] on_get_trace_context]
+    if {$tc_provider ne ""} {
+        ::copilot::session::register_trace_context_provider $sess_handle $tc_provider
+    }
 
     # Track the session in the client
     set sessions [dict get $cdata sessions]

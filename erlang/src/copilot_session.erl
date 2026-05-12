@@ -30,7 +30,8 @@
     handle_event/3,
     set_ready/1,
     session_id/1,
-    workspace_path/1
+    workspace_path/1,
+    handle_exit_plan_mode/2
 ]).
 
 %% gen_server callbacks
@@ -56,7 +57,9 @@
     ready           :: boolean(),
     hooks           :: map() | undefined,
     command_handlers :: #{binary() => fun()},
-    elicitation_handler :: fun() | undefined
+    elicitation_handler :: fun() | undefined,
+    exit_plan_mode_handler :: fun() | undefined,
+    trace_context_provider :: fun() | undefined
 }).
 
 %% ---------------------------------------------------------------------------
@@ -115,6 +118,10 @@ session_id(Pid) ->
 workspace_path(Pid) ->
     gen_server:call(Pid, workspace_path).
 
+-spec handle_exit_plan_mode(pid(), map()) -> map().
+handle_exit_plan_mode(Pid, Request) ->
+    gen_server:call(Pid, {handle_exit_plan_mode, Request}).
+
 %% ---------------------------------------------------------------------------
 %% gen_server callbacks
 %% ---------------------------------------------------------------------------
@@ -129,6 +136,8 @@ init({SessionId, Rpc, WorkspacePath, Config}) ->
         Acc#{Name => Handler}
     end, #{}, Commands),
     ElicitHandler = maps:get(on_elicitation_request, Config, undefined),
+    ExitPlanModeHandler = maps:get(on_exit_plan_mode, Config, undefined),
+    TraceContextProvider = maps:get(on_get_trace_context, Config, undefined),
     {ok, #state{
         session_id = SessionId,
         rpc = Rpc,
@@ -139,7 +148,9 @@ init({SessionId, Rpc, WorkspacePath, Config}) ->
         ready = false,
         hooks = Hooks,
         command_handlers = CmdHandlers,
-        elicitation_handler = ElicitHandler
+        elicitation_handler = ElicitHandler,
+        exit_plan_mode_handler = ExitPlanModeHandler,
+        trace_context_provider = TraceContextProvider
     }}.
 
 handle_call({send, Options}, _From, #state{rpc = Rpc, session_id = SessionId} = State) ->
@@ -152,7 +163,8 @@ handle_call({send, Options}, _From, #state{rpc = Rpc, session_id = SessionId} = 
     Req3 = maybe_add(<<"responseFormat">>, response_format, Options, Req2),
     Req4 = maybe_add(<<"imageOptions">>, image_options, Options, Req3),
     Req5 = maybe_add(<<"requestHeaders">>, request_headers, Options, Req4),
-    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req5) of
+    Req6 = inject_trace_context(Req5, State),
+    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req6) of
         {ok, #{<<"messageId">> := MsgId}} ->
             {reply, {ok, MsgId}, State};
         {ok, _} ->
@@ -172,7 +184,8 @@ handle_call({send_and_wait, Options, Timeout}, From, State) ->
     Req3 = maybe_add(<<"responseFormat">>, response_format, Options, Req2),
     Req4 = maybe_add(<<"imageOptions">>, image_options, Options, Req3),
     Req5 = maybe_add(<<"requestHeaders">>, request_headers, Options, Req4),
-    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req5) of
+    Req6 = inject_trace_context(Req5, State),
+    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req6) of
         {ok, _} ->
             TimerRef = erlang:send_after(Timeout, self(), {wait_timeout, From}),
             Waiting = [{From, TimerRef, undefined} | State#state.waiting],
@@ -202,6 +215,18 @@ handle_call(session_id, _From, #state{session_id = Id} = State) ->
 
 handle_call(workspace_path, _From, #state{workspace_path = WP} = State) ->
     {reply, WP, State};
+
+handle_call({handle_exit_plan_mode, Request}, _From,
+            #state{exit_plan_mode_handler = Handler} = State) ->
+    Result = case Handler of
+        undefined ->
+            #{<<"approved">> => true};
+        _ ->
+            try Handler(Request)
+            catch _:_ -> #{<<"approved">> => true}
+            end
+    end,
+    {reply, Result, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
@@ -375,3 +400,19 @@ maybe_handle_elicitation(<<"elicitation.requested">>, Data,
     ok;
 maybe_handle_elicitation(_EventType, _Data, _State) ->
     ok.
+
+inject_trace_context(Req, #state{trace_context_provider = undefined}) ->
+    Req;
+inject_trace_context(Req, #state{trace_context_provider = Provider}) ->
+    try
+        Ctx = Provider(),
+        Req1 = case maps:get(traceparent, Ctx, undefined) of
+            undefined -> Req;
+            TP -> Req#{<<"traceparent">> => TP}
+        end,
+        case maps:get(tracestate, Ctx, undefined) of
+            undefined -> Req1;
+            TS -> Req1#{<<"tracestate">> => TS}
+        end
+    catch _:_ -> Req
+    end.

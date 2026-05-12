@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/BasicExample.build/master.swiftdeps"
+  },
+  "/Users/home/Documents/copilot-sdk-supercharged/swift/Examples/BasicExample/main.swift": {
+    "dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/BasicExample.build/main.d",
+    "object": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/BasicExample.build/main.swift.o",
+    "swiftmodule": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/BasicExample.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/BasicExample.build/main.swiftdeps",
+    "diagnostics": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/BasicExample.build/main.dia"
+  }
+}

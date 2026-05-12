@@ -98,6 +98,7 @@ sub new {
         _state             => 'disconnected',
         _sessions          => {},
         _models_cache      => undef,
+        on_get_trace_context => $args{on_get_trace_context},
     }, $class;
 
     return $self;
@@ -219,6 +220,16 @@ sub create_session {
         $session->register_hooks($config->hooks);
     }
 
+    # Register exit plan mode handler
+    if ($config->on_exit_plan_mode) {
+        $session->register_exit_plan_mode_handler($config->on_exit_plan_mode);
+    }
+
+    # Register trace context provider
+    if ($self->{on_get_trace_context}) {
+        $session->register_trace_context_provider($self->{on_get_trace_context});
+    }
+
     # Session supports: idleTimeout, elicitation (requestElicitation),
     # systemMessage / system_prompt, skills / skillDirectories,
     # excludedTools, requestHeaders, modelCapabilities,
@@ -261,6 +272,16 @@ sub resume_session {
     }
     if ($config->hooks) {
         $session->register_hooks($config->hooks);
+    }
+
+    # Register exit plan mode handler
+    if ($config->on_exit_plan_mode) {
+        $session->register_exit_plan_mode_handler($config->on_exit_plan_mode);
+    }
+
+    # Register trace context provider
+    if ($self->{on_get_trace_context}) {
+        $session->register_trace_context_provider($self->{on_get_trace_context});
     }
 
     $self->{_sessions}{$resumed_id} = $session;
@@ -488,6 +509,12 @@ sub _setup_handlers {
         my ($params) = @_;
         return $self->_handle_hooks_invoke($params);
     });
+
+    # Handle exitPlanMode.request from server
+    $self->{_client}->set_request_handler('exitPlanMode.request', sub {
+        my ($params) = @_;
+        return $self->_handle_exit_plan_mode_request($params);
+    });
 }
 
 # --------------------------------------------------------------------------
@@ -643,6 +670,25 @@ sub _handle_hooks_invoke {
 
     my $output = $session->_handle_hooks_invoke($hook_type, $input);
     return { output => $output };
+}
+
+sub _handle_exit_plan_mode_request {
+    my ($self, $params) = @_;
+    my $session_id = $params->{sessionId};
+    croak "Invalid exit plan mode request payload" unless $session_id;
+
+    my $session = $self->{_sessions}{$session_id};
+    croak "Session not found: $session_id" unless $session;
+
+    my $result;
+    eval {
+        $result = $session->_handle_exit_plan_mode_request($params);
+    };
+    if ($@) {
+        return { approved => \1 };
+    }
+
+    return $result;
 }
 
 # --------------------------------------------------------------------------

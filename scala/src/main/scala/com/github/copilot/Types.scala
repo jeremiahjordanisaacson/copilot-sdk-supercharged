@@ -382,6 +382,9 @@ case class SessionConfig(
   /** Handler for elicitation requests from the server. */
   onElicitationRequest: Option[ElicitationHandler] = None,
 
+  /** Handler for exit plan mode requests from the server. */
+  onExitPlanMode: Option[ExitPlanModeHandler] = None,
+
   /** Additional HTTP headers sent with each model request. */
   requestHeaders: Option[Map[String, String]] = None,
   /** Response format for image generation ("text", "image", "json_object"). */
@@ -432,10 +435,54 @@ case class ResumeSessionConfig(
   /** Handler for elicitation requests from the server. */
   onElicitationRequest: Option[ElicitationHandler] = None,
 
+  /** Handler for exit plan mode requests from the server. */
+  onExitPlanMode: Option[ExitPlanModeHandler] = None,
+
   disableResume: Option[Boolean] = None,
   /** Custom instruction directory paths. */
   instructionDirectories: Option[Seq[String]] = None,
 )
+
+// ============================================================================
+// Exit Plan Mode Types
+// ============================================================================
+
+/** Request payload for an exit plan mode request from the server. */
+case class ExitPlanModeRequest(
+  sessionId: String
+)
+
+object ExitPlanModeRequest:
+  given Decoder[ExitPlanModeRequest] = deriveDecoder
+
+/** Response for an exit plan mode request. */
+case class ExitPlanModeResponse(
+  approved: Boolean
+)
+
+object ExitPlanModeResponse:
+  given Encoder[ExitPlanModeResponse] = deriveEncoder
+  given Decoder[ExitPlanModeResponse] = deriveDecoder
+
+/** Handler for exit plan mode requests. */
+type ExitPlanModeHandler = ExitPlanModeRequest => Future[ExitPlanModeResponse]
+
+// ============================================================================
+// Trace Context Types
+// ============================================================================
+
+/** Trace context for distributed tracing. */
+case class TraceContext(
+  traceparent: Option[String] = None,
+  tracestate: Option[String] = None
+)
+
+object TraceContext:
+  given Encoder[TraceContext] = deriveEncoder
+  given Decoder[TraceContext] = deriveDecoder
+
+/** Provider that returns a trace context for outbound requests. */
+type TraceContextProvider = () => Future[TraceContext]
 
 // ============================================================================
 // Session Events
@@ -1163,6 +1210,9 @@ case class CopilotClientOptions(
 
   /** Configurable data directory, passed as COPILOT_HOME env var. */
   copilotHome: Option[String] = None,
+
+  /** Provider for trace context to include in outbound requests. */
+  onGetTraceContext: Option[TraceContextProvider] = None,
 
   /** Auth token for TCP server connections. */
   tcpConnectionToken: Option[String] = None

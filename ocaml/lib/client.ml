@@ -58,6 +58,11 @@ let spawn_cli (t : t) : (Jsonrpc.t * Lwt_process.process_full) Lwt.t =
     | Some level -> Array.append args [| "--log-level"; level |]
     | None -> args
   in
+  let args =
+    match t.options.remote with
+    | Some true -> Array.append args [| "--remote" |]
+    | _ -> args
+  in
   let cmd = (cli_path, args) in
   let process =
     new Lwt_process.process_full cmd
@@ -194,6 +199,9 @@ let create_session ?(config = Types.default_session_config ()) (t : t)
   let open Yojson.Safe.Util in
   let session_id = result |> member "sessionId" |> to_string in
   let session = Session.create ~rpc ~session_id ~config in
+  (match t.options.on_get_trace_context with
+   | Some provider -> Session.register_trace_context_provider session provider
+   | None -> ());
   Session.setup_notifications session;
   Lwt.return session
 
@@ -278,6 +286,9 @@ let resume_session (t : t) (session_id : string) ?(config = Types.default_sessio
   let open Yojson.Safe.Util in
   let sid = try result |> member "sessionId" |> to_string with _ -> session_id in
   let session = Session.create ~rpc ~session_id:sid ~config in
+  (match t.options.on_get_trace_context with
+   | Some provider -> Session.register_trace_context_provider session provider
+   | None -> ());
   Session.setup_notifications session;
   Lwt.return session
 

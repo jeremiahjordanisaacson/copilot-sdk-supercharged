@@ -311,6 +311,20 @@
          (let [output (session/handle-hooks-invoke! session-atom hook-type input)]
            {:output output})))))
 
+  ;; Exit plan mode requests from server
+  (rpc/set-request-handler!
+   rpc-client "exitPlanMode.request"
+   (fn [params]
+     (let [session-id (:sessionId params)
+           state      @client-atom
+           session-atom (get-in state [:sessions session-id])]
+       (if-not session-atom
+         {:result {:approved true}}
+         (try
+           {:result (session/handle-exit-plan-mode! session-atom params)}
+           (catch Exception _
+             {:result {:approved true}}))))))
+
   ;; Session filesystem requests from server
   (doseq [[method-name fs-key args-fn]
           [["sessionFs.readFile"         :read-file          (fn [p] [(:sessionId p) (:path p)])]
@@ -522,6 +536,9 @@
       (when-let [fs-config (:session-fs (:options @client-atom))]
         (when-let [create-handler (:create-session-fs-handler config)]
           (session/register-session-fs-handler! sess (create-handler))))
+      ;; Register trace context provider
+      (when-let [p (:on-get-trace-context (:options @client-atom))]
+        (session/register-trace-context-provider! sess p))
       ;; Store session in client
       (swap! client-atom assoc-in [:sessions session-id] sess)
       sess)))
@@ -555,6 +572,9 @@
       (when-let [fs-config (:session-fs (:options @client-atom))]
         (when-let [create-handler (:create-session-fs-handler config)]
           (session/register-session-fs-handler! sess (create-handler))))
+      ;; Register trace context provider
+      (when-let [p (:on-get-trace-context (:options @client-atom))]
+        (session/register-trace-context-provider! sess p))
       (swap! client-atom assoc-in [:sessions resumed-id] sess)
       sess)))
 

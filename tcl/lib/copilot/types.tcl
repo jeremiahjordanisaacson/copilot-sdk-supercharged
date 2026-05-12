@@ -11,7 +11,9 @@ namespace eval ::copilot::types {
     namespace export make_client_options make_session_config make_tool \
                      make_send_options make_session_event validate_dict \
                      make_session_fs_config make_mcp_server_config \
-                     make_command_definition
+                     make_command_definition \
+                     make_exit_plan_mode_request make_exit_plan_mode_response \
+                     make_trace_context
 }
 
 # -- Client options -----------------------------------------------------------
@@ -28,6 +30,8 @@ proc ::copilot::types::make_client_options {args} {
         session_fs                      {} \
         copilot_home                    "" \
         tcp_connection_token            "" \
+        remote                          0 \
+        on_get_trace_context            "" \
     ]
     set opts $defaults
     foreach {key value} $args {
@@ -65,6 +69,9 @@ proc ::copilot::types::make_session_config {args} {
         request_headers                     {} \
         elicitation_handler                 "" \
         instruction_directories             {} \
+        enable_session_telemetry            0 \
+        on_exit_plan_mode                   "" \
+        on_get_trace_context                "" \
     ]
     set cfg $defaults
     foreach {key value} $args {
@@ -224,6 +231,33 @@ proc ::copilot::types::make_mcp_server_config {args} {
 
 proc ::copilot::types::make_command_definition {name description} {
     return [dict create name $name description $description]
+}
+
+# -- Exit plan mode types ---------------------------------------------------
+
+proc ::copilot::types::make_exit_plan_mode_request {session_id} {
+    return [dict create sessionId $session_id]
+}
+
+proc ::copilot::types::make_exit_plan_mode_response {approved} {
+    return [dict create approved $approved]
+}
+
+# -- Trace context -----------------------------------------------------------
+
+proc ::copilot::types::make_trace_context {args} {
+    set defaults [dict create \
+        traceparent "" \
+        tracestate  "" \
+    ]
+    set ctx $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown trace context key: $key"
+        }
+        dict set ctx $key $value
+    }
+    return $ctx
 }
 
 package provide copilot::types 2.0.0

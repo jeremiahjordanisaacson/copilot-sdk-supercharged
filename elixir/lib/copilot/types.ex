@@ -526,6 +526,49 @@ defmodule Copilot.Types do
   end
 
   # ---------------------------------------------------------------------------
+  # Exit Plan Mode
+  # ---------------------------------------------------------------------------
+
+  defmodule ExitPlanModeRequest do
+    @moduledoc "Request to exit plan mode."
+    @type t :: %__MODULE__{session_id: String.t()}
+    defstruct [:session_id]
+
+    def from_map(m) when is_map(m) do
+      %__MODULE__{session_id: m["sessionId"]}
+    end
+  end
+
+  defmodule ExitPlanModeResponse do
+    @moduledoc "Response to an exit plan mode request."
+    @type t :: %__MODULE__{approved: boolean()}
+    defstruct [approved: true]
+
+    def to_map(%__MODULE__{} = r) do
+      %{"approved" => r.approved}
+    end
+  end
+
+  @typedoc "Exit plan mode handler callback."
+  @type exit_plan_mode_handler :: (ExitPlanModeRequest.t() -> ExitPlanModeResponse.t())
+
+  # ---------------------------------------------------------------------------
+  # Trace Context
+  # ---------------------------------------------------------------------------
+
+  defmodule TraceContext do
+    @moduledoc "OpenTelemetry-compatible trace context for RPC payloads."
+    @type t :: %__MODULE__{
+            traceparent: String.t() | nil,
+            tracestate: String.t() | nil
+          }
+    defstruct [:traceparent, :tracestate]
+  end
+
+  @typedoc "Trace context provider callback."
+  @type trace_context_provider :: (-> TraceContext.t())
+
+  # ---------------------------------------------------------------------------
   # Session Configuration
   # ---------------------------------------------------------------------------
 
@@ -785,7 +828,8 @@ defmodule Copilot.Types do
             session_idle_timeout_seconds: integer() | nil,
             session_fs: Copilot.Types.SessionFsConfig.t() | nil,
             copilot_home: String.t() | nil,
-            tcp_connection_token: String.t() | nil
+            tcp_connection_token: String.t() | nil,
+            on_get_trace_context: Copilot.Types.trace_context_provider() | nil
           }
     defstruct [
       cli_path: nil,
@@ -804,7 +848,9 @@ defmodule Copilot.Types do
       # Custom path to the copilot home directory
       copilot_home: nil,
       # Token for TCP connections
-      tcp_connection_token: nil
+      tcp_connection_token: nil,
+      # Trace context provider for OpenTelemetry
+      on_get_trace_context: nil
     ]
   end
 

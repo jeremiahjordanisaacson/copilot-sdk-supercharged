@@ -29,7 +29,9 @@
          :permission-handler nil      ;; (fn [request invocation])
          :user-input-handler nil      ;; (fn [request invocation])
          :hooks              nil      ;; session-hooks map
-         :session-fs-handler nil}))   ;; session filesystem provider map
+         :session-fs-handler nil      ;; session filesystem provider map
+         :exit-plan-mode-handler nil  ;; (fn [request] -> {:approved bool})
+         :trace-context-provider nil})) ;; zero-arg fn returning trace-context map
 
 ;; ============================================================================
 ;; Event subscription
@@ -168,6 +170,51 @@
             (catch Exception _ nil)))))))
 
 ;; ============================================================================
+;; Exit plan mode handling
+;; ============================================================================
+
+(defn register-exit-plan-mode-handler!
+  "Register an exit plan mode handler.
+
+  `handler` - (fn [request] -> {:approved bool})"
+  [session-atom handler]
+  (swap! session-atom assoc :exit-plan-mode-handler handler))
+
+(defn handle-exit-plan-mode!
+  "Handle an exit plan mode request. Internal."
+  [session-atom request]
+  (let [handler (:exit-plan-mode-handler @session-atom)]
+    (if-not handler
+      {:approved true}
+      (try
+        (handler request)
+        (catch Exception _
+          {:approved true})))))
+
+;; ============================================================================
+;; Trace context
+;; ============================================================================
+
+(defn register-trace-context-provider!
+  "Register a trace context provider.
+
+  `provider` - zero-arg function returning a trace-context map"
+  [session-atom provider]
+  (swap! session-atom assoc :trace-context-provider provider))
+
+(defn- inject-trace-context
+  "Inject trace context into RPC params if a provider is registered."
+  [params state]
+  (if-let [provider (:trace-context-provider state)]
+    (try
+      (let [ctx (provider)]
+        (cond-> params
+          (:traceparent ctx) (assoc :traceparent (:traceparent ctx))
+          (:tracestate ctx)  (assoc :tracestate (:tracestate ctx))))
+      (catch Exception _ params))
+    params))
+
+;; ============================================================================
 ;; Messaging
 ;; ============================================================================
 
@@ -189,6 +236,7 @@
                      (assoc :responseFormat (:response-format options))
                      (:image-options options)
                      (assoc :imageOptions (:image-options options)))
+        params     (inject-trace-context params state)
         response   (rpc/request! rpc-client "session.send" params)]
     (:messageId response)))
 
@@ -286,7 +334,9 @@
            :permission-handler nil
            :user-input-handler nil
            :hooks nil
-           :session-fs-handler nil)
+           :session-fs-handler nil
+           :exit-plan-mode-handler nil
+           :trace-context-provider nil)
     nil))
 
 (defn abort!

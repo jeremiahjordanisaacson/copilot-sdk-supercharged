@@ -137,6 +137,7 @@ type session_config = {
   request_headers : (string * string) list;
   on_elicitation_request : bool;
   instruction_directories : string list;
+  enable_session_telemetry : bool;
 }
 
 val default_session_config : unit -> session_config
@@ -186,6 +187,28 @@ type permission_result = {
 
 val permission_result_to_yojson : permission_result -> Yojson.Safe.t
 
+(** {1 Exit Plan Mode} *)
+
+type exit_plan_mode_request = {
+  epm_session_id : string;
+}
+
+val exit_plan_mode_request_of_yojson : Yojson.Safe.t -> (exit_plan_mode_request, string) result
+
+type exit_plan_mode_response = {
+  epm_approved : bool;
+}
+
+val exit_plan_mode_response_to_yojson : exit_plan_mode_response -> Yojson.Safe.t
+val default_exit_plan_mode_response : unit -> exit_plan_mode_response
+
+(** {1 Trace Context} *)
+
+type trace_context = {
+  traceparent : string option;
+  tracestate : string option;
+}
+
 (** {1 Status Types} *)
 
 type get_status_response = {
@@ -214,6 +237,8 @@ type client_options = {
   session_fs : session_fs_config option;
   copilot_home : string option;
   tcp_connection_token : string option;
+  remote : bool option;
+  on_get_trace_context : (unit -> trace_context) option;
 }
 
 val default_client_options : unit -> client_options

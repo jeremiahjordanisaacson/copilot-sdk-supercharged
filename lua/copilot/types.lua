@@ -164,6 +164,7 @@ function M.ClientOptions(fields)
         sessionFs                  = fields.sessionFs,                  -- optional table, session filesystem provider
         copilotHome                = fields.copilotHome,                -- optional string, copilot home directory path
         tcpConnectionToken         = fields.tcpConnectionToken,         -- optional string, TCP connection token
+        onGetTraceContext          = fields.onGetTraceContext,          -- optional function() -> TraceContext
     }
 end
 
@@ -297,6 +298,83 @@ function M.ElicitationResult(fields)
     }
 end
 
+--- Create a ModelCapabilitiesOverride table.
+-- @param fields table with optional keys: supports, limits
+-- @return table ModelCapabilitiesOverride
+function M.ModelCapabilitiesOverride(fields)
+    fields = fields or {}
+    return {
+        supports = fields.supports,    -- optional table { vision = bool, reasoningEffort = bool }
+        limits   = fields.limits,      -- optional table { maxPromptTokens = number, maxContextWindowTokens = number, vision = table }
+    }
+end
+
+--- Create a ModelCapabilitiesSupports table.
+-- @param fields table with optional keys: vision, reasoningEffort
+-- @return table
+function M.ModelCapabilitiesSupports(fields)
+    fields = fields or {}
+    return {
+        vision          = fields.vision,
+        reasoningEffort = fields.reasoningEffort,
+    }
+end
+
+--- Create a ModelCapabilitiesLimits table.
+-- @param fields table with optional keys: maxPromptTokens, maxContextWindowTokens, vision
+-- @return table
+function M.ModelCapabilitiesLimits(fields)
+    fields = fields or {}
+    return {
+        maxPromptTokens        = fields.maxPromptTokens,
+        maxContextWindowTokens = fields.maxContextWindowTokens,
+        vision                 = fields.vision,  -- optional ModelCapabilitiesVisionLimits
+    }
+end
+
+--- Create a ModelCapabilitiesVisionLimits table.
+-- @param fields table with optional keys: supportedMediaTypes, maxPromptImages, maxPromptImageSize
+-- @return table
+function M.ModelCapabilitiesVisionLimits(fields)
+    fields = fields or {}
+    return {
+        supportedMediaTypes = fields.supportedMediaTypes,
+        maxPromptImages     = fields.maxPromptImages,
+        maxPromptImageSize  = fields.maxPromptImageSize,
+    }
+end
+
+--- Create an ExitPlanModeRequest table.
+-- @param fields table with keys: sessionId
+-- @return table ExitPlanModeRequest
+function M.ExitPlanModeRequest(fields)
+    fields = fields or {}
+    return {
+        sessionId = fields.sessionId or "",
+    }
+end
+
+--- Create an ExitPlanModeResponse table.
+-- @param fields table with keys: approved
+-- @return table ExitPlanModeResponse
+function M.ExitPlanModeResponse(fields)
+    fields = fields or {}
+    return {
+        approved = fields.approved ~= false,  -- default true
+    }
+end
+
+--- Create a TraceContext table.
+-- @param fields table with optional keys: traceparent, tracestate
+-- @return table TraceContext
+function M.TraceContext(fields)
+    fields = fields or {}
+    return {
+        traceparent = fields.traceparent,  -- optional string
+        tracestate  = fields.tracestate,   -- optional string
+    }
+end
+
 --- Create a SessionConfig table.
 -- @param fields table with optional keys (see Go SessionConfig)
 -- @return table SessionConfig
@@ -329,6 +407,7 @@ function M.SessionConfig(fields)
         gitHubToken                     = fields.gitHubToken,
         commands                        = fields.commands,                        -- array of CommandDefinition
         onElicitationRequest            = fields.onElicitationRequest,            -- function(ElicitationContext) -> ElicitationResult
+        onExitPlanMode                  = fields.onExitPlanMode,                  -- function(ExitPlanModeRequest) -> ExitPlanModeResponse
         instructionDirectories          = fields.instructionDirectories,          -- array of strings, instruction directories
     }
 end
@@ -365,6 +444,7 @@ function M.ResumeSessionConfig(fields)
         gitHubToken                     = fields.gitHubToken,
         commands                        = fields.commands,                        -- array of CommandDefinition
         onElicitationRequest            = fields.onElicitationRequest,            -- function(ElicitationContext) -> ElicitationResult
+        onExitPlanMode                  = fields.onExitPlanMode,                  -- function(ExitPlanModeRequest) -> ExitPlanModeResponse
         instructionDirectories          = fields.instructionDirectories,          -- array of strings, instruction directories
     }
 end

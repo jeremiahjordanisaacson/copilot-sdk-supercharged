@@ -53,6 +53,11 @@ module Copilot
 
       @hooks      = nil
       @hooks_lock = Mutex.new
+
+      @exit_plan_mode_handler      = nil
+      @exit_plan_mode_handler_lock = Mutex.new
+
+      @trace_context_provider = nil
     end
 
     # Send a message to this session.
@@ -69,6 +74,22 @@ module Copilot
       payload[:mode] = mode if mode
       payload[:responseFormat] = response_format if response_format
       payload[:imageOptions] = image_options.to_h if image_options
+
+      # Inject trace context if provider is available
+      if @trace_context_provider
+        begin
+          tc = @trace_context_provider.call
+          if tc
+            tp = tc.respond_to?(:traceparent) ? tc.traceparent : tc[:traceparent]
+            ts = tc.respond_to?(:tracestate) ? tc.tracestate : tc[:tracestate]
+            payload[:traceparent] = tp if tp
+            payload[:tracestate] = ts if ts
+          end
+        rescue StandardError
+          # ignore trace context errors
+        end
+      end
+
       response = @rpc_client.request("session.send", payload)
       response["messageId"]
     end
@@ -202,6 +223,8 @@ module Copilot
       @permission_handler_lock.synchronize { @permission_handler = nil }
       @user_input_handler_lock.synchronize { @user_input_handler = nil }
       @hooks_lock.synchronize { @hooks = nil }
+      @exit_plan_mode_handler_lock.synchronize { @exit_plan_mode_handler = nil }
+      @trace_context_provider = nil
     end
 
     # Abort the currently processing message.
@@ -284,6 +307,32 @@ module Copilot
     # @api private
     def _register_hooks(hooks)
       @hooks_lock.synchronize { @hooks = hooks }
+    end
+
+    # @api private
+    def _register_exit_plan_mode_handler(handler)
+      @exit_plan_mode_handler_lock.synchronize { @exit_plan_mode_handler = handler }
+    end
+
+    # @api private
+    def _handle_exit_plan_mode_request(params)
+      handler = @exit_plan_mode_handler_lock.synchronize { @exit_plan_mode_handler }
+      unless handler
+        return { approved: true }
+      end
+
+      begin
+        request = ExitPlanModeRequest.from_hash(params)
+        result = handler.call(request)
+        result.is_a?(ExitPlanModeResponse) ? result.to_h : result
+      rescue StandardError
+        { approved: true }
+      end
+    end
+
+    # @api private
+    def _register_trace_context_provider(provider)
+      @trace_context_provider = provider
     end
 
     # @api private

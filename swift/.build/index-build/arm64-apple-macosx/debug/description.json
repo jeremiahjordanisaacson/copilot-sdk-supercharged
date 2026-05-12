@@ -1,0 +1,624 @@
+{
+  "builtTestProducts" : [
+    {
+      "binaryPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.xctest/Contents/MacOS/CopilotSDKPackageTests",
+      "packagePath" : "/Users/home/Documents/copilot-sdk-supercharged/swift",
+      "productName" : "CopilotSDKPackageTests"
+    }
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.CopilotSDK-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "fileList" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/sources",
+      "importPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/CopilotClient.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/CopilotSession.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/DefineTool.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/JsonRpcClient.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/SdkProtocolVersion.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/Types.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "CopilotSDK",
+      "moduleOutputPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules/CopilotSDK.swiftmodule",
+      "objects" : [
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotClient.swift.o",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotSession.swift.o",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/DefineTool.swift.o",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/JsonRpcClient.swift.o",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/SdkProtocolVersion.swift.o",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/Types.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx13.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-Onone",
+        "-enable-testing",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/include/CopilotSDK-Swift.h",
+        "-swift-version",
+        "5",
+        "-Xfrontend",
+        "-experimental-lazy-typecheck",
+        "-Xfrontend",
+        "-experimental-skip-all-function-bodies",
+        "-Xfrontend",
+        "-experimental-allow-module-with-compiler-errors",
+        "-Xfrontend",
+        "-empty-abi-descriptor",
+        "-I",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-L",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-plugin-path",
+        "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "swift"
+      ],
+      "outputFileMapPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules/CopilotSDK.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : true,
+      "sources" : [
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/CopilotClient.swift",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/CopilotSession.swift",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/DefineTool.swift",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/JsonRpcClient.swift",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/SdkProtocolVersion.swift",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/Types.swift"
+      ],
+      "tempsPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.CopilotSDKPackageTests-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "fileList" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.build/sources",
+      "importPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.derived/runner.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules/E2ETests.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "CopilotSDKPackageTests",
+      "moduleOutputPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules/CopilotSDKPackageTests.swiftmodule",
+      "objects" : [
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.build/runner.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx13.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.build/include/CopilotSDKPackageTests-Swift.h",
+        "-Xfrontend",
+        "-experimental-lazy-typecheck",
+        "-Xfrontend",
+        "-experimental-skip-all-function-bodies",
+        "-Xfrontend",
+        "-experimental-allow-module-with-compiler-errors",
+        "-Xfrontend",
+        "-empty-abi-descriptor",
+        "-I",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-L",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-plugin-path",
+        "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "swift"
+      ],
+      "outputFileMapPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules/CopilotSDKPackageTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : true,
+      "sources" : [
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.derived/runner.swift"
+      ],
+      "tempsPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.E2ETests-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "fileList" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/sources",
+      "importPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Tests/E2ETests/SessionE2ETests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Tests/E2ETests/TestHarness.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules/CopilotSDK.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "E2ETests",
+      "moduleOutputPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules/E2ETests.swiftmodule",
+      "objects" : [
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/SessionE2ETests.swift.o",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/TestHarness.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx13.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j14",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-swift-version",
+        "5",
+        "-Xfrontend",
+        "-experimental-lazy-typecheck",
+        "-Xfrontend",
+        "-experimental-skip-all-function-bodies",
+        "-Xfrontend",
+        "-experimental-allow-module-with-compiler-errors",
+        "-Xfrontend",
+        "-empty-abi-descriptor",
+        "-I",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-L",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-plugin-path",
+        "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "swift"
+      ],
+      "outputFileMapPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules/E2ETests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : true,
+      "sources" : [
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/Tests/E2ETests/SessionE2ETests.swift",
+        "/Users/home/Documents/copilot-sdk-supercharged/swift/Tests/E2ETests/TestHarness.swift"
+      ],
+      "tempsPath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "CopilotSDK" : [
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "-module-name",
+      "CopilotSDK",
+      "-package-name",
+      "swift",
+      "-c",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/CopilotClient.swift",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/CopilotSession.swift",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/DefineTool.swift",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/JsonRpcClient.swift",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/SdkProtocolVersion.swift",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/Types.swift",
+      "-I",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx13.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-Onone",
+      "-enable-testing",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/include/CopilotSDK-Swift.h",
+      "-swift-version",
+      "5",
+      "-Xfrontend",
+      "-experimental-lazy-typecheck",
+      "-Xfrontend",
+      "-experimental-skip-all-function-bodies",
+      "-Xfrontend",
+      "-experimental-allow-module-with-compiler-errors",
+      "-Xfrontend",
+      "-empty-abi-descriptor",
+      "-I",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-L",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-plugin-path",
+      "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "swift",
+      "-driver-use-frontend-path",
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+    ],
+    "CopilotSDKPackageTests" : [
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "-module-name",
+      "CopilotSDKPackageTests",
+      "-package-name",
+      "swift",
+      "-c",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.derived/runner.swift",
+      "-I",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx13.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.build/include/CopilotSDKPackageTests-Swift.h",
+      "-Xfrontend",
+      "-experimental-lazy-typecheck",
+      "-Xfrontend",
+      "-experimental-skip-all-function-bodies",
+      "-Xfrontend",
+      "-experimental-allow-module-with-compiler-errors",
+      "-Xfrontend",
+      "-empty-abi-descriptor",
+      "-I",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-L",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-plugin-path",
+      "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "swift",
+      "-driver-use-frontend-path",
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+    ],
+    "E2ETests" : [
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "-module-name",
+      "E2ETests",
+      "-package-name",
+      "swift",
+      "-c",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/Tests/E2ETests/SessionE2ETests.swift",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/Tests/E2ETests/TestHarness.swift",
+      "-I",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx13.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j14",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-swift-version",
+      "5",
+      "-Xfrontend",
+      "-experimental-lazy-typecheck",
+      "-Xfrontend",
+      "-experimental-skip-all-function-bodies",
+      "-Xfrontend",
+      "-experimental-allow-module-with-compiler-errors",
+      "-Xfrontend",
+      "-empty-abi-descriptor",
+      "-I",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-L",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-plugin-path",
+      "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "swift",
+      "-driver-use-frontend-path",
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "CopilotSDK" : [
+
+    ],
+    "CopilotSDKPackageTests" : [
+      "E2ETests",
+      "CopilotSDK"
+    ],
+    "E2ETests" : [
+      "CopilotSDK"
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/CopilotClient.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/CopilotSession.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/DefineTool.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/JsonRpcClient.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/SdkProtocolVersion.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/Types.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDK.build/sources"
+    },
+    "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.derived/runner.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/CopilotSDKPackageTests.build/sources"
+    },
+    "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Tests/E2ETests/SessionE2ETests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/home/Documents/copilot-sdk-supercharged/swift/Tests/E2ETests/TestHarness.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/sources"
+    },
+    "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"
+    }
+  }
+}

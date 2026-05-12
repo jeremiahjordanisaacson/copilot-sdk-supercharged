@@ -278,6 +278,30 @@ module Copilot
   # Result returned from an elicitation handler.
   ElicitationResult = Struct.new(:action, :content, keyword_init: true)
 
+  # Exit plan mode request from the server.
+  ExitPlanModeRequest = Struct.new(:session_id, keyword_init: true) do
+    def self.from_hash(h)
+      new(session_id: h["sessionId"])
+    end
+  end
+
+  # Exit plan mode response.
+  ExitPlanModeResponse = Struct.new(:approved, keyword_init: true) do
+    def to_h
+      { approved: approved }
+    end
+  end
+
+  # Trace context for distributed tracing.
+  TraceContext = Struct.new(:traceparent, :tracestate, keyword_init: true) do
+    def to_h
+      h = {}
+      h[:traceparent] = traceparent if traceparent
+      h[:tracestate] = tracestate if tracestate
+      h
+    end
+  end
+
   # Configuration for creating a session.
   SessionConfig = Struct.new(
     :session_id, :model, :reasoning_effort, :config_dir,
@@ -288,7 +312,7 @@ module Copilot
     :skill_directories, :disabled_skills, :infinite_sessions,
     :model_capabilities, :enable_config_discovery,
     :github_token,
-    :commands, :on_elicitation_request,
+    :commands, :on_elicitation_request, :on_exit_plan_mode,
     :instruction_directories,
     keyword_init: true
   )
@@ -303,7 +327,7 @@ module Copilot
     :skill_directories, :disabled_skills, :infinite_sessions,
     :model_capabilities, :enable_config_discovery,
     :github_token,
-    :commands, :on_elicitation_request,
+    :commands, :on_elicitation_request, :on_exit_plan_mode,
     :instruction_directories,
     :disable_resume,
     keyword_init: true
@@ -596,6 +620,7 @@ module Copilot
     :github_token, :use_logged_in_user, :session_idle_timeout_seconds,
     :session_fs,
     :copilot_home, :tcp_connection_token,
+    :on_get_trace_context,
     keyword_init: true
   )
 end

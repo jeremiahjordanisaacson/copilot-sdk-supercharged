@@ -37,6 +37,8 @@ function CopilotSession.new(session_id, rpc_client, workspace_path)
     self._permission_handler = nil        -- function or nil
     self._user_input_handler = nil        -- function or nil
     self._hooks            = nil          -- SessionHooks table or nil
+    self._exit_plan_mode_handler = nil    -- function or nil
+    self._trace_context_provider = nil    -- function or nil
 
     return self
 end
@@ -59,6 +61,15 @@ function CopilotSession:send(options)
         responseFormat = options.responseFormat,
         imageOptions   = options.imageOptions,
     }
+
+    -- Inject trace context if provider is available
+    if self._trace_context_provider then
+        local tc_ok, tc = pcall(self._trace_context_provider)
+        if tc_ok and tc then
+            if tc.traceparent then req.traceparent = tc.traceparent end
+            if tc.tracestate then req.tracestate = tc.tracestate end
+        end
+    end
 
     local result, err = self._rpc_client:request("session.send", req)
     if err then
@@ -208,6 +219,8 @@ function CopilotSession:destroy()
     self._permission_handler = nil
     self._user_input_handler = nil
     self._hooks              = nil
+    self._exit_plan_mode_handler = nil
+    self._trace_context_provider = nil
 
     return true, nil
 end
@@ -320,6 +333,32 @@ end
 -- @return table|nil
 function CopilotSession:_get_hooks()
     return self._hooks
+end
+
+-- ---------------------------------------------------------------------------
+-- Internal: exit plan mode handler
+-- ---------------------------------------------------------------------------
+
+--- Register an exit plan mode handler.
+-- @param handler function(request) -> ExitPlanModeResponse
+function CopilotSession:_register_exit_plan_mode_handler(handler)
+    self._exit_plan_mode_handler = handler
+end
+
+--- Get the registered exit plan mode handler.
+-- @return function|nil
+function CopilotSession:_get_exit_plan_mode_handler()
+    return self._exit_plan_mode_handler
+end
+
+-- ---------------------------------------------------------------------------
+-- Internal: trace context provider
+-- ---------------------------------------------------------------------------
+
+--- Register a trace context provider.
+-- @param provider function() -> TraceContext
+function CopilotSession:_register_trace_context_provider(provider)
+    self._trace_context_provider = provider
 end
 
 --- Handle a hooks invocation from the server.

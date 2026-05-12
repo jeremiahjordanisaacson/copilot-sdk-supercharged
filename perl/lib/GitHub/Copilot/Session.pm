@@ -38,6 +38,8 @@ sub new {
         _permission_handler => undef,
         _user_input_handler => undef,
         _hooks             => undef,
+        _exit_plan_mode_handler => undef,
+        _trace_context_provider => undef,
     }, $class;
 
     return $self;
@@ -83,6 +85,19 @@ sub send {
     $payload{mode}           = $mode            if defined $mode;
     $payload{responseFormat} = $response_format if defined $response_format;
     $payload{imageOptions}   = $image_options   if defined $image_options;
+
+    # Inject trace context if provider is available
+    if ($self->{_trace_context_provider}) {
+        eval {
+            my $tc = $self->{_trace_context_provider}->();
+            if ($tc) {
+                my $tp = ref($tc) && $tc->can('traceparent') ? $tc->traceparent : $tc->{traceparent};
+                my $ts = ref($tc) && $tc->can('tracestate') ? $tc->tracestate : $tc->{tracestate};
+                $payload{traceparent} = $tp if defined $tp;
+                $payload{tracestate}  = $ts if defined $ts;
+            }
+        };
+    }
 
     my $response = $self->{_client}->request('session.send', \%payload);
     return $response->{messageId};
@@ -286,6 +301,43 @@ sub _handle_hooks_invoke {
     return $result;
 }
 
+# --------------------------------------------------------------------------
+# Exit plan mode handling
+# --------------------------------------------------------------------------
+
+sub register_exit_plan_mode_handler {
+    my ($self, $handler) = @_;
+    $self->{_exit_plan_mode_handler} = $handler;
+}
+
+sub _handle_exit_plan_mode_request {
+    my ($self, $request) = @_;
+
+    if (!$self->{_exit_plan_mode_handler}) {
+        return { approved => \1 };
+    }
+
+    my $result;
+    eval {
+        my $req = GitHub::Copilot::Types::ExitPlanModeRequest->from_hashref($request);
+        $result = $self->{_exit_plan_mode_handler}->($req);
+    };
+    if ($@) {
+        return { approved => \1 };
+    }
+
+    return $result;
+}
+
+# --------------------------------------------------------------------------
+# Trace context provider
+# --------------------------------------------------------------------------
+
+sub register_trace_context_provider {
+    my ($self, $provider) = @_;
+    $self->{_trace_context_provider} = $provider;
+}
+
 sub get_metadata {
     my ($self) = @_;
 
@@ -333,6 +385,8 @@ sub destroy {
     $self->{_permission_handler} = undef;
     $self->{_user_input_handler} = undef;
     $self->{_hooks}              = undef;
+    $self->{_exit_plan_mode_handler} = undef;
+    $self->{_trace_context_provider} = undef;
 }
 
 sub abort {

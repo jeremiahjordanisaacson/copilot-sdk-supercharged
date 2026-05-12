@@ -248,6 +248,7 @@ type session_config = {
   request_headers : (string * string) list;
   on_elicitation_request : bool;
   instruction_directories : string list;
+  enable_session_telemetry : bool;
 }
 
 let default_session_config () =
@@ -270,6 +271,7 @@ let default_session_config () =
   ; request_headers = []
   ; on_elicitation_request = false
   ; instruction_directories = []
+  ; enable_session_telemetry = false
   }
 
 let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
@@ -373,6 +375,11 @@ let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
     | [] -> fields
     | dirs -> ("instructionDirectories", `List (List.map (fun s -> `String s) dirs)) :: fields
   in
+  let fields =
+    if c.enable_session_telemetry then
+      ("enableSessionTelemetry", `Bool true) :: fields
+    else fields
+  in
   `Assoc fields
 
 (* ========================================================================== *)
@@ -454,6 +461,38 @@ let permission_result_to_yojson (r : permission_result) : Yojson.Safe.t =
   `Assoc fields
 
 (* ========================================================================== *)
+(* Exit Plan Mode                                                             *)
+(* ========================================================================== *)
+
+type exit_plan_mode_request = {
+  epm_session_id : string;
+}
+
+let exit_plan_mode_request_of_yojson (json : Yojson.Safe.t)
+    : (exit_plan_mode_request, string) result =
+  try
+    Ok { epm_session_id = json |> member "sessionId" |> to_string }
+  with exn -> Error (Printexc.to_string exn)
+
+type exit_plan_mode_response = {
+  epm_approved : bool;
+}
+
+let exit_plan_mode_response_to_yojson (r : exit_plan_mode_response) : Yojson.Safe.t =
+  `Assoc [ ("approved", `Bool r.epm_approved) ]
+
+let default_exit_plan_mode_response () = { epm_approved = true }
+
+(* ========================================================================== *)
+(* Trace Context                                                              *)
+(* ========================================================================== *)
+
+type trace_context = {
+  traceparent : string option;
+  tracestate : string option;
+}
+
+(* ========================================================================== *)
 (* Status Types                                                               *)
 (* ========================================================================== *)
 
@@ -502,6 +541,8 @@ type client_options = {
   session_fs : session_fs_config option;
   copilot_home : string option;
   tcp_connection_token : string option;
+  remote : bool option;
+  on_get_trace_context : (unit -> trace_context) option;
 }
 
 let default_client_options () =
@@ -514,6 +555,8 @@ let default_client_options () =
   ; session_fs = None
   ; copilot_home = None
   ; tcp_connection_token = None
+  ; remote = None
+  ; on_get_trace_context = None
   }
 
 (* ========================================================================== *)

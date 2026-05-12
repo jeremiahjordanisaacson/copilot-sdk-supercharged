@@ -50,6 +50,7 @@ function CopilotClient.new(options)
     self._stdin_handle   = nil
     self._stdout_handle  = nil
     self._read_thread    = nil    -- coroutine for the read loop
+    self._on_get_trace_context = options.onGetTraceContext  -- optional trace context provider
 
     return self
 end
@@ -365,6 +366,12 @@ function CopilotClient:create_session(config)
     if config.hooks then
         session:_register_hooks(config.hooks)
     end
+    if config.onExitPlanMode then
+        session:_register_exit_plan_mode_handler(config.onExitPlanMode)
+    end
+    if self._on_get_trace_context then
+        session:_register_trace_context_provider(self._on_get_trace_context)
+    end
 
     self._sessions[result.sessionId] = session
     return session, nil
@@ -406,6 +413,12 @@ function CopilotClient:resume_session(session_id, config)
     end
     if config.hooks then
         session:_register_hooks(config.hooks)
+    end
+    if config.onExitPlanMode then
+        session:_register_exit_plan_mode_handler(config.onExitPlanMode)
+    end
+    if self._on_get_trace_context then
+        session:_register_trace_context_provider(self._on_get_trace_context)
     end
 
     self._sessions[result.sessionId] = session
@@ -653,6 +666,11 @@ function CopilotClient:_setup_handlers()
     self._rpc_client:set_request_handler("hooks.invoke", function(params)
         return self:_handle_hooks_invoke(params)
     end)
+
+    -- exitPlanMode.request
+    self._rpc_client:set_request_handler("exitPlanMode.request", function(params)
+        return self:_handle_exit_plan_mode_request(params)
+    end)
 end
 
 --- Dispatch a session event to the appropriate session.
@@ -827,6 +845,31 @@ function CopilotClient:_handle_hooks_invoke(params)
     return result, nil
 end
 
+--- Handle an exit plan mode request from the server.
+function CopilotClient:_handle_exit_plan_mode_request(params)
+    if not params or not params.sessionId then
+        return nil, { code = -32602, message = "invalid exit plan mode request payload" }
+    end
+
+    local session = self._sessions[params.sessionId]
+    if not session then
+        return nil, { code = -32602, message = "unknown session " .. tostring(params.sessionId) }
+    end
+
+    local handler = session:_get_exit_plan_mode_handler()
+    if not handler then
+        return { approved = true }, nil
+    end
+
+    local request = { sessionId = params.sessionId }
+    local ok, result = pcall(handler, request)
+    if not ok then
+        return { approved = true }, nil
+    end
+
+    return result, nil
+end
+
 -- ---------------------------------------------------------------------------
 -- Internal: request building
 -- ---------------------------------------------------------------------------
@@ -869,6 +912,8 @@ function CopilotClient:_build_create_session_request(config)
     if config.streaming then req.streaming = true end
     if config.onPermissionRequest then req.requestPermission = true end
     if config.onUserInputRequest then req.requestUserInput = true end
+    if config.onExitPlanMode then req.requestExitPlanMode = true end
+    if config.modelCapabilities then req.modelCapabilities = config.modelCapabilities end
 
     if config.hooks then
         local h = config.hooks
@@ -915,6 +960,8 @@ function CopilotClient:_build_resume_session_request(session_id, config)
     if config.streaming then req.streaming = true end
     if config.onPermissionRequest then req.requestPermission = true end
     if config.onUserInputRequest then req.requestUserInput = true end
+    if config.onExitPlanMode then req.requestExitPlanMode = true end
+    if config.modelCapabilities then req.modelCapabilities = config.modelCapabilities end
     if config.disableResume then req.disableResume = true end
 
     if config.hooks then

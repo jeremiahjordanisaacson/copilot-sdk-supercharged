@@ -537,6 +537,51 @@ has action  => (is => 'ro', required => 1);
 has content => (is => 'ro', default => sub { undef });
 
 # ============================================================================
+# ExitPlanModeRequest - request to exit plan mode
+# ============================================================================
+package GitHub::Copilot::Types::ExitPlanModeRequest;
+use Moo;
+
+has session_id => (is => 'ro', required => 1);
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        session_id => $hr->{sessionId} // '',
+    );
+}
+
+# ============================================================================
+# ExitPlanModeResponse - response to exit plan mode request
+# ============================================================================
+package GitHub::Copilot::Types::ExitPlanModeResponse;
+use Moo;
+
+has approved => (is => 'ro', required => 1);
+
+sub TO_JSON {
+    my ($self) = @_;
+    return { approved => $self->approved ? \1 : \0 };
+}
+
+# ============================================================================
+# TraceContext - distributed tracing context
+# ============================================================================
+package GitHub::Copilot::Types::TraceContext;
+use Moo;
+
+has traceparent => (is => 'ro', default => sub { undef });
+has tracestate  => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{traceparent} = $self->traceparent if defined $self->traceparent;
+    $h{tracestate}  = $self->tracestate  if defined $self->tracestate;
+    return \%h;
+}
+
+# ============================================================================
 # SessionConfig - configuration for creating a session
 # ============================================================================
 package GitHub::Copilot::Types::SessionConfig;
@@ -571,6 +616,7 @@ has include_sub_agent_streaming_events => (is => 'ro', default => sub { undef })
 has github_token              => (is => 'ro', default => sub { undef });
 has commands                => (is => 'ro', default => sub { undef });
 has on_elicitation_request  => (is => 'ro', default => sub { undef });
+has on_exit_plan_mode      => (is => 'ro', default => sub { undef });
 # Instruction directories for prompt customization
 has instruction_directories => (is => 'ro', default => sub { undef });
 # System prompt text (alias for system_message, maps to systemPrompt on wire)
@@ -640,6 +686,7 @@ sub to_wire {
     $payload{requestPermission} = \1 if defined $self->on_permission_request;
     $payload{requestUserInput}  = \1 if defined $self->on_user_input_request;
     $payload{requestElicitation} = \1 if defined $self->on_elicitation_request;
+    $payload{requestExitPlanMode} = \1 if defined $self->on_exit_plan_mode;
 
     if (defined $self->hooks) {
         my $hooks = $self->hooks;

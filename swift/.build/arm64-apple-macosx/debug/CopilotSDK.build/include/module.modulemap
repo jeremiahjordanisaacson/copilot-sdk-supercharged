@@ -1,0 +1,3 @@
+module CopilotSDK {
+    header "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/include/CopilotSDK-Swift.h"
+}

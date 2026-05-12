@@ -238,7 +238,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "modelCapabilities" -> config.modelCapabilities.asJson,
       ).dropNullValues
 
-      client.sendRequest("session.create", params).map { result =>
+      client.sendRequest("session.create", injectTraceContext(params)).map { result =>
         val sessionId = result.hcursor.get[String]("sessionId").getOrElse(
           throw new RuntimeException("session.create response missing sessionId")
         )
@@ -248,6 +248,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         config.onPermissionRequest.foreach(session.registerPermissionHandler)
         config.onUserInputRequest.foreach(session.registerUserInputHandler)
         config.hooks.foreach(session.registerHooks)
+        config.onExitPlanMode.foreach(session.registerExitPlanModeHandler)
         sessions.put(sessionId, session)
         session
       }
@@ -295,7 +296,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "disableResume" -> config.disableResume.asJson,
       ).dropNullValues
 
-      client.sendRequest("session.resume", params).map { result =>
+      client.sendRequest("session.resume", injectTraceContext(params)).map { result =>
         val resumedId = result.hcursor.get[String]("sessionId").getOrElse(sessionId)
         val workspacePath = result.hcursor.get[String]("workspacePath").toOption
         val session = new CopilotSession(resumedId, client, workspacePath)
@@ -303,6 +304,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         config.onPermissionRequest.foreach(session.registerPermissionHandler)
         config.onUserInputRequest.foreach(session.registerUserInputHandler)
         config.hooks.foreach(session.registerHooks)
+        config.onExitPlanMode.foreach(session.registerExitPlanModeHandler)
         sessions.put(resumedId, session)
         session
       }
@@ -605,6 +607,9 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     // hooks.invoke (server asks client to run a hook)
     client.onRequest("hooks.invoke", handleHooksInvoke)
 
+    // exitPlanMode.request (server asks client to approve exiting plan mode)
+    client.onRequest("exitPlanMode.request", handleExitPlanModeRequest)
+
   private def handleSessionEvent(params: Json): Unit =
     val cursor = params.hcursor
     for
@@ -725,6 +730,38 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     session.handleHooksInvoke(hookType, input).map { output =>
       Json.obj("output" -> output.getOrElse(Json.Null))
     }
+
+  private def handleExitPlanModeRequest(params: Json): Future[Json] =
+    val cursor = params.hcursor
+    val sessionId = cursor.get[String]("sessionId").getOrElse(
+      throw new RuntimeException("Invalid exit plan mode request: missing sessionId")
+    )
+
+    val session = Option(sessions.get(sessionId)).getOrElse(
+      throw new RuntimeException(s"Session not found: $sessionId")
+    )
+
+    val request = ExitPlanModeRequest(sessionId)
+    session.handleExitPlanModeRequest(request).map { result =>
+      Json.obj("approved" -> result.approved.asJson)
+    }
+
+  private def injectTraceContext(params: Json): Json =
+    options.onGetTraceContext match
+      case None => params
+      case Some(provider) =>
+        try
+          val ctx = concurrent.Await.result(provider(), scala.concurrent.duration.Duration(5, "s"))
+          var result = params
+          ctx.traceparent.foreach { tp =>
+            result = result.deepMerge(Json.obj("traceparent" -> tp.asJson))
+          }
+          ctx.tracestate.foreach { ts =>
+            result = result.deepMerge(Json.obj("tracestate" -> ts.asJson))
+          }
+          result
+        catch
+          case _: Exception => params
 
   // -------------------------------------------------------------------------
   // Helpers

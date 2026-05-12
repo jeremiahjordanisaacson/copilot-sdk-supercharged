@@ -34,7 +34,9 @@ defmodule Copilot.Session do
     PermissionRequestResult,
     UserInputRequest,
     UserInputResponse,
-    SessionHooks
+    SessionHooks,
+    ExitPlanModeRequest,
+    ExitPlanModeResponse
   }
 
   # ---------------------------------------------------------------------------
@@ -50,10 +52,12 @@ defmodule Copilot.Session do
             tool_handlers: %{String.t() => fun()},
             permission_handler: fun() | nil,
             user_input_handler: fun() | nil,
+            exit_plan_mode_handler: fun() | nil,
             hooks: SessionHooks.t() | nil,
             event_handlers: [{reference(), fun()}],
             typed_event_handlers: %{String.t() => [{reference(), fun()}]},
-            waiters: [{reference(), pid(), any()}]
+            waiters: [{reference(), pid(), any()}],
+            trace_context_provider: fun() | nil
           }
     defstruct session_id: "",
               rpc: nil,
@@ -61,10 +65,12 @@ defmodule Copilot.Session do
               tool_handlers: %{},
               permission_handler: nil,
               user_input_handler: nil,
+              exit_plan_mode_handler: nil,
               hooks: nil,
               event_handlers: [],
               typed_event_handlers: %{},
-              waiters: []
+              waiters: [],
+              trace_context_provider: nil
   end
 
   # ---------------------------------------------------------------------------
@@ -201,6 +207,18 @@ defmodule Copilot.Session do
     GenServer.call(session, {:handle_hooks_invoke, hook_type, input}, 30_000)
   end
 
+  @doc "Register a handler for exit plan mode requests."
+  @spec register_exit_plan_mode_handler(GenServer.server(), fun()) :: :ok
+  def register_exit_plan_mode_handler(session, handler) do
+    GenServer.call(session, {:register_exit_plan_mode_handler, handler})
+  end
+
+  @doc false
+  @spec handle_exit_plan_mode(GenServer.server(), map()) :: {:ok, map()} | {:error, String.t()}
+  def handle_exit_plan_mode(session, request) do
+    GenServer.call(session, {:handle_exit_plan_mode, request}, 30_000)
+  end
+
   # ---------------------------------------------------------------------------
   # GenServer Callbacks
   # ---------------------------------------------------------------------------
@@ -214,6 +232,7 @@ defmodule Copilot.Session do
     on_permission_request = Keyword.get(opts, :on_permission_request)
     on_user_input_request = Keyword.get(opts, :on_user_input_request)
     hooks = Keyword.get(opts, :hooks)
+    trace_context_provider = Keyword.get(opts, :trace_context_provider)
 
     tool_handlers =
       if tools do
@@ -232,7 +251,8 @@ defmodule Copilot.Session do
        tool_handlers: tool_handlers,
        permission_handler: on_permission_request,
        user_input_handler: on_user_input_request,
-       hooks: hooks
+       hooks: hooks,
+       trace_context_provider: trace_context_provider
      }}
   end
 
@@ -247,6 +267,7 @@ defmodule Copilot.Session do
     params = if options.mode, do: Map.put(params, "mode", options.mode), else: params
     params = if options.response_format, do: Map.put(params, "responseFormat", Types.response_format_to_string(options.response_format)), else: params
     params = if options.image_options, do: Map.put(params, "imageOptions", options.image_options), else: params
+    params = inject_trace_context(params, state)
 
     case JsonRpcClient.request(state.rpc, "session.send", params, 30_000) do
       {:ok, %{"messageId" => mid}} -> {:reply, {:ok, mid}, state}
@@ -281,6 +302,7 @@ defmodule Copilot.Session do
     params = if options.mode, do: Map.put(params, "mode", options.mode), else: params
     params = if options.response_format, do: Map.put(params, "responseFormat", Types.response_format_to_string(options.response_format)), else: params
     params = if options.image_options, do: Map.put(params, "imageOptions", options.image_options), else: params
+    params = inject_trace_context(params, state)
 
     case JsonRpcClient.request(state.rpc, "session.send", params, 30_000) do
       {:ok, _} ->
@@ -452,6 +474,32 @@ defmodule Copilot.Session do
   end
 
   # ---------------------------------------------------------------------------
+  # Exit plan mode handling
+  # ---------------------------------------------------------------------------
+
+  def handle_call({:register_exit_plan_mode_handler, handler}, _from, state) do
+    {:reply, :ok, %{state | exit_plan_mode_handler: handler}}
+  end
+
+  def handle_call({:handle_exit_plan_mode, request_map}, _from, state) do
+    case state.exit_plan_mode_handler do
+      nil ->
+        {:reply, {:ok, %{"approved" => true}}, state}
+
+      handler ->
+        try do
+          req = ExitPlanModeRequest.from_map(request_map)
+          result = handler.(req)
+          {:reply, {:ok, ExitPlanModeResponse.to_map(result)}, state}
+        rescue
+          e ->
+            Logger.warning("ExitPlanMode handler error: #{inspect(e)}")
+            {:reply, {:ok, %{"approved" => true}}, state}
+        end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Event dispatch
   # ---------------------------------------------------------------------------
 
@@ -594,5 +642,18 @@ defmodule Copilot.Session do
       "resultType" => "success",
       "toolTelemetry" => %{}
     }
+  end
+
+  defp inject_trace_context(params, %{trace_context_provider: nil}), do: params
+
+  defp inject_trace_context(params, %{trace_context_provider: provider}) do
+    try do
+      ctx = provider.()
+      params = if ctx.traceparent, do: Map.put(params, "traceparent", ctx.traceparent), else: params
+      params = if ctx.tracestate, do: Map.put(params, "tracestate", ctx.tracestate), else: params
+      params
+    rescue
+      _ -> params
+    end
   end
 end

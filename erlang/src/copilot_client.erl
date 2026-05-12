@@ -392,9 +392,13 @@ build_cli_args(CliPath, LogLevel, Options) ->
         undefined -> Base;
         Token     -> Base ++ ["--github-token", binary_to_list(ensure_binary(Token))]
     end,
-    case UseLoggedIn of
+    WithToken2 = case UseLoggedIn of
         true -> WithToken ++ ["--use-logged-in-user"];
         _    -> WithToken
+    end,
+    case maps:get(remote, Options, undefined) of
+        true -> WithToken2 ++ ["--remote"];
+        _    -> WithToken2
     end.
 
 verify_connection(RpcPid) ->
@@ -502,6 +506,17 @@ register_session_handlers(Rpc, SessionId, SessionPid, Config) ->
                     end
                 end)
     end,
+    %% Register exit plan mode handler
+    copilot_jsonrpc:set_request_handler(Rpc, <<"exitPlanMode.request">>, fun(Params) ->
+        TargetSession = maps:get(<<"sessionId">>, Params, <<>>),
+        case TargetSession of
+            SessionId ->
+                Result = copilot_session:handle_exit_plan_mode(SessionPid, Params),
+                #{<<"result">> => Result};
+            _ ->
+                #{<<"result">> => #{<<"approved">> => true}}
+        end
+    end),
     %% Notify session process it is ready
     copilot_session:set_ready(SessionPid),
     ok.

@@ -1,0 +1,47 @@
+{
+  "": {
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/master.swiftdeps"
+  },
+  "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/CopilotClient.swift": {
+    "dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotClient.d",
+    "object": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotClient.swift.o",
+    "swiftmodule": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotClient~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotClient.swiftdeps",
+    "diagnostics": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotClient.dia"
+  },
+  "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/CopilotSession.swift": {
+    "dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotSession.d",
+    "object": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotSession.swift.o",
+    "swiftmodule": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotSession~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotSession.swiftdeps",
+    "diagnostics": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/CopilotSession.dia"
+  },
+  "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/DefineTool.swift": {
+    "dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/DefineTool.d",
+    "object": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/DefineTool.swift.o",
+    "swiftmodule": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/DefineTool~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/DefineTool.swiftdeps",
+    "diagnostics": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/DefineTool.dia"
+  },
+  "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/JsonRpcClient.swift": {
+    "dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/JsonRpcClient.d",
+    "object": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/JsonRpcClient.swift.o",
+    "swiftmodule": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/JsonRpcClient~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/JsonRpcClient.swiftdeps",
+    "diagnostics": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/JsonRpcClient.dia"
+  },
+  "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/SdkProtocolVersion.swift": {
+    "dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/SdkProtocolVersion.d",
+    "object": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/SdkProtocolVersion.swift.o",
+    "swiftmodule": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/SdkProtocolVersion~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/SdkProtocolVersion.swiftdeps",
+    "diagnostics": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/SdkProtocolVersion.dia"
+  },
+  "/Users/home/Documents/copilot-sdk-supercharged/swift/Sources/CopilotSDK/Types.swift": {
+    "dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/Types.d",
+    "object": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/Types.swift.o",
+    "swiftmodule": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/Types~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/Types.swiftdeps",
+    "diagnostics": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/arm64-apple-macosx/debug/CopilotSDK.build/Types.dia"
+  }
+}
