@@ -90,6 +90,26 @@ typedef void (^CPElicitationHandler)(NSDictionary<NSString *, id> *request,
                                      NSString *sessionId,
                                      void (^completion)(NSDictionary<NSString *, id> *result));
 
+#pragma mark - Exit Plan Mode
+
+/// Block type for exit plan mode request handlers.
+/// The handler receives the session ID and must call the completion block with YES (approved) or NO (denied).
+typedef void (^CPExitPlanModeHandler)(NSString *sessionId,
+                                      void (^completion)(BOOL approved));
+
+#pragma mark - Trace Context
+
+/// Trace context for distributed tracing.
+@interface CPTraceContext : NSObject
+
+@property (nonatomic, copy, nullable) NSString *traceparent;
+@property (nonatomic, copy, nullable) NSString *tracestate;
+
+@end
+
+/// Block type for trace context provider.
+typedef CPTraceContext * _Nullable (^CPTraceContextProvider)(void);
+
 #pragma mark - Session Event
 
 /// An event received from the session.
@@ -199,6 +219,8 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, copy, nullable) NSString *responseFormat;
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *imageOptions;
 @property (nonatomic, copy, nullable) CPElicitationHandler elicitationHandler;
+@property (nonatomic, copy, nullable) CPExitPlanModeHandler exitPlanModeHandler;
+@property (nonatomic, assign) BOOL enableSessionTelemetry;
 @property (nonatomic, copy, nullable) NSString *authToken;
 @property (nonatomic, copy, nullable) NSArray<NSString *> *instructionDirectories;
 
@@ -224,6 +246,7 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, assign) NSInteger sessionIdleTimeoutSeconds;
 @property (nonatomic, copy, nullable) NSString *copilotHome;
 @property (nonatomic, copy, nullable) NSString *tcpConnectionToken;
+@property (nonatomic, copy, nullable) CPTraceContextProvider onGetTraceContext;
 
 + (instancetype)defaultOptions;
 

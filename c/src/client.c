@@ -67,6 +67,10 @@ struct copilot_session {
     copilot_hook_handler_fn hook_handler;
     void *hook_user_data;
 
+    /* Exit plan mode handler */
+    copilot_exit_plan_mode_handler_fn exit_plan_mode_handler;
+    void *exit_plan_mode_user_data;
+
     /* SendAndWait synchronization */
     pthread_mutex_t idle_mutex;
     pthread_cond_t idle_cond;
@@ -95,6 +99,10 @@ struct copilot_client {
     bool use_logged_in_user;
     char **extra_args;
     int extra_args_count;
+
+    /* Trace context */
+    copilot_trace_context_provider_fn trace_context_provider;
+    void *trace_context_user_data;
 
     /* State */
     copilot_connection_state_t state;
@@ -591,6 +599,42 @@ static cJSON *on_hooks_invoke(const char *method, cJSON *params, void *user_data
 }
 
 /* ============================================================================
+ * Internal: exit plan mode request handler
+ * ============================================================================ */
+
+static cJSON *on_exit_plan_mode_request(const char *method, cJSON *params, void *user_data,
+                                        int *out_error_code, char **out_error_message)
+{
+    (void)method;
+    (void)out_error_code;
+    (void)out_error_message;
+
+    copilot_client_t *client = (copilot_client_t *)user_data;
+
+    cJSON *sid_json = cJSON_GetObjectItem(params, "sessionId");
+    const char *sid = (sid_json && cJSON_IsString(sid_json)) ? sid_json->valuestring : "";
+
+    copilot_session_t *session = find_session(client, sid);
+
+    cJSON *response = cJSON_CreateObject();
+
+    if (session && session->exit_plan_mode_handler) {
+        copilot_exit_plan_mode_request_t req;
+        req.session_id = sid;
+        copilot_exit_plan_mode_response_t resp;
+        resp.approved = true;
+
+        copilot_error_t err = session->exit_plan_mode_handler(&req, session->exit_plan_mode_user_data, &resp);
+        cJSON_AddBoolToObject(response, "approved", (err == COPILOT_OK) ? resp.approved : true);
+    } else {
+        /* Default: approve */
+        cJSON_AddBoolToObject(response, "approved", true);
+    }
+
+    return response;
+}
+
+/* ============================================================================
  * Internal: spawn CLI process
  * ============================================================================ */
 
@@ -825,6 +869,23 @@ static copilot_error_t verify_protocol_version(copilot_client_t *client)
 }
 
 /* ============================================================================
+ * Internal: inject trace context into RPC params
+ * ============================================================================ */
+
+static void inject_trace_context(copilot_client_t *client, cJSON *params)
+{
+    if (!client->trace_context_provider) return;
+
+    copilot_trace_context_t ctx = client->trace_context_provider(client->trace_context_user_data);
+    if (ctx.traceparent) {
+        cJSON_AddStringToObject(params, "traceparent", ctx.traceparent);
+    }
+    if (ctx.tracestate) {
+        cJSON_AddStringToObject(params, "tracestate", ctx.tracestate);
+    }
+}
+
+/* ============================================================================
  * Internal: build session create/resume params
  * ============================================================================ */
 
@@ -952,6 +1013,9 @@ static cJSON *build_session_params(const copilot_session_config_t *config)
     if (config->on_hook) {
         cJSON_AddBoolToObject(params, "hooks", true);
     }
+    if (config->on_exit_plan_mode) {
+        cJSON_AddBoolToObject(params, "requestExitPlanMode", true);
+    }
 
     return params;
 }
@@ -1010,6 +1074,8 @@ static copilot_session_t *create_session_from_response(
         session->user_input_user_data = config->user_input_user_data;
         session->hook_handler = config->on_hook;
         session->hook_user_data = config->hook_user_data;
+        session->exit_plan_mode_handler = config->on_exit_plan_mode;
+        session->exit_plan_mode_user_data = config->exit_plan_mode_user_data;
     }
 
     return session;
@@ -1050,6 +1116,10 @@ copilot_client_t *copilot_client_create(const copilot_client_options_t *options)
     client->rpc = NULL;
     client->sessions = NULL;
     pthread_mutex_init(&client->sessions_mutex, NULL);
+
+    /* Trace context provider */
+    client->trace_context_provider = opts.on_get_trace_context;
+    client->trace_context_user_data = opts.trace_context_user_data;
 
 #ifdef _WIN32
     client->process_handle = NULL;
@@ -1103,6 +1173,8 @@ copilot_error_t copilot_client_start(copilot_client_t *client)
                                         on_user_input_request, client);
     json_rpc_client_set_request_handler(client->rpc, "hooks.invoke",
                                         on_hooks_invoke, client);
+    json_rpc_client_set_request_handler(client->rpc, "exitPlanMode.request",
+                                        on_exit_plan_mode_request, client);
 
     /* Start reader thread */
     if (json_rpc_client_start(client->rpc) != 0) {
@@ -1621,6 +1693,7 @@ copilot_error_t copilot_client_create_session(
     if (!config) config = &default_config;
 
     cJSON *params = build_session_params(config);
+    inject_trace_context(client, params);
 
     int err_code = 0;
     char *err_msg = NULL;
@@ -1663,6 +1736,7 @@ copilot_error_t copilot_client_resume_session(
 
     cJSON *params = build_session_params(config);
     cJSON_AddStringToObject(params, "sessionId", session_id);
+    inject_trace_context(client, params);
 
     int err_code = 0;
     char *err_msg = NULL;

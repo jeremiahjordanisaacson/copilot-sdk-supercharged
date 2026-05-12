@@ -196,6 +196,7 @@ public actor CopilotClient {
         params["requestPermission"] = config.onPermissionRequest != nil
         params["requestUserInput"] = config.onUserInputRequest != nil
         params["hooks"] = config.hooks?.hasAnyHandler ?? false
+        params["requestExitPlanMode"] = config.onExitPlanMode != nil
         if let wd = config.workingDirectory { params["workingDirectory"] = wd }
         if let streaming = config.streaming { params["streaming"] = streaming }
         if let mcp = config.mcpServers {
@@ -210,6 +211,8 @@ public actor CopilotClient {
         if let inf = config.infiniteSessions {
             params["infiniteSessions"] = encodeToDictionary(inf)
         }
+
+        await injectTraceContext(&params)
 
         let response = try await rpc.sendRequest(method: "session.create", params: params)
 
@@ -235,6 +238,9 @@ public actor CopilotClient {
         }
         if let hooks = config.hooks {
             await session.registerHooks(hooks)
+        }
+        if let handler = config.onExitPlanMode {
+            await session.registerExitPlanModeHandler(handler)
         }
 
         sessions[sessionId] = session
@@ -271,6 +277,7 @@ public actor CopilotClient {
         params["requestPermission"] = config.onPermissionRequest != nil
         params["requestUserInput"] = config.onUserInputRequest != nil
         params["hooks"] = config.hooks?.hasAnyHandler ?? false
+        params["requestExitPlanMode"] = config.onExitPlanMode != nil
         if let wd = config.workingDirectory { params["workingDirectory"] = wd }
         if let cd = config.configDir { params["configDir"] = cd }
         if let streaming = config.streaming { params["streaming"] = streaming }
@@ -286,6 +293,8 @@ public actor CopilotClient {
             params["infiniteSessions"] = encodeToDictionary(inf)
         }
         if let dr = config.disableResume { params["disableResume"] = dr }
+
+        await injectTraceContext(&params)
 
         let response = try await rpc.sendRequest(method: "session.resume", params: params)
 
@@ -311,6 +320,9 @@ public actor CopilotClient {
         }
         if let hooks = config.hooks {
             await session.registerHooks(hooks)
+        }
+        if let handler = config.onExitPlanMode {
+            await session.registerExitPlanModeHandler(handler)
         }
 
         sessions[resumedSessionId] = session
@@ -614,6 +626,13 @@ public actor CopilotClient {
             }
             return try await self.handleHooksInvoke(params)
         }
+
+        await rpc.setRequestHandler(method: "exitPlanMode.request") { [weak self] params in
+            guard let self = self else {
+                throw JsonRpcError(code: -32000, message: "Client deallocated")
+            }
+            return try await self.handleExitPlanModeRequest(params)
+        }
     }
 
     private func verifyProtocolVersion() async throws {
@@ -798,6 +817,31 @@ public actor CopilotClient {
             return ["output": output]
         }
         return ["output": [:] as [String: Any]]
+    }
+
+    private func handleExitPlanModeRequest(_ params: [String: Any]) async throws -> [String: Any]? {
+        guard let sessionId = params["sessionId"] as? String else {
+            throw JsonRpcError(code: -32602, message: "Invalid exit plan mode request payload")
+        }
+
+        guard let session = sessions[sessionId] else {
+            return ["approved": true]
+        }
+
+        do {
+            let request = ExitPlanModeRequest(sessionId: sessionId)
+            let result = try await session.handleExitPlanModeRequest(request)
+            return ["approved": result.approved]
+        } catch {
+            return ["approved": true]
+        }
+    }
+
+    private func injectTraceContext(_ params: inout [String: Any]) async {
+        guard let provider = options.onGetTraceContext else { return }
+        let ctx = await provider()
+        if let tp = ctx.traceparent { params["traceparent"] = tp }
+        if let ts = ctx.tracestate { params["tracestate"] = ts }
     }
 
     // MARK: - Private: Tool Result Normalization

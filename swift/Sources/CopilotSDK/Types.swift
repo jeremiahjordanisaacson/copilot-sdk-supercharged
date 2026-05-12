@@ -752,6 +752,49 @@ public struct ElicitationResult: Sendable {
 public typealias ElicitationHandler = @Sendable (ElicitationContext) async throws
     -> ElicitationResult
 
+// MARK: - Exit Plan Mode
+
+/// Request sent by the server when asking the user to approve exiting plan mode.
+public struct ExitPlanModeRequest: Sendable {
+    /// The session ID that triggered the request.
+    public let sessionId: String
+
+    public init(sessionId: String) {
+        self.sessionId = sessionId
+    }
+}
+
+/// Response to an exit plan mode request.
+public struct ExitPlanModeResponse: Sendable {
+    /// Whether the user approved exiting plan mode.
+    public var approved: Bool
+
+    public init(approved: Bool = true) {
+        self.approved = approved
+    }
+}
+
+/// Handler for exit plan mode requests.
+public typealias ExitPlanModeHandler = @Sendable (ExitPlanModeRequest) async throws -> ExitPlanModeResponse
+
+// MARK: - Trace Context
+
+/// Trace context for distributed tracing (W3C Trace Context format).
+public struct TraceContext: Sendable {
+    /// The W3C traceparent header value.
+    public var traceparent: String?
+    /// The W3C tracestate header value.
+    public var tracestate: String?
+
+    public init(traceparent: String? = nil, tracestate: String? = nil) {
+        self.traceparent = traceparent
+        self.tracestate = tracestate
+    }
+}
+
+/// Provider callback that returns the current trace context.
+public typealias TraceContextProvider = @Sendable () async -> TraceContext
+
 // MARK: - Session Configuration
 
 /// Configuration for creating a new session.
@@ -787,6 +830,8 @@ public struct SessionConfig: Sendable {
     public var commands: [CommandDefinition]?
     /// Handler for elicitation requests from the server.
     public var onElicitationRequest: ElicitationHandler?
+    /// Handler for exit plan mode requests from the server.
+    public var onExitPlanMode: ExitPlanModeHandler?
 
     /// Directories to search for instruction files.
     public var instructionDirectories: [String]?
@@ -817,6 +862,7 @@ public struct SessionConfig: Sendable {
         gitHubToken: String? = nil,
         commands: [CommandDefinition]? = nil,
         onElicitationRequest: ElicitationHandler? = nil,
+        onExitPlanMode: ExitPlanModeHandler? = nil,
         instructionDirectories: [String]? = nil
     ) {
         self.sessionId = sessionId
@@ -844,6 +890,7 @@ public struct SessionConfig: Sendable {
         self.gitHubToken = gitHubToken
         self.commands = commands
         self.onElicitationRequest = onElicitationRequest
+        self.onExitPlanMode = onExitPlanMode
         self.instructionDirectories = instructionDirectories
     }
 }
@@ -881,6 +928,8 @@ public struct ResumeSessionConfig: Sendable {
     public var commands: [CommandDefinition]?
     /// Handler for elicitation requests from the server.
     public var onElicitationRequest: ElicitationHandler?
+    /// Handler for exit plan mode requests from the server.
+    public var onExitPlanMode: ExitPlanModeHandler?
 
     /// Directories to search for instruction files.
     public var instructionDirectories: [String]?
@@ -911,6 +960,7 @@ public struct ResumeSessionConfig: Sendable {
         disableResume: Bool? = nil,
         commands: [CommandDefinition]? = nil,
         onElicitationRequest: ElicitationHandler? = nil,
+        onExitPlanMode: ExitPlanModeHandler? = nil,
         instructionDirectories: [String]? = nil
     ) {
         self.model = model
@@ -938,6 +988,7 @@ public struct ResumeSessionConfig: Sendable {
         self.disableResume = disableResume
         self.commands = commands
         self.onElicitationRequest = onElicitationRequest
+        self.onExitPlanMode = onExitPlanMode
         self.instructionDirectories = instructionDirectories
     }
 }
@@ -1364,6 +1415,9 @@ public struct CopilotClientOptions: Sendable {
     /// Token for TCP connection authentication.
     public var tcpConnectionToken: String?
 
+    /// Provider for distributed trace context, called before each RPC request.
+    public var onGetTraceContext: TraceContextProvider?
+
     public init(
         cliPath: String? = nil,
         cliArgs: [String]? = nil,
@@ -1380,7 +1434,8 @@ public struct CopilotClientOptions: Sendable {
         sessionIdleTimeoutSeconds: Int? = nil,
         sessionFs: SessionFsConfig? = nil,
         copilotHome: String? = nil,
-        tcpConnectionToken: String? = nil
+        tcpConnectionToken: String? = nil,
+        onGetTraceContext: TraceContextProvider? = nil
     ) {
         self.cliPath = cliPath
         self.cliArgs = cliArgs
@@ -1398,6 +1453,7 @@ public struct CopilotClientOptions: Sendable {
         self.sessionFs = sessionFs
         self.copilotHome = copilotHome
         self.tcpConnectionToken = tcpConnectionToken
+        self.onGetTraceContext = onGetTraceContext
     }
 }
 

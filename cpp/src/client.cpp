@@ -225,6 +225,9 @@ std::shared_ptr<CopilotSession> CopilotClient::createSession(const SessionConfig
     if (config.hooks && config.hooks->hasAny()) {
         session->registerHooks(*config.hooks);
     }
+    if (config.onExitPlanMode) {
+        session->registerExitPlanModeHandler(config.onExitPlanMode);
+    }
 
     {
         std::lock_guard<std::mutex> lock(sessionsMutex_);
@@ -256,6 +259,9 @@ std::shared_ptr<CopilotSession> CopilotClient::resumeSession(
     }
     if (config.hooks && config.hooks->hasAny()) {
         session->registerHooks(*config.hooks);
+    }
+    if (config.onExitPlanMode) {
+        session->registerExitPlanModeHandler(config.onExitPlanMode);
     }
 
     {
@@ -669,6 +675,10 @@ void CopilotClient::setupHandlers() {
     // hooks.invoke - request
     rpcClient_->setRequestHandler("hooks.invoke",
         [this](const nlohmann::json& params) { return handleHooksInvoke(params); });
+
+    // exitPlanMode.request - request
+    rpcClient_->setRequestHandler("exitPlanMode.request",
+        [this](const nlohmann::json& params) { return handleExitPlanModeRequest(params); });
 }
 
 // ============================================================================
@@ -845,6 +855,42 @@ CopilotClient::handleHooksInvoke(const nlohmann::json& params) {
     return {response, std::nullopt};
 }
 
+std::pair<nlohmann::json, std::optional<JsonRpcError>>
+CopilotClient::handleExitPlanModeRequest(const nlohmann::json& params) {
+    std::string sid = params.value("sessionId", "");
+
+    if (sid.empty()) {
+        return {nullptr, JsonRpcError{-32602, "Invalid exit plan mode request payload"}};
+    }
+
+    std::shared_ptr<CopilotSession> session;
+    {
+        std::lock_guard<std::mutex> lock(sessionsMutex_);
+        auto it = sessions_.find(sid);
+        if (it != sessions_.end()) session = it->second;
+    }
+
+    if (!session) {
+        // Default: approve if session not found
+        nlohmann::json response;
+        response["approved"] = true;
+        return {response, std::nullopt};
+    }
+
+    try {
+        ExitPlanModeRequest req;
+        req.sessionId = sid;
+        auto result = session->handleExitPlanModeRequest(req);
+        nlohmann::json response;
+        response["approved"] = result.approved;
+        return {response, std::nullopt};
+    } catch (...) {
+        nlohmann::json response;
+        response["approved"] = true;
+        return {response, std::nullopt};
+    }
+}
+
 // ============================================================================
 // Tool Execution
 // ============================================================================
@@ -908,6 +954,7 @@ nlohmann::json CopilotClient::buildCreateSessionParams(const SessionConfig& conf
     if (config.onPermissionRequest) params["requestPermission"] = true;
     if (config.onUserInputRequest) params["requestUserInput"] = true;
     if (config.hooks && config.hooks->hasAny()) params["hooks"] = true;
+    if (config.onExitPlanMode) params["requestExitPlanMode"] = true;
     if (config.workingDirectory) params["workingDirectory"] = *config.workingDirectory;
     if (config.streaming) params["streaming"] = true;
     if (config.mcpServers) params["mcpServers"] = *config.mcpServers;
@@ -934,6 +981,7 @@ nlohmann::json CopilotClient::buildResumeSessionParams(const std::string& sessio
     if (config.onPermissionRequest) params["requestPermission"] = true;
     if (config.onUserInputRequest) params["requestUserInput"] = true;
     if (config.hooks && config.hooks->hasAny()) params["hooks"] = true;
+    if (config.onExitPlanMode) params["requestExitPlanMode"] = true;
     if (config.workingDirectory) params["workingDirectory"] = *config.workingDirectory;
     if (config.configDir) params["configDir"] = *config.configDir;
     if (config.disableResume) params["disableResume"] = true;

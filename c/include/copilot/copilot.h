@@ -489,6 +489,41 @@ typedef copilot_elicitation_result_t (*copilot_elicitation_handler_fn)(
 );
 
 /* ============================================================================
+ * Exit Plan Mode
+ * ============================================================================ */
+
+/** Request sent by the server when asking the user to approve exiting plan mode. */
+typedef struct {
+    const char *session_id;     /**< Session ID that sent the request */
+} copilot_exit_plan_mode_request_t;
+
+/** Response to an exit plan mode request. */
+typedef struct {
+    bool approved;              /**< Whether the user approved exiting plan mode */
+} copilot_exit_plan_mode_response_t;
+
+/** Handler for exit plan mode requests. */
+typedef copilot_error_t (*copilot_exit_plan_mode_handler_fn)(
+    const copilot_exit_plan_mode_request_t *request,
+    void *user_data,
+    copilot_exit_plan_mode_response_t *out_response
+);
+
+/* ============================================================================
+ * Trace Context
+ * ============================================================================ */
+
+/** Trace context for distributed tracing (W3C Trace Context format). */
+typedef struct {
+    const char *traceparent;    /**< W3C traceparent header value, or NULL */
+    const char *tracestate;     /**< W3C tracestate header value, or NULL */
+} copilot_trace_context_t;
+
+/** Callback that returns the current trace context. The returned strings must
+ *  remain valid until the next call to this callback. */
+typedef copilot_trace_context_t (*copilot_trace_context_provider_fn)(void *user_data);
+
+/* ============================================================================
  * Client options
  * ============================================================================ */
 
@@ -506,6 +541,8 @@ typedef struct {
     const copilot_session_fs_config_t *session_fs; /**< Session filesystem config, or NULL */
     const char *copilot_home;  /**< Override the Copilot home directory (NULL = default) */
     const char *tcp_connection_token; /**< Token for TCP connection authentication (NULL = none) */
+    copilot_trace_context_provider_fn on_get_trace_context; /**< Trace context provider, or NULL */
+    void *trace_context_user_data;  /**< User data for trace context provider */
 } copilot_client_options_t;
 
 /**
@@ -581,6 +618,10 @@ typedef struct {
     /* Elicitation */
     copilot_elicitation_handler_fn on_elicitation_request;
     void *elicitation_user_data;
+
+    /* Exit plan mode */
+    copilot_exit_plan_mode_handler_fn on_exit_plan_mode;
+    void *exit_plan_mode_user_data;
 } copilot_session_config_t;
 
 /**

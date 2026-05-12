@@ -122,6 +122,7 @@ private:
     std::pair<nlohmann::json, std::optional<JsonRpcError>> handlePermissionRequest(const nlohmann::json& params);
     std::pair<nlohmann::json, std::optional<JsonRpcError>> handleUserInputRequest(const nlohmann::json& params);
     std::pair<nlohmann::json, std::optional<JsonRpcError>> handleHooksInvoke(const nlohmann::json& params);
+    std::pair<nlohmann::json, std::optional<JsonRpcError>> handleExitPlanModeRequest(const nlohmann::json& params);
 
     ToolResultObject executeToolCall(ToolHandler handler, const ToolInvocation& invocation);
     ToolResultObject normalizeToolResult(const nlohmann::json& result);

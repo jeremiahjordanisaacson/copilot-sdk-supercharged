@@ -39,6 +39,7 @@ public actor CopilotSession {
     private var permissionHandler: PermissionHandler?
     private var userInputHandler: UserInputHandler?
     private var hooks: SessionHooks?
+    private var exitPlanModeHandler: ExitPlanModeHandler?
 
     // MARK: - Init
 
@@ -284,6 +285,25 @@ public actor CopilotSession {
         self.hooks = hooks
     }
 
+    // MARK: - Exit Plan Mode Handler (Internal)
+
+    /// Registers an exit plan mode handler.
+    func registerExitPlanModeHandler(_ handler: @escaping ExitPlanModeHandler) {
+        exitPlanModeHandler = handler
+    }
+
+    /// Handles an exit plan mode request from the server.
+    func handleExitPlanModeRequest(_ request: ExitPlanModeRequest) async throws -> ExitPlanModeResponse {
+        guard let handler = exitPlanModeHandler else {
+            return ExitPlanModeResponse(approved: true)
+        }
+        do {
+            return try await handler(request)
+        } catch {
+            return ExitPlanModeResponse(approved: true)
+        }
+    }
+
     /// Handles a hook invocation from the server.
     func handleHooksInvoke(hookType: String, input: Any?) async throws -> Any? {
         guard let hooks = hooks else {
@@ -416,6 +436,7 @@ public actor CopilotSession {
         permissionHandler = nil
         userInputHandler = nil
         hooks = nil
+        exitPlanModeHandler = nil
     }
 
     // MARK: - Abort

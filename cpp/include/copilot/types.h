@@ -679,6 +679,44 @@ struct ElicitationResult {
 using ElicitationHandler = std::function<ElicitationResult(const ElicitationContext&)>;
 
 // ============================================================================
+// Exit Plan Mode
+// ============================================================================
+
+/// Request sent by the server when asking the user to approve exiting plan mode.
+struct ExitPlanModeRequest {
+    std::string sessionId;
+};
+
+inline void from_json(const nlohmann::json& j, ExitPlanModeRequest& r) {
+    j.at("sessionId").get_to(r.sessionId);
+}
+
+/// Response to an exit plan mode request.
+struct ExitPlanModeResponse {
+    bool approved = true;
+};
+
+inline void to_json(nlohmann::json& j, const ExitPlanModeResponse& r) {
+    j = {{"approved", r.approved}};
+}
+
+/// Handler for exit plan mode requests.
+using ExitPlanModeHandler = std::function<ExitPlanModeResponse(const ExitPlanModeRequest& request)>;
+
+// ============================================================================
+// Trace Context
+// ============================================================================
+
+/// Trace context for distributed tracing (W3C Trace Context format).
+struct TraceContext {
+    std::optional<std::string> traceparent;
+    std::optional<std::string> tracestate;
+};
+
+/// Provider callback that returns the current trace context.
+using TraceContextProvider = std::function<TraceContext()>;
+
+// ============================================================================
 // Session Configuration
 // ============================================================================
 
@@ -723,6 +761,8 @@ struct SessionConfig {
     std::vector<CommandDefinition> commands;
     /// Handler for elicitation requests from the server.
     ElicitationHandler onElicitationRequest;
+    /// Handler for exit plan mode requests from the server.
+    ExitPlanModeHandler onExitPlanMode;
 };
 
 struct ResumeSessionConfig {
@@ -765,6 +805,8 @@ struct ResumeSessionConfig {
     std::vector<CommandDefinition> commands;
     /// Handler for elicitation requests from the server.
     ElicitationHandler onElicitationRequest;
+    /// Handler for exit plan mode requests from the server.
+    ExitPlanModeHandler onExitPlanMode;
 };
 
 // ============================================================================
@@ -1160,6 +1202,9 @@ struct CopilotClientOptions {
 
     /// Token for TCP connection authentication.
     std::optional<std::string> tcpConnectionToken;
+
+    /// Provider for distributed tracing context (W3C Trace Context format).
+    TraceContextProvider onGetTraceContext;
 };
 
 } // namespace copilot

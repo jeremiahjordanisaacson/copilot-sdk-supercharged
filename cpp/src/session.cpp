@@ -217,6 +217,33 @@ UserInputResponse CopilotSession::handleUserInputRequest(const UserInputRequest&
 }
 
 // ============================================================================
+// Exit Plan Mode Handling
+// ============================================================================
+
+void CopilotSession::registerExitPlanModeHandler(ExitPlanModeHandler handler) {
+    std::lock_guard<std::mutex> lock(exitPlanModeMutex_);
+    exitPlanModeHandler_ = std::move(handler);
+}
+
+ExitPlanModeResponse CopilotSession::handleExitPlanModeRequest(const ExitPlanModeRequest& request) {
+    ExitPlanModeHandler handler;
+    {
+        std::lock_guard<std::mutex> lock(exitPlanModeMutex_);
+        handler = exitPlanModeHandler_;
+    }
+
+    if (!handler) {
+        return {true}; // Default: approve
+    }
+
+    try {
+        return handler(request);
+    } catch (...) {
+        return {true}; // Default: approve on error
+    }
+}
+
+// ============================================================================
 // Hooks Handling
 // ============================================================================
 
@@ -307,6 +334,10 @@ void CopilotSession::destroy() {
     {
         std::lock_guard<std::mutex> lock(userInputMutex_);
         userInputHandler_ = nullptr;
+    }
+    {
+        std::lock_guard<std::mutex> lock(exitPlanModeMutex_);
+        exitPlanModeHandler_ = nullptr;
     }
 }
 

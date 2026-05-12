@@ -61,6 +61,11 @@
 
 @end
 
+#pragma mark - CPTraceContext
+
+@implementation CPTraceContext
+@end
+
 #pragma mark - CPSessionEvent
 
 @implementation CPSessionEvent
@@ -174,6 +179,10 @@
     if (self.systemMessage) dict[@"systemMessage"] = self.systemMessage;
     if (self.githubToken) dict[@"githubToken"] = self.githubToken;
     if (self.instructionDirectories) dict[@"instructionDirectories"] = self.instructionDirectories;
+    if (self.permissionHandler) dict[@"requestPermission"] = @YES;
+    if (self.exitPlanModeHandler) dict[@"requestExitPlanMode"] = @YES;
+    if (self.enableSessionTelemetry) dict[@"enableSessionTelemetry"] = @YES;
+    if (self.modelCapabilities) dict[@"modelCapabilities"] = self.modelCapabilities;
 
     return [dict copy];
 }
