@@ -201,6 +201,9 @@ contains
       if (config%session_idle_timeout_seconds > 0) then
         ! Would add timeout param here
       end if
+      if (config%enable_session_telemetry) then
+        params = params // '"enableSessionTelemetry":true,'
+      end if
     end if
     ! Remove trailing comma if present, close brace
     if (len(params) > 1 .and. params(len(params):len(params)) == ',') then
@@ -482,6 +485,10 @@ contains
 
     if (allocated(opts%log_level)) then
       cmd = cmd // ' --log-level ' // opts%log_level
+    end if
+
+    if (opts%remote) then
+      cmd = cmd // ' --remote'
     end if
   end function build_cli_command
 

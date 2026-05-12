@@ -20,6 +20,9 @@ module copilot_types
   public :: COPILOT_STATE_DISCONNECTED, COPILOT_STATE_CONNECTING
   public :: COPILOT_STATE_CONNECTED, COPILOT_STATE_ERROR
   public :: tool_callback_interface
+  public :: exit_plan_mode_request, exit_plan_mode_response
+  public :: exit_plan_mode_callback_interface
+  public :: trace_context, trace_context_provider_interface
 
   ! --------------------------------------------------------------------------
   ! Connection state enum
@@ -50,6 +53,8 @@ module copilot_types
     type(session_fs_config), allocatable :: session_fs
     character(len=:), allocatable :: copilot_home
     character(len=:), allocatable :: tcp_connection_token
+    logical :: remote = .false.
+    procedure(trace_context_provider_interface), pointer, nopass :: on_get_trace_context => null()
   contains
     procedure :: set_defaults => client_options_set_defaults
   end type copilot_client_options
@@ -124,6 +129,7 @@ module copilot_types
     type(image_options) :: img_options
     character(len=:), allocatable :: response_format
     character(len=:), allocatable :: instruction_directories(:)
+    logical :: enable_session_telemetry = .false.
   end type session_config
 
   ! --------------------------------------------------------------------------
@@ -228,6 +234,25 @@ module copilot_types
   end type elicitation_result
 
   ! --------------------------------------------------------------------------
+  ! ExitPlanMode request / response
+  ! --------------------------------------------------------------------------
+  type :: exit_plan_mode_request
+    character(len=:), allocatable :: session_id
+  end type exit_plan_mode_request
+
+  type :: exit_plan_mode_response
+    logical :: approved = .true.
+  end type exit_plan_mode_response
+
+  ! --------------------------------------------------------------------------
+  ! TraceContext for distributed tracing
+  ! --------------------------------------------------------------------------
+  type :: trace_context
+    character(len=:), allocatable :: traceparent
+    character(len=:), allocatable :: tracestate
+  end type trace_context
+
+  ! --------------------------------------------------------------------------
   ! Abstract interfaces for callbacks
   ! --------------------------------------------------------------------------
   abstract interface
@@ -237,6 +262,16 @@ module copilot_types
       type(tool_invocation), intent(in) :: invocation
       type(tool_result) :: res
     end function tool_callback_interface
+    function exit_plan_mode_callback_interface(req) result(res)
+      import :: exit_plan_mode_request, exit_plan_mode_response
+      type(exit_plan_mode_request), intent(in) :: req
+      type(exit_plan_mode_response) :: res
+    end function exit_plan_mode_callback_interface
+
+    function trace_context_provider_interface() result(ctx)
+      import :: trace_context
+      type(trace_context) :: ctx
+    end function trace_context_provider_interface
   end interface
 
 contains

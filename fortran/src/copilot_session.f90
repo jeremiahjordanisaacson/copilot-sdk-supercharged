@@ -41,6 +41,7 @@ module copilot_session_module
     integer :: handler_count = 0
     integer :: next_handler_id = 1
     type(handler_entry) :: handlers(MAX_HANDLERS)
+    procedure(exit_plan_mode_callback_interface), pointer, nopass :: exit_plan_mode_handler => null()
   contains
     procedure :: send           => session_send
     procedure :: send_and_wait  => session_send_and_wait
@@ -51,6 +52,7 @@ module copilot_session_module
     procedure :: off             => session_off
     procedure :: dispatch_event  => session_dispatch_event
     procedure :: get_metadata    => session_get_metadata
+    procedure :: register_exit_plan_mode => session_register_exit_plan_mode
   end type copilot_session_type
 
 contains
@@ -303,5 +305,12 @@ contains
     if (end_pos == 0) return
     content = json(pos:pos+end_pos-2)
   end function extract_content
+
+  !> Register a handler for exit-plan-mode requests.
+  subroutine session_register_exit_plan_mode(self, handler)
+    class(copilot_session_type), intent(inout) :: self
+    procedure(exit_plan_mode_callback_interface) :: handler
+    self%exit_plan_mode_handler => handler
+  end subroutine session_register_exit_plan_mode
 
 end module copilot_session_module
