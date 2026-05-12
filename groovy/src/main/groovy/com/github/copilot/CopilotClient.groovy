@@ -70,6 +70,7 @@ class CopilotClient {
     private Integer sessionIdleTimeoutSeconds
     private String copilotHome
     private String tcpConnectionToken
+    private Closure traceContextProvider
 
     // Session config defaults (stored for createSession)
     private List<Tool> defaultTools
@@ -156,6 +157,7 @@ class CopilotClient {
             }
             if (options.copilotHome) this.copilotHome = options.copilotHome as String
             if (options.tcpConnectionToken) this.tcpConnectionToken = options.tcpConnectionToken as String
+            if (options.onGetTraceContext) this.traceContextProvider = (Closure) options.onGetTraceContext
         }
 
         this.isExternalServer = external
@@ -314,6 +316,9 @@ class CopilotClient {
         Closure elicitationHandler = (Closure) config.onElicitationRequest
         if (elicitationHandler) session.registerElicitationHandler(elicitationHandler)
 
+        Closure exitPlanModeHandler = (Closure) config.onExitPlanMode
+        if (exitPlanModeHandler) session.registerExitPlanModeHandler(exitPlanModeHandler)
+
         List<CommandDefinition> commands = (List<CommandDefinition>) config.commands
         if (commands) session.registerCommands(commands)
 
@@ -347,6 +352,9 @@ class CopilotClient {
 
         Closure elicitationHandler = (Closure) config.onElicitationRequest
         if (elicitationHandler) session.registerElicitationHandler(elicitationHandler)
+
+        Closure exitPlanModeHandler = (Closure) config.onExitPlanMode
+        if (exitPlanModeHandler) session.registerExitPlanModeHandler(exitPlanModeHandler)
 
         List<CommandDefinition> commands = (List<CommandDefinition>) config.commands
         if (commands) session.registerCommands(commands)
@@ -542,6 +550,7 @@ class CopilotClient {
         if (config.onPermissionRequest) payload.requestPermission = true
         if (config.onUserInputRequest) payload.requestUserInput = true
         if (config.onElicitationRequest) payload.requestElicitation = true
+        if (config.onExitPlanMode) payload.exitPlanMode = true
         if (config.workingDirectory) payload.workingDirectory = config.workingDirectory
         if (config.streaming != null) payload.streaming = config.streaming
         if (config.includeSubAgentStreamingEvents != null) {
@@ -560,7 +569,24 @@ class CopilotClient {
         if (config.responseFormat) payload.responseFormat = config.responseFormat
         if (config.imageGeneration) payload.imageGeneration = config.imageGeneration
         if (config.instructionDirectories) payload.instructionDirectories = config.instructionDirectories
+        injectTraceContext(payload)
         payload
+    }
+
+    private void injectTraceContext(Map<String, Object> payload) {
+        if (!traceContextProvider) return
+        try {
+            Object result = traceContextProvider.call()
+            if (result instanceof TraceContext) {
+                TraceContext ctx = (TraceContext) result
+                if (ctx.traceparent) payload.traceparent = ctx.traceparent
+                if (ctx.tracestate) payload.tracestate = ctx.tracestate
+            } else if (result instanceof Map) {
+                Map<String, Object> ctx = (Map<String, Object>) result
+                if (ctx.traceparent) payload.traceparent = ctx.traceparent
+                if (ctx.tracestate) payload.tracestate = ctx.tracestate
+            }
+        } catch (Exception ignored) {}
     }
 
     private void verifyProtocolVersion() throws Exception {
@@ -710,6 +736,9 @@ class CopilotClient {
         rpcClient.setRequestHandler('userInput.request') { Map<String, Object> params ->
             handleUserInputRequest(params)
         }
+        rpcClient.setRequestHandler('exitPlanMode.request') { Map<String, Object> params ->
+            handleExitPlanModeRequest(params)
+        }
     }
 
     @SuppressWarnings('unchecked')
@@ -757,6 +786,16 @@ class CopilotClient {
         } catch (Exception e) {
             [result: [kind: 'denied-no-approval-rule-and-could-not-request-from-user']] as Map<String, Object>
         }
+    }
+
+    @SuppressWarnings('unchecked')
+    private Map<String, Object> handleExitPlanModeRequest(Map<String, Object> params) throws Exception {
+        String sessionId = (String) params.sessionId
+        CopilotSession session = sessions.get(sessionId)
+        if (!session) throw new RuntimeException("Unknown session ${sessionId}")
+
+        ExitPlanModeResponse result = session.handleExitPlanModeRequest(params)
+        [approved: result.approved] as Map<String, Object>
     }
 
     @SuppressWarnings('unchecked')

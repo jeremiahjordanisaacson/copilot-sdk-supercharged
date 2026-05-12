@@ -322,4 +322,26 @@ final class Types {
         String message
         StopError(String message) { this.message = message }
     }
+
+    /** Request payload for an exit plan mode request from the server. */
+    @ToString(includeNames = true)
+    static class ExitPlanModeRequest {
+        String sessionId
+    }
+
+    /** Response payload for an exit plan mode request. */
+    @ToString(includeNames = true)
+    static class ExitPlanModeResponse {
+        boolean approved
+
+        ExitPlanModeResponse() {}
+        ExitPlanModeResponse(boolean approved) { this.approved = approved }
+    }
+
+    /** Trace context for distributed tracing. */
+    @ToString(includeNames = true)
+    static class TraceContext {
+        String traceparent
+        String tracestate
+    }
 }
