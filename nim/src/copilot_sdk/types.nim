@@ -45,6 +45,8 @@ type
     sessionFs*: SessionFsConfig
     copilotHome*: string
     tcpConnectionToken*: string
+    remote*: bool
+    onGetTraceContext*: TraceContextProvider
 
   SessionFsConfig* = object
     initialCwd*: string
@@ -74,12 +76,14 @@ type
     includeSubAgentStreamingEvents*: bool
     authToken*: string
     instructionDirectories*: seq[string]
+    enableSessionTelemetry*: bool
 
   ResumeSessionConfig* = object
     sessionId*: string
     systemPrompt*: string
     githubToken*: string
     instructionDirectories*: seq[string]
+    enableSessionTelemetry*: bool
 
 # ---------------------------------------------------------------------------
 # Message types
@@ -193,6 +197,34 @@ type
 
   ElicitationHandler* = proc(req: ElicitationRequest): string {.closure.}
 
+  ExitPlanModeRequest* = object
+    sessionId*: string
+
+  ExitPlanModeResponse* = object
+    approved*: bool
+
+  ExitPlanModeHandler* = proc(req: ExitPlanModeRequest): ExitPlanModeResponse {.closure.}
+
+  TraceContext* = object
+    traceparent*: string
+    tracestate*: string
+
+  TraceContextProvider* = proc(): TraceContext {.closure.}
+
+  ModelCapabilitiesSupports* = object
+    agentMode*: bool
+    toolUse*: bool
+    vision*: bool
+
+  ModelCapabilitiesLimits* = object
+    maxContextTokens*: int
+    maxOutputTokens*: int
+
+  ModelCapabilitiesOverride* = object
+    supports*: ModelCapabilitiesSupports
+    limits*: ModelCapabilitiesLimits
+    defaultModel*: string
+
 # ---------------------------------------------------------------------------
 # Connection state
 # ---------------------------------------------------------------------------
@@ -213,11 +245,15 @@ proc newClientConfig*(cliPath = ""; cliUrl = "";
                       sessionIdleTimeoutSeconds = 0;
                       sessionFs = SessionFsConfig();
                       copilotHome = "";
-                      tcpConnectionToken = ""): ClientConfig =
+                      tcpConnectionToken = "";
+                      remote = false;
+                      onGetTraceContext: TraceContextProvider = nil): ClientConfig =
   ClientConfig(cliPath: cliPath, cliUrl: cliUrl, extraArgs: extraArgs,
                sessionIdleTimeoutSeconds: sessionIdleTimeoutSeconds,
                sessionFs: sessionFs, copilotHome: copilotHome,
-               tcpConnectionToken: tcpConnectionToken)
+               tcpConnectionToken: tcpConnectionToken,
+               remote: remote,
+               onGetTraceContext: onGetTraceContext)
 
 proc newSessionConfig*(systemPrompt = ""; githubToken = "";
                        sessionIdleTimeoutSeconds = 0;
@@ -234,7 +270,8 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
                        imageStyle = "";
                        includeSubAgentStreamingEvents = false;
                        authToken = "";
-                       instructionDirectories: seq[string] = @[]): SessionConfig =
+                       instructionDirectories: seq[string] = @[];
+                       enableSessionTelemetry = false): SessionConfig =
   SessionConfig(
     systemPrompt: systemPrompt,
     githubToken: githubToken,
@@ -253,16 +290,19 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
     includeSubAgentStreamingEvents: includeSubAgentStreamingEvents,
     authToken: authToken,
     instructionDirectories: instructionDirectories,
+    enableSessionTelemetry: enableSessionTelemetry,
   )
 
 proc newResumeSessionConfig*(sessionId: string; systemPrompt = "";
                              githubToken = "";
-                             instructionDirectories: seq[string] = @[]): ResumeSessionConfig =
+                             instructionDirectories: seq[string] = @[];
+                             enableSessionTelemetry = false): ResumeSessionConfig =
   ResumeSessionConfig(
     sessionId: sessionId,
     systemPrompt: systemPrompt,
     githubToken: githubToken,
     instructionDirectories: instructionDirectories,
+    enableSessionTelemetry: enableSessionTelemetry,
   )
 
 proc newMessageOptions*(message: string; streaming = false;

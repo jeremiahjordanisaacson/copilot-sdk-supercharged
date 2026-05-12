@@ -19,6 +19,7 @@ type
     listeners: Table[string, seq[EventCallback]]
     messages: seq[Message]
     turnCounter: int
+    exitPlanModeHandler*: ExitPlanModeHandler
 
 # ---------------------------------------------------------------------------
 # Constructor

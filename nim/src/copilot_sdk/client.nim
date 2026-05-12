@@ -160,6 +160,17 @@ proc handleServerRequest(client: CopilotClient; msg: JsonNode) =
     let resp = buildResponse(id, %*{"status": "ok"})
     client.writeMessage(resp)
 
+  of "exitPlanMode.request":
+    var response = ExitPlanModeResponse(approved: true)
+    let sid = params{"sessionId"}.getStr()
+    if client.sessions.hasKey(sid):
+      let sess = client.sessions[sid]
+      if not sess.exitPlanModeHandler.isNil:
+        let req = ExitPlanModeRequest(sessionId: sid)
+        response = sess.exitPlanModeHandler(req)
+    let resp = buildResponse(id, %*{"approved": response.approved})
+    client.writeMessage(resp)
+
   else:
     let errResp = buildErrorResponse(id, -32601,
       "Method not found: " & meth)
@@ -223,6 +234,8 @@ proc start*(client: CopilotClient) {.async.} =
 
   let cliPath = client.resolveCliPath()
   var args = @["--headless", "--no-auto-update", "--stdio"]
+  if client.config.remote:
+    args.add("--remote")
   args.add(client.config.extraArgs)
 
   client.process = startProcess(
@@ -325,6 +338,8 @@ proc createSession*(client: CopilotClient;
     params["disabledSkills"] = %config.disabledSkills
   if config.excludedTools.len > 0:
     params["excludedTools"] = %config.excludedTools
+  if config.enableSessionTelemetry:
+    params["enableSessionTelemetry"] = %true
 
   let res = await client.sendRpcRequest("session.create", params)
   let sessionId = res["sessionId"].getStr()
@@ -351,6 +366,8 @@ proc resumeSession*(client: CopilotClient;
     params["systemPrompt"] = %config.systemPrompt
   if config.githubToken.len > 0:
     params["githubToken"] = %config.githubToken
+  if config.enableSessionTelemetry:
+    params["enableSessionTelemetry"] = %true
 
   let res = await client.sendRpcRequest("session.resume", params)
   let sessionId = res["sessionId"].getStr()
