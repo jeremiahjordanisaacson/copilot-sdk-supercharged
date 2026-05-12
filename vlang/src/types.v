@@ -25,6 +25,8 @@ pub mut:
 	session_fs                    SessionFsConfig // session filesystem config
 	copilot_home                  string // override path to the Copilot home directory
 	tcp_connection_token          string // token for TCP connection authentication
+	remote                        bool   // connect to remote CLI server
+	on_get_trace_context          fn () TraceContext = unsafe { nil }
 }
 
 // SessionConfig defines how to create a new conversation session.
@@ -53,6 +55,8 @@ pub mut:
 	elicitation_handler                 fn (map[string]string) map[string]string = unsafe { nil }
 	idle_timeout                        int    // session idle timeout in seconds
 	instruction_directories             []string // directories to search for instruction files
+	enable_session_telemetry            bool // enable session telemetry
+	exit_plan_mode_handler              fn (ExitPlanModeRequest) ExitPlanModeResponse = unsafe { nil }
 }
 
 // HistoryEntry is a single turn in a conversation.
@@ -218,4 +222,23 @@ pub fn deny_all(req PermissionRequest) PermissionResponse {
 		approved: false
 		reason: 'auto-denied'
 	}
+}
+
+// ExitPlanModeRequest is sent when the model requests to exit plan mode.
+pub struct ExitPlanModeRequest {
+pub:
+	session_id string [json: 'sessionId']
+}
+
+// ExitPlanModeResponse is the answer to an exit-plan-mode request.
+pub struct ExitPlanModeResponse {
+pub:
+	approved bool [json: 'approved']
+}
+
+// TraceContext provides W3C Trace Context headers for distributed tracing.
+pub struct TraceContext {
+pub:
+	traceparent string [json: 'traceparent']
+	tracestate  string [json: 'tracestate']
 }

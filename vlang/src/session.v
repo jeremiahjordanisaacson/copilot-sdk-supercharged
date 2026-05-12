@@ -124,6 +124,9 @@ pub fn (mut s CopilotSession) start_event_loop() {
 			if ev.event_type == 'tool.call' {
 				s.handle_tool_call(ev)
 			}
+			if ev.event_type == 'exitPlanMode.request' {
+				s.handle_exit_plan_mode(ev)
+			}
 
 			// Dispatch to user handlers
 			rlock s.handlers {
@@ -166,6 +169,21 @@ fn (mut s CopilotSession) handle_tool_call(ev SessionEvent) {
 		result: result
 	})
 	s.transport.send_notification('tool/result', resp_payload) or {}
+}
+
+// handle_exit_plan_mode processes an incoming exit-plan-mode request.
+fn (mut s CopilotSession) handle_exit_plan_mode(ev SessionEvent) {
+	req := ExitPlanModeRequest{
+		session_id: s.metadata.session_id
+	}
+	mut response := ExitPlanModeResponse{
+		approved: true
+	}
+	if !isnil(s.config.exit_plan_mode_handler) {
+		response = s.config.exit_plan_mode_handler(req)
+	}
+	resp_payload := json.encode(response)
+	s.transport.send_notification('exitPlanMode/response', resp_payload) or {}
 }
 
 // disconnect tears down the session.

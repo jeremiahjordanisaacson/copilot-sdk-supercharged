@@ -106,6 +106,9 @@ pub fn (mut c CopilotClient) create_session(config SessionConfig) !&CopilotSessi
 	if config.history.len > 0 {
 		params['"history"'] = json.encode(config.history)
 	}
+	if config.enable_session_telemetry {
+		params['"enableSessionTelemetry"'] = 'true'
+	}
 
 	raw_result := c.transport.send_request('session.create', build_params(params))!
 	result := parse_response_result(raw_result)!
@@ -248,7 +251,11 @@ fn (mut c CopilotClient) spawn_cli_process() ! {
 	cli_path := c.resolve_cli_path()!
 
 	mut proc := os.new_process(cli_path)
-	proc.set_args(['--stdio'])
+	mut args := ['--stdio']
+	if c.options.remote {
+		args << '--remote'
+	}
+	proc.set_args(args)
 	proc.set_redirect_stdio()
 	proc.run()
 
