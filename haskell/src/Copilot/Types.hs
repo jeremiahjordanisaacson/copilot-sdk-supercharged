@@ -88,6 +88,15 @@ module Copilot.Types
   , SessionHooks (..)
   , defaultSessionHooks
 
+    -- * Exit plan mode types
+  , ExitPlanModeRequest (..)
+  , ExitPlanModeResponse (..)
+  , ExitPlanModeHandler
+
+    -- * Trace context types
+  , TraceContext (..)
+  , TraceContextProvider
+
     -- * Session event types
   , SessionEvent (..)
   , SessionEventHandler
@@ -1623,6 +1632,43 @@ class SessionFsProvider a where
   sfRename          :: a -> Text -> Text -> Text -> IO ()
 
 -- ============================================================================
+-- Exit Plan Mode
+-- ============================================================================
+
+-- | Request to exit plan mode.
+data ExitPlanModeRequest = ExitPlanModeRequest
+  { epmSessionId :: !Text
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON ExitPlanModeRequest where
+  parseJSON = withObject "ExitPlanModeRequest" $ \o ->
+    ExitPlanModeRequest <$> o .: "sessionId"
+
+-- | Response to an exit plan mode request.
+data ExitPlanModeResponse = ExitPlanModeResponse
+  { epmApproved :: !Bool
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON ExitPlanModeResponse where
+  toJSON ExitPlanModeResponse{..} = object [ "approved" .= epmApproved ]
+
+-- | Exit plan mode handler callback.
+type ExitPlanModeHandler = ExitPlanModeRequest -> IO ExitPlanModeResponse
+
+-- ============================================================================
+-- Trace Context
+-- ============================================================================
+
+-- | OpenTelemetry-compatible trace context for RPC payloads.
+data TraceContext = TraceContext
+  { tcTraceparent :: !(Maybe Text)
+  , tcTracestate  :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+-- | Trace context provider callback.
+type TraceContextProvider = IO TraceContext
+
+-- ============================================================================
 -- Client Options
 -- ============================================================================
 
@@ -1641,6 +1687,7 @@ data CopilotClientOptions = CopilotClientOptions
   , ccoSessionFs                 :: !(Maybe SessionFsConfig)  -- ^ Custom session filesystem provider configuration
   , ccoCopilotHome               :: !(Maybe Text)  -- ^ Custom path to the copilot home directory
   , ccoTcpConnectionToken        :: !(Maybe Text)  -- ^ Token for TCP connections
+  , ccoOnGetTraceContext          :: !(Maybe TraceContextProvider)  -- ^ Trace context provider for RPC payloads
   }
 
 -- | Default client options.
@@ -1659,4 +1706,5 @@ defaultClientOptions = CopilotClientOptions
   , ccoSessionFs                 = Nothing
   , ccoCopilotHome               = Nothing
   , ccoTcpConnectionToken        = Nothing
+  , ccoOnGetTraceContext          = Nothing
   }

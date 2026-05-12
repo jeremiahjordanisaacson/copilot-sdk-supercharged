@@ -38,6 +38,14 @@ module Copilot.Session
   , handleSessionUserInputRequest
   , handleSessionHooksInvoke
 
+    -- * Exit plan mode (internal)
+  , registerExitPlanModeHandler
+  , handleExitPlanModeRequest
+
+    -- * Trace context (internal)
+  , registerTraceContextProvider
+  , injectTraceContext
+
     -- * Lifecycle
   , destroySession
   , abortSession
@@ -50,6 +58,8 @@ import           Control.Exception         (SomeException, catch, try, throwIO, 
 import           Control.Monad             (forM_, void, when)
 import           Data.Aeson                (Value (..), object, (.=), (.:), (.:?), withObject)
 import qualified Data.Aeson                as Aeson
+import           Data.Aeson.Key            (fromText)
+import qualified Data.Aeson.KeyMap         as KM
 import           Data.Aeson.Types          (parseMaybe)
 import           Data.IORef
 import qualified Data.Map.Strict           as Map
@@ -87,6 +97,8 @@ data CopilotSession = CopilotSession
   , csPermissionHandler :: !(IORef (Maybe PermissionHandler))
   , csUserInputHandler  :: !(IORef (Maybe UserInputHandler))
   , csHooks             :: !(IORef (Maybe SessionHooks))
+  , csExitPlanModeHandler :: !(IORef (Maybe ExitPlanModeHandler))
+  , csTraceContextProvider :: !(IORef (Maybe TraceContextProvider))
   }
 
 -- | Create a new session.
@@ -97,6 +109,8 @@ newCopilotSession sid rpc wsp = do
   permH      <- newIORef Nothing
   userInputH <- newIORef Nothing
   hooksRef   <- newIORef Nothing
+  exitPlanH  <- newIORef Nothing
+  traceCtxP  <- newIORef Nothing
   pure CopilotSession
     { csSessionId         = sid
     , csWorkspacePath     = wsp
@@ -106,6 +120,8 @@ newCopilotSession sid rpc wsp = do
     , csPermissionHandler = permH
     , csUserInputHandler  = userInputH
     , csHooks             = hooksRef
+    , csExitPlanModeHandler = exitPlanH
+    , csTraceContextProvider = traceCtxP
     }
 
 -- | Get the session ID.
@@ -360,6 +376,54 @@ handleSessionHooksInvoke session hookType input sid = do
         _ -> pure Nothing
 
 -- ============================================================================
+-- Exit Plan Mode
+-- ============================================================================
+
+-- | Register an exit plan mode handler. (Internal)
+registerExitPlanModeHandler :: CopilotSession -> ExitPlanModeHandler -> IO ()
+registerExitPlanModeHandler session handler =
+  writeIORef (csExitPlanModeHandler session) (Just handler)
+
+-- | Handle an exit plan mode request. (Internal)
+handleExitPlanModeRequest :: CopilotSession -> Value -> IO ExitPlanModeResponse
+handleExitPlanModeRequest session reqVal = do
+  mHandler <- readIORef (csExitPlanModeHandler session)
+  case mHandler of
+    Nothing -> pure $ ExitPlanModeResponse True
+    Just handler -> do
+      case Aeson.fromJSON reqVal of
+        Aeson.Success req -> handler req
+        Aeson.Error _ ->
+          let mSid = parseMaybe (withObject "" $ \o -> o .: "sessionId") reqVal :: Maybe Text
+          in case mSid of
+            Just sid -> handler (ExitPlanModeRequest sid)
+            Nothing  -> pure $ ExitPlanModeResponse True
+
+-- ============================================================================
+-- Trace Context
+-- ============================================================================
+
+-- | Register a trace context provider. (Internal)
+registerTraceContextProvider :: CopilotSession -> TraceContextProvider -> IO ()
+registerTraceContextProvider session provider =
+  writeIORef (csTraceContextProvider session) (Just provider)
+
+-- | Inject trace context into request params. (Internal)
+injectTraceContext :: CopilotSession -> Value -> IO Value
+injectTraceContext session params = do
+  mProvider <- readIORef (csTraceContextProvider session)
+  case mProvider of
+    Nothing -> pure params
+    Just provider -> do
+      ctx <- provider `catch` (\(_ :: SomeException) -> pure $ TraceContext Nothing Nothing)
+      let addField key mVal obj = case mVal of
+            Nothing -> obj
+            Just v  -> case obj of
+              Object hm -> Object (KM.insert (fromText key) (String v) hm)
+              _         -> obj
+      pure $ addField "traceparent" (tcTraceparent ctx) $ addField "tracestate" (tcTracestate ctx) params
+
+-- ============================================================================
 -- Lifecycle
 -- ============================================================================
 
@@ -376,6 +440,8 @@ destroySession session = do
       writeIORef (csPermissionHandler session) Nothing
       writeIORef (csUserInputHandler session) Nothing
       writeIORef (csHooks session) Nothing
+      writeIORef (csExitPlanModeHandler session) Nothing
+      writeIORef (csTraceContextProvider session) Nothing
 
 -- | Abort the currently processing message.
 abortSession :: CopilotSession -> IO ()
