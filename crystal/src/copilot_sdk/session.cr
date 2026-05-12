@@ -24,15 +24,18 @@ module CopilotSDK
     @tool_handlers : Hash(String, ToolHandler)
     @tool_definitions : Array(ToolDefinition)
     @permission_handler : PermissionHandler?
+    @exit_plan_mode_handler : ExitPlanModeHandler?
+    @trace_context_provider : TraceContextProvider?
     @mutex : Mutex
     @destroyed : Bool
     @next_handler_id : Int64
 
-    def initialize(@session_id, @rpc, @model = nil)
+    def initialize(@session_id, @rpc, @model = nil, @trace_context_provider = nil)
       @event_handlers = {} of String => SessionEventHandler
       @tool_handlers = {} of String => ToolHandler
       @tool_definitions = [] of ToolDefinition
       @permission_handler = nil
+      @exit_plan_mode_handler = nil
       @mutex = Mutex.new
       @destroyed = false
       @next_handler_id = 0_i64
@@ -91,6 +94,20 @@ module CopilotSDK
       @permission_handler = handler
     end
 
+    # Set the exit plan mode handler for this session.
+    def on_exit_plan_mode(&handler : ExitPlanModeRequest, String -> ExitPlanModeResult) : Nil
+      @exit_plan_mode_handler = handler
+    end
+
+    # Handle an incoming exit-plan-mode request from the server.
+    def handle_exit_plan_mode(request : ExitPlanModeRequest) : ExitPlanModeResult
+      if handler = @exit_plan_mode_handler
+        handler.call(request, @session_id)
+      else
+        ExitPlanModeResult.new(approved: true)
+      end
+    end
+
     # Send a message to the session and return the raw response.
     def send(options : MessageOptions) : JSON::Any
       raise "Session has been destroyed" if @destroyed
@@ -102,6 +119,9 @@ module CopilotSDK
           json.field "attachments", options.attachments if options.attachments
           json.field "mode", options.mode if options.mode
           json.field "tools", @tool_definitions if @tool_definitions.any?
+
+          trace = get_trace_context
+          trace.each { |k, v| json.field k, v }
         end
       })
 
@@ -210,6 +230,22 @@ module CopilotSDK
     # Returns the list of currently registered tool definitions.
     def tool_definitions : Array(ToolDefinition)
       @mutex.synchronize { @tool_definitions.dup }
+    end
+
+    private def get_trace_context : Hash(String, String)
+      if provider = @trace_context_provider
+        begin
+          ctx = provider.call
+          result = {} of String => String
+          result["traceparent"] = ctx.traceparent.not_nil! if ctx.traceparent
+          result["tracestate"] = ctx.tracestate.not_nil! if ctx.tracestate
+          result
+        rescue
+          {} of String => String
+        end
+      else
+        {} of String => String
+      end
     end
   end
 end

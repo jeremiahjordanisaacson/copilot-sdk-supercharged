@@ -242,3 +242,62 @@
                88 USE-LOGGED-IN-NO            VALUE 0.
            05 WS-CLI-IDLE-TIMEOUT   PIC 9(10)  VALUE 0.
            05 WS-CLI-LOG-LEVEL      PIC X(16)  VALUE "error".
+
+      *----------------------------------------------------------------*
+      * Remote option for CLI spawn                                    *
+      *----------------------------------------------------------------*
+       01  WS-REMOTE-OPTION.
+           05 WS-REMOTE-ENABLED      PIC 9      VALUE 0.
+               88 REMOTE-ON                     VALUE 1.
+               88 REMOTE-OFF                    VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Session telemetry                                               *
+      *----------------------------------------------------------------*
+       01  WS-SESSION-TELEMETRY.
+           05 WS-ENABLE-SESS-TELEMETRY PIC 9    VALUE 0.
+               88 SESS-TELEMETRY-ON             VALUE 1.
+               88 SESS-TELEMETRY-OFF            VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Exit Plan Mode request/response                                *
+      *----------------------------------------------------------------*
+       01  WS-EXIT-PLAN-MODE-REQ.
+           05 WS-EPM-SUMMARY         PIC X(1024) VALUE SPACES.
+           05 WS-EPM-PLAN-CONTENT    PIC X(2048) VALUE SPACES.
+           05 WS-EPM-ACTIONS         PIC X(1024) VALUE SPACES.
+           05 WS-EPM-RECOMMENDED     PIC X(64)  VALUE SPACES.
+           05 WS-EPM-SESSION-ID      PIC X(64)  VALUE SPACES.
+
+       01  WS-EXIT-PLAN-MODE-RESP.
+           05 WS-EPM-APPROVED        PIC 9      VALUE 1.
+               88 EPM-APPROVED                  VALUE 1.
+               88 EPM-DENIED                    VALUE 0.
+           05 WS-EPM-SELECTED-ACTION PIC X(64)  VALUE SPACES.
+           05 WS-EPM-FEEDBACK        PIC X(256) VALUE SPACES.
+
+       01  WS-EPM-HANDLER-SET        PIC 9      VALUE 0.
+           88 EPM-HANDLER-ACTIVE                VALUE 1.
+           88 EPM-HANDLER-INACTIVE              VALUE 0.
+
+      *----------------------------------------------------------------*
+      * W3C Trace Context                                              *
+      *----------------------------------------------------------------*
+       01  WS-TRACE-CONTEXT.
+           05 WS-TRACEPARENT         PIC X(256) VALUE SPACES.
+           05 WS-TRACESTATE          PIC X(256) VALUE SPACES.
+
+       01  WS-TRACE-PROVIDER-SET     PIC 9      VALUE 0.
+           88 TRACE-PROVIDER-ACTIVE             VALUE 1.
+           88 TRACE-PROVIDER-INACTIVE           VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Model capabilities override                                    *
+      *----------------------------------------------------------------*
+       01  WS-MODEL-CAP-OVERRIDE.
+           05 WS-MCO-SUPPORTS        PIC X(512) VALUE SPACES.
+           05 WS-MCO-LIMITS          PIC X(512) VALUE SPACES.
+           05 WS-MCO-VISION          PIC X(256) VALUE SPACES.
+           05 WS-MCO-ENABLED         PIC 9      VALUE 0.
+               88 MCO-ENABLED                   VALUE 1.
+               88 MCO-DISABLED                  VALUE 0.

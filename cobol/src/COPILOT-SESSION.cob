@@ -108,6 +108,71 @@
                END-STRING
            END-IF
 
+      *    Include remote option
+           IF REMOTE-ON
+               STRING
+                   ',"remote":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+      *    Include session telemetry
+           IF SESS-TELEMETRY-ON
+               STRING
+                   ',"enableSessionTelemetry":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+      *    Include exit plan mode handler flag
+           IF EPM-HANDLER-ACTIVE
+               STRING
+                   ',"requestExitPlanMode":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+      *    Include trace context
+           IF TRACE-PROVIDER-ACTIVE
+               IF WS-TRACEPARENT NOT = SPACES
+                   STRING
+                       ',"traceparent":"'
+                       FUNCTION TRIM(WS-TRACEPARENT)
+                       '"'
+                       DELIMITED SIZE
+                       INTO WS-PARAMS-BUFFER
+                       WITH POINTER WS-PARAMS-PTR
+                   END-STRING
+               END-IF
+               IF WS-TRACESTATE NOT = SPACES
+                   STRING
+                       ',"tracestate":"'
+                       FUNCTION TRIM(WS-TRACESTATE)
+                       '"'
+                       DELIMITED SIZE
+                       INTO WS-PARAMS-BUFFER
+                       WITH POINTER WS-PARAMS-PTR
+                   END-STRING
+               END-IF
+           END-IF
+
+      *    Include model capabilities override
+           IF MCO-ENABLED
+               STRING
+                   ',"modelCapabilities":'
+                   FUNCTION TRIM(WS-MODEL-CAPABILITIES)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
            STRING
                '}'
                DELIMITED SIZE
@@ -365,5 +430,20 @@
            CALL "COPILOT-CLIENT" USING WS-JSONRPC-RESPONSE
                WS-RETURN-CODE
            .
+
+      *----------------------------------------------------------------*
+      * HANDLE-EXIT-PLAN-MODE: Handle exit plan mode request           *
+      * Input:  WS-EXIT-PLAN-MODE-REQ                                  *
+      * Output: WS-EXIT-PLAN-MODE-RESP                                 *
+      *----------------------------------------------------------------*
+       HANDLE-EXIT-PLAN-MODE.
+           IF NOT EPM-HANDLER-ACTIVE
+               SET EPM-APPROVED TO TRUE
+               MOVE SPACES TO WS-EPM-SELECTED-ACTION
+               MOVE SPACES TO WS-EPM-FEEDBACK
+           END-IF
+           .
+       HANDLE-EXIT-PLAN-MODE-EXIT.
+           EXIT.
 
        STOP RUN.

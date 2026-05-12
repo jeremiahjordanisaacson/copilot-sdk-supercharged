@@ -270,6 +270,10 @@ module CopilotSDK
     property elicitation_handler : Bool?
     @[JSON::Field(key: "instructionDirectories")]
     property instruction_directories : Array(String)?
+    @[JSON::Field(key: "requestExitPlanMode")]
+    property request_exit_plan_mode : Bool?
+    @[JSON::Field(key: "enableSessionTelemetry")]
+    property enable_session_telemetry : Bool?
 
     def initialize(@model = nil, @streaming = nil, @system_message = nil,
                    @tools = nil, @instructions = nil, @agent_mode = nil,
@@ -278,7 +282,8 @@ module CopilotSDK
                    @commands = nil, @skill_directories = nil, @disabled_skills = nil,
                    @working_directory = nil, @github_token = nil, @reasoning_effort = nil,
                    @response_format = nil, @request_headers = nil, @elicitation_handler = nil,
-                   @instruction_directories = nil)
+                   @instruction_directories = nil, @request_exit_plan_mode = nil,
+                   @enable_session_telemetry = nil)
     end
   end
 
@@ -292,8 +297,13 @@ module CopilotSDK
     property streaming : Bool?
     @[JSON::Field(key: "instructionDirectories")]
     property instruction_directories : Array(String)?
+    @[JSON::Field(key: "requestExitPlanMode")]
+    property request_exit_plan_mode : Bool?
+    @[JSON::Field(key: "enableSessionTelemetry")]
+    property enable_session_telemetry : Bool?
 
-    def initialize(@session_id, @model = nil, @streaming = nil, @instruction_directories = nil)
+    def initialize(@session_id, @model = nil, @streaming = nil, @instruction_directories = nil,
+                   @request_exit_plan_mode = nil, @enable_session_telemetry = nil)
     end
   end
 
@@ -371,11 +381,14 @@ module CopilotSDK
     property session_fs : SessionFsConfig?
     property copilot_home : String?
     property tcp_connection_token : String?
+    property remote : Bool
+    property on_get_trace_context : TraceContextProvider?
 
     def initialize(@cli_path = nil, @cli_url = nil, @auto_start = true, @request_timeout = 30,
                    @github_token = nil, @use_logged_in_user = nil,
                    @session_idle_timeout_seconds = nil, @session_fs = nil,
-                   @copilot_home = nil, @tcp_connection_token = nil)
+                   @copilot_home = nil, @tcp_connection_token = nil,
+                   @remote = false, @on_get_trace_context = nil)
     end
   end
 
@@ -416,6 +429,48 @@ module CopilotSDK
     def initialize(@session_id, @model = nil, @created_at = nil)
     end
   end
+
+  # Exit plan mode request from the agent.
+  class ExitPlanModeRequest
+    include JSON::Serializable
+    property summary : String
+    @[JSON::Field(key: "planContent")]
+    property plan_content : String?
+    property actions : Array(String)
+    @[JSON::Field(key: "recommendedAction")]
+    property recommended_action : String
+
+    def initialize(@summary, @actions, @recommended_action, @plan_content = nil)
+    end
+  end
+
+  # Response to an exit-plan-mode request.
+  class ExitPlanModeResult
+    include JSON::Serializable
+    property approved : Bool
+    @[JSON::Field(key: "selectedAction")]
+    property selected_action : String?
+    property feedback : String?
+
+    def initialize(@approved, @selected_action = nil, @feedback = nil)
+    end
+  end
+
+  # W3C Trace Context for distributed tracing.
+  class TraceContext
+    include JSON::Serializable
+    property traceparent : String?
+    property tracestate : String?
+
+    def initialize(@traceparent = nil, @tracestate = nil)
+    end
+  end
+
+  # Callback that returns the current W3C Trace Context.
+  alias TraceContextProvider = Proc(TraceContext)
+
+  # Handler for exit-plan-mode requests.
+  alias ExitPlanModeHandler = Proc(ExitPlanModeRequest, String, ExitPlanModeResult)
 
   # Alias for tool handler callbacks.
   alias ToolHandler = Proc(JSON::Any, ToolInvocation, JSON::Any)

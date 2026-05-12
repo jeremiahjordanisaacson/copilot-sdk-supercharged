@@ -144,7 +144,7 @@ module CopilotSDK
       session_id = result["sessionId"]?.try(&.as_s) || raise CopilotError.new("No sessionId in response")
       model = result["model"]?.try(&.as_s) || config.model
 
-      session = CopilotSession.new(session_id, rpc, model)
+      session = CopilotSession.new(session_id, rpc, model, @options.on_get_trace_context)
       @mutex.synchronize { @sessions[session_id] = session }
 
       session
@@ -160,7 +160,7 @@ module CopilotSDK
       session_id = config.session_id
       model = result["model"]?.try(&.as_s) || config.model
 
-      session = CopilotSession.new(session_id, rpc, model)
+      session = CopilotSession.new(session_id, rpc, model, @options.on_get_trace_context)
       @mutex.synchronize { @sessions[session_id] = session }
 
       session
@@ -290,9 +290,14 @@ module CopilotSDK
     private def spawn_cli_process : Nil
       cli_path = @options.cli_path || find_cli_path
 
+      args = ["--stdio"]
+      if @options.remote
+        args << "--remote"
+      end
+
       process = Process.new(
         cli_path,
-        args: ["--stdio"],
+        args: args,
         input: Process::Redirect::Pipe,
         output: Process::Redirect::Pipe,
         error: Process::Redirect::Close
@@ -377,6 +382,20 @@ module CopilotSDK
           JSON.parse(result.to_json)
         else
           JSON.parse(%Q({"allowed": false, "reason": "Unknown session"}))
+        end
+      end
+
+      # Handle exit-plan-mode requests from the server
+      r.on_request("exitPlanMode.request") do |params|
+        request = ExitPlanModeRequest.from_json(params.to_json)
+        session_id = params["sessionId"]?.try(&.as_s)
+        session = session_id ? @mutex.synchronize { @sessions[session_id]? } : nil
+
+        if session
+          result = session.handle_exit_plan_mode(request)
+          JSON.parse(result.to_json)
+        else
+          JSON.parse(%Q({"approved": true}))
         end
       end
 
