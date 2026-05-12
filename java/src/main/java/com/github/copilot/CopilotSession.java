@@ -43,6 +43,7 @@ public class CopilotSession {
     private volatile PermissionHandler permissionHandler;
     private volatile UserInputHandler userInputHandler;
     private volatile SessionHooks hooks;
+    private volatile ExitPlanModeHandler exitPlanModeHandler;
 
     CopilotSession(String sessionId, JsonRpcClient client, String workspacePath) {
         this.sessionId = sessionId;
@@ -194,6 +195,7 @@ public class CopilotSession {
         typedEventHandlers.clear();
         toolHandlers.clear();
         permissionHandler = null;
+        exitPlanModeHandler = null;
     }
 
     /** Aborts the currently processing message. */
@@ -222,6 +224,19 @@ public class CopilotSession {
 
     void registerHooks(SessionHooks hooks) {
         this.hooks = hooks;
+    }
+
+    void registerExitPlanModeHandler(ExitPlanModeHandler handler) {
+        this.exitPlanModeHandler = handler;
+    }
+
+    ExitPlanModeResponse handleExitPlanModeRequest(Map<String, Object> params) throws Exception {
+        if (exitPlanModeHandler == null) {
+            return new ExitPlanModeResponse(true);
+        }
+        ExitPlanModeRequest req = new ExitPlanModeRequest();
+        req.sessionId = (String) params.get("sessionId");
+        return exitPlanModeHandler.handle(req);
     }
 
     ToolHandler getToolHandler(String name) {

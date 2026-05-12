@@ -50,6 +50,8 @@ public class SessionConfig {
     private String responseFormat;
     /** Custom instruction directory paths. */
     private List<String> instructionDirectories;
+    /** Handler for exit plan mode requests from the server. */
+    private ExitPlanModeHandler onExitPlanMode;
 
     public SessionConfig() {}
 
@@ -83,6 +85,7 @@ public class SessionConfig {
     public SessionConfig requestHeaders(Map<String, String> headers) { this.requestHeaders = headers; return this; }
     public SessionConfig responseFormat(String format) { this.responseFormat = format; return this; }
     public SessionConfig instructionDirectories(List<String> dirs) { this.instructionDirectories = dirs; return this; }
+    public SessionConfig onExitPlanMode(ExitPlanModeHandler handler) { this.onExitPlanMode = handler; return this; }
 
     // Getters
     public String getSessionId() { return sessionId; }
@@ -114,4 +117,5 @@ public class SessionConfig {
     public Map<String, String> getRequestHeaders() { return requestHeaders; }
     public String getResponseFormat() { return responseFormat; }
     public List<String> getInstructionDirectories() { return instructionDirectories; }
+    public ExitPlanModeHandler getOnExitPlanMode() { return onExitPlanMode; }
 }

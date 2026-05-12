@@ -78,6 +78,7 @@ public class CopilotClient {
     private boolean useLoggedInUser = true;
     private Integer sessionIdleTimeoutSeconds;
     private Types.SessionFsConfig sessionFsConfig;
+    private Types.TraceContextProvider traceContextProvider;
 
     /**
      * Creates a new CopilotClient with default options.
@@ -126,6 +127,7 @@ public class CopilotClient {
             if (options.getUseLoggedInUser() != null) this.useLoggedInUser = options.getUseLoggedInUser();
             if (options.getSessionIdleTimeoutSeconds() != null) this.sessionIdleTimeoutSeconds = options.getSessionIdleTimeoutSeconds();
             if (options.getSessionFs() != null) this.sessionFsConfig = options.getSessionFs();
+            if (options.getOnGetTraceContext() != null) this.traceContextProvider = options.getOnGetTraceContext();
         }
 
         this.isExternalServer = external;
@@ -254,6 +256,7 @@ public class CopilotClient {
         if (config.getOnPermissionRequest() != null) session.registerPermissionHandler(config.getOnPermissionRequest());
         if (config.getOnUserInputRequest() != null) session.registerUserInputHandler(config.getOnUserInputRequest());
         if (config.getHooks() != null) session.registerHooks(config.getHooks());
+        if (config.getOnExitPlanMode() != null) session.registerExitPlanModeHandler(config.getOnExitPlanMode());
         sessions.put(sessionId, session);
         return session;
     }
@@ -282,6 +285,7 @@ public class CopilotClient {
         if (config.getOnPermissionRequest() != null) session.registerPermissionHandler(config.getOnPermissionRequest());
         if (config.getOnUserInputRequest() != null) session.registerUserInputHandler(config.getOnUserInputRequest());
         if (config.getHooks() != null) session.registerHooks(config.getHooks());
+        if (config.getOnExitPlanMode() != null) session.registerExitPlanModeHandler(config.getOnExitPlanMode());
         sessions.put(resumedId, session);
         return session;
     }
@@ -472,7 +476,19 @@ public class CopilotClient {
         // Wire requestHeaders and imageGeneration / responseFormat for the session
         if (config.getRequestHeaders() != null) payload.put("requestHeaders", config.getRequestHeaders());
         if (config.getResponseFormat() != null) payload.put("responseFormat", config.getResponseFormat());
+        injectTraceContext(payload);
         return payload;
+    }
+
+    private void injectTraceContext(Map<String, Object> payload) {
+        if (traceContextProvider == null) return;
+        try {
+            Types.TraceContext ctx = traceContextProvider.getTraceContext();
+            if (ctx != null) {
+                if (ctx.traceparent != null) payload.put("traceparent", ctx.traceparent);
+                if (ctx.tracestate != null) payload.put("tracestate", ctx.tracestate);
+            }
+        } catch (Exception ignored) {}
     }
 
     private void verifyProtocolVersion() throws Exception {
@@ -613,6 +629,7 @@ public class CopilotClient {
         rpcClient.setRequestHandler("permission.request", params -> handlePermissionRequest(params));
         rpcClient.setRequestHandler("userInput.request", params -> handleUserInputRequest(params));
         rpcClient.setRequestHandler("hooks.invoke", params -> handleHooksInvoke(params));
+        rpcClient.setRequestHandler("exitPlanMode.request", params -> handleExitPlanModeRequest(params));
     }
 
     @SuppressWarnings("unchecked")
@@ -670,6 +687,15 @@ public class CopilotClient {
 
         UserInputResponse result = session.handleUserInputRequest(params);
         return Map.of("answer", result.answer, "wasFreeform", result.wasFreeform);
+    }
+
+    private Map<String, Object> handleExitPlanModeRequest(Map<String, Object> params) throws Exception {
+        String sessionId = (String) params.get("sessionId");
+        CopilotSession session = sessions.get(sessionId);
+        if (session == null) throw new RuntimeException("Unknown session " + sessionId);
+
+        ExitPlanModeResponse result = session.handleExitPlanModeRequest(params);
+        return Map.of("approved", result.approved);
     }
 
     @SuppressWarnings("unchecked")

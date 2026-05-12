@@ -479,4 +479,37 @@ public final class Types {
         void rm(String sessionId, String path, boolean recursive) throws Exception;
         void rename(String sessionId, String oldPath, String newPath) throws Exception;
     }
+
+    /** Request payload for an exit plan mode request from the server. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ExitPlanModeRequest {
+        @JsonProperty("sessionId") public String sessionId;
+    }
+
+    /** Response payload for an exit plan mode request. */
+    public static class ExitPlanModeResponse {
+        public boolean approved;
+
+        public ExitPlanModeResponse() {}
+        public ExitPlanModeResponse(boolean approved) { this.approved = approved; }
+    }
+
+    /** Functional interface for exit plan mode handlers. */
+    @FunctionalInterface
+    public interface ExitPlanModeHandler {
+        ExitPlanModeResponse handle(ExitPlanModeRequest request) throws Exception;
+    }
+
+    /** Trace context for distributed tracing. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class TraceContext {
+        @JsonProperty("traceparent") public String traceparent;
+        @JsonProperty("tracestate") public String tracestate;
+    }
+
+    /** Provider that returns a trace context for outbound requests. */
+    @FunctionalInterface
+    public interface TraceContextProvider {
+        TraceContext getTraceContext() throws Exception;
+    }
 }
