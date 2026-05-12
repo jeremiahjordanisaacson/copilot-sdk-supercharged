@@ -62,6 +62,12 @@ classdef SessionConfig
 
         % Directories containing instruction files (cell array of char).
         InstructionDirectories (1,:) cell = {}
+
+        % Enable/disable session telemetry.
+        EnableSessionTelemetry
+
+        % Handler for exit-plan-mode requests (function handle or empty).
+        ExitPlanModeHandler
     end
 
     methods
@@ -91,6 +97,8 @@ classdef SessionConfig
             p.addParameter('ImageOptions',        struct());
             p.addParameter('ElicitationHandler',  []);
             p.addParameter('InstructionDirectories', obj.InstructionDirectories);
+            p.addParameter('EnableSessionTelemetry', []);
+            p.addParameter('ExitPlanModeHandler', []);
             p.parse(varargin{:});
 
             obj.Model              = p.Results.Model;
@@ -112,6 +120,8 @@ classdef SessionConfig
             obj.ImageOptions       = p.Results.ImageOptions;
             obj.ElicitationHandler = p.Results.ElicitationHandler;
             obj.InstructionDirectories = p.Results.InstructionDirectories;
+            obj.EnableSessionTelemetry = p.Results.EnableSessionTelemetry;
+            obj.ExitPlanModeHandler = p.Results.ExitPlanModeHandler;
         end
 
         function s = toStruct(obj)
@@ -144,6 +154,15 @@ classdef SessionConfig
             end
             if ~isempty(obj.InstructionDirectories)
                 s.instructionDirectories = obj.InstructionDirectories;
+            end
+            if ~isempty(obj.EnableSessionTelemetry)
+                s.enableSessionTelemetry = obj.EnableSessionTelemetry;
+            end
+            if ~isempty(obj.ExitPlanModeHandler)
+                s.requestExitPlanMode = true;
+            end
+            if isstruct(obj.ModelCapabilities) && ~isempty(fieldnames(obj.ModelCapabilities))
+                s.modelCapabilities = obj.ModelCapabilities;
             end
         end
     end

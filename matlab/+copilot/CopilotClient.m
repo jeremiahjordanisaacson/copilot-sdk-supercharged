@@ -168,6 +168,14 @@ classdef CopilotClient < handle
             obj.assertRunning();
 
             params = config.toStruct();
+
+            % Merge trace context into params.
+            ctx = obj.getTraceContext();
+            ctxFields = fieldnames(ctx);
+            for i = 1:numel(ctxFields)
+                params.(ctxFields{i}) = ctx.(ctxFields{i});
+            end
+
             result = obj.RpcClient.request('session.create', params, 30);
 
             sessionId = '';
@@ -177,7 +185,15 @@ classdef CopilotClient < handle
                 sessionId = result.id;
             end
 
-            session = copilot.CopilotSession(obj.RpcClient, sessionId, config.Tools);
+            session = copilot.CopilotSession(obj.RpcClient, sessionId, ...
+                config.Tools, config.ExitPlanModeHandler);
+
+            % Register exitPlanMode.request handler if configured.
+            if ~isempty(config.ExitPlanModeHandler)
+                obj.RpcClient.onRequest('exitPlanMode.request', ...
+                    @(p) session.handleExitPlanMode(p));
+            end
+
             obj.Sessions(sessionId) = session;
         end
 
@@ -372,6 +388,9 @@ classdef CopilotClient < handle
             if obj.Options.UseLoggedInUser
                 args{end+1} = '--use-logged-in-user';
             end
+            if obj.Options.Remote
+                args{end+1} = '--remote';
+            end
             args = [args, obj.Options.CliArgs];
         end
 
@@ -384,6 +403,18 @@ classdef CopilotClient < handle
             if ~isempty(obj.Process)
                 try obj.Process.destroyForcibly(); catch, end
                 obj.Process = [];
+            end
+        end
+
+        function ctx = getTraceContext(obj)
+            %getTraceContext  Invoke the OnGetTraceContext provider.
+            ctx = struct();
+            if ~isempty(obj.Options.OnGetTraceContext)
+                try
+                    ctx = obj.Options.OnGetTraceContext();
+                catch
+                    ctx = struct();
+                end
             end
         end
     end
