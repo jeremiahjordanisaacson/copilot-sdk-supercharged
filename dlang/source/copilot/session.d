@@ -19,6 +19,9 @@ import copilot.tools : ToolBinding, ToolHandler;
 /// Callback signature for session event listeners.
 alias EventListener = void delegate(SessionEvent event) @safe;
 
+/// Callback for exit-plan-mode requests.
+alias ExitPlanModeHandler = ExitPlanModeResponse delegate(ExitPlanModeRequest req) @safe;
+
 /// Represents a single conversation session with the Copilot assistant.
 final class CopilotSession
 {
@@ -32,6 +35,7 @@ final class CopilotSession
         Condition _idleCond;
         bool _idle = true;
         bool _stopped = false;
+        ExitPlanModeHandler _exitPlanModeHandler;
     }
 
     /// Construct a session (called internally by CopilotClient).
@@ -154,6 +158,12 @@ final class CopilotSession
     void registerTool(ToolBinding binding) @safe
     {
         _toolHandlers[binding.tool.name] = binding.handler;
+    }
+
+    /// Register a handler for exit-plan-mode requests.
+    void registerExitPlanModeHandler(ExitPlanModeHandler handler) @safe
+    {
+        _exitPlanModeHandler = handler;
     }
 
     /// Register multiple tool bindings.

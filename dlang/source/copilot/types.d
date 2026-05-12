@@ -62,6 +62,12 @@ struct CopilotClientOptions
 
     /// Token for TCP connection authentication.
     Nullable!string tcpConnectionToken;
+
+    /// Connect to a remote CLI server.
+    bool remote = false;
+
+    /// Provider for W3C Trace Context headers.
+    TraceContextProvider onGetTraceContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +241,9 @@ struct SessionConfig
     /// Directories containing instruction files for the session.
     string[] instructionDirectories;
 
+    /// Enable session telemetry reporting.
+    Nullable!bool enableSessionTelemetry;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
@@ -330,6 +339,9 @@ struct SessionConfig
             obj["instructionDirectories"] = JSONValue(arr);
         }
 
+        if (!enableSessionTelemetry.isNull)
+            obj["enableSessionTelemetry"] = enableSessionTelemetry.get;
+
         return obj;
     }
 }
@@ -348,6 +360,9 @@ struct ResumeSessionConfig
 
     /// Directories containing instruction files for the session.
     string[] instructionDirectories;
+
+    /// Enable session telemetry reporting.
+    Nullable!bool enableSessionTelemetry;
 
     JSONValue toJson() const @safe
     {
@@ -369,6 +384,9 @@ struct ResumeSessionConfig
             foreach (s; instructionDirectories) arr ~= JSONValue(s);
             obj["instructionDirectories"] = JSONValue(arr);
         }
+
+        if (!enableSessionTelemetry.isNull)
+            obj["enableSessionTelemetry"] = enableSessionTelemetry.get;
         return obj;
     }
 }
@@ -454,6 +472,82 @@ struct ElicitationResult
 {
     string action = "accept";
     JSONValue content;
+}
+
+// ---------------------------------------------------------------------------
+// ExitPlanMode
+// ---------------------------------------------------------------------------
+
+/// Request to exit plan mode for a session.
+struct ExitPlanModeRequest
+{
+    string sessionId;
+}
+
+/// Response to an exit-plan-mode request.
+struct ExitPlanModeResponse
+{
+    bool approved = true;
+}
+
+// ---------------------------------------------------------------------------
+// TraceContext
+// ---------------------------------------------------------------------------
+
+/// W3C Trace Context for distributed tracing.
+struct TraceContext
+{
+    Nullable!string traceparent;
+    Nullable!string tracestate;
+}
+
+/// Callback that provides trace context for outgoing RPCs.
+alias TraceContextProvider = TraceContext delegate() @safe;
+
+// ---------------------------------------------------------------------------
+// ModelCapabilitiesOverride
+// ---------------------------------------------------------------------------
+
+/// Fine-grained model feature support flags.
+struct ModelCapabilitiesSupports
+{
+    bool agentMode = false;
+    bool toolUse = false;
+    bool vision = false;
+}
+
+/// Token limits for a model.
+struct ModelCapabilitiesLimits
+{
+    int maxContextTokens = 0;
+    int maxOutputTokens = 0;
+}
+
+/// Override for model capabilities sent during session creation.
+struct ModelCapabilitiesOverride
+{
+    ModelCapabilitiesSupports supports;
+    ModelCapabilitiesLimits limits;
+    Nullable!string defaultModel;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        auto sup = JSONValue(string[string].init);
+        sup["agentMode"] = JSONValue(supports.agentMode);
+        sup["toolUse"] = JSONValue(supports.toolUse);
+        sup["vision"] = JSONValue(supports.vision);
+        obj["supports"] = sup;
+
+        auto lim = JSONValue(string[string].init);
+        lim["maxContextTokens"] = JSONValue(limits.maxContextTokens);
+        lim["maxOutputTokens"] = JSONValue(limits.maxOutputTokens);
+        obj["limits"] = lim;
+
+        if (!defaultModel.isNull)
+            obj["defaultModel"] = defaultModel.get;
+        return obj;
+    }
 }
 
 // ---------------------------------------------------------------------------
