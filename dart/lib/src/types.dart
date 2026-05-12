@@ -124,6 +124,26 @@ class ToolResultObject {
 }
 
 // ---------------------------------------------------------------------------
+// Trace Context (W3C distributed tracing)
+// ---------------------------------------------------------------------------
+
+/// W3C Trace Context propagation data.
+class TraceContext {
+  final String? traceparent;
+  final String? tracestate;
+
+  const TraceContext({this.traceparent, this.tracestate});
+
+  Map<String, dynamic> toJson() => {
+        if (traceparent != null) 'traceparent': traceparent,
+        if (tracestate != null) 'tracestate': tracestate,
+      };
+}
+
+/// Callback that returns the current W3C Trace Context.
+typedef TraceContextProvider = Future<TraceContext> Function();
+
+// ---------------------------------------------------------------------------
 // Tool Invocation
 // ---------------------------------------------------------------------------
 
@@ -1402,6 +1422,59 @@ typedef ElicitationHandler = Future<ElicitationResult> Function(
     ElicitationContext context);
 
 // ---------------------------------------------------------------------------
+// Exit Plan Mode
+// ---------------------------------------------------------------------------
+
+/// Request to exit plan mode from the agent.
+class ExitPlanModeRequest {
+  final String summary;
+  final String? planContent;
+  final List<String> actions;
+  final String recommendedAction;
+
+  const ExitPlanModeRequest({
+    required this.summary,
+    this.planContent,
+    required this.actions,
+    required this.recommendedAction,
+  });
+
+  factory ExitPlanModeRequest.fromJson(Map<String, dynamic> json) {
+    return ExitPlanModeRequest(
+      summary: json['summary'] as String,
+      planContent: json['planContent'] as String?,
+      actions: (json['actions'] as List<dynamic>).cast<String>(),
+      recommendedAction: json['recommendedAction'] as String,
+    );
+  }
+}
+
+/// Response to an exit-plan-mode request.
+class ExitPlanModeResult {
+  final bool approved;
+  final String? selectedAction;
+  final String? feedback;
+
+  const ExitPlanModeResult({
+    required this.approved,
+    this.selectedAction,
+    this.feedback,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'approved': approved,
+        if (selectedAction != null) 'selectedAction': selectedAction,
+        if (feedback != null) 'feedback': feedback,
+      };
+}
+
+/// Handler for exit-plan-mode requests.
+typedef ExitPlanModeHandler = Future<ExitPlanModeResult> Function(
+  ExitPlanModeRequest request,
+  SessionInvocationContext context,
+);
+
+// ---------------------------------------------------------------------------
 // Session Configuration
 // ---------------------------------------------------------------------------
 
@@ -1449,6 +1522,12 @@ class SessionConfig {
   /// Handler for elicitation requests from the server.
   final ElicitationHandler? onElicitationRequest;
 
+  /// Handler for exit-plan-mode requests from the agent.
+  final ExitPlanModeHandler? onExitPlanMode;
+
+  /// When true, enables session-level telemetry collection.
+  final bool? enableSessionTelemetry;
+
   /// Directories to search for instruction files.
   final List<String>? instructionDirectories;
 
@@ -1478,6 +1557,8 @@ class SessionConfig {
     this.gitHubToken,
     this.commands,
     this.onElicitationRequest,
+    this.onExitPlanMode,
+    this.enableSessionTelemetry,
     this.instructionDirectories,
   });
 }
@@ -1522,6 +1603,12 @@ class ResumeSessionConfig {
   /// Handler for elicitation requests from the server.
   final ElicitationHandler? onElicitationRequest;
 
+  /// Handler for exit-plan-mode requests from the agent.
+  final ExitPlanModeHandler? onExitPlanMode;
+
+  /// When true, enables session-level telemetry collection.
+  final bool? enableSessionTelemetry;
+
   final bool? disableResume;
 
   /// Directories to search for instruction files.
@@ -1552,6 +1639,8 @@ class ResumeSessionConfig {
     this.gitHubToken,
     this.commands,
     this.onElicitationRequest,
+    this.onExitPlanMode,
+    this.enableSessionTelemetry,
     this.disableResume,
     this.instructionDirectories,
   });
@@ -1703,6 +1792,9 @@ class CopilotClientOptions {
   /// Token for TCP connection authentication.
   final String? tcpConnectionToken;
 
+  /// Callback that returns the current W3C Trace Context for distributed tracing.
+  final TraceContextProvider? onGetTraceContext;
+
   const CopilotClientOptions({
     this.cliPath,
     this.cliArgs,
@@ -1720,6 +1812,7 @@ class CopilotClientOptions {
     this.sessionFs,
     this.copilotHome,
     this.tcpConnectionToken,
+    this.onGetTraceContext,
   });
 }
 

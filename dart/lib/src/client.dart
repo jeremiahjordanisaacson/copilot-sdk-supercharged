@@ -68,6 +68,7 @@ class CopilotClient {
   late final Map<String, String>? _env;
   late final String? _githubToken;
   late final bool _useLoggedInUser;
+  late final TraceContextProvider? _onGetTraceContext;
 
   /// Creates a new [CopilotClient].
   ///
@@ -111,6 +112,7 @@ class CopilotClient {
     _githubToken = options.githubToken;
     _useLoggedInUser =
         options.useLoggedInUser ?? (options.githubToken != null ? false : true);
+    _onGetTraceContext = options.onGetTraceContext;
   }
 
   /// Current connection state.
@@ -266,7 +268,9 @@ class CopilotClient {
     config ??= const SessionConfig();
     await _ensureConnected();
 
+    final traceCtx = await _getTraceContext();
     final params = <String, dynamic>{
+      ...traceCtx,
       if (config.model != null) 'model': config.model,
       if (config.sessionId != null) 'sessionId': config.sessionId,
       if (config.reasoningEffort != null)
@@ -280,6 +284,7 @@ class CopilotClient {
       if (config.provider != null) 'provider': config.provider!.toJson(),
       'requestPermission': config.onPermissionRequest != null,
       'requestUserInput': config.onUserInputRequest != null,
+      'requestExitPlanMode': config.onExitPlanMode != null,
       'hooks': config.hooks?.hasAny ?? false,
       if (config.workingDirectory != null)
         'workingDirectory': config.workingDirectory,
@@ -295,6 +300,8 @@ class CopilotClient {
       if (config.disabledSkills != null) 'disabledSkills': config.disabledSkills,
       if (config.infiniteSessions != null)
         'infiniteSessions': config.infiniteSessions!.toJson(),
+      if (config.enableSessionTelemetry != null)
+        'enableSessionTelemetry': config.enableSessionTelemetry,
     };
 
     final response =
@@ -306,6 +313,7 @@ class CopilotClient {
       sessionId: sessionId,
       connection: _connection!,
       workspacePath: workspacePath,
+      traceContextProvider: _onGetTraceContext,
     );
 
     session.registerTools(config.tools);
@@ -317,6 +325,9 @@ class CopilotClient {
     }
     if (config.hooks != null) {
       session.registerHooks(config.hooks);
+    }
+    if (config.onExitPlanMode != null) {
+      session.registerExitPlanModeHandler(config.onExitPlanMode);
     }
 
     _sessions[sessionId] = session;
@@ -331,7 +342,9 @@ class CopilotClient {
     config ??= const ResumeSessionConfig();
     await _ensureConnected();
 
+    final traceCtx = await _getTraceContext();
     final params = <String, dynamic>{
+      ...traceCtx,
       'sessionId': sessionId,
       if (config.model != null) 'model': config.model,
       if (config.reasoningEffort != null)
@@ -345,6 +358,7 @@ class CopilotClient {
       if (config.provider != null) 'provider': config.provider!.toJson(),
       'requestPermission': config.onPermissionRequest != null,
       'requestUserInput': config.onUserInputRequest != null,
+      'requestExitPlanMode': config.onExitPlanMode != null,
       'hooks': config.hooks?.hasAny ?? false,
       if (config.workingDirectory != null)
         'workingDirectory': config.workingDirectory,
@@ -361,6 +375,8 @@ class CopilotClient {
       if (config.infiniteSessions != null)
         'infiniteSessions': config.infiniteSessions!.toJson(),
       if (config.disableResume != null) 'disableResume': config.disableResume,
+      if (config.enableSessionTelemetry != null)
+        'enableSessionTelemetry': config.enableSessionTelemetry,
     };
 
     final response =
@@ -372,6 +388,7 @@ class CopilotClient {
       sessionId: resumedId,
       connection: _connection!,
       workspacePath: workspacePath,
+      traceContextProvider: _onGetTraceContext,
     );
 
     session.registerTools(config.tools);
@@ -383,6 +400,9 @@ class CopilotClient {
     }
     if (config.hooks != null) {
       session.registerHooks(config.hooks);
+    }
+    if (config.onExitPlanMode != null) {
+      session.registerExitPlanModeHandler(config.onExitPlanMode);
     }
 
     _sessions[resumedId] = session;
@@ -769,6 +789,10 @@ class CopilotClient {
     _connection!.onRequest('hooks.invoke', (params) async {
       return await _handleHooksInvoke(params as Map<String, dynamic>);
     });
+
+    _connection!.onRequest('exitPlanMode.request', (params) async {
+      return await _handleExitPlanModeRequest(params as Map<String, dynamic>);
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -937,9 +961,34 @@ class CopilotClient {
     return {'output': output};
   }
 
+  Future<Map<String, dynamic>> _handleExitPlanModeRequest(
+      Map<String, dynamic> params) async {
+    final sessionId = params['sessionId'] as String?;
+    if (sessionId == null) {
+      throw Exception('Invalid exit plan mode request payload');
+    }
+    final session = _sessions[sessionId];
+    if (session == null) {
+      throw Exception('Session not found: $sessionId');
+    }
+    final request = ExitPlanModeRequest.fromJson(params);
+    final result = await session.handleExitPlanModeRequest(request);
+    return result.toJson();
+  }
+
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
+
+  Future<Map<String, dynamic>> _getTraceContext() async {
+    if (_onGetTraceContext == null) return {};
+    try {
+      final ctx = await _onGetTraceContext!();
+      return ctx.toJson();
+    } catch (_) {
+      return {};
+    }
+  }
 
   Map<String, dynamic> _normalizeToolResult(dynamic result) {
     if (result == null) {

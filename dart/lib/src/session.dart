@@ -51,6 +51,8 @@ class CopilotSession {
   PermissionHandler? _permissionHandler;
   UserInputHandler? _userInputHandler;
   SessionHooks? _hooks;
+  ExitPlanModeHandler? _exitPlanModeHandler;
+  TraceContextProvider? _traceContextProvider;
 
   /// Creates a new [CopilotSession].
   ///
@@ -60,7 +62,9 @@ class CopilotSession {
     required this.sessionId,
     required JsonRpcClient connection,
     this.workspacePath,
-  }) : _connection = connection;
+    TraceContextProvider? traceContextProvider,
+  })  : _connection = connection,
+        _traceContextProvider = traceContextProvider;
 
   /// Broadcast stream of all session events.
   ///
@@ -93,7 +97,9 @@ class CopilotSession {
   ///
   /// Returns the message ID of the enqueued message.
   Future<String> send(MessageOptions options) async {
+    final traceCtx = await _getTraceContext();
     final response = await _connection.sendRequest('session.send', {
+      ...traceCtx,
       'sessionId': sessionId,
       'prompt': options.prompt,
       if (options.attachments != null) 'attachments': options.attachments,
@@ -182,6 +188,8 @@ class CopilotSession {
     _permissionHandler = null;
     _userInputHandler = null;
     _hooks = null;
+    _exitPlanModeHandler = null;
+    _traceContextProvider = null;
     await _eventController.close();
   }
 
@@ -223,6 +231,11 @@ class CopilotSession {
   /// Registers hook handlers for this session.
   void registerHooks(SessionHooks? hooks) {
     _hooks = hooks;
+  }
+
+  /// Registers an exit-plan-mode handler for this session.
+  void registerExitPlanModeHandler(ExitPlanModeHandler? handler) {
+    _exitPlanModeHandler = handler;
   }
 
   // -------------------------------------------------------------------------
@@ -349,6 +362,37 @@ class CopilotSession {
       }
     } catch (_) {
       return null;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Internal: Exit Plan Mode handling (called by CopilotClient)
+  // -------------------------------------------------------------------------
+
+  /// Handles an exit-plan-mode request from the CLI server.
+  Future<ExitPlanModeResult> handleExitPlanModeRequest(
+      ExitPlanModeRequest request) async {
+    if (_exitPlanModeHandler == null) {
+      return const ExitPlanModeResult(approved: true);
+    }
+    return await _exitPlanModeHandler!(
+      request,
+      SessionInvocationContext(sessionId: sessionId),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Internal: Trace Context helper
+  // -------------------------------------------------------------------------
+
+  /// Returns the current W3C Trace Context, or an empty map if unavailable.
+  Future<Map<String, dynamic>> _getTraceContext() async {
+    if (_traceContextProvider == null) return {};
+    try {
+      final ctx = await _traceContextProvider!();
+      return ctx.toJson();
+    } catch (_) {
+      return {};
     }
   }
 }
