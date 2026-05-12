@@ -685,6 +685,60 @@ class ElicitationResult
 }
 
 // ============================================================================
+// Exit Plan Mode
+// ============================================================================
+
+class ExitPlanModeRequest
+{
+    public function __construct(
+        public readonly string $sessionId,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            sessionId: $data['sessionId'] ?? '',
+        );
+    }
+}
+
+class ExitPlanModeResponse
+{
+    public function __construct(
+        public readonly bool $approved,
+    ) {}
+
+    public function toArray(): array
+    {
+        return ['approved' => $this->approved];
+    }
+}
+
+// ============================================================================
+// Trace Context
+// ============================================================================
+
+class TraceContext
+{
+    public function __construct(
+        public readonly ?string $traceparent = null,
+        public readonly ?string $tracestate = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [];
+        if ($this->traceparent !== null) {
+            $result['traceparent'] = $this->traceparent;
+        }
+        if ($this->tracestate !== null) {
+            $result['tracestate'] = $this->tracestate;
+        }
+        return $result;
+    }
+}
+
+// ============================================================================
 // Session Configuration
 // ============================================================================
 
@@ -743,6 +797,8 @@ class SessionConfig
         public readonly ?array $commands = null,
         /** @var callable|null $onElicitationRequest Elicitation handler */
         public /* readonly */ $onElicitationRequest = null,
+        /** @var callable|null $onExitPlanMode Exit plan mode handler */
+        public /* readonly */ $onExitPlanMode = null,
         /** @var string[]|null $instructionDirectories Instruction directories for prompt customization */
         public readonly ?array $instructionDirectories = null,
     ) {}
@@ -820,6 +876,7 @@ class SessionConfig
         if ($this->enableConfigDiscovery !== null) {
             $params['enableConfigDiscovery'] = $this->enableConfigDiscovery;
         }
+        $params['requestExitPlanMode'] = $this->onExitPlanMode !== null;
         if ($this->gitHubToken !== null) {
             $params['gitHubToken'] = $this->gitHubToken;
         }
@@ -884,6 +941,8 @@ class ResumeSessionConfig
         public readonly ?array $commands = null,
         /** @var callable|null $onElicitationRequest Elicitation handler */
         public /* readonly */ $onElicitationRequest = null,
+        /** @var callable|null $onExitPlanMode Exit plan mode handler */
+        public /* readonly */ $onExitPlanMode = null,
         /** @var string[]|null $instructionDirectories Instruction directories for prompt customization */
         public readonly ?array $instructionDirectories = null,
         public readonly ?bool $disableResume = null,
@@ -959,6 +1018,7 @@ class ResumeSessionConfig
         if ($this->enableConfigDiscovery !== null) {
             $params['enableConfigDiscovery'] = $this->enableConfigDiscovery;
         }
+        $params['requestExitPlanMode'] = $this->onExitPlanMode !== null;
         if ($this->gitHubToken !== null) {
             $params['gitHubToken'] = $this->gitHubToken;
         }
@@ -1923,5 +1983,7 @@ class CopilotClientOptions
         public readonly ?SessionFsConfig $sessionFs = null,
         public readonly ?string $copilotHome = null,
         public readonly ?string $tcpConnectionToken = null,
+        /** @var callable|null $onGetTraceContext Trace context provider */
+        public /* readonly */ $onGetTraceContext = null,
     ) {}
 }

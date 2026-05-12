@@ -52,6 +52,11 @@ package Copilot.Session is
      (Self    : in out Copilot_Session;
       Handler : User_Input_Handler);
 
+   --  Register an exit-plan-mode handler.
+   procedure Register_Exit_Plan_Mode_Handler
+     (Self    : in out Copilot_Session;
+      Handler : Exit_Plan_Mode_Handler);
+
    --  Property accessors.
    function Session_Id      (Self : Copilot_Session) return String;
    function Workspace_Path  (Self : Copilot_Session) return String;
@@ -62,7 +67,8 @@ package Copilot.Session is
    function Create_Internal
      (Conn         : access RPC_Connection;
       Sid          : String;
-      Ws_Path      : String) return Copilot_Session;
+      Ws_Path      : String;
+      Trace_Prov   : Trace_Context_Provider := null) return Copilot_Session;
 
 private
 
@@ -73,6 +79,8 @@ private
       Active          : Boolean  := True;
       Perm_Handler    : Permission_Handler   := null;
       Input_Handler   : User_Input_Handler   := null;
+      Exit_Plan_Handler : Exit_Plan_Mode_Handler := null;
+      Trace_Provider  : Trace_Context_Provider := null;
    end record;
 
 end Copilot.Session;

@@ -45,6 +45,18 @@ package Copilot.Types is
    type Log_Level is (Trace, Debug, Info, Warn, Error, Fatal);
 
    --  -----------------------------------------------------------------------
+   --  TraceContext for distributed tracing
+   --  -----------------------------------------------------------------------
+
+   type Trace_Context is record
+      Traceparent : UString := Null_UString;
+      Tracestate  : UString := Null_UString;
+   end record;
+
+   type Trace_Context_Provider is access
+     function return Trace_Context;
+
+   --  -----------------------------------------------------------------------
    --  Client options
    --  -----------------------------------------------------------------------
 
@@ -66,6 +78,8 @@ package Copilot.Types is
       Session_Fs_Conventions      : UString := Null_UString;
       Copilot_Home                : UString := Null_UString;
       Tcp_Connection_Token        : UString := Null_UString;
+      Remote                      : Boolean := False;
+      On_Get_Trace_Context        : Trace_Context_Provider := null;
    end record;
 
    Default_Options : constant Client_Options :=
@@ -85,7 +99,9 @@ package Copilot.Types is
       Session_Fs_State_Path       => Null_UString,
       Session_Fs_Conventions      => Null_UString,
       Copilot_Home                => Null_UString,
-      Tcp_Connection_Token        => Null_UString);
+      Tcp_Connection_Token        => Null_UString,
+       Remote                      => False,
+       On_Get_Trace_Context        => null);
 
    --  -----------------------------------------------------------------------
    --  Session configuration
@@ -115,6 +131,7 @@ package Copilot.Types is
       Auth_Token                    : UString  := Null_UString;
       Elicitation_Handler_Set       : Boolean  := False;
       Instruction_Directories_Json  : UString  := Null_UString;
+      Enable_Session_Telemetry      : Boolean  := False;
    end record;
 
    Default_Session_Config : constant Session_Config :=
@@ -140,7 +157,8 @@ package Copilot.Types is
        Available_Tools_Json          => Null_UString,
        Auth_Token                    => Null_UString,
        Elicitation_Handler_Set       => False,
-       Instruction_Directories_Json  => Null_UString);
+       Instruction_Directories_Json  => Null_UString,
+       Enable_Session_Telemetry      => False);
 
    --  -----------------------------------------------------------------------
    --  Resume session configuration
@@ -150,6 +168,7 @@ package Copilot.Types is
       Session_Id                    : UString := Null_UString;
       Model                         : UString := Null_UString;
       Instruction_Directories_Json  : UString := Null_UString;
+      Enable_Session_Telemetry      : Boolean := False;
    end record;
 
    --  -----------------------------------------------------------------------
@@ -312,6 +331,21 @@ package Copilot.Types is
 
    type User_Input_Handler is access
      function (Req : User_Input_Request) return User_Input_Response;
+
+   --  -----------------------------------------------------------------------
+   --  ExitPlanMode handling
+   --  -----------------------------------------------------------------------
+
+   type Exit_Plan_Mode_Request is record
+      Session_Id : UString := Null_UString;
+   end record;
+
+   type Exit_Plan_Mode_Response is record
+      Approved : Boolean := True;
+   end record;
+
+   type Exit_Plan_Mode_Handler is access
+     function (Req : Exit_Plan_Mode_Request) return Exit_Plan_Mode_Response;
 
    --  -----------------------------------------------------------------------
    --  Exceptions

@@ -271,6 +271,49 @@ data class ElicitationResult(
  */
 typealias ElicitationHandler = suspend (context: ElicitationContext) -> ElicitationResult
 
+// ============================================================================
+// Exit Plan Mode Types
+// ============================================================================
+
+/**
+ * Request payload for an exit plan mode request from the server.
+ */
+@Serializable
+data class ExitPlanModeRequest(
+    val sessionId: String
+)
+
+/**
+ * Response payload for an exit plan mode request.
+ */
+@Serializable
+data class ExitPlanModeResponse(
+    val approved: Boolean
+)
+
+/**
+ * Handler for exit plan mode requests.
+ */
+typealias ExitPlanModeHandler = suspend (request: ExitPlanModeRequest) -> ExitPlanModeResponse
+
+// ============================================================================
+// Trace Context Types
+// ============================================================================
+
+/**
+ * Trace context for distributed tracing.
+ */
+@Serializable
+data class TraceContext(
+    val traceparent: String? = null,
+    val tracestate: String? = null
+)
+
+/**
+ * Provider that returns a trace context for outbound requests.
+ */
+typealias TraceContextProvider = suspend () -> TraceContext
+
 /**
  * Configuration for creating a session.
  */
@@ -321,6 +364,9 @@ data class SessionConfig(
 
     /** Handler for elicitation requests from the server. */
     val onElicitationRequest: ElicitationHandler? = null,
+
+    /** Handler for exit plan mode requests from the server. */
+    val onExitPlanMode: ExitPlanModeHandler? = null,
 
     /** Additional HTTP headers sent with each model request. */
     val requestHeaders: Map<String, String>? = null,
@@ -381,6 +427,9 @@ data class ResumeSessionConfig(
 
     /** Handler for elicitation requests from the server. */
     val onElicitationRequest: ElicitationHandler? = null,
+
+    /** Handler for exit plan mode requests from the server. */
+    val onExitPlanMode: ExitPlanModeHandler? = null,
 
     val disableResume: Boolean? = null,
     /** Custom instruction directory paths. */
@@ -874,5 +923,10 @@ data class CopilotClientOptions(
     /**
      * Auth token for TCP server connections.
      */
-    val tcpConnectionToken: String? = null
+    val tcpConnectionToken: String? = null,
+
+    /**
+     * Provider for trace context to include in outbound requests.
+     */
+    val onGetTraceContext: TraceContextProvider? = null
 )

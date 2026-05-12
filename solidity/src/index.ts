@@ -36,3 +36,13 @@ export type {
     TestFramework,
     TestGenToolParams,
 } from "./types.js";
+
+// Re-export base SDK types for feature parity
+export type {
+    ExitPlanModeRequest,
+    ExitPlanModeResult,
+    ExitPlanModeHandler,
+    TraceContext,
+    TraceContextProvider,
+    ModelCapabilitiesOverride,
+} from "copilot-sdk-supercharged";

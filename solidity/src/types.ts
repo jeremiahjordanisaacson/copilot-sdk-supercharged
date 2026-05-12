@@ -9,7 +9,22 @@ import type {
     CopilotClientOptions,
     SessionConfig,
     Tool,
+    ExitPlanModeRequest,
+    ExitPlanModeResult,
+    ExitPlanModeHandler,
+    TraceContext,
+    TraceContextProvider,
+    ModelCapabilitiesOverride,
 } from "copilot-sdk-supercharged";
+
+export type {
+    ExitPlanModeRequest,
+    ExitPlanModeResult,
+    ExitPlanModeHandler,
+    TraceContext,
+    TraceContextProvider,
+    ModelCapabilitiesOverride,
+};
 
 // ---------------------------------------------------------------------------
 // Severity & finding types
@@ -127,6 +142,10 @@ export interface CopilotSolidityClientOptions extends CopilotClientOptions {
     copilotHome?: string;
     /** TCP connection token for authenticated server connections. */
     tcpConnectionToken?: string;
+    /** Enable remote session support (Mission Control). */
+    remote?: boolean;
+    /** W3C Trace Context provider for distributed tracing. */
+    onGetTraceContext?: TraceContextProvider;
 }
 
 /** Configuration for a Solidity-focused session. */
@@ -137,6 +156,12 @@ export interface SoliditySessionConfig extends SessionConfig {
     projectRoot?: string;
     /** Directories containing instruction files. */
     instructionDirectories?: string[];
+    /** Enable/disable session telemetry. */
+    enableSessionTelemetry?: boolean;
+    /** Handler for exit-plan-mode requests. */
+    onExitPlanMode?: ExitPlanModeHandler;
+    /** Model capabilities override. */
+    modelCapabilities?: ModelCapabilitiesOverride;
 }
 
 // ---------------------------------------------------------------------------

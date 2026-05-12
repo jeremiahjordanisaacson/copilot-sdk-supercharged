@@ -67,10 +67,16 @@ export class CopilotSolidityClient {
             solidityVersion,
             defaultTestFramework = "hardhat",
             includeGasHints = false,
+            remote,
+            onGetTraceContext,
             ...baseOptions
         } = options;
 
-        this.client = new CopilotClient(baseOptions);
+        this.client = new CopilotClient({
+            ...baseOptions,
+            remote,
+            onGetTraceContext,
+        });
         this.solidityVersion = solidityVersion;
         this.defaultTestFramework = defaultTestFramework;
         this.includeGasHints = includeGasHints;
@@ -206,6 +212,9 @@ export class CopilotSolidityClient {
                 mode: "append" as const,
                 content: SOLIDITY_SYSTEM_PROMPT,
             },
+            enableSessionTelemetry: config.enableSessionTelemetry,
+            onExitPlanMode: config.onExitPlanMode,
+            modelCapabilities: config.modelCapabilities,
         };
 
         return this.client.createSession(sessionConfig);

@@ -251,6 +251,7 @@ class CopilotClient(
         config.onPermissionRequest?.let { session.registerPermissionHandler(it) }
         config.onUserInputRequest?.let { session.registerUserInputHandler(it) }
         config.onElicitationRequest?.let { session.registerElicitationHandler(it) }
+        config.onExitPlanMode?.let { session.registerExitPlanModeHandler(it) }
         config.hooks?.let { session.registerHooks(it) }
         sessions[sessionId] = session
 
@@ -303,7 +304,15 @@ class CopilotClient(
             config.gitHubToken?.let { put("gitHubToken", JsonPrimitive(it)) }
             config.commands?.let { put("commands", json.encodeToJsonElement(it)) }
             if (config.onElicitationRequest != null) put("requestElicitation", true)
+            if (config.onExitPlanMode != null) put("exitPlanMode", true)
             config.disableResume?.let { put("disableResume", it) }
+            options.onGetTraceContext?.let {
+                try {
+                    val ctx = kotlinx.coroutines.runBlocking { it() }
+                    ctx.traceparent?.let { tp -> put("traceparent", tp) }
+                    ctx.tracestate?.let { ts -> put("tracestate", ts) }
+                } catch (_: Exception) {}
+            }
         }
 
         val response = client.request("session.resume", payload)
@@ -316,6 +325,7 @@ class CopilotClient(
         config.onPermissionRequest?.let { session.registerPermissionHandler(it) }
         config.onUserInputRequest?.let { session.registerUserInputHandler(it) }
         config.onElicitationRequest?.let { session.registerElicitationHandler(it) }
+        config.onExitPlanMode?.let { session.registerExitPlanModeHandler(it) }
         config.hooks?.let { session.registerHooks(it) }
         sessions[resumedId] = session
 
@@ -536,9 +546,17 @@ class CopilotClient(
             config.gitHubToken?.let { put("gitHubToken", JsonPrimitive(it)) }
             config.commands?.let { put("commands", json.encodeToJsonElement(it)) }
             if (config.onElicitationRequest != null) put("requestElicitation", true)
+            if (config.onExitPlanMode != null) put("exitPlanMode", true)
             // Wire sessionIdleTimeoutSeconds (idleTimeout), requestHeaders, imageGeneration / responseFormat
             config.requestHeaders?.let { put("requestHeaders", json.encodeToJsonElement(it)) }
             config.responseFormat?.let { put("responseFormat", JsonPrimitive(it)) }
+            options.onGetTraceContext?.let {
+                try {
+                    val ctx = kotlinx.coroutines.runBlocking { it() }
+                    ctx.traceparent?.let { tp -> put("traceparent", tp) }
+                    ctx.tracestate?.let { ts -> put("tracestate", ts) }
+                } catch (_: Exception) {}
+            }
         }
     }
 
@@ -698,6 +716,7 @@ class CopilotClient(
         client.setRequestHandler("userInput.request") { params -> handleUserInputRequest(params) }
         client.setRequestHandler("hooks.invoke") { params -> handleHooksInvoke(params) }
         client.setRequestHandler("elicitation.request") { params -> handleElicitationRequest(params) }
+        client.setRequestHandler("exitPlanMode.request") { params -> handleExitPlanModeRequest(params) }
     }
 
     private fun handleSessionEventNotification(params: JsonObject) {
@@ -877,6 +896,20 @@ class CopilotClient(
         return buildJsonObject {
             put("action", result.action)
             result.content?.let { put("content", json.encodeToJsonElement(it)) }
+        }
+    }
+
+    private suspend fun handleExitPlanModeRequest(params: JsonObject): JsonObject {
+        val sessionId = params["sessionId"]?.jsonPrimitive?.content
+            ?: throw RuntimeException("Invalid exit plan mode request payload")
+
+        val session = sessions[sessionId]
+            ?: throw RuntimeException("Session not found: $sessionId")
+
+        val request = ExitPlanModeRequest(sessionId = sessionId)
+        val result = session.handleExitPlanModeRequest(request)
+        return buildJsonObject {
+            put("approved", result.approved)
         }
     }
 

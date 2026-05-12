@@ -53,15 +53,18 @@ package body Copilot.Session is
    function Create_Internal
      (Conn    : access RPC_Connection;
       Sid     : String;
-      Ws_Path : String) return Copilot_Session
+      Ws_Path : String;
+      Trace_Prov : Trace_Context_Provider := null) return Copilot_Session
    is
    begin
-      return (Conn          => Conn,
-              Sid           => To_Unbounded_String (Sid),
-              Ws_Path       => To_Unbounded_String (Ws_Path),
-              Active        => True,
-              Perm_Handler  => null,
-              Input_Handler => null);
+      return (Conn              => Conn,
+              Sid               => To_Unbounded_String (Sid),
+              Ws_Path           => To_Unbounded_String (Ws_Path),
+              Active            => True,
+              Perm_Handler      => null,
+              Input_Handler     => null,
+              Exit_Plan_Handler => null,
+              Trace_Provider    => Trace_Prov);
    end Create_Internal;
 
    procedure Send
@@ -151,6 +154,14 @@ package body Copilot.Session is
    begin
       Self.Input_Handler := Handler;
    end Register_User_Input_Handler;
+
+   procedure Register_Exit_Plan_Mode_Handler
+     (Self    : in out Copilot_Session;
+      Handler : Exit_Plan_Mode_Handler)
+   is
+   begin
+      Self.Exit_Plan_Handler := Handler;
+   end Register_Exit_Plan_Mode_Handler;
 
    function Session_Id (Self : Copilot_Session) return String is
    begin

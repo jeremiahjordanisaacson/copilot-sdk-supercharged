@@ -283,6 +283,12 @@ class CopilotClient
         if ($config->hooks !== null) {
             $session->registerHooks($config->hooks);
         }
+        if ($config->onExitPlanMode !== null) {
+            $session->registerExitPlanModeHandler($config->onExitPlanMode);
+        }
+        if ($this->options->onGetTraceContext !== null) {
+            $session->registerTraceContextProvider($this->options->onGetTraceContext);
+        }
         $this->sessions[$sessionId] = $session;
 
         return $session;
@@ -324,6 +330,12 @@ class CopilotClient
         }
         if ($config->hooks !== null) {
             $session->registerHooks($config->hooks);
+        }
+        if ($config->onExitPlanMode !== null) {
+            $session->registerExitPlanModeHandler($config->onExitPlanMode);
+        }
+        if ($this->options->onGetTraceContext !== null) {
+            $session->registerTraceContextProvider($this->options->onGetTraceContext);
         }
         $this->sessions[$resumedSessionId] = $session;
 
@@ -831,6 +843,10 @@ class CopilotClient
         $this->connection->setRequestHandler('hooks.invoke', function (array $params): array {
             return $this->handleHooksInvoke($params);
         });
+
+        $this->connection->setRequestHandler('exitPlanMode.request', function (array $params): array {
+            return $this->handleExitPlanModeRequest($params);
+        });
     }
 
     private function handleSessionEventNotification(array $notification): void
@@ -994,6 +1010,25 @@ class CopilotClient
 
         $output = $session->handleHooksInvokeInternal($hookType, $input);
         return ['output' => $output];
+    }
+
+    private function handleExitPlanModeRequest(array $params): array
+    {
+        $sessionId = $params['sessionId'] ?? null;
+        if ($sessionId === null) {
+            throw new \RuntimeException('Invalid exit plan mode request payload');
+        }
+
+        $session = $this->sessions[$sessionId] ?? null;
+        if ($session === null) {
+            throw new \RuntimeException("Session not found: {$sessionId}");
+        }
+
+        try {
+            return $session->handleExitPlanModeRequestInternal($params);
+        } catch (\Throwable) {
+            return ['approved' => true];
+        }
     }
 
     /**

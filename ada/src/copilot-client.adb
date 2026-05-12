@@ -106,8 +106,11 @@ package body Copilot.Client is
 
       --  Spawn the CLI in server mode.
       declare
+         Arg_Str : constant String :=
+           (if Self.Options.Remote then "--stdio --remote"
+            else "--stdio");
          Args : Argument_List_Access :=
-           Argument_String_To_List ("--stdio");
+           Argument_String_To_List (Arg_Str);
       begin
          Self.Process_Id := Non_Blocking_Spawn
            (Program_Name => CLI_Bin,
@@ -238,6 +241,10 @@ package body Copilot.Client is
          end;
       end if;
 
+      if Config.Enable_Session_Telemetry then
+         Append (Params, """enableSessionTelemetry"":true,");
+      end if;
+
       --  Strip trailing comma (if any) and close brace.
       --  Session config supports: authToken / auth_token, excludedTools / excluded_tools,
       --  requestHeaders / request_headers, modelCapabilities / model_capabilities,
@@ -258,7 +265,9 @@ package body Copilot.Client is
          Sid  : constant String := Json_Get (Resp, "sessionId");
          Ws   : constant String := Json_Get (Resp, "workspacePath");
       begin
-         return Create_Internal (Self.Conn'Access, Sid, Ws);
+         return Create_Internal
+           (Self.Conn'Access, Sid, Ws,
+            Self.Options.On_Get_Trace_Context);
       end;
    end Create_Session;
 
@@ -273,7 +282,9 @@ package body Copilot.Client is
       Sid    : constant String := Json_Get (Resp, "sessionId");
       Ws     : constant String := Json_Get (Resp, "workspacePath");
    begin
-      return Create_Internal (Self.Conn'Access, Sid, Ws);
+      return Create_Internal
+        (Self.Conn'Access, Sid, Ws,
+         Self.Options.On_Get_Trace_Context);
    end Resume_Session;
 
    procedure Delete_Session
