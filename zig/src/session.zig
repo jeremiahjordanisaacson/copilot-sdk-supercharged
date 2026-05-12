@@ -31,6 +31,7 @@ const ToolHandlerFn = tools_mod.ToolHandlerFn;
 pub const EventCallback = *const fn (event: SessionEvent) void;
 pub const PermissionHandlerFn = *const fn (req: PermissionRequest, session_id: []const u8) anyerror!PermissionResult;
 pub const UserInputHandlerFn = *const fn (req: UserInputRequest, session_id: []const u8) anyerror!UserInputResponse;
+pub const ExitPlanModeHandlerFn = *const fn (req: types.ExitPlanModeRequest, session_id: []const u8) anyerror!types.ExitPlanModeResponse;
 
 // ---------------------------------------------------------------------------
 // EventSubscription
@@ -60,6 +61,8 @@ pub const CopilotSession = struct {
     next_listener_id: u64 = 1,
     permission_handler: ?PermissionHandlerFn = null,
     user_input_handler: ?UserInputHandlerFn = null,
+    exit_plan_mode_handler: ?ExitPlanModeHandlerFn = null,
+    trace_context_provider: ?types.TraceContextProvider = null,
     last_event: ?SessionEvent = null,
     idle: bool = true,
 
@@ -74,12 +77,14 @@ pub const CopilotSession = struct {
         session_id: []const u8,
         workspace_path: ?[]const u8,
         transport: *jsonrpc.JsonRpcTransport,
+        trace_context_provider: ?types.TraceContextProvider,
     ) CopilotSession {
         return .{
             .allocator = allocator,
             .session_id = session_id,
             .workspace_path = workspace_path,
             .transport = transport,
+            .trace_context_provider = trace_context_provider,
             .tool_registry = ToolRegistry.init(allocator),
             .listeners = std.ArrayList(Listener).init(allocator),
         };
@@ -214,6 +219,10 @@ pub const CopilotSession = struct {
         self.user_input_handler = handler;
     }
 
+    pub fn registerExitPlanModeHandler(self: *CopilotSession, handler: ExitPlanModeHandlerFn) void {
+        self.exit_plan_mode_handler = handler;
+    }
+
     // -------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------
@@ -274,7 +283,7 @@ test "CopilotSession event subscribe and unsubscribe" {
     );
     defer transport.deinit();
 
-    var session = CopilotSession.init(allocator, "test-session", null, &transport);
+    var session = CopilotSession.init(allocator, "test-session", null, &transport, null);
     defer session.deinit();
 
     const sub = session.on(noopCallback);
@@ -298,7 +307,7 @@ test "CopilotSession emitEvent sets idle" {
     );
     defer transport.deinit();
 
-    var session = CopilotSession.init(allocator, "test-session", null, &transport);
+    var session = CopilotSession.init(allocator, "test-session", null, &transport, null);
     defer session.deinit();
     session.idle = false;
 
@@ -321,7 +330,7 @@ test "CopilotSession getId returns session_id" {
     );
     defer transport.deinit();
 
-    var session = CopilotSession.init(allocator, "abc-123", null, &transport);
+    var session = CopilotSession.init(allocator, "abc-123", null, &transport, null);
     defer session.deinit();
     try std.testing.expectEqualStrings("abc-123", session.getId());
 }

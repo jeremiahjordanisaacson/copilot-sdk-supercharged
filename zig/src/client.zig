@@ -291,6 +291,10 @@ pub const CopilotClient = struct {
             argv.append("--stdio") catch return SdkError.AllocationFailed;
         }
 
+        if (self.options.remote) {
+            argv.append("--remote") catch return SdkError.AllocationFailed;
+        }
+
         if (self.options.cli_args) |extra| {
             for (extra) |arg| {
                 argv.append(arg) catch return SdkError.AllocationFailed;
@@ -341,6 +345,9 @@ pub const CopilotClient = struct {
         if (config.streaming) {
             params.put("streaming", .{ .bool = true }) catch return SdkError.AllocationFailed;
         }
+        if (config.enable_session_telemetry) |est| {
+            params.put("enableSessionTelemetry", .{ .bool = est }) catch return SdkError.AllocationFailed;
+        }
     }
 
     fn sessionFromResult(self: *CopilotClient, result: JsonValue, config: SessionConfig) SdkError!*CopilotSession {
@@ -358,7 +365,7 @@ pub const CopilotClient = struct {
         }
 
         const sess = self.allocator.create(CopilotSession) catch return SdkError.AllocationFailed;
-        sess.* = CopilotSession.init(self.allocator, sid, wpath, &self.transport.?);
+        sess.* = CopilotSession.init(self.allocator, sid, wpath, &self.transport.?, self.options.on_get_trace_context);
 
         self.sessions.put(sid, sess) catch return SdkError.AllocationFailed;
         return sess;

@@ -32,6 +32,17 @@ pub const JsonRpcError = struct {
 };
 
 // ---------------------------------------------------------------------------
+// TraceContext
+// ---------------------------------------------------------------------------
+
+pub const TraceContext = struct {
+    traceparent: ?[]const u8 = null,
+    tracestate: ?[]const u8 = null,
+};
+
+pub const TraceContextProvider = *const fn () anyerror!TraceContext;
+
+// ---------------------------------------------------------------------------
 // Client options
 // ---------------------------------------------------------------------------
 
@@ -51,6 +62,8 @@ pub const ClientOptions = struct {
     session_fs: ?SessionFsConfig = null,
     copilot_home: ?[]const u8 = null,
     tcp_connection_token: ?[]const u8 = null,
+    remote: bool = false,
+    on_get_trace_context: ?TraceContextProvider = null,
 };
 
 pub const SessionFsConfig = struct {
@@ -91,6 +104,7 @@ pub const SessionConfig = struct {
     commands_json: ?[]const u8 = null,
     github_token: ?[]const u8 = null,
     instruction_directories: ?[]const []const u8 = null,
+    enable_session_telemetry: ?bool = null,
 };
 
 pub const ProviderConfig = struct {
@@ -181,6 +195,18 @@ pub const ElicitationRequest = struct {
 pub const ElicitationResult = struct {
     action: []const u8 = "accept",
     content_json: ?[]const u8 = null,
+};
+
+// ---------------------------------------------------------------------------
+// ExitPlanMode
+// ---------------------------------------------------------------------------
+
+pub const ExitPlanModeRequest = struct {
+    session_id: []const u8 = "",
+};
+
+pub const ExitPlanModeResponse = struct {
+    approved: bool = true,
 };
 
 // ---------------------------------------------------------------------------
