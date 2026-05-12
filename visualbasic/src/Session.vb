@@ -22,6 +22,8 @@ Namespace GitHub.Copilot.SDK
         Private ReadOnly _handlersLock As New Object()
         Private ReadOnly _toolHandlers As New Dictionary(Of String, Func(Of Object, Task(Of String)))
         Private _permissionHandler As PermissionHandler
+        Private _exitPlanModeHandler As ExitPlanModeHandler
+        Private _traceContextProvider As TraceContextProvider
         Private _disposed As Boolean = False
 
         ''' <summary>Gets the unique identifier for this session.</summary>
@@ -177,6 +179,30 @@ Namespace GitHub.Copilot.SDK
         ''' </summary>
         Public Sub SetPermissionHandler(handler As PermissionHandler)
             _permissionHandler = handler
+        End Sub
+
+        ''' <summary>
+        ''' Registers a handler for exit-plan-mode requests.
+        ''' </summary>
+        Friend Sub RegisterExitPlanModeHandler(handler As ExitPlanModeHandler)
+            _exitPlanModeHandler = handler
+        End Sub
+
+        ''' <summary>
+        ''' Handles an exit-plan-mode request from the CLI.
+        ''' </summary>
+        Friend Async Function HandleExitPlanModeRequest(request As ExitPlanModeRequest) As Task(Of ExitPlanModeResult)
+            If _exitPlanModeHandler Is Nothing Then
+                Return New ExitPlanModeResult With {.Approved = True}
+            End If
+            Return Await _exitPlanModeHandler(request)
+        End Function
+
+        ''' <summary>
+        ''' Sets the W3C Trace Context provider.
+        ''' </summary>
+        Friend Sub SetTraceContextProvider(provider As TraceContextProvider)
+            _traceContextProvider = provider
         End Sub
 
         ' -----------------------------------------------------------------------
@@ -339,6 +365,17 @@ Namespace GitHub.Copilot.SDK
                          End Try
                      End Function)
         End Sub
+
+        Private Async Function GetTraceContextAsync() As Task(Of TraceContext)
+            If _traceContextProvider Is Nothing Then
+                Return New TraceContext()
+            End If
+            Try
+                Return Await _traceContextProvider()
+            Catch
+                Return New TraceContext()
+            End Try
+        End Function
 
         ' -----------------------------------------------------------------------
         '  Disposal

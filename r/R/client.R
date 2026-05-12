@@ -28,6 +28,7 @@ CopilotClient <- R6::R6Class(
     #'   Default: TRUE (but FALSE when github_token is provided).
     #' @param env Named list or NULL. Additional environment variables.
     #' @param session_fs SessionFsConfig or NULL. Custom session filesystem provider config.
+    #' @param on_get_trace_context Function or NULL. W3C Trace Context provider for distributed tracing.
     #'
     #' @return A CopilotClient R6 object.
     #'
@@ -40,7 +41,7 @@ CopilotClient <- R6::R6Class(
     initialize = function(cli_path = NULL, cwd = getwd(), log_level = "info",
                           auto_start = TRUE, github_token = NULL,
                           use_logged_in_user = NULL, env = NULL,
-                          session_fs = NULL) {
+                          session_fs = NULL, on_get_trace_context = NULL) {
       # Determine CLI path
       if (is.null(cli_path)) {
         cli_path <- Sys.which("copilot")
@@ -61,7 +62,8 @@ CopilotClient <- R6::R6Class(
         auto_start = auto_start,
         github_token = github_token,
         use_logged_in_user = use_logged_in_user,
-        env = env
+        env = env,
+        on_get_trace_context = on_get_trace_context
       )
 
       private$process <- NULL
@@ -210,6 +212,7 @@ CopilotClient <- R6::R6Class(
     #' @param enable_config_discovery Logical or NULL. Auto-discover MCP server configs.
     #' @param include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events.
     #' @param commands List of CommandDefinition or NULL. Slash commands for this session.
+    #' @param on_exit_plan_mode Function or NULL. Exit-plan-mode request handler.
     #'
     #' @return A CopilotSession R6 object.
     create_session = function(model = NULL, session_id = NULL, tools = NULL,
@@ -226,7 +229,8 @@ CopilotClient <- R6::R6Class(
                               include_sub_agent_streaming_events = NULL,
                               commands = NULL,
                               request_headers = NULL,
-                              response_format = NULL) {
+                              response_format = NULL,
+                              on_exit_plan_mode = NULL) {
       if (is.null(private$client)) {
         if (isTRUE(self$options$auto_start)) {
           self$start()
@@ -256,6 +260,7 @@ CopilotClient <- R6::R6Class(
       if (!is.null(on_permission_request)) payload$requestPermission <- TRUE
       if (!is.null(on_user_input_request)) payload$requestUserInput <- TRUE
       if (!is.null(on_elicitation_request)) payload$requestElicitation <- TRUE
+      if (!is.null(on_exit_plan_mode)) payload$requestExitPlanMode <- TRUE
       if (!is.null(hooks) && length(hooks) > 0) payload$hooks <- TRUE
       if (!is.null(working_directory)) payload$workingDirectory <- working_directory
       if (!is.null(streaming)) payload$streaming <- streaming
@@ -314,6 +319,12 @@ CopilotClient <- R6::R6Class(
       if (!is.null(on_elicitation_request)) {
         session$register_elicitation_handler(on_elicitation_request)
       }
+      if (!is.null(on_exit_plan_mode)) {
+        session$register_exit_plan_mode_handler(on_exit_plan_mode)
+      }
+      if (!is.null(self$options$on_get_trace_context)) {
+        session$register_trace_context_provider(self$options$on_get_trace_context)
+      }
       if (!is.null(commands)) {
         session$register_commands(commands)
       }
@@ -342,6 +353,7 @@ CopilotClient <- R6::R6Class(
     #' @param enable_config_discovery Logical or NULL. Auto-discover MCP server configs.
     #' @param include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events.
     #' @param commands List of CommandDefinition or NULL. Slash commands for this session.
+    #' @param on_exit_plan_mode Function or NULL. Exit-plan-mode request handler.
     #'
     #' @return A CopilotSession R6 object.
     resume_session = function(session_id, model = NULL, tools = NULL,
@@ -355,7 +367,8 @@ CopilotClient <- R6::R6Class(
                               model_capabilities = NULL,
                               enable_config_discovery = NULL,
                               include_sub_agent_streaming_events = NULL,
-                              commands = NULL) {
+                              commands = NULL,
+                              on_exit_plan_mode = NULL) {
       if (is.null(private$client)) {
         if (isTRUE(self$options$auto_start)) {
           self$start()
@@ -381,6 +394,7 @@ CopilotClient <- R6::R6Class(
       if (!is.null(on_permission_request)) payload$requestPermission <- TRUE
       if (!is.null(on_user_input_request)) payload$requestUserInput <- TRUE
       if (!is.null(on_elicitation_request)) payload$requestElicitation <- TRUE
+      if (!is.null(on_exit_plan_mode)) payload$requestExitPlanMode <- TRUE
       if (!is.null(hooks) && length(hooks) > 0) payload$hooks <- TRUE
       if (!is.null(working_directory)) payload$workingDirectory <- working_directory
       if (!is.null(provider)) payload$provider <- private$convert_provider(provider)
@@ -412,6 +426,10 @@ CopilotClient <- R6::R6Class(
       if (!is.null(on_user_input_request)) session$register_user_input_handler(on_user_input_request)
       if (!is.null(hooks)) session$register_hooks(hooks)
       if (!is.null(on_elicitation_request)) session$register_elicitation_handler(on_elicitation_request)
+      if (!is.null(on_exit_plan_mode)) session$register_exit_plan_mode_handler(on_exit_plan_mode)
+      if (!is.null(self$options$on_get_trace_context)) {
+        session$register_trace_context_provider(self$options$on_get_trace_context)
+      }
       if (!is.null(commands)) session$register_commands(commands)
 
       assign(sid, session, envir = private$sessions)
@@ -643,6 +661,10 @@ CopilotClient <- R6::R6Class(
         private$handle_hooks_invoke(params)
       })
 
+      private$client$set_request_handler("exitPlanMode.request", function(params) {
+        private$handle_exit_plan_mode_request(params)
+      })
+
       private$client$start()
     },
 
@@ -814,6 +836,29 @@ CopilotClient <- R6::R6Class(
       session <- get(session_id, envir = private$sessions)
       output <- session$handle_hooks_invoke(hook_type, input_data)
       list(output = output)
+    },
+
+    handle_exit_plan_mode_request = function(params) {
+      session_id <- params$sessionId
+
+      if (is.null(session_id)) {
+        stop("Invalid exitPlanMode request payload")
+      }
+
+      if (!exists(session_id, envir = private$sessions)) {
+        stop(paste0("Unknown session ", session_id))
+      }
+
+      session <- get(session_id, envir = private$sessions)
+      tryCatch(
+        {
+          result <- session$handle_exit_plan_mode_request(params)
+          list(result = result)
+        },
+        error = function(e) {
+          list(result = list(approved = TRUE))
+        }
+      )
     }
   )
 )

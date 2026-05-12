@@ -64,6 +64,9 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Token for TCP connection authentication.</summary>
         Public Property TcpConnectionToken As String
 
+        ''' <summary>W3C Trace Context provider for distributed tracing.</summary>
+        Public Property OnGetTraceContext As TraceContextProvider
+
     End Class
 
     ' -----------------------------------------------------------------------
@@ -134,6 +137,12 @@ Namespace GitHub.Copilot.SDK
 
         ''' <summary>Directories to search for instruction files.</summary>
         Public Property InstructionDirectories As List(Of String)
+
+        ''' <summary>Handler for exit-plan-mode requests.</summary>
+        Public Property OnExitPlanMode As ExitPlanModeHandler
+
+        ''' <summary>Enable/disable session telemetry.</summary>
+        Public Property EnableSessionTelemetry As Boolean? = Nothing
 
     End Class
 
@@ -335,6 +344,72 @@ Namespace GitHub.Copilot.SDK
         End Function
 
     End Module
+
+    ' -----------------------------------------------------------------------
+    '  Exit Plan Mode
+    ' -----------------------------------------------------------------------
+
+    ''' <summary>
+    ''' Request to exit plan mode from the agent.
+    ''' </summary>
+    Public Class ExitPlanModeRequest
+
+        <JsonPropertyName("summary")>
+        Public Property Summary As String
+
+        <JsonPropertyName("planContent")>
+        Public Property PlanContent As String
+
+        <JsonPropertyName("actions")>
+        Public Property Actions As List(Of String)
+
+        <JsonPropertyName("recommendedAction")>
+        Public Property RecommendedAction As String
+
+    End Class
+
+    ''' <summary>
+    ''' Response to an exit-plan-mode request.
+    ''' </summary>
+    Public Class ExitPlanModeResult
+
+        <JsonPropertyName("approved")>
+        Public Property Approved As Boolean
+
+        <JsonPropertyName("selectedAction")>
+        Public Property SelectedAction As String
+
+        <JsonPropertyName("feedback")>
+        Public Property Feedback As String
+
+    End Class
+
+    ''' <summary>
+    ''' Handler for exit-plan-mode requests.
+    ''' </summary>
+    Public Delegate Function ExitPlanModeHandler(request As ExitPlanModeRequest) As Task(Of ExitPlanModeResult)
+
+    ' -----------------------------------------------------------------------
+    '  Trace Context (W3C distributed tracing)
+    ' -----------------------------------------------------------------------
+
+    ''' <summary>
+    ''' W3C Trace Context propagation data.
+    ''' </summary>
+    Public Class TraceContext
+
+        <JsonPropertyName("traceparent")>
+        Public Property Traceparent As String
+
+        <JsonPropertyName("tracestate")>
+        Public Property Tracestate As String
+
+    End Class
+
+    ''' <summary>
+    ''' Callback that returns the current W3C Trace Context.
+    ''' </summary>
+    Public Delegate Function TraceContextProvider() As Task(Of TraceContext)
 
     ' -----------------------------------------------------------------------
     '  User input / elicitation

@@ -234,6 +234,16 @@ Namespace GitHub.Copilot.SDK
                 session.SetPermissionHandler(cfg.OnPermissionRequest)
             End If
 
+            ' Wire up exit plan mode handler
+            If cfg.OnExitPlanMode IsNot Nothing Then
+                session.RegisterExitPlanModeHandler(cfg.OnExitPlanMode)
+            End If
+
+            ' Wire up trace context provider
+            If _options.OnGetTraceContext IsNot Nothing Then
+                session.SetTraceContextProvider(_options.OnGetTraceContext)
+            End If
+
             ' Register tools
             If cfg.Tools IsNot Nothing Then
                 For Each tool In cfg.Tools
@@ -278,6 +288,11 @@ Namespace GitHub.Copilot.SDK
 
             If cfg.OnPermissionRequest IsNot Nothing Then
                 session.SetPermissionHandler(cfg.OnPermissionRequest)
+            End If
+
+            ' Wire up trace context provider
+            If _options.OnGetTraceContext IsNot Nothing Then
+                session.SetTraceContextProvider(_options.OnGetTraceContext)
             End If
 
             If cfg.Tools IsNot Nothing Then
@@ -511,6 +526,14 @@ Namespace GitHub.Copilot.SDK
                     })
                 Next
                 request("tools") = toolDefs
+            End If
+
+            If cfg.OnExitPlanMode IsNot Nothing Then
+                request("requestExitPlanMode") = True
+            End If
+
+            If cfg.EnableSessionTelemetry.HasValue Then
+                request("enableSessionTelemetry") = cfg.EnableSessionTelemetry.Value
             End If
 
             Return request

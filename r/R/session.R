@@ -34,6 +34,8 @@ CopilotSession <- R6::R6Class(
       private$tool_handlers <- list()
       private$permission_handler <- NULL
       private$user_input_handler <- NULL
+      private$exit_plan_mode_handler <- NULL
+      private$trace_context_provider <- NULL
       private$hooks <- NULL
     },
 
@@ -259,6 +261,41 @@ CopilotSession <- R6::R6Class(
       private$elicitation_handler <- handler
     },
 
+    #' @description Register an exit-plan-mode request handler.
+    #' @param handler Function or NULL. Called with ExitPlanModeRequest.
+    #' @keywords internal
+    register_exit_plan_mode_handler = function(handler) {
+      private$exit_plan_mode_handler <- handler
+    },
+
+    #' @description Handle an exit-plan-mode request from the CLI.
+    #' @param params Named list. The exit-plan-mode request data.
+    #' @return Named list with approval decision.
+    #' @keywords internal
+    handle_exit_plan_mode_request = function(params) {
+      if (is.null(private$exit_plan_mode_handler)) {
+        return(list(approved = TRUE))
+      }
+      request <- ExitPlanModeRequest$new(
+        summary = params$summary %||% "",
+        actions = params$actions %||% character(0),
+        recommended_action = params$recommendedAction %||% "",
+        plan_content = params$planContent
+      )
+      result <- private$exit_plan_mode_handler(request)
+      if (inherits(result, "ExitPlanModeResult")) {
+        return(result$to_list())
+      }
+      return(result)
+    },
+
+    #' @description Register a trace context provider.
+    #' @param provider Function or NULL. Called with no arguments, returns TraceContext or list.
+    #' @keywords internal
+    register_trace_context_provider = function(provider) {
+      private$trace_context_provider <- provider
+    },
+
     #' @description Register slash commands for this session.
     #' @param commands List of CommandDefinition objects or NULL.
     #' @keywords internal
@@ -336,6 +373,8 @@ CopilotSession <- R6::R6Class(
     tool_handlers = NULL,
     permission_handler = NULL,
     user_input_handler = NULL,
+    exit_plan_mode_handler = NULL,
+    trace_context_provider = NULL,
     hooks = NULL,
     elicitation_handler = NULL,
     commands = NULL,

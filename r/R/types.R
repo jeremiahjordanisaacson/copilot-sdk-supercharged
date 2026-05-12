@@ -516,6 +516,113 @@ model_info_from_list <- function(obj) {
 
 
 # ---------------------------------------------------------------------------
+# ExitPlanModeRequest / ExitPlanModeResult
+# ---------------------------------------------------------------------------
+
+#' ExitPlanModeRequest
+#'
+#' Request to exit plan mode from the agent.
+#'
+#' @field summary Character. Summary of the plan.
+#' @field plan_content Character or NULL. Full plan content.
+#' @field actions Character vector. Available actions.
+#' @field recommended_action Character. The recommended action.
+#' @export
+ExitPlanModeRequest <- R6::R6Class(
+  "ExitPlanModeRequest",
+  public = list(
+    summary = NULL,
+    plan_content = NULL,
+    actions = NULL,
+    recommended_action = NULL,
+
+    #' @description Create a new ExitPlanModeRequest.
+    #' @param summary Character. Summary of the plan.
+    #' @param actions Character vector. Available actions.
+    #' @param recommended_action Character. The recommended action.
+    #' @param plan_content Character or NULL. Full plan content.
+    initialize = function(summary, actions, recommended_action, plan_content = NULL) {
+      self$summary <- summary
+      self$plan_content <- plan_content
+      self$actions <- actions
+      self$recommended_action <- recommended_action
+    }
+  )
+)
+
+#' ExitPlanModeResult
+#'
+#' Response to an exit-plan-mode request.
+#'
+#' @field approved Logical. Whether the user approved exiting plan mode.
+#' @field selected_action Character or NULL. Selected action.
+#' @field feedback Character or NULL. User feedback.
+#' @export
+ExitPlanModeResult <- R6::R6Class(
+  "ExitPlanModeResult",
+  public = list(
+    approved = NULL,
+    selected_action = NULL,
+    feedback = NULL,
+
+    #' @description Create a new ExitPlanModeResult.
+    #' @param approved Logical. Whether the user approved exiting plan mode.
+    #' @param selected_action Character or NULL. Selected action.
+    #' @param feedback Character or NULL. User feedback.
+    initialize = function(approved, selected_action = NULL, feedback = NULL) {
+      self$approved <- approved
+      self$selected_action <- selected_action
+      self$feedback <- feedback
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list(approved = self$approved)
+      if (!is.null(self$selected_action)) result$selectedAction <- self$selected_action
+      if (!is.null(self$feedback)) result$feedback <- self$feedback
+      result
+    }
+  )
+)
+
+
+# ---------------------------------------------------------------------------
+# TraceContext
+# ---------------------------------------------------------------------------
+
+#' TraceContext
+#'
+#' W3C Trace Context propagation data for distributed tracing.
+#'
+#' @field traceparent Character or NULL.
+#' @field tracestate Character or NULL.
+#' @export
+TraceContext <- R6::R6Class(
+  "TraceContext",
+  public = list(
+    traceparent = NULL,
+    tracestate = NULL,
+
+    #' @description Create a new TraceContext.
+    #' @param traceparent Character or NULL.
+    #' @param tracestate Character or NULL.
+    initialize = function(traceparent = NULL, tracestate = NULL) {
+      self$traceparent <- traceparent
+      self$tracestate <- tracestate
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$traceparent)) result$traceparent <- self$traceparent
+      if (!is.null(self$tracestate)) result$tracestate <- self$tracestate
+      result
+    }
+  )
+)
+
+
+# ---------------------------------------------------------------------------
 # SessionMetadata
 # ---------------------------------------------------------------------------
 
