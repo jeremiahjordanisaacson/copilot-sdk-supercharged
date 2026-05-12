@@ -113,7 +113,9 @@ type CopilotClientOptions =
       /// Override the Copilot home directory.
       CopilotHome: string option
       /// Token for TCP connection authentication.
-      TcpConnectionToken: string option }
+      TcpConnectionToken: string option
+      /// Callback to get W3C Trace Context for distributed tracing.
+      OnGetTraceContext: TraceContextProvider option }
 
 module CopilotClientOptions =
     /// Default client options (stdio, auto-start, info log level).
@@ -133,7 +135,8 @@ module CopilotClientOptions =
           SessionIdleTimeoutSeconds = None
           SessionFs = None
           CopilotHome = None
-          TcpConnectionToken = None }
+          TcpConnectionToken = None
+          OnGetTraceContext = None }
 
 // ---------------------------------------------------------------------------
 // MCP server configuration
@@ -224,6 +227,51 @@ type ElicitationResult =
 type ElicitationHandler = ElicitationContext -> Async<ElicitationResult>
 
 // ---------------------------------------------------------------------------
+// Exit Plan Mode
+// ---------------------------------------------------------------------------
+
+/// Request to exit plan mode from the server.
+type ExitPlanModeRequest =
+    { /// The session ID.
+      SessionId: string
+      /// Summary of the plan or proposed next step.
+      [<JsonPropertyName("summary")>]
+      Summary: string
+      /// Full plan content, when available.
+      [<JsonPropertyName("planContent")>]
+      PlanContent: string option
+      /// Available actions the user can select.
+      [<JsonPropertyName("actions")>]
+      Actions: string list
+      /// The action recommended by the runtime.
+      [<JsonPropertyName("recommendedAction")>]
+      RecommendedAction: string }
+
+/// Response to an exit plan mode request.
+type ExitPlanModeResponse =
+    { /// Whether the user approved exiting plan mode.
+      Approved: bool
+      /// Selected action, if the user chose one.
+      SelectedAction: string option
+      /// Optional feedback provided by the user.
+      Feedback: string option }
+
+/// Handler for exit plan mode requests.
+type ExitPlanModeHandler = ExitPlanModeRequest -> Async<ExitPlanModeResponse>
+
+// ---------------------------------------------------------------------------
+// Trace Context
+// ---------------------------------------------------------------------------
+
+/// OpenTelemetry-compatible trace context for RPC payloads.
+type TraceContext =
+    { Traceparent: string option
+      Tracestate: string option }
+
+/// Provider that returns a trace context.
+type TraceContextProvider = unit -> TraceContext
+
+// ---------------------------------------------------------------------------
 // Session configuration
 // ---------------------------------------------------------------------------
 
@@ -261,6 +309,8 @@ type SessionConfig =
       ImageOptions: ImageOptions option
       /// Handler for elicitation requests from the server.
       OnElicitationRequest: ElicitationHandler option
+      /// Handler for exit plan mode requests from the server.
+      OnExitPlanMode: ExitPlanModeHandler option
       /// Per-session GitHub token.
       GitHubToken: string option
       /// Directories to search for instruction files.
@@ -293,6 +343,7 @@ module SessionConfig =
           ResponseFormat = None
           ImageOptions = None
           OnElicitationRequest = None
+          OnExitPlanMode = None
           GitHubToken = None
           InstructionDirectories = None }
 
@@ -308,6 +359,8 @@ type ResumeSessionConfig =
       OnPermissionRequest: PermissionRequestHandler
       /// Model override for the resumed session.
       Model: string option
+      /// Handler for exit plan mode requests from the server.
+      OnExitPlanMode: ExitPlanModeHandler option
       /// Directories to search for instruction files.
       InstructionDirectories: string list option }
 

@@ -217,13 +217,23 @@ type CopilotClient(options: CopilotClientOptions) =
             config.SkillDirectories
             |> Option.map (fun dirs -> {| skillDirectories = dirs |})
 
+        let traceCtx =
+            match options.OnGetTraceContext with
+            | Some provider ->
+                try provider ()
+                with _ -> { Traceparent = None; Tracestate = None }
+            | None -> { Traceparent = None; Tracestate = None }
+
         let request =
             {| model = config.Model
                systemMessage = config.SystemMessage
                streaming = config.Streaming
                agent = config.Agent
                sdkProtocolVersion = SdkProtocolVersion.getVersion ()
-               includeSubAgentStreamingEvents = config.IncludeSubAgentStreamingEvents |}
+               includeSubAgentStreamingEvents = config.IncludeSubAgentStreamingEvents
+               requestExitPlanMode = config.OnExitPlanMode.IsSome
+               traceparent = traceCtx.Traceparent |> Option.toObj
+               tracestate = traceCtx.Tracestate |> Option.toObj |}
 
         let! response = t.SendRequestAsync<{| sessionId: string; workspacePath: string option |}>("session.create", request)
 
@@ -233,16 +243,36 @@ type CopilotClient(options: CopilotClientOptions) =
                 t,
                 response.workspacePath)
         sessions.TryAdd(response.sessionId, session) |> ignore
+
+        match config.OnExitPlanMode with
+        | Some handler -> session.RegisterExitPlanModeHandler(handler)
+        | None -> ()
+
+        match options.OnGetTraceContext with
+        | Some provider -> session.RegisterTraceContextProvider(provider)
+        | None -> ()
+
         return session
     }
 
     /// Resume an existing session by ID.
     member _.ResumeSessionAsync(config: ResumeSessionConfig, ?cancellationToken: CancellationToken) : Async<CopilotSession> = async {
         let t = getTransport ()
+
+        let traceCtx =
+            match options.OnGetTraceContext with
+            | Some provider ->
+                try provider ()
+                with _ -> { Traceparent = None; Tracestate = None }
+            | None -> { Traceparent = None; Tracestate = None }
+
         let request =
             {| sessionId = config.SessionId
                model = config.Model
-               sdkProtocolVersion = SdkProtocolVersion.getVersion () |}
+               sdkProtocolVersion = SdkProtocolVersion.getVersion ()
+               requestExitPlanMode = config.OnExitPlanMode.IsSome
+               traceparent = traceCtx.Traceparent |> Option.toObj
+               tracestate = traceCtx.Tracestate |> Option.toObj |}
 
         let! response = t.SendRequestAsync<{| sessionId: string; workspacePath: string option |}>("session.resume", request)
 
@@ -252,6 +282,15 @@ type CopilotClient(options: CopilotClientOptions) =
                 t,
                 response.workspacePath)
         sessions.TryAdd(response.sessionId, session) |> ignore
+
+        match config.OnExitPlanMode with
+        | Some handler -> session.RegisterExitPlanModeHandler(handler)
+        | None -> ()
+
+        match options.OnGetTraceContext with
+        | Some provider -> session.RegisterTraceContextProvider(provider)
+        | None -> ()
+
         return session
     }
 

@@ -17,6 +17,8 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
     let handlersLock = obj()
     let toolHandlers = Dictionary<string, ToolHandler>()
     let mutable workspacePath = initialWorkspacePath
+    let mutable exitPlanModeHandler : ExitPlanModeHandler option = None
+    let mutable traceContextProvider : TraceContextProvider option = None
 
     let dispatchEvent (evt: SessionEvent) =
         let handlers =
@@ -93,6 +95,53 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
             | None -> ()
         )
 
+        // Register handler for exit plan mode requests from the server.
+        rpc.OnRequest("exitPlanMode.request", fun paramData ->
+            async {
+                match paramData with
+                | Some elem ->
+                    let summary =
+                        match elem.TryGetProperty("summary") with
+                        | true, s -> s.GetString()
+                        | _ -> ""
+                    let planContent =
+                        match elem.TryGetProperty("planContent") with
+                        | true, s -> Some (s.GetString())
+                        | _ -> None
+                    let actions =
+                        match elem.TryGetProperty("actions") with
+                        | true, a ->
+                            [ for i in 0 .. a.GetArrayLength() - 1 -> a.[i].GetString() ]
+                        | _ -> []
+                    let recommendedAction =
+                        match elem.TryGetProperty("recommendedAction") with
+                        | true, s -> s.GetString()
+                        | _ -> ""
+                    let request =
+                        { SessionId = sessionId
+                          Summary = summary
+                          PlanContent = planContent
+                          Actions = actions
+                          RecommendedAction = recommendedAction }
+                    let! result =
+                        match exitPlanModeHandler with
+                        | None ->
+                            async { return { Approved = true; SelectedAction = None; Feedback = None } }
+                        | Some handler ->
+                            async {
+                                try
+                                    return! handler request
+                                with _ ->
+                                    return { Approved = true; SelectedAction = None; Feedback = None }
+                            }
+                    return
+                        {| approved = result.Approved
+                           selectedAction = result.SelectedAction |> Option.toObj
+                           feedback = result.Feedback |> Option.toObj |} :> obj
+                | None ->
+                    return {| approved = true |} :> obj
+            })
+
     /// Alternate constructor without workspace path.
     internal new(sessionId: string, rpc: JsonRpcTransport) =
         CopilotSession(sessionId, rpc, None)
@@ -131,13 +180,29 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
     member this.RegisterTools(tools: RegisteredTool list) =
         tools |> List.iter this.RegisterTool
 
+    /// Register a handler for exit plan mode requests.
+    member _.RegisterExitPlanModeHandler(handler: ExitPlanModeHandler) =
+        exitPlanModeHandler <- Some handler
+
+    /// Register a trace context provider for distributed tracing.
+    member _.RegisterTraceContextProvider(provider: TraceContextProvider) =
+        traceContextProvider <- Some provider
+
     /// Send a message to the session. Returns the response message ID.
     member _.SendAsync(options: MessageOptions, ?cancellationToken: CancellationToken) : Async<string> = async {
-        let request =
-            {| sessionId = sessionId
-               prompt = options.Prompt
-               attachments = options.Attachments |> Option.defaultValue []
-               mode = options.Mode |}
+        let request = Dictionary<string, obj>()
+        request.["sessionId"] <- box sessionId
+        request.["prompt"] <- box options.Prompt
+        request.["attachments"] <- box (options.Attachments |> Option.defaultValue [])
+        options.Mode |> Option.iter (fun m -> request.["mode"] <- box m)
+        match traceContextProvider with
+        | Some provider ->
+            try
+                let ctx = provider ()
+                ctx.Traceparent |> Option.iter (fun tp -> request.["traceparent"] <- box tp)
+                ctx.Tracestate |> Option.iter (fun ts -> request.["tracestate"] <- box ts)
+            with _ -> ()
+        | None -> ()
         let! response = rpc.SendRequestAsync<{| messageId: string |}>("session.send", request)
         return response.messageId
     }
