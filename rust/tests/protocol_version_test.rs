@@ -1,3 +1,4 @@
+#![cfg(feature = "test-support")]
 #![allow(clippy::unwrap_used)]
 
 use github_copilot_sdk::Client;

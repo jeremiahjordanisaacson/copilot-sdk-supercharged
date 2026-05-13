@@ -39,7 +39,7 @@ Base.showerror(io::IO, e::ProcessExitedError) = print(io, "ProcessExitedError: $
 Async JSON-RPC 2.0 client that communicates over stdio using Content-Length framing.
 """
 mutable struct JsonRpcClient
-    process::Base.Process
+    process::Any
     input::IO
     output::IO
     pending::Dict{String, Channel{Any}}
@@ -50,7 +50,7 @@ mutable struct JsonRpcClient
     write_lock::ReentrantLock
     pending_lock::ReentrantLock
 
-    function JsonRpcClient(process::Base.Process, input::IO, output::IO)
+    function JsonRpcClient(process, input::IO, output::IO)
         new(
             process, input, output,
             Dict{String, Channel{Any}}(),
@@ -69,6 +69,13 @@ function start!(client::JsonRpcClient)
     return client
 end
 
+# Safe wrappers for process operations (support both Base.Process and _NullProcess)
+_check_process_running(p::Base.Process) = process_running(p)
+_check_process_running(p) = try p.running catch; false end
+
+_kill_process(p::Base.Process) = kill(p)
+_kill_process(p) = try p.running = false catch; end
+
 """Stop the client and close the process."""
 function stop!(client::JsonRpcClient)
     client.running = false
@@ -76,8 +83,8 @@ function stop!(client::JsonRpcClient)
         close(client.input)
     catch; end
     try
-        if process_running(client.process)
-            kill(client.process)
+        if _check_process_running(client.process)
+            _kill_process(client.process)
         end
     catch; end
     # Resolve all pending requests with an error
@@ -166,7 +173,7 @@ end
 
 function _read_loop(client::JsonRpcClient)
     try
-        while client.running && process_running(client.process)
+        while client.running && _check_process_running(client.process)
             msg = _read_message(client)
             msg === nothing && continue
             _dispatch(client, msg)

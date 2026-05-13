@@ -81,7 +81,7 @@ object TestHarness:
         "Make sure Node.js ≥ 18, npx, and tsx are on PATH and `npm ci` was run in test/harness."
       )
 
-    val ListeningPattern: Regex = """Listening:\s+(http://\S+)""".r
+    val ListeningPattern: Regex = """Listening:\s+(http://\S+).*""".r
     line match
       case ListeningPattern(url) =>
         _proxyUrl = Some(url)

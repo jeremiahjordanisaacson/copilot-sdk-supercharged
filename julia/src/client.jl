@@ -498,14 +498,10 @@ function _connect_tcp!(client::CopilotClient)
 end
 
 """Thin wrapper so the JsonRpcClient can treat a TCP socket like a process."""
-mutable struct _NullProcess <: Base.AbstractPipe
+mutable struct _NullProcess
     running::Bool
     _NullProcess() = new(true)
 end
-Base.process_running(p::_NullProcess) = p.running
-Base.kill(p::_NullProcess) = (p.running = false; nothing)
-Base.pipe_reader(p::_NullProcess) = devnull
-Base.pipe_writer(p::_NullProcess) = devnull
 
 function _parse_url(url::AbstractString)
     url = strip(url)

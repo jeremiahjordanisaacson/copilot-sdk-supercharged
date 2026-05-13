@@ -1,3 +1,4 @@
+#![cfg(feature = "test-support")]
 #![allow(clippy::unwrap_used)]
 
 use std::path::Path;
