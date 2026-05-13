@@ -70,7 +70,7 @@ class SessionE2ETest {
     }
 
     private fun getTestEnv(): Map<String, String> {
-        return mapOf(
+        val env = mutableMapOf(
             "COPILOT_API_URL" to proxyUrl,
             "COPILOT_HOME" to workDir,
             "XDG_CONFIG_HOME" to workDir,
@@ -78,6 +78,8 @@ class SessionE2ETest {
             "GH_TOKEN" to (System.getenv("GH_TOKEN") ?: "fake-test-token"),
             "GITHUB_TOKEN" to (System.getenv("GITHUB_TOKEN") ?: "fake-test-token"),
         )
+        env.putAll(harness.getProxyEnv())
+        return env
     }
 
     // -- Tests --
