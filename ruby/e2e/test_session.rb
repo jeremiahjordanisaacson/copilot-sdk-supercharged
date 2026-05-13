@@ -12,7 +12,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -31,7 +32,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -62,7 +64,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -81,7 +84,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -106,7 +110,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -119,7 +124,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -137,7 +143,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -160,7 +167,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -180,7 +188,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -207,7 +216,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -222,7 +232,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -237,7 +248,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -252,7 +264,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -273,7 +286,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -315,7 +329,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -335,7 +350,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -365,7 +381,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -387,7 +404,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -410,7 +428,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -433,7 +452,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 
@@ -454,7 +474,8 @@ class TestSession < E2E::TestCase
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
-      env: test_env
+      env: test_env,
+      github_token: github_token
     )
     client.start
 

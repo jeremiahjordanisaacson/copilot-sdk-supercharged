@@ -77,6 +77,10 @@ module E2E
       harness.test_env(work_dir, home_dir)
     end
 
+    def github_token
+      ENV["GH_TOKEN"] || ENV["GITHUB_TOKEN"] || "fake-test-token"
+    end
+
     def clean_dir(dir)
       return unless dir && Dir.exist?(dir)
 

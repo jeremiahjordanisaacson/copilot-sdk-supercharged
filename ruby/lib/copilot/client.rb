@@ -826,6 +826,9 @@ module Copilot
         payload[:provider] = config[:provider].respond_to?(:to_wire) ? config[:provider].to_wire : config[:provider]
       end
 
+      token = config[:auth_token] || config[:github_token] || config[:git_hub_token]
+      payload[:gitHubToken] = token if token
+
       payload[:mcpServers] = config[:mcp_servers] if config[:mcp_servers]
 
       if config[:custom_agents]
