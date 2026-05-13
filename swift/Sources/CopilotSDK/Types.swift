@@ -84,7 +84,7 @@ public enum ToolResult: Sendable {
 // MARK: - Tool Invocation
 
 /// Context passed to a tool handler when the tool is called.
-public struct ToolInvocation: Sendable {
+public struct ToolInvocation: @unchecked Sendable {
     public let sessionId: String
     public let toolCallId: String
     public let toolName: String
@@ -104,7 +104,7 @@ public typealias ToolHandler = @Sendable (Any?, ToolInvocation) async throws -> 
 // MARK: - Tool Definition
 
 /// Describes a tool that can be invoked by the Copilot agent.
-public struct Tool: Sendable {
+public struct Tool: @unchecked Sendable {
     public let name: String
     public let description: String?
     public let parameters: [String: Any]?
@@ -209,7 +209,7 @@ public struct SystemMessageConfig: Codable, Sendable {
 // MARK: - Permission Types
 
 /// A permission request from the server.
-public struct PermissionRequest: Sendable {
+public struct PermissionRequest: @unchecked Sendable {
     public let kind: String
     public let toolCallId: String?
     public let rawData: [String: Any]
@@ -1147,7 +1147,7 @@ public struct MessageOptions: Sendable {
 
 /// A session event received from the server.
 /// The `data` field is a dictionary because event types vary widely.
-public struct SessionEvent: Sendable {
+public struct SessionEvent: @unchecked Sendable {
     public let id: String
     public let timestamp: String
     public let parentId: String?

@@ -7,7 +7,7 @@ import Foundation
 // MARK: - JSON-RPC Error
 
 /// A JSON-RPC 2.0 error.
-public struct JsonRpcError: Error, Sendable {
+public struct JsonRpcError: Error, @unchecked Sendable {
     public let code: Int
     public let message: String
     public let data: [String: Any]?

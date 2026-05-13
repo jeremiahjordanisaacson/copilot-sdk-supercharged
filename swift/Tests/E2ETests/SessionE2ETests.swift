@@ -540,8 +540,9 @@ final class SessionE2ETests: XCTestCase {
                 name: "get_weather",
                 description: "Get current weather for a city",
                 parameters: ["city": "string"]
-            ) { params in
-                return ["temperature": "72F", "city": params["city"] ?? "unknown"]
+            ) { params, _ in
+                let dict = params as? [String: Any] ?? [:]
+                return ["temperature": "72F", "city": dict["city"] ?? "unknown"]
             }
 
             let session = try await client.createSession(
@@ -582,9 +583,9 @@ final class SessionE2ETests: XCTestCase {
                 SessionConfig(model: "gpt-4", streaming: true)
             )
 
-            var deltas: [Any] = []
+            let deltasCollector = DeltasCollector()
             await session.on("assistant.message_delta") { event in
-                deltas.append(event)
+                deltasCollector.append(event)
             }
 
             let response = try await session.sendAndWait(
@@ -614,9 +615,8 @@ final class SessionE2ETests: XCTestCase {
         try await client.start()
 
         do {
-            let systemMessage = SystemMessageConfig(
-                content: "You are a helpful coding assistant.",
-                mode: .append
+            let systemMessage = SystemMessageConfig.append(
+                content: "You are a helpful coding assistant."
             )
 
             let session = try await client.createSession(
@@ -683,14 +683,13 @@ final class SessionE2ETests: XCTestCase {
         try await client.start()
 
         do {
-            let mcpServer = MCPServerConfig(
-                name: "test-mcp",
+            let mcpServer = MCPServerConfig.local(
                 command: "echo",
                 args: ["hello"]
             )
 
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4", mcpServers: [mcpServer])
+                SessionConfig(model: "gpt-4", mcpServers: ["test-mcp": mcpServer])
             )
 
             let sessionId = await session.sessionId
@@ -719,11 +718,11 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4", skills: ["code-review", "testing"])
+                SessionConfig(model: "gpt-4", skillDirectories: ["/skills"])
             )
 
             let sessionId = await session.sessionId
-            XCTAssertFalse(sessionId.isEmpty, "Session with skills should be created")
+            XCTAssertFalse(sessionId.isEmpty, "Session with skill directories should be created")
 
             try await session.destroy()
         }
@@ -770,5 +769,23 @@ final class SessionE2ETests: XCTestCase {
         }
 
         try await client.stop()
+    }
+}
+
+/// Thread-safe collector for streaming delta events in tests.
+private final class DeltasCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [Any] = []
+
+    func append(_ item: Any) {
+        lock.lock()
+        defer { lock.unlock() }
+        items.append(item)
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return items.count
     }
 }
