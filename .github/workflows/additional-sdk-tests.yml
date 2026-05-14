@@ -558,6 +558,8 @@ jobs:
         with:
           perl-version: '5.38'
           install-modules-with: cpanm
+          enable-modules-cache: false
+          multi-thread: true
       - run: |
           cpanm --installdeps --notest .
           prove -l t/ e2e/
@@ -763,9 +765,9 @@ jobs:
           cd $GITHUB_WORKSPACE/test/harness && npm ci
         working-directory: .
       - run: |
-          wget -q https://github.com/nickelca/vlang-action/releases/download/v0.4.8/vlang-ubuntu-latest.tar.gz -O /tmp/v.tar.gz
-          tar xf /tmp/v.tar.gz -C /tmp
-          /tmp/v/v vlang/src/*.v || echo "::warning::V compiler check completed with warnings"
+          git clone --depth 1 https://github.com/vlang/v.git /tmp/vlang
+          cd /tmp/vlang && make -j$(nproc) 2>/dev/null
+          /tmp/vlang/v $GITHUB_WORKSPACE/vlang/src/*.v || echo "::warning::V compiler check completed with warnings"
 
   ada:
     name: "Test: Ada SDK"

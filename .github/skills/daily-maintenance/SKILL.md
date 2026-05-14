@@ -241,9 +241,38 @@ bash -n shell/lib/types.sh 2>/dev/null
 
 ---
 
-## Phase 5: Commit and Push
+## Phase 5: Commit, Push, and WATCH CI Until ALL Green
 
-### Step 5a: Commit
+### Step 5a: Pre-commit Checks
+Before committing, validate ALL workflow YAML files parse correctly:
+```bash
+# Validate every single workflow file — catch syntax errors BEFORE push
+for wf in .github/workflows/*.yml; do
+  node -e "const fs=require('fs'); const y=require('yaml'); try{y.parse(fs.readFileSync('$wf','utf8'));console.log('✅ '+require('path').basename('$wf'))}catch(e){console.log('❌ '+require('path').basename('$wf')+': '+e.message.split('\n')[0]);process.exit(1)}"
+done
+```
+If ANY workflow fails validation: **FIX IT BEFORE COMMITTING**. Common issues:
+- Empty `defaults:` key without `run:` subkey
+- Inline `run:` values with special YAML chars (`:`, `{`, `}`, `#`) — use `run: |` block scalar
+- Missing required keys under mappings
+
+### Step 5b: Dependabot / Security Alerts
+Fix ALL open security alerts before shipping:
+```bash
+# Check for open alerts
+gh api repos/jeremiahjordanisaacson/copilot-sdk-supercharged/dependabot/alerts \
+  --jq '.[] | select(.state == "open") | "\(.number) \(.severity) \(.dependency.package.name)"'
+
+# If any exist:
+cd test/harness && npm audit fix && npm ci --ignore-scripts  # Verify lock file valid
+cd nodejs && npm audit fix && npm ci --ignore-scripts  # Same for nodejs
+
+# Verify zero vulnerabilities
+cd test/harness && npm audit 2>&1 | tail -3  # Must show "found 0 vulnerabilities"
+```
+**Gate**: `npm audit` returns 0 vulnerabilities in ALL package directories. Zero open dependabot alerts.
+
+### Step 5c: Commit
 ```bash
 git add -A
 # Exclude build artifacts
@@ -252,66 +281,141 @@ git reset HEAD -- scripts/daily-maintenance/.maintenance.lock 2>/dev/null
 git reset HEAD -- scripts/daily-maintenance/maintenance.log* 2>/dev/null
 git reset HEAD -- scripts/daily-maintenance/stats-history.jsonl 2>/dev/null
 git reset HEAD -- scripts/daily-maintenance/.last-run.json 2>/dev/null
+git reset HEAD -- dotnet/src/build/ 2>/dev/null
 
 git commit -m "feat: upstream sync — <SUMMARY>
 
 - Merged N commits from github/copilot-sdk (M features, K dep bumps)
 - Ported new types to all 36 additional SDKs: <LIST TYPES>
 - <any fixes applied>
-- All 36 SDKs pass verify-sdk-coverage (13/13 RPC, 14/14 features)"
+- All 36 SDKs pass verify-sdk-coverage (13/13 RPC, 14/14 features)
+- 0 dependabot alerts, all workflow YAML validated"
 ```
 
-### Step 5b: Push
+### Step 5d: Push
 ```bash
 git push origin main
 ```
 
-### Step 5c: Monitor CI
+### Step 5e: CI Watch Loop — DO NOT STOP UNTIL ALL GREEN
+
+**This is the most critical step. You DO NOT declare victory until every single CI check is green.**
+
 ```bash
-# Wait ~30 seconds, then check
-sleep 30
-gh run list --limit 8 --json status,name,conclusion --jq '.[] | "\(.status) \(.conclusion // "—") \(.name)"'
+# 1. Wait for CI to start
+sleep 60
+
+# 2. Get HEAD commit
+COMMIT=$(git rev-parse HEAD)
+
+# 3. Poll until all jobs complete
+while true; do
+  RESULTS=$(gh run list --limit 20 --json name,status,conclusion,headSha \
+    --jq ".[] | select(.headSha == \"$COMMIT\") | \"\(.status) \(.conclusion // \"pending\") \(.name)\"")
+  
+  IN_PROGRESS=$(echo "$RESULTS" | grep -c "in_progress\|queued" || true)
+  FAILURES=$(echo "$RESULTS" | grep -c "failure" || true)
+  
+  echo "$RESULTS"
+  
+  if [ "$IN_PROGRESS" -eq 0 ]; then
+    break  # All done
+  fi
+  
+  echo "--- $IN_PROGRESS jobs still running, waiting 60s ---"
+  sleep 60
+done
 ```
 
-If CI fails:
-1. Read the failure logs: `gh run view <ID> --log-failed | tail -50`
-2. **Fix the issue** — do NOT ignore it
-3. Commit fix, push, re-check CI
-4. Repeat until green
+**If ANY job shows `failure`:**
+1. Read the logs: `gh run view <ID> --log-failed | tail -50`
+2. **Diagnose the root cause** — common failures:
+   - `npm ci` lock file mismatch → regenerate lock file with `npm install`
+   - TypeScript compilation → check `tsconfig.json`
+   - `cd: No such file or directory` → working-directory already set, remove redundant `cd`
+   - Workflow YAML parse error → use `|` block scalar for complex `run:` values
+3. **Fix the code**, commit, push
+4. **Go back to step 5e** — watch CI again
+5. **Repeat until ZERO failures**
 
-**Gate**: All CI jobs green (except known pre-existing failures like Python workflow file issue).
+**Also manually trigger workflows that didn't auto-trigger** (path filters may skip them):
+```bash
+# If Additional SDKs didn't run:
+gh workflow run "additional-sdk-tests.yml" --ref main
+# If Version Sync didn't run:
+gh workflow run "version-sync-check.yml" --ref main
+```
+
+**Gate**: EVERY CI job for HEAD commit shows `completed success` or `completed skipped`. ZERO `failure`. No exceptions. No "known failures". No "pre-existing issues". If it's red, fix it.
 
 ---
 
-## Phase 6: Release and Announce
+## Phase 6: Release — ONLY After ALL Green
 
-### Step 6a: Create GitHub Release
+**DO NOT create a release if ANY CI check is red. Period.**
+
+### Step 6a: Final Gate Check
+```bash
+COMMIT=$(git rev-parse HEAD)
+FAILURES=$(gh run list --limit 20 --json name,status,conclusion,headSha \
+  --jq "[.[] | select(.headSha == \"$COMMIT\" and .conclusion == \"failure\")] | length")
+
+if [ "$FAILURES" -gt 0 ]; then
+  echo "❌ CANNOT RELEASE — $FAILURES CI failures exist. Go fix them."
+  exit 1
+fi
+echo "✅ All CI green — clear to release"
+```
+
+### Step 6b: Bump Version
+Check the current version and determine the new one:
+```bash
+CURRENT=$(node -p "require('./nodejs/package.json').version")
+echo "Current version: $CURRENT"
+# Bump patch: 2.2.1 → 2.2.2
+NEW=$(node -p "const v='$CURRENT'.split('.'); v[2]=parseInt(v[2])+1; v.join('.')")
+echo "New version: $NEW"
+```
+
+Update version across all SDKs using the version sync script pattern, then commit:
+```bash
+# Update canonical source
+sed -i '' "s/version = \"$CURRENT\"/version = \"$NEW\"/" python/pyproject.toml
+# Run version sync to update all other SDKs
+# ... then verify
+bash scripts/verify-version-sync.sh
+```
+
+### Step 6c: Create GitHub Release
 ```bash
 VERSION=$(node -p "require('./nodejs/package.json').version")
 gh release create "v$VERSION" \
-    --title "v$VERSION — Upstream Sync + Type Expansion" \
+    --title "v$VERSION — Upstream Sync $(date +%Y-%m-%d)" \
     --generate-notes \
     --target main
 ```
 
-### Step 6b: Post Discussion Announcement
-Use the GraphQL mutation to post to the **Announcements** category (ID: `DIC_kwDOROUors4C2RPG`):
+### Step 6d: Post Discussion Announcement
 ```bash
-gh api graphql -f query='
+REPO_ID=$(gh api repos/jeremiahjordanisaacson/copilot-sdk-supercharged --jq '.node_id')
+VERSION=$(node -p "require('./nodejs/package.json').version")
+
+gh api graphql -f query="
 mutation {
   createDiscussion(input: {
-    repositoryId: "<REPO_ID>",
-    categoryId: "DIC_kwDOROUors4C2RPG",
-    title: "🚀 v'$VERSION' — Upstream Sync + New Types",
-    body: "## What'\''s New\n\n- Synced with github/copilot-sdk (N commits)\n- New types: <LIST>\n- All 40 SDKs updated and tested\n\n⭐ Star the repo if you find it useful!"
+    repositoryId: \"$REPO_ID\",
+    categoryId: \"DIC_kwDOROUors4C2RPG\",
+    title: \"🚀 v$VERSION — Upstream Sync + New Types\",
+    body: \"## What's New\n\n- Synced with github/copilot-sdk\n- All 40 SDKs updated and tested\n- 0 security vulnerabilities\n- All CI checks passing\n\n📊 Total downloads: 23,000+\n\n⭐ Star the repo if you find it useful!\"
   }) { discussion { url } }
-}'
+}"
 ```
 
-### Step 6c: Close Sync Issue
+### Step 6e: Close Sync Issue
 ```bash
-gh issue list --state open --json number,title --jq '.[] | select(.title | startswith("Upstream sync:")) | .number' | \
-    xargs -I{} gh issue close {} -c "✅ Synced in $(git rev-parse --short HEAD). All 36 SDKs ported and tested."
+gh issue list --state open --json number,title \
+  --jq '.[] | select(.title | startswith("Upstream sync:")) | .number' | \
+  xargs -I{} gh issue close {} -c "✅ Synced and released v$VERSION. All CI green. All 36 SDKs ported and tested."
 ```
 
 ---
@@ -358,10 +462,17 @@ gh issue create --title "🚨 Rollback: upstream sync reverted" --body "Rolled b
 
 | Symptom | Fix |
 |---|---|
-| Keychain popups | You ran npm test/ci. STOP. Kill the process. NEVER do this. |
+| Keychain popups | You ran npm test/ci in nodejs/. STOP. Kill the process. NEVER do this. |
 | `verify-sdk-coverage` fails | An SDK is missing RPC methods or features. Check the output, fix the gap. |
 | Merge conflicts in generated files | `git checkout --theirs <file>` then re-run codegen if needed |
 | Agent claims it updated files but didn't | Always verify with grep. Fix manually. |
 | CI fails on Windows only | Usually path separators or shell=True issues. Check the workflow. |
 | npm token expired | User must regenerate at npmjs.com/settings/jeremiahisaacson/tokens |
 | `git fetch upstream` fails | Check network. Verify remote: `git remote -v`. Re-add if needed: `git remote add upstream https://github.com/github/copilot-sdk.git` |
+| `npm ci` fails with "lock file out of sync" | `cd <dir> && npm install` to regenerate lock, then `npm ci` to verify. Commit the new lock file. |
+| Workflow YAML parse error (workflow file issue) | Use `run: \|` block scalar for complex commands. Validate: `node -e "require('yaml').parse(require('fs').readFileSync('file','utf8'))"` |
+| `cd: No such file or directory` in workflow | Check if `working-directory` is already set in job defaults — remove redundant `cd` |
+| Dependabot alerts | `cd <dir> && npm audit fix`. Check ALL package dirs. Must be 0 vulnerabilities. |
+| TypeScript build fails with TS5107/TS5110 | Update tsconfig: `module: "Node16"`, `moduleResolution: "node16"`, add `rootDir: "./src"` |
+| Additional SDKs didn't trigger | Path filters may skip — manually trigger: `gh workflow run "additional-sdk-tests.yml"` |
+| CI shows green locally but red on GitHub | Old run showing. Check the specific commit SHA matches HEAD. Old failures from previous commits don't count. |
