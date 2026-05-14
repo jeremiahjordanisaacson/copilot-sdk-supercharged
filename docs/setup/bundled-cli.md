@@ -35,7 +35,7 @@ flowchart TB
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient();
 
@@ -87,7 +87,9 @@ import (
 func main() {
 	ctx := context.Background()
 
-	client := copilot.NewClient(nil)
+	client := copilot.NewClient(&copilot.ClientOptions{
+		CLIPath: "/usr/local/bin/copilot",
+	})
 	if err := client.Start(ctx); err != nil {
 		log.Fatal(err)
 	}
@@ -103,7 +105,9 @@ func main() {
 <!-- /docs-validate: hidden -->
 
 ```go
-client := copilot.NewClient(nil)
+client := copilot.NewClient(&copilot.ClientOptions{
+    CLIPath: "/usr/local/bin/copilot",
+})
 if err := client.Start(ctx); err != nil {
     log.Fatal(err)
 }

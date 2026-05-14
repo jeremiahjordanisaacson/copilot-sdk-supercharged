@@ -32,7 +32,7 @@ sequenceDiagram
 ### Prerequisites
 
 ```bash
-pip install github-copilot-sdk azure-identity
+pip install copilot-sdk-supercharged azure-identity
 ```
 
 ### Basic usage
@@ -129,7 +129,7 @@ class ManagedIdentityCopilotAgent:
 <!-- docs-validate: skip -->
 ```typescript
 import { DefaultAzureCredential } from "@azure/identity";
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const credential = new DefaultAzureCredential();
 const tokenResponse = await credential.getToken(

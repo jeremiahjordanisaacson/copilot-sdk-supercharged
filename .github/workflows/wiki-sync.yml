@@ -25,6 +25,11 @@ jobs:
 
       - name: Update changelog in wiki
         run: |
+          if [[ "${GITHUB_REF_NAME}" != v* ]]; then
+            echo "Skipping changelog update for non-release ref ${GITHUB_REF_NAME}"
+            exit 0
+          fi
+
           VERSION=${GITHUB_REF_NAME#v}
           DATE=$(date +%Y-%m-%d)
 
@@ -39,6 +44,64 @@ jobs:
             echo "Added v${VERSION} to changelog"
           else
             echo "v${VERSION} already in changelog"
+          fi
+
+      - name: Sync canonical docs to wiki
+        run: |
+          copy_doc() {
+            local source="$1"
+            local target="$2"
+
+            if [ -f "$source" ]; then
+              cp "$source" "wiki/$target"
+              echo "Synced $target from $source"
+            else
+              echo "Missing source doc: $source" >&2
+              exit 1
+            fi
+          }
+
+          copy_doc docs/auth/byok.md BYOK.md
+          copy_doc docs/setup/azure-managed-identity.md Setup-Azure-Managed-Identity.md
+          copy_doc docs/setup/bundled-cli.md Setup-Bundled-CLI.md
+          copy_doc docs/setup/local-cli.md Setup-Local-CLI.md
+          copy_doc docs/troubleshooting/compatibility.md Compatibility.md
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              "../auth/byok.md": "BYOK",
+              "./index.md": "Authentication",
+              "../getting-started.md": "Getting-Started",
+              "./bundled-cli.md": "Setup-Bundled-CLI",
+              "./local-cli.md": "Setup-Local-CLI",
+              "./github-oauth.md": "Setup-GitHub-OAuth",
+              "./backend-services.md": "Setup-Backend-Services",
+              "../features/session-persistence.md": "Session-Persistence",
+              "../features/mcp.md": "MCP-Server-Integration",
+              "../hooks/index.md": "Hooks",
+              "../troubleshooting/debugging.md": "Debugging",
+          }
+
+          for name in [
+              "BYOK.md",
+              "Setup-Azure-Managed-Identity.md",
+              "Setup-Bundled-CLI.md",
+              "Setup-Local-CLI.md",
+              "Compatibility.md",
+          ]:
+              path = Path("wiki") / name
+              text = path.read_text()
+              for old, new in replacements.items():
+                  text = text.replace(f"]({old})", f"]({new})")
+              path.write_text(text)
+          PY
+
+          # Keep wiki-only pages aligned with current repo facts.
+          if [ -f wiki/Installation.md ]; then
+            sed -i 's/^## Base SDKs (bundled CLI)$/## Core SDKs/' wiki/Installation.md
+            sed -i 's/These SDKs bundle the Copilot CLI automatically:/Node.js, Python, and .NET bundle the Copilot CLI automatically. Go is a core SDK but requires a separately installed CLI or explicit `CLIPath`./' wiki/Installation.md
           fi
 
       - name: Update download counts

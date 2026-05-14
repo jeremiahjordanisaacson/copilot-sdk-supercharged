@@ -104,7 +104,9 @@ import (
 
 func main() {
     ctx := context.Background()
-    client := copilot.NewClient(nil)
+    client := copilot.NewClient(&copilot.ClientOptions{
+        CLIPath: "/usr/local/bin/copilot",
+    })
     if err := client.Start(ctx); err != nil {
         panic(err)
     }
@@ -348,8 +350,8 @@ When using BYOK, the CLI server may not know which models your provider supports
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
-import type { ModelInfo } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
+import type { ModelInfo } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient({
     onListModels: () => [
@@ -479,9 +481,9 @@ When using BYOK, be aware of these limitations:
 
 ### Identity limitations
 
-BYOK authentication uses **static credentials only**. 
+BYOK authentication uses credentials supplied by your application. 
 
-You must use an API key or static bearer token that you manage yourself.
+You must use an API key or bearer token that you manage yourself. The SDK sends the token you provide, but it does not acquire, rotate, or refresh credentials automatically. For Azure Entra ID / Managed Identity scenarios, obtain a fresh short-lived token in your application and pass it as `bearerToken` / `bearer_token` when creating a session.
 
 ### Feature limitations
 
@@ -496,7 +498,7 @@ Some Copilot features may behave differently with BYOK:
 
 | Provider | Limitations |
 |----------|-------------|
-| Azure AI Foundry | No Entra ID auth; must use API keys |
+| Azure AI Foundry | API keys are supported directly; Entra ID / Managed Identity requires the application-managed bearer token pattern |
 | Ollama | No API key; local only; model support varies |
 | [Microsoft Foundry Local](https://foundrylocal.ai) | Local only; model availability depends on device hardware; no API key required |
 | OpenAI | Subject to OpenAI rate limits and quotas |
@@ -526,7 +528,7 @@ For Azure OpenAI endpoints (`*.openai.azure.com`), use the correct type:
 
 <!-- docs-validate: hidden -->
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient();
 const session = await client.createSession({
@@ -557,7 +559,7 @@ However, if your Azure AI Foundry deployment provides an OpenAI-compatible endpo
 
 <!-- docs-validate: hidden -->
 ```typescript
-import { CopilotClient } from "@github/copilot-sdk";
+import { CopilotClient } from "copilot-sdk-supercharged";
 
 const client = new CopilotClient();
 const session = await client.createSession({
