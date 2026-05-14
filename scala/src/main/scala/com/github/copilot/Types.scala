@@ -1027,6 +1027,43 @@ object SkillsLoadDiagnostics:
   given Decoder[SkillsLoadDiagnostics] = deriveDecoder
 
 // ============================================================================
+// Remote Session Types
+// ============================================================================
+
+/** Per-session remote mode. "off" disables remote, "export" exports session events to Mission Control without enabling remote steering, "on" enables both export and remote steering. */
+enum RemoteSessionMode(val value: String):
+  case Export extends RemoteSessionMode("export")
+  case Off    extends RemoteSessionMode("off")
+  case On     extends RemoteSessionMode("on")
+
+object RemoteSessionMode:
+  given Encoder[RemoteSessionMode] = Encoder.encodeString.contramap(_.value)
+  given Decoder[RemoteSessionMode] = Decoder.decodeString.emap:
+    case "export" => Right(RemoteSessionMode.Export)
+    case "off"    => Right(RemoteSessionMode.Off)
+    case "on"     => Right(RemoteSessionMode.On)
+    case other    => Left(s"Unknown RemoteSessionMode: $other")
+
+/** Experimental: Request to enable remote mode for a session. */
+case class RemoteEnableRequest(
+  mode: Option[RemoteSessionMode] = None
+)
+
+object RemoteEnableRequest:
+  given Encoder[RemoteEnableRequest] = deriveEncoder
+  given Decoder[RemoteEnableRequest] = deriveDecoder
+
+/** Experimental: Result of enabling remote mode for a session. */
+case class RemoteEnableResult(
+  remoteSteerable: Boolean,
+  url: Option[String] = None
+)
+
+object RemoteEnableResult:
+  given Encoder[RemoteEnableResult] = deriveEncoder
+  given Decoder[RemoteEnableResult] = deriveDecoder
+
+// ============================================================================
 // Session Metadata
 // ============================================================================
 

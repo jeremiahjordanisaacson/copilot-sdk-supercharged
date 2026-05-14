@@ -23,6 +23,11 @@ use constant MODEL_PICKER_PRICE_CATEGORY_LOW       => 'low';
 use constant MODEL_PICKER_PRICE_CATEGORY_MEDIUM    => 'medium';
 use constant MODEL_PICKER_PRICE_CATEGORY_VERY_HIGH => 'very_high';
 
+# Remote session mode constants
+use constant REMOTE_SESSION_MODE_EXPORT => 'export';
+use constant REMOTE_SESSION_MODE_OFF    => 'off';
+use constant REMOTE_SESSION_MODE_ON     => 'on';
+
 =head1 NAME
 
 GitHub::Copilot::Types - Type definitions for the GitHub Copilot Perl SDK
@@ -1091,6 +1096,52 @@ sub TO_JSON {
         errors   => $self->errors,
         warnings => $self->warnings,
     };
+}
+
+# ============================================================================
+# Experimental: RemoteEnableRequest
+# ============================================================================
+package GitHub::Copilot::Types::RemoteEnableRequest;
+use Moo;
+
+has mode => (is => 'ro');
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        mode => $hr->{mode},
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{mode} = $self->mode if defined $self->mode;
+    return \%h;
+}
+
+# ============================================================================
+# Experimental: RemoteEnableResult
+# ============================================================================
+package GitHub::Copilot::Types::RemoteEnableResult;
+use Moo;
+
+has remote_steerable => (is => 'ro', required => 1);
+has url              => (is => 'ro');
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        remote_steerable => $hr->{remoteSteerable},
+        url              => $hr->{url},
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (remoteSteerable => $self->remote_steerable ? \1 : \0);
+    $h{url} = $self->url if defined $self->url;
+    return \%h;
 }
 
 1;

@@ -924,6 +924,41 @@ Namespace GitHub.Copilot.SDK
     End Class
 
     ''' <summary>
+    ''' Experimental
+    ''' Mode for remote session control.
+    ''' </summary>
+    Public Enum RemoteSessionMode
+        Export
+        Off
+        [On]
+    End Enum
+
+    ''' <summary>
+    ''' Experimental
+    ''' Request to enable or configure remote session mode.
+    ''' </summary>
+    Public Class RemoteEnableRequest
+
+        <JsonPropertyName("mode")>
+        Public Property Mode As RemoteSessionMode?
+
+    End Class
+
+    ''' <summary>
+    ''' Experimental
+    ''' Result of enabling remote session mode.
+    ''' </summary>
+    Public Class RemoteEnableResult
+
+        <JsonPropertyName("remoteSteerable")>
+        Public Property RemoteSteerable As Boolean
+
+        <JsonPropertyName("url")>
+        Public Property Url As String
+
+    End Class
+
+    ''' <summary>
     ''' Session capabilities reported by the host.
     ''' </summary>
     Public Class SessionCapabilities

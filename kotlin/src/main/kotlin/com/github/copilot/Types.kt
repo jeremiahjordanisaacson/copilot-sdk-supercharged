@@ -849,6 +849,42 @@ data class SkillsLoadDiagnostics(
 )
 
 // ============================================================================
+// Remote Session Types
+// ============================================================================
+
+/**
+ * Per-session remote mode. "off" disables remote, "export" exports session
+ * events to Mission Control without enabling remote steering, "on" enables
+ * both export and remote steering.
+ */
+@Serializable
+enum class RemoteSessionMode {
+    @SerialName("export") EXPORT,
+    @SerialName("off") OFF,
+    @SerialName("on") ON
+}
+
+/**
+ * Experimental: Request to enable remote mode for a session.
+ */
+@Serializable
+data class RemoteEnableRequest(
+    /** Per-session remote mode. */
+    val mode: RemoteSessionMode? = null
+)
+
+/**
+ * Experimental: Result of enabling remote mode for a session.
+ */
+@Serializable
+data class RemoteEnableResult(
+    /** Whether remote steering is enabled. */
+    val remoteSteerable: Boolean,
+    /** Mission Control frontend URL for this session. */
+    val url: String? = null
+)
+
+// ============================================================================
 // Session Metadata
 // ============================================================================
 

@@ -646,6 +646,45 @@ type SkillsLoadDiagnostics =
       Warnings: string list }
 
 // ---------------------------------------------------------------------------
+// Remote session types (Experimental)
+// ---------------------------------------------------------------------------
+
+/// Experimental
+/// Mode for remote sessions.
+type RemoteSessionMode =
+    | Export
+    | Off
+    | On
+
+module RemoteSessionMode =
+    let toString =
+        function
+        | Export -> "export"
+        | Off -> "off"
+        | On -> "on"
+
+    let fromString =
+        function
+        | "export" -> Export
+        | "off" -> Off
+        | "on" -> On
+        | _ -> Off
+
+/// Experimental
+/// Request to enable remote mode.
+type RemoteEnableRequest =
+    { [<JsonPropertyName("mode")>]
+      Mode: string option }
+
+/// Experimental
+/// Result of enabling remote mode.
+type RemoteEnableResult =
+    { [<JsonPropertyName("remoteSteerable")>]
+      RemoteSteerable: bool
+      [<JsonPropertyName("url")>]
+      Url: string option }
+
+// ---------------------------------------------------------------------------
 // Model info
 // ---------------------------------------------------------------------------
 

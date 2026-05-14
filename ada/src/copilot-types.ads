@@ -405,6 +405,25 @@ package Copilot.Types is
    end record;
 
    --  -----------------------------------------------------------------------
+   --  Remote session types (Experimental)
+   --  -----------------------------------------------------------------------
+
+   --  Experimental
+   type Remote_Session_Mode is (Export, Off, On);
+
+   --  Experimental
+   type Remote_Enable_Request is record
+      Mode     : Remote_Session_Mode := Off;
+      Mode_Set : Boolean := False;
+   end record;
+
+   --  Experimental
+   type Remote_Enable_Result is record
+      Remote_Steerable : Boolean := False;
+      Url              : UString := Null_UString;
+   end record;
+
+   --  -----------------------------------------------------------------------
    --  Exceptions
    --  -----------------------------------------------------------------------
 

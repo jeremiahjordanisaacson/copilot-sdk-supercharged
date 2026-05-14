@@ -135,6 +135,11 @@ module Copilot.Types
     -- * Diagnostics
   , SkillsLoadDiagnostics (..)
 
+    -- * Remote session types (Experimental)
+  , RemoteSessionMode (..)
+  , RemoteEnableRequest (..)
+  , RemoteEnableResult (..)
+
     -- * Session filesystem
   , SessionFsConfig (..)
   , SessionFsFileInfo (..)
@@ -1655,6 +1660,58 @@ instance ToJSON SkillsLoadDiagnostics where
   toJSON SkillsLoadDiagnostics{..} = object
     [ "errors"   .= sldErrors
     , "warnings" .= sldWarnings
+    ]
+
+-- Experimental
+-- | Mode for remote sessions.
+data RemoteSessionMode = RemoteExport | RemoteOff | RemoteOn
+  deriving (Show, Eq, Generic)
+
+instance ToJSON RemoteSessionMode where
+  toJSON RemoteExport = String "export"
+  toJSON RemoteOff    = String "off"
+  toJSON RemoteOn     = String "on"
+
+instance FromJSON RemoteSessionMode where
+  parseJSON = withText "RemoteSessionMode" $ \case
+    "export" -> pure RemoteExport
+    "off"    -> pure RemoteOff
+    "on"     -> pure RemoteOn
+    other    -> fail $ "Unknown RemoteSessionMode: " ++ show other
+
+-- Experimental
+-- | Request to enable remote mode.
+data RemoteEnableRequest = RemoteEnableRequest
+  { rerMode :: !(Maybe RemoteSessionMode)
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON RemoteEnableRequest where
+  parseJSON = withObject "RemoteEnableRequest" $ \o ->
+    RemoteEnableRequest
+      <$> o .:? "mode"
+
+instance ToJSON RemoteEnableRequest where
+  toJSON RemoteEnableRequest{..} = object
+    [ "mode" .= rerMode
+    ]
+
+-- Experimental
+-- | Result of enabling remote mode.
+data RemoteEnableResult = RemoteEnableResult
+  { rerRemoteSteerable :: !Bool
+  , rerUrl             :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON RemoteEnableResult where
+  parseJSON = withObject "RemoteEnableResult" $ \o ->
+    RemoteEnableResult
+      <$> o .:  "remoteSteerable"
+      <*> o .:? "url"
+
+instance ToJSON RemoteEnableResult where
+  toJSON RemoteEnableResult{..} = object
+    [ "remoteSteerable" .= rerRemoteSteerable
+    , "url"             .= rerUrl
     ]
 
 -- | Model billing information.

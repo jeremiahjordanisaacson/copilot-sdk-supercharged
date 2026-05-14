@@ -72,6 +72,11 @@ COPILOT_TRACE_CONTEXT_PROVIDER=""
 # When set to "true", adds "--remote" flag to CLI args
 COPILOT_REMOTE=""
 
+# --- Remote Session Mode Constants (Experimental) ---
+COPILOT_REMOTE_SESSION_MODE_EXPORT="export"
+COPILOT_REMOTE_SESSION_MODE_OFF="off"
+COPILOT_REMOTE_SESSION_MODE_ON="on"
+
 # --- Session Telemetry ---
 # When set to "true", enables session telemetry in create/resume payload
 COPILOT_ENABLE_SESSION_TELEMETRY=""

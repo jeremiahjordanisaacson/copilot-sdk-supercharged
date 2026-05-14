@@ -2041,6 +2041,61 @@ class SkillsLoadDiagnostics
 }
 
 // ============================================================================
+// Remote Session Types
+// ============================================================================
+
+/**
+ * Per-session remote mode. "off" disables remote, "export" exports session
+ * events to Mission Control without enabling remote steering, "on" enables
+ * both export and remote steering.
+ */
+enum RemoteSessionMode: string
+{
+    case Export = 'export';
+    case Off = 'off';
+    case On = 'on';
+}
+
+/**
+ * Experimental: Request to enable remote mode for a session.
+ */
+class RemoteEnableRequest
+{
+    public function __construct(
+        /** Per-session remote mode. */
+        public readonly ?string $mode = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            mode: $data['mode'] ?? null,
+        );
+    }
+}
+
+/**
+ * Experimental: Result of enabling remote mode for a session.
+ */
+class RemoteEnableResult
+{
+    public function __construct(
+        /** Whether remote steering is enabled. */
+        public readonly bool $remoteSteerable,
+        /** Mission Control frontend URL for this session. */
+        public readonly ?string $url = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            remoteSteerable: $data['remoteSteerable'] ?? false,
+            url: $data['url'] ?? null,
+        );
+    }
+}
+
+// ============================================================================
 // Session Filesystem Types
 // ============================================================================
 

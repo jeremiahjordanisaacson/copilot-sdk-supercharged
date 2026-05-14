@@ -146,6 +146,17 @@
 }).
 
 %% Experimental
+-record(remote_enable_request, {
+    mode :: binary() | undefined
+}).
+
+%% Experimental
+-record(remote_enable_result, {
+    remote_steerable :: boolean(),
+    url              :: binary() | undefined
+}).
+
+%% Experimental
 -record(skills_load_diagnostics, {
     errors   :: [binary()],
     warnings :: [binary()]
@@ -222,6 +233,8 @@
     commands_list_request/0,
     model_billing_token_prices/0,
     model_billing/0,
+    remote_enable_request/0,
+    remote_enable_result/0,
     skills_load_diagnostics/0
 ]).
 
@@ -246,6 +259,9 @@
 -type commands_list_request()     :: #commands_list_request{}.
 -type model_billing_token_prices() :: #model_billing_token_prices{}.
 -type model_billing()             :: #model_billing{}.
+-type remote_session_mode()       :: binary().  %% "export" | "off" | "on"
+-type remote_enable_request()    :: #remote_enable_request{}.
+-type remote_enable_result()     :: #remote_enable_result{}.
 -type skills_load_diagnostics()   :: #skills_load_diagnostics{}.
 -type connection_state()         :: disconnected | connecting | connected | error.
 -type session_event_type()       :: binary().

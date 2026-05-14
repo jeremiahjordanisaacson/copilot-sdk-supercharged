@@ -247,6 +247,24 @@ type
     Warnings: TArray<string>;
   end;
 
+  // Experimental
+  // Mode for remote session control
+  TRemoteSessionMode = (rsmExport, rsmOff, rsmOn);
+
+  // Experimental
+  // Request to enable or configure remote session mode
+  TRemoteEnableRequest = record
+    Mode: TRemoteSessionMode;
+    HasMode: Boolean;
+  end;
+
+  // Experimental
+  // Result of enabling remote session mode
+  TRemoteEnableResult = record
+    RemoteSteerable: Boolean;
+    Url: string;
+  end;
+
   // Image options
   TImageOptions = record
     Size: string;

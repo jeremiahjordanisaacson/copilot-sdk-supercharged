@@ -1145,6 +1145,49 @@ defmodule Copilot.Types do
     end
   end
 
+  # Experimental
+  defmodule RemoteSessionMode do
+    @moduledoc "Mode for remote sessions."
+    @type t :: :export | :off | :on
+
+    def from_string("export"), do: :export
+    def from_string("off"), do: :off
+    def from_string("on"), do: :on
+    def from_string(nil), do: nil
+  end
+
+  # Experimental
+  defmodule RemoteEnableRequest do
+    @moduledoc "Request to enable remote mode."
+    @type t :: %__MODULE__{
+            mode: RemoteSessionMode.t() | nil
+          }
+    defstruct [:mode]
+
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        mode: RemoteSessionMode.from_string(m["mode"])
+      }
+    end
+  end
+
+  # Experimental
+  defmodule RemoteEnableResult do
+    @moduledoc "Result of enabling remote mode."
+    @type t :: %__MODULE__{
+            remote_steerable: boolean(),
+            url: String.t() | nil
+          }
+    defstruct [:remote_steerable, :url]
+
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        remote_steerable: m["remoteSteerable"],
+        url: m["url"]
+      }
+    end
+  end
+
   defmodule ModelBilling do
     @moduledoc "Model billing information."
     @type t :: %__MODULE__{

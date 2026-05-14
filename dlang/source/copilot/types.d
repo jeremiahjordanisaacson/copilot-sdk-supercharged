@@ -644,6 +644,30 @@ struct SkillsLoadDiagnostics
     string[] warnings;
 }
 
+/// Experimental
+/// Mode for remote session control.
+enum RemoteSessionMode : string
+{
+    export_ = "export",
+    off     = "off",
+    on      = "on",
+}
+
+/// Experimental
+/// Request to enable or configure remote session mode.
+struct RemoteEnableRequest
+{
+    Nullable!RemoteSessionMode mode;
+}
+
+/// Experimental
+/// Result of enabling remote session mode.
+struct RemoteEnableResult
+{
+    bool remoteSteerable;
+    Nullable!string url;
+}
+
 // ---------------------------------------------------------------------------
 // Session events
 // ---------------------------------------------------------------------------

@@ -208,39 +208,6 @@
 
 @end
 
-#pragma mark - CPRemoteEnableRequest (Experimental)
-
-@implementation CPRemoteEnableRequest
-
-- (NSDictionary<NSString *, id> *)toDictionary {
-    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
-    if (self.hasMode) {
-        switch (self.mode) {
-            case CPRemoteSessionModeExport: dict[@"mode"] = @"export"; break;
-            case CPRemoteSessionModeOff:    dict[@"mode"] = @"off"; break;
-            case CPRemoteSessionModeOn:     dict[@"mode"] = @"on"; break;
-        }
-    }
-    return [dict copy];
-}
-
-@end
-
-#pragma mark - CPRemoteEnableResult (Experimental)
-
-@implementation CPRemoteEnableResult
-
-- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
-    self = [super init];
-    if (self) {
-        _remoteSteerable = [dict[@"remoteSteerable"] boolValue];
-        _url = dict[@"url"];
-    }
-    return self;
-}
-
-@end
-
 #pragma mark - CPSessionEvent
 
 @implementation CPSessionEvent

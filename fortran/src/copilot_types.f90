@@ -27,6 +27,9 @@ module copilot_types
   public :: commands_invoke_request, commands_list_request
   public :: model_billing_token_prices, model_billing
   public :: skills_load_diagnostics
+  public :: REMOTE_SESSION_MODE_EXPORT, REMOTE_SESSION_MODE_OFF
+  public :: REMOTE_SESSION_MODE_ON
+  public :: remote_enable_request, remote_enable_result
 
   ! --------------------------------------------------------------------------
   ! Connection state enum
@@ -309,6 +312,25 @@ module copilot_types
     character(len=:), allocatable :: errors_json
     character(len=:), allocatable :: warnings_json
   end type skills_load_diagnostics
+
+  ! --------------------------------------------------------------------------
+  ! Remote session types (Experimental)
+  ! --------------------------------------------------------------------------
+  integer, parameter :: REMOTE_SESSION_MODE_EXPORT = 0
+  integer, parameter :: REMOTE_SESSION_MODE_OFF    = 1
+  integer, parameter :: REMOTE_SESSION_MODE_ON     = 2
+
+  ! Experimental
+  type :: remote_enable_request
+    integer :: mode = -1   ! -1 means unset; use REMOTE_SESSION_MODE_* constants
+    logical :: mode_set = .false.
+  end type remote_enable_request
+
+  ! Experimental
+  type :: remote_enable_result
+    logical :: remote_steerable = .false.
+    character(len=:), allocatable :: url
+  end type remote_enable_result
 
   ! --------------------------------------------------------------------------
   ! Abstract interfaces for callbacks

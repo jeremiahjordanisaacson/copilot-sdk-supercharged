@@ -670,6 +670,34 @@ module Copilot
     end
   end
 
+  # Per-session remote mode.
+  # "off" disables remote, "export" exports session events to Mission Control
+  # without enabling remote steering, "on" enables both export and remote steering.
+  module RemoteSessionMode
+    EXPORT = "export"
+    OFF    = "off"
+    ON     = "on"
+  end
+
+  # Experimental
+  # Request to enable remote mode for a session.
+  RemoteEnableRequest = Struct.new(:mode, keyword_init: true) do
+    def self.from_hash(h)
+      new(mode: h["mode"])
+    end
+  end
+
+  # Experimental
+  # Result of enabling remote mode for a session.
+  RemoteEnableResult = Struct.new(:remote_steerable, :url, keyword_init: true) do
+    def self.from_hash(h)
+      new(
+        remote_steerable: h["remoteSteerable"],
+        url: h["url"]
+      )
+    end
+  end
+
   # Foreground session info (TUI+server mode).
   ForegroundSessionInfo = Struct.new(:session_id, :workspace_path, keyword_init: true)
 

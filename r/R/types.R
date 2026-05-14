@@ -1959,6 +1959,74 @@ SkillsLoadDiagnostics <- R6::R6Class(
   )
 )
 
+# ---------------------------------------------------------------------------
+# Remote Session Types
+# ---------------------------------------------------------------------------
+
+#' Valid remote session mode values
+#'
+#' Per-session remote mode. "off" disables remote, "export" exports session
+#' events to Mission Control without enabling remote steering, "on" enables
+#' both export and remote steering.
+#' @export
+REMOTE_SESSION_MODES <- c("export", "off", "on")
+
+#' RemoteEnableRequest (Experimental)
+#'
+#' Request to enable remote mode for a session.
+#'
+#' @field mode Character or NULL. Per-session remote mode.
+#' @export
+RemoteEnableRequest <- R6::R6Class(
+  "RemoteEnableRequest",
+  public = list(
+    mode = NULL,
+
+    #' @description Create a new RemoteEnableRequest.
+    #' @param mode Character or NULL. Per-session remote mode.
+    initialize = function(mode = NULL) {
+      self$mode <- mode
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$mode)) result$mode <- self$mode
+      result
+    }
+  )
+)
+
+#' RemoteEnableResult (Experimental)
+#'
+#' Result of enabling remote mode for a session.
+#'
+#' @field remote_steerable Logical. Whether remote steering is enabled.
+#' @field url Character or NULL. Mission Control frontend URL for this session.
+#' @export
+RemoteEnableResult <- R6::R6Class(
+  "RemoteEnableResult",
+  public = list(
+    remote_steerable = NULL,
+    url = NULL,
+
+    #' @description Create a new RemoteEnableResult.
+    #' @param remote_steerable Logical. Whether remote steering is enabled.
+    #' @param url Character or NULL. Mission Control frontend URL.
+    initialize = function(remote_steerable, url = NULL) {
+      self$remote_steerable <- remote_steerable
+      self$url <- url
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list(remoteSteerable = self$remote_steerable)
+      if (!is.null(self$url)) result$url <- self$url
+      result
+    }
+  )
+)
+
 
 # ---------------------------------------------------------------------------
 # NULL-coalescing operator

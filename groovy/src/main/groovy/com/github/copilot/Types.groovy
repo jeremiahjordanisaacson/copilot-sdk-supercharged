@@ -417,4 +417,22 @@ final class Types {
         List<String> errors
         List<String> warnings
     }
+
+    /** Per-session remote mode. "off" disables remote, "export" exports session events to Mission Control without enabling remote steering, "on" enables both export and remote steering. */
+    enum RemoteSessionMode {
+        EXPORT, OFF, ON
+    }
+
+    /** Experimental: Request to enable remote mode for a session. */
+    @ToString(includeNames = true)
+    static class RemoteEnableRequest {
+        String mode
+    }
+
+    /** Experimental: Result of enabling remote mode for a session. */
+    @ToString(includeNames = true)
+    static class RemoteEnableResult {
+        boolean remoteSteerable
+        String url
+    }
 }

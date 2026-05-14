@@ -363,6 +363,36 @@
            05 WS-SDIAG-WARNINGS      PIC X(2048) VALUE SPACES.
 
       *----------------------------------------------------------------*
+      * Experimental                                                    *
+      * Remote session mode enum                                        *
+      * Values: "export", "off", "on"                                   *
+      *----------------------------------------------------------------*
+       01  WS-REMOTE-SESSION-MODE     PIC X(16)  VALUE SPACES.
+           88 REMOTE-MODE-EXPORT                  VALUE "export".
+           88 REMOTE-MODE-OFF                     VALUE "off".
+           88 REMOTE-MODE-ON                      VALUE "on".
+
+      *----------------------------------------------------------------*
+      * Experimental                                                    *
+      * Remote enable request                                           *
+      *----------------------------------------------------------------*
+       01  WS-REMOTE-ENABLE-REQ.
+           05 WS-RER-MODE             PIC X(16)  VALUE SPACES.
+           05 WS-RER-MODE-SET         PIC 9      VALUE 0.
+               88 RER-MODE-SET-YES               VALUE 1.
+               88 RER-MODE-SET-NO                VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Experimental                                                    *
+      * Remote enable result                                            *
+      *----------------------------------------------------------------*
+       01  WS-REMOTE-ENABLE-RESULT.
+           05 WS-RERES-STEERABLE     PIC 9      VALUE 0.
+               88 RERES-STEERABLE-YES            VALUE 1.
+               88 RERES-STEERABLE-NO             VALUE 0.
+           05 WS-RERES-URL            PIC X(256) VALUE SPACES.
+
+      *----------------------------------------------------------------*
       * Model capabilities override                                    *
       *----------------------------------------------------------------*
        01  WS-MODEL-CAP-OVERRIDE.

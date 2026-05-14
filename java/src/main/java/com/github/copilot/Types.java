@@ -35,6 +35,13 @@ public final class Types {
         @JsonProperty("xhigh") XHIGH
     }
 
+    /** Per-session remote mode. "off" disables remote, "export" exports session events to Mission Control without enabling remote steering, "on" enables both export and remote steering. */
+    public enum RemoteSessionMode {
+        @JsonProperty("export") EXPORT,
+        @JsonProperty("off") OFF,
+        @JsonProperty("on") ON
+    }
+
     /** Structured result from a tool execution. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ToolResultObject {
@@ -589,5 +596,21 @@ public final class Types {
     public static class SkillsLoadDiagnostics {
         @JsonProperty("errors") public List<String> errors;
         @JsonProperty("warnings") public List<String> warnings;
+    }
+
+    /** Experimental: Request to enable remote mode for a session. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class RemoteEnableRequest {
+        /** Per-session remote mode. */
+        @JsonProperty("mode") public String mode;
+    }
+
+    /** Experimental: Result of enabling remote mode for a session. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class RemoteEnableResult {
+        /** Whether remote steering is enabled. */
+        @JsonProperty("remoteSteerable") public boolean remoteSteerable;
+        /** Mission Control frontend URL for this session. */
+        @JsonProperty("url") public String url;
     }
 }

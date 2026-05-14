@@ -912,4 +912,38 @@ function M.SkillsLoadDiagnostics(fields)
     }
 end
 
+-- ---------------------------------------------------------------------------
+-- Remote session mode constants
+-- ---------------------------------------------------------------------------
+
+--- Per-session remote mode. "off" disables remote, "export" exports session
+--- events to Mission Control without enabling remote steering, "on" enables
+--- both export and remote steering.
+M.RemoteSessionMode = {
+    EXPORT = "export",
+    OFF    = "off",
+    ON     = "on",
+}
+
+--- Experimental: Create a RemoteEnableRequest table.
+-- @param fields table with keys: mode
+-- @return table RemoteEnableRequest
+function M.RemoteEnableRequest(fields)
+    fields = fields or {}
+    return {
+        mode = fields.mode,  -- RemoteSessionMode or nil
+    }
+end
+
+--- Experimental: Create a RemoteEnableResult table.
+-- @param fields table with keys: remoteSteerable, url
+-- @return table RemoteEnableResult
+function M.RemoteEnableResult(fields)
+    fields = fields or {}
+    return {
+        remoteSteerable = fields.remoteSteerable or false,
+        url             = fields.url,  -- string or nil
+    }
+end
+
 return M

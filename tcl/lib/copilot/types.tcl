@@ -18,7 +18,8 @@ namespace eval ::copilot::types {
                      make_commands_invoke_request make_commands_list_request \
                      make_model_billing_token_prices make_skills_load_diagnostics \
                      slash_command_input_completions slash_command_kinds \
-                     model_picker_price_categories
+                     model_picker_price_categories remote_session_modes \
+                     make_remote_enable_request make_remote_enable_result
 }
 
 # -- Client options -----------------------------------------------------------
@@ -380,6 +381,38 @@ proc ::copilot::types::make_trace_context {args} {
         dict set ctx $key $value
     }
     return $ctx
+}
+
+# -- Remote session mode constants (Experimental) ----------------------------
+
+proc ::copilot::types::remote_session_modes {} {
+    return {export off on}
+}
+
+# -- Experimental: Remote enable request -------------------------------------
+
+proc ::copilot::types::make_remote_enable_request {args} {
+    set defaults [dict create \
+        mode "" \
+    ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown remote_enable_request key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+# -- Experimental: Remote enable result --------------------------------------
+
+proc ::copilot::types::make_remote_enable_result {remoteSteerable {url ""}} {
+    set r [dict create remoteSteerable $remoteSteerable]
+    if {$url ne ""} {
+        dict set r url $url
+    }
+    return $r
 }
 
 # -- Experimental: Skills load diagnostics ------------------------------------

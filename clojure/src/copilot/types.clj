@@ -617,6 +617,29 @@
   [errors warnings]
   {:errors errors :warnings warnings})
 
+;; Experimental
+(def remote-session-modes
+  "Valid remote session mode values."
+  #{"export" "off" "on"})
+
+;; Experimental
+(defn remote-enable-request
+  "Construct a remote enable request map.
+
+  Optional: :mode (one of \"export\" \"off\" \"on\")"
+  [& {:keys [mode]}]
+  (cond-> {}
+    mode (assoc :mode mode)))
+
+;; Experimental
+(defn remote-enable-result
+  "Parse a remote enable result map.
+
+  `m` - raw JSON map with :remoteSteerable (boolean, required) and :url (string, optional)"
+  [m]
+  {:remote-steerable (:remoteSteerable m)
+   :url              (:url m)})
+
 ;; ============================================================================
 ;; Client options
 ;; ============================================================================

@@ -394,6 +394,26 @@ export interface SkillsLoadDiagnostics {
     warnings: string[];
 }
 
+/** Experimental
+ *  Mode for remote session control. */
+export type RemoteSessionMode = "export" | "off" | "on";
+
+/** Experimental
+ *  Request to enable or configure remote session mode. */
+export interface RemoteEnableRequest {
+    /** Remote session mode. */
+    mode?: RemoteSessionMode;
+}
+
+/** Experimental
+ *  Result of enabling remote session mode. */
+export interface RemoteEnableResult {
+    /** Whether the session is remotely steerable. */
+    remoteSteerable: boolean;
+    /** URL for the remote session. */
+    url?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Session Event Envelope
 // ---------------------------------------------------------------------------

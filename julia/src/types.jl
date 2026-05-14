@@ -308,6 +308,29 @@ Base.@kwdef struct ModelBilling
 end
 
 """Experimental
+Mode for remote sessions."""
+@enum RemoteSessionMode RSM_EXPORT RSM_OFF RSM_ON
+
+const REMOTE_SESSION_MODE_STRINGS = Dict{RemoteSessionMode, String}(
+    RSM_EXPORT => "export",
+    RSM_OFF    => "off",
+    RSM_ON     => "on",
+)
+
+"""Experimental
+Request to enable remote mode."""
+Base.@kwdef struct RemoteEnableRequest
+    mode::Union{RemoteSessionMode, Nothing} = nothing
+end
+
+"""Experimental
+Result of enabling remote mode."""
+Base.@kwdef struct RemoteEnableResult
+    remote_steerable::Bool = false
+    url::Union{String, Nothing} = nothing
+end
+
+"""Experimental
 Diagnostics from loading skills."""
 Base.@kwdef struct SkillsLoadDiagnostics
     errors::Vector{String} = String[]

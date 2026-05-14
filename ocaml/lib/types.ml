@@ -686,6 +686,81 @@ let skills_load_diagnostics_to_yojson (d : skills_load_diagnostics) : Yojson.Saf
     ; ("warnings", `List (List.map (fun s -> `String s) d.sld_warnings))
     ]
 
+(* Experimental *)
+(* Mode for remote sessions. *)
+
+type remote_session_mode =
+  | RemoteExport
+  | RemoteOff
+  | RemoteOn
+
+let remote_session_mode_to_string = function
+  | RemoteExport -> "export"
+  | RemoteOff -> "off"
+  | RemoteOn -> "on"
+
+let remote_session_mode_of_string = function
+  | "export" -> RemoteExport
+  | "off" -> RemoteOff
+  | "on" -> RemoteOn
+  | _ -> RemoteOff
+
+(* Experimental *)
+(* Request to enable remote mode. *)
+
+type remote_enable_request = {
+  rer_mode : remote_session_mode option;
+}
+
+let remote_enable_request_of_yojson (json : Yojson.Safe.t)
+    : (remote_enable_request, string) result =
+  try
+    let mode =
+      match json |> member "mode" with
+      | `Null -> None
+      | v -> Some (remote_session_mode_of_string (to_string v))
+    in
+    Ok { rer_mode = mode }
+  with exn -> Error (Printexc.to_string exn)
+
+let remote_enable_request_to_yojson (r : remote_enable_request) : Yojson.Safe.t =
+  let fields = [] in
+  let fields =
+    match r.rer_mode with
+    | Some m -> ("mode", `String (remote_session_mode_to_string m)) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+(* Experimental *)
+(* Result of enabling remote mode. *)
+
+type remote_enable_result = {
+  rer_remote_steerable : bool;
+  rer_url : string option;
+}
+
+let remote_enable_result_of_yojson (json : Yojson.Safe.t)
+    : (remote_enable_result, string) result =
+  try
+    Ok
+      { rer_remote_steerable = json |> member "remoteSteerable" |> to_bool
+      ; rer_url =
+          (match json |> member "url" with
+           | `Null -> None
+           | v -> Some (to_string v))
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let remote_enable_result_to_yojson (r : remote_enable_result) : Yojson.Safe.t =
+  let fields = [ ("remoteSteerable", `Bool r.rer_remote_steerable) ] in
+  let fields =
+    match r.rer_url with
+    | Some u -> ("url", `String u) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
 (* ========================================================================== *)
 (* Session Events                                                             *)
 (* ========================================================================== *)
