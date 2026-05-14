@@ -106,6 +106,51 @@
     tracestate  :: binary() | undefined
 }).
 
+-record(slash_command_input, {
+    hint        :: binary(),
+    completion  :: binary() | undefined
+}).
+
+-record(slash_command_info, {
+    allow_during_agent_execution :: boolean(),
+    description                  :: binary(),
+    kind                         :: binary(),
+    name                         :: binary(),
+    aliases                      :: [binary()] | undefined,
+    experimental                 :: boolean() | undefined,
+    input                        :: #slash_command_input{} | undefined
+}).
+
+-record(commands_invoke_request, {
+    name  :: binary(),
+    input :: binary() | undefined
+}).
+
+-record(commands_list_request, {
+    include_builtins        :: boolean() | undefined,
+    include_client_commands :: boolean() | undefined,
+    include_skills          :: boolean() | undefined
+}).
+
+-record(model_billing_token_prices, {
+    batch_size   :: non_neg_integer() | undefined,
+    cache_price  :: non_neg_integer() | undefined,
+    input_price  :: non_neg_integer() | undefined,
+    output_price :: non_neg_integer() | undefined
+}).
+
+-record(model_billing, {
+    multiplier            :: float(),
+    token_prices          :: #model_billing_token_prices{} | undefined,
+    picker_price_category :: binary() | undefined
+}).
+
+%% Experimental
+-record(skills_load_diagnostics, {
+    errors   :: [binary()],
+    warnings :: [binary()]
+}).
+
 -record(session_event, {
     type :: binary(),
     data :: map() | undefined,
@@ -170,7 +215,14 @@
     command_context/0,
     elicitation_context/0,
     elicitation_result/0,
-    trace_context/0
+    trace_context/0,
+    slash_command_input/0,
+    slash_command_info/0,
+    commands_invoke_request/0,
+    commands_list_request/0,
+    model_billing_token_prices/0,
+    model_billing/0,
+    skills_load_diagnostics/0
 ]).
 
 -type client_options()           :: #client_options{}.
@@ -188,6 +240,13 @@
 -type elicitation_context()      :: #elicitation_context{}.
 -type elicitation_result()       :: #elicitation_result{}.
 -type trace_context()            :: #trace_context{}.
+-type slash_command_input()       :: #slash_command_input{}.
+-type slash_command_info()        :: #slash_command_info{}.
+-type commands_invoke_request()   :: #commands_invoke_request{}.
+-type commands_list_request()     :: #commands_list_request{}.
+-type model_billing_token_prices() :: #model_billing_token_prices{}.
+-type model_billing()             :: #model_billing{}.
+-type skills_load_diagnostics()   :: #skills_load_diagnostics{}.
 -type connection_state()         :: disconnected | connecting | connected | error.
 -type session_event_type()       :: binary().
 

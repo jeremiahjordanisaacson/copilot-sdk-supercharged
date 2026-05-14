@@ -113,12 +113,27 @@ module Copilot.Types
   , ModelCapabilities (..)
   , ModelPolicy (..)
   , ModelBilling (..)
+  , ModelBillingTokenPrices (..)
+  , ModelPickerPriceCategory (..)
   , ModelInfo (..)
 
     -- * Session metadata & lifecycle
   , SessionMetadata (..)
   , SessionLifecycleEvent (..)
   , SessionLifecycleHandler
+
+    -- * Slash command types
+  , SlashCommandInputCompletion (..)
+  , SlashCommandKind (..)
+  , SlashCommandInput (..)
+  , SlashCommandInfo (..)
+
+    -- * Command request types
+  , CommandsInvokeRequest (..)
+  , CommandsListRequest (..)
+
+    -- * Diagnostics
+  , SkillsLoadDiagnostics (..)
 
     -- * Session filesystem
   , SessionFsConfig (..)
@@ -1463,17 +1478,205 @@ instance ToJSON ModelPolicy where
     , "terms" .= mpTerms
     ]
 
+-- | Completion type for slash command input.
+data SlashCommandInputCompletion = SCICDirectory
+  deriving (Show, Eq, Generic)
+
+instance FromJSON SlashCommandInputCompletion where
+  parseJSON = withText "SlashCommandInputCompletion" $ \case
+    "directory" -> pure SCICDirectory
+    t           -> fail $ "Unknown SlashCommandInputCompletion: " <> T.unpack t
+
+instance ToJSON SlashCommandInputCompletion where
+  toJSON SCICDirectory = String "directory"
+
+-- | Kind of a slash command.
+data SlashCommandKind = SCKBuiltin | SCKClient | SCKSkill
+  deriving (Show, Eq, Generic)
+
+instance FromJSON SlashCommandKind where
+  parseJSON = withText "SlashCommandKind" $ \case
+    "builtin" -> pure SCKBuiltin
+    "client"  -> pure SCKClient
+    "skill"   -> pure SCKSkill
+    t         -> fail $ "Unknown SlashCommandKind: " <> T.unpack t
+
+instance ToJSON SlashCommandKind where
+  toJSON SCKBuiltin = String "builtin"
+  toJSON SCKClient  = String "client"
+  toJSON SCKSkill   = String "skill"
+
+-- | Price category for the model picker.
+data ModelPickerPriceCategory = MPPCHigh | MPPCLow | MPPCMedium | MPPCVeryHigh
+  deriving (Show, Eq, Generic)
+
+instance FromJSON ModelPickerPriceCategory where
+  parseJSON = withText "ModelPickerPriceCategory" $ \case
+    "high"      -> pure MPPCHigh
+    "low"       -> pure MPPCLow
+    "medium"    -> pure MPPCMedium
+    "very_high" -> pure MPPCVeryHigh
+    t           -> fail $ "Unknown ModelPickerPriceCategory: " <> T.unpack t
+
+instance ToJSON ModelPickerPriceCategory where
+  toJSON MPPCHigh     = String "high"
+  toJSON MPPCLow      = String "low"
+  toJSON MPPCMedium   = String "medium"
+  toJSON MPPCVeryHigh = String "very_high"
+
+-- | Input specification for a slash command.
+data SlashCommandInput = SlashCommandInput
+  { sciHint       :: !Text
+  , sciCompletion :: !(Maybe SlashCommandInputCompletion)
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON SlashCommandInput where
+  parseJSON = withObject "SlashCommandInput" $ \o ->
+    SlashCommandInput
+      <$> o .:  "hint"
+      <*> o .:? "completion"
+
+instance ToJSON SlashCommandInput where
+  toJSON SlashCommandInput{..} = object
+    [ "hint"       .= sciHint
+    , "completion" .= sciCompletion
+    ]
+
+-- | Information about a slash command.
+data SlashCommandInfo = SlashCommandInfo
+  { scAllowDuringAgentExecution :: !Bool
+  , scDescription               :: !Text
+  , scKind                      :: !SlashCommandKind
+  , scName                      :: !Text
+  , scAliases                   :: !(Maybe [Text])
+  , scExperimental              :: !(Maybe Bool)
+  , scInput                     :: !(Maybe SlashCommandInput)
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON SlashCommandInfo where
+  parseJSON = withObject "SlashCommandInfo" $ \o ->
+    SlashCommandInfo
+      <$> o .:  "allowDuringAgentExecution"
+      <*> o .:  "description"
+      <*> o .:  "kind"
+      <*> o .:  "name"
+      <*> o .:? "aliases"
+      <*> o .:? "experimental"
+      <*> o .:? "input"
+
+instance ToJSON SlashCommandInfo where
+  toJSON SlashCommandInfo{..} = object
+    [ "allowDuringAgentExecution" .= scAllowDuringAgentExecution
+    , "description"               .= scDescription
+    , "kind"                      .= scKind
+    , "name"                      .= scName
+    , "aliases"                   .= scAliases
+    , "experimental"              .= scExperimental
+    , "input"                     .= scInput
+    ]
+
+-- | Request to invoke a command.
+data CommandsInvokeRequest = CommandsInvokeRequest
+  { cirName  :: !Text
+  , cirInput :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON CommandsInvokeRequest where
+  parseJSON = withObject "CommandsInvokeRequest" $ \o ->
+    CommandsInvokeRequest
+      <$> o .:  "name"
+      <*> o .:? "input"
+
+instance ToJSON CommandsInvokeRequest where
+  toJSON CommandsInvokeRequest{..} = object
+    [ "name"  .= cirName
+    , "input" .= cirInput
+    ]
+
+-- | Request to list available commands.
+data CommandsListRequest = CommandsListRequest
+  { clrIncludeBuiltins       :: !(Maybe Bool)
+  , clrIncludeClientCommands :: !(Maybe Bool)
+  , clrIncludeSkills         :: !(Maybe Bool)
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON CommandsListRequest where
+  parseJSON = withObject "CommandsListRequest" $ \o ->
+    CommandsListRequest
+      <$> o .:? "includeBuiltins"
+      <*> o .:? "includeClientCommands"
+      <*> o .:? "includeSkills"
+
+instance ToJSON CommandsListRequest where
+  toJSON CommandsListRequest{..} = object
+    [ "includeBuiltins"       .= clrIncludeBuiltins
+    , "includeClientCommands" .= clrIncludeClientCommands
+    , "includeSkills"         .= clrIncludeSkills
+    ]
+
+-- | Token prices for model billing.
+data ModelBillingTokenPrices = ModelBillingTokenPrices
+  { mbtpBatchSize  :: !(Maybe Int)
+  , mbtpCachePrice :: !(Maybe Int)
+  , mbtpInputPrice :: !(Maybe Int)
+  , mbtpOutputPrice :: !(Maybe Int)
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON ModelBillingTokenPrices where
+  parseJSON = withObject "ModelBillingTokenPrices" $ \o ->
+    ModelBillingTokenPrices
+      <$> o .:? "batchSize"
+      <*> o .:? "cachePrice"
+      <*> o .:? "inputPrice"
+      <*> o .:? "outputPrice"
+
+instance ToJSON ModelBillingTokenPrices where
+  toJSON ModelBillingTokenPrices{..} = object
+    [ "batchSize"   .= mbtpBatchSize
+    , "cachePrice"  .= mbtpCachePrice
+    , "inputPrice"  .= mbtpInputPrice
+    , "outputPrice" .= mbtpOutputPrice
+    ]
+
+-- Experimental
+-- | Diagnostics from loading skills.
+data SkillsLoadDiagnostics = SkillsLoadDiagnostics
+  { sldErrors   :: ![Text]
+  , sldWarnings :: ![Text]
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON SkillsLoadDiagnostics where
+  parseJSON = withObject "SkillsLoadDiagnostics" $ \o ->
+    SkillsLoadDiagnostics
+      <$> o .: "errors"
+      <*> o .: "warnings"
+
+instance ToJSON SkillsLoadDiagnostics where
+  toJSON SkillsLoadDiagnostics{..} = object
+    [ "errors"   .= sldErrors
+    , "warnings" .= sldWarnings
+    ]
+
 -- | Model billing information.
 data ModelBilling = ModelBilling
-  { mbMultiplier :: !Double
+  { mbMultiplier          :: !Double
+  , mbTokenPrices         :: !(Maybe ModelBillingTokenPrices)
+  , mbPickerPriceCategory :: !(Maybe ModelPickerPriceCategory)
   } deriving (Show, Eq, Generic)
 
 instance FromJSON ModelBilling where
   parseJSON = withObject "ModelBilling" $ \o ->
-    ModelBilling <$> o .: "multiplier"
+    ModelBilling
+      <$> o .:  "multiplier"
+      <*> o .:? "tokenPrices"
+      <*> o .:? "pickerPriceCategory"
 
 instance ToJSON ModelBilling where
-  toJSON ModelBilling{..} = object [ "multiplier" .= mbMultiplier ]
+  toJSON ModelBilling{..} = object
+    [ "multiplier"          .= mbMultiplier
+    , "tokenPrices"         .= mbTokenPrices
+    , "pickerPriceCategory" .= mbPickerPriceCategory
+    ]
 
 -- | Information about an available model.
 data ModelInfo = ModelInfo

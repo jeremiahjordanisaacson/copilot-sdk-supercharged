@@ -532,6 +532,120 @@ type SessionEventEnvelope =
       Event: SessionEvent }
 
 // ---------------------------------------------------------------------------
+// Slash command types
+// ---------------------------------------------------------------------------
+
+/// Completion type for slash command input.
+type SlashCommandInputCompletion =
+    | Directory
+
+module SlashCommandInputCompletion =
+    let toWireString = function
+        | Directory -> "directory"
+
+/// Kind of a slash command.
+type SlashCommandKind =
+    | Builtin
+    | Client
+    | Skill
+
+module SlashCommandKind =
+    let toWireString = function
+        | Builtin -> "builtin"
+        | Client -> "client"
+        | Skill -> "skill"
+
+/// Price category for the model picker.
+type ModelPickerPriceCategory =
+    | High
+    | Low
+    | Medium
+    | VeryHigh
+
+module ModelPickerPriceCategory =
+    let toWireString = function
+        | High -> "high"
+        | Low -> "low"
+        | Medium -> "medium"
+        | VeryHigh -> "very_high"
+
+/// Input specification for a slash command.
+type SlashCommandInput =
+    { [<JsonPropertyName("hint")>]
+      Hint: string
+      [<JsonPropertyName("completion")>]
+      Completion: string option }
+
+/// Information about a slash command.
+type SlashCommandInfo =
+    { [<JsonPropertyName("allowDuringAgentExecution")>]
+      AllowDuringAgentExecution: bool
+      [<JsonPropertyName("description")>]
+      Description: string
+      [<JsonPropertyName("kind")>]
+      Kind: string
+      [<JsonPropertyName("name")>]
+      Name: string
+      [<JsonPropertyName("aliases")>]
+      Aliases: string list option
+      [<JsonPropertyName("experimental")>]
+      Experimental: bool option
+      [<JsonPropertyName("input")>]
+      Input: SlashCommandInput option }
+
+// ---------------------------------------------------------------------------
+// Command request types
+// ---------------------------------------------------------------------------
+
+/// Request to invoke a command.
+type CommandsInvokeRequest =
+    { [<JsonPropertyName("name")>]
+      Name: string
+      [<JsonPropertyName("input")>]
+      Input: string option }
+
+/// Request to list available commands.
+type CommandsListRequest =
+    { [<JsonPropertyName("includeBuiltins")>]
+      IncludeBuiltins: bool option
+      [<JsonPropertyName("includeClientCommands")>]
+      IncludeClientCommands: bool option
+      [<JsonPropertyName("includeSkills")>]
+      IncludeSkills: bool option }
+
+// ---------------------------------------------------------------------------
+// Model billing types
+// ---------------------------------------------------------------------------
+
+/// Token prices for model billing.
+type ModelBillingTokenPrices =
+    { [<JsonPropertyName("batchSize")>]
+      BatchSize: int option
+      [<JsonPropertyName("cachePrice")>]
+      CachePrice: int option
+      [<JsonPropertyName("inputPrice")>]
+      InputPrice: int option
+      [<JsonPropertyName("outputPrice")>]
+      OutputPrice: int option }
+
+/// Model billing information.
+type ModelBilling =
+    { [<JsonPropertyName("multiplier")>]
+      Multiplier: float
+      [<JsonPropertyName("tokenPrices")>]
+      TokenPrices: ModelBillingTokenPrices option
+      [<JsonPropertyName("pickerPriceCategory")>]
+      PickerPriceCategory: string option }
+
+/// Experimental
+/// Diagnostics from loading skills.
+type SkillsLoadDiagnostics =
+    { [<JsonPropertyName("errors")>]
+      Errors: string list
+      [<JsonPropertyName("warnings")>]
+      Warnings: string list }
+
+// ---------------------------------------------------------------------------
 // Model info
 // ---------------------------------------------------------------------------
 

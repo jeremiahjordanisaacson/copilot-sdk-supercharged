@@ -23,6 +23,10 @@ module copilot_types
   public :: exit_plan_mode_request, exit_plan_mode_response
   public :: exit_plan_mode_callback_interface
   public :: trace_context, trace_context_provider_interface
+  public :: slash_command_input, slash_command_info
+  public :: commands_invoke_request, commands_list_request
+  public :: model_billing_token_prices, model_billing
+  public :: skills_load_diagnostics
 
   ! --------------------------------------------------------------------------
   ! Connection state enum
@@ -251,6 +255,60 @@ module copilot_types
     character(len=:), allocatable :: traceparent
     character(len=:), allocatable :: tracestate
   end type trace_context
+
+  ! --------------------------------------------------------------------------
+  ! Slash command types
+  ! --------------------------------------------------------------------------
+  type :: slash_command_input
+    character(len=:), allocatable :: hint
+    character(len=:), allocatable :: completion
+  end type slash_command_input
+
+  type :: slash_command_info
+    logical :: allow_during_agent_execution = .false.
+    character(len=:), allocatable :: description
+    character(len=:), allocatable :: kind
+    character(len=:), allocatable :: name
+    character(len=:), allocatable :: aliases_json
+    logical :: experimental = .false.
+    type(slash_command_input), allocatable :: input
+  end type slash_command_info
+
+  ! --------------------------------------------------------------------------
+  ! Command request types
+  ! --------------------------------------------------------------------------
+  type :: commands_invoke_request
+    character(len=:), allocatable :: name
+    character(len=:), allocatable :: input
+  end type commands_invoke_request
+
+  type :: commands_list_request
+    logical :: include_builtins = .false.
+    logical :: include_client_commands = .false.
+    logical :: include_skills = .false.
+  end type commands_list_request
+
+  ! --------------------------------------------------------------------------
+  ! Model billing types
+  ! --------------------------------------------------------------------------
+  type :: model_billing_token_prices
+    integer :: batch_size = 0
+    integer :: cache_price = 0
+    integer :: input_price = 0
+    integer :: output_price = 0
+  end type model_billing_token_prices
+
+  type :: model_billing
+    double precision :: multiplier = 0.0d0
+    type(model_billing_token_prices), allocatable :: token_prices
+    character(len=:), allocatable :: picker_price_category
+  end type model_billing
+
+  ! Experimental
+  type :: skills_load_diagnostics
+    character(len=:), allocatable :: errors_json
+    character(len=:), allocatable :: warnings_json
+  end type skills_load_diagnostics
 
   ! --------------------------------------------------------------------------
   ! Abstract interfaces for callbacks

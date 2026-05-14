@@ -551,6 +551,100 @@ struct ModelCapabilitiesOverride
 }
 
 // ---------------------------------------------------------------------------
+// Slash command types
+// ---------------------------------------------------------------------------
+
+/// Completion type for slash command input.
+enum SlashCommandInputCompletion : string
+{
+    directory = "directory",
+}
+
+/// Kind of a slash command.
+enum SlashCommandKind : string
+{
+    builtin = "builtin",
+    client = "client",
+    skill = "skill",
+}
+
+/// Price category for the model picker.
+enum ModelPickerPriceCategory : string
+{
+    high = "high",
+    low = "low",
+    medium = "medium",
+    veryHigh = "very_high",
+}
+
+/// Input specification for a slash command.
+struct SlashCommandInput
+{
+    string hint;
+    Nullable!SlashCommandInputCompletion completion;
+}
+
+/// Information about a slash command.
+struct SlashCommandInfo
+{
+    bool allowDuringAgentExecution;
+    string description;
+    SlashCommandKind kind;
+    string name;
+    Nullable!(string[]) aliases;
+    Nullable!bool experimental;
+    Nullable!SlashCommandInput input;
+}
+
+// ---------------------------------------------------------------------------
+// Command request types
+// ---------------------------------------------------------------------------
+
+/// Request to invoke a command.
+struct CommandsInvokeRequest
+{
+    string name;
+    Nullable!string input;
+}
+
+/// Request to list available commands.
+struct CommandsListRequest
+{
+    Nullable!bool includeBuiltins;
+    Nullable!bool includeClientCommands;
+    Nullable!bool includeSkills;
+}
+
+// ---------------------------------------------------------------------------
+// Model billing types
+// ---------------------------------------------------------------------------
+
+/// Token prices for model billing.
+struct ModelBillingTokenPrices
+{
+    Nullable!int batchSize;
+    Nullable!int cachePrice;
+    Nullable!int inputPrice;
+    Nullable!int outputPrice;
+}
+
+/// Model billing information.
+struct ModelBilling
+{
+    double multiplier = 0.0;
+    Nullable!ModelBillingTokenPrices tokenPrices;
+    Nullable!ModelPickerPriceCategory pickerPriceCategory;
+}
+
+/// Experimental
+/// Diagnostics from loading skills.
+struct SkillsLoadDiagnostics
+{
+    string[] errors;
+    string[] warnings;
+}
+
+// ---------------------------------------------------------------------------
 // Session events
 // ---------------------------------------------------------------------------
 

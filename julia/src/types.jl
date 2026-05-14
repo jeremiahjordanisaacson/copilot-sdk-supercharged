@@ -236,6 +236,84 @@ function PermissionRequest(d::Dict)
     )
 end
 
+"""Completion type for slash command input."""
+@enum SlashCommandInputCompletion SCIC_DIRECTORY
+
+const SLASH_COMMAND_INPUT_COMPLETION_STRINGS = Dict{SlashCommandInputCompletion, String}(
+    SCIC_DIRECTORY => "directory",
+)
+
+"""Kind of a slash command."""
+@enum SlashCommandKind SCK_BUILTIN SCK_CLIENT SCK_SKILL
+
+const SLASH_COMMAND_KIND_STRINGS = Dict{SlashCommandKind, String}(
+    SCK_BUILTIN => "builtin",
+    SCK_CLIENT  => "client",
+    SCK_SKILL   => "skill",
+)
+
+"""Price category for the model picker."""
+@enum ModelPickerPriceCategory MPPC_HIGH MPPC_LOW MPPC_MEDIUM MPPC_VERY_HIGH
+
+const MODEL_PICKER_PRICE_CATEGORY_STRINGS = Dict{ModelPickerPriceCategory, String}(
+    MPPC_HIGH      => "high",
+    MPPC_LOW       => "low",
+    MPPC_MEDIUM    => "medium",
+    MPPC_VERY_HIGH => "very_high",
+)
+
+"""Input specification for a slash command."""
+Base.@kwdef struct SlashCommandInput
+    hint::String = ""
+    completion::Union{SlashCommandInputCompletion, Nothing} = nothing
+end
+
+"""Information about a slash command."""
+Base.@kwdef struct SlashCommandInfo
+    allow_during_agent_execution::Bool = false
+    description::String = ""
+    kind::SlashCommandKind = SCK_BUILTIN
+    name::String = ""
+    aliases::Union{Vector{String}, Nothing} = nothing
+    experimental::Union{Bool, Nothing} = nothing
+    input::Union{SlashCommandInput, Nothing} = nothing
+end
+
+"""Request to invoke a command."""
+Base.@kwdef struct CommandsInvokeRequest
+    name::String = ""
+    input::Union{String, Nothing} = nothing
+end
+
+"""Request to list available commands."""
+Base.@kwdef struct CommandsListRequest
+    include_builtins::Union{Bool, Nothing} = nothing
+    include_client_commands::Union{Bool, Nothing} = nothing
+    include_skills::Union{Bool, Nothing} = nothing
+end
+
+"""Token prices for model billing."""
+Base.@kwdef struct ModelBillingTokenPrices
+    batch_size::Union{Int, Nothing} = nothing
+    cache_price::Union{Int, Nothing} = nothing
+    input_price::Union{Int, Nothing} = nothing
+    output_price::Union{Int, Nothing} = nothing
+end
+
+"""Model billing information."""
+Base.@kwdef struct ModelBilling
+    multiplier::Float64 = 0.0
+    token_prices::Union{ModelBillingTokenPrices, Nothing} = nothing
+    picker_price_category::Union{ModelPickerPriceCategory, Nothing} = nothing
+end
+
+"""Experimental
+Diagnostics from loading skills."""
+Base.@kwdef struct SkillsLoadDiagnostics
+    errors::Vector{String} = String[]
+    warnings::Vector{String} = String[]
+end
+
 """Exit plan mode request from the agent."""
 Base.@kwdef struct ExitPlanModeRequest
     summary::String = ""

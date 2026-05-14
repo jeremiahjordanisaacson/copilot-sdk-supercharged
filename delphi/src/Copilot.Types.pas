@@ -186,6 +186,67 @@ type
     Description: string;
   end;
 
+  // Slash command input completion
+  TSlashCommandInputCompletion = (scicDirectory);
+
+  // Slash command kind
+  TSlashCommandKind = (sckBuiltin, sckClient, sckSkill);
+
+  // Model picker price category
+  TModelPickerPriceCategory = (mppcHigh, mppcLow, mppcMedium, mppcVeryHigh);
+
+  // Slash command input
+  TSlashCommandInput = record
+    Hint: string;
+    Completion: string;
+  end;
+
+  // Slash command info
+  TSlashCommandInfo = record
+    AllowDuringAgentExecution: Boolean;
+    Description: string;
+    Kind: string;
+    Name: string;
+    Aliases: TArray<string>;
+    Experimental: Boolean;
+    Input: TSlashCommandInput;
+  end;
+
+  // Commands invoke request
+  TCommandsInvokeRequest = record
+    Name: string;
+    Input: string;
+  end;
+
+  // Commands list request
+  TCommandsListRequest = record
+    IncludeBuiltins: Boolean;
+    IncludeClientCommands: Boolean;
+    IncludeSkills: Boolean;
+  end;
+
+  // Model billing token prices
+  TModelBillingTokenPrices = record
+    BatchSize: Integer;
+    CachePrice: Integer;
+    InputPrice: Integer;
+    OutputPrice: Integer;
+  end;
+
+  // Model billing
+  TModelBilling = record
+    Multiplier: Double;
+    TokenPrices: TModelBillingTokenPrices;
+    PickerPriceCategory: string;
+  end;
+
+  // Experimental
+  // Diagnostics from loading skills
+  TSkillsLoadDiagnostics = record
+    Errors: TArray<string>;
+    Warnings: TArray<string>;
+  end;
+
   // Image options
   TImageOptions = record
     Size: string;

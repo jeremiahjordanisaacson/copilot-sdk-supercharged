@@ -991,13 +991,178 @@ defmodule Copilot.Types do
     end
   end
 
-  defmodule ModelBilling do
-    @moduledoc "Model billing information."
-    @type t :: %__MODULE__{multiplier: float()}
-    defstruct [:multiplier]
+  defmodule SlashCommandInputCompletion do
+    @moduledoc "Completion type for slash command input."
+    @type t :: :directory
+
+    def from_string("directory"), do: :directory
+    def from_string(nil), do: nil
+  end
+
+  defmodule SlashCommandKind do
+    @moduledoc "Kind of a slash command."
+    @type t :: :builtin | :client | :skill
+
+    def from_string("builtin"), do: :builtin
+    def from_string("client"), do: :client
+    def from_string("skill"), do: :skill
+    def from_string(nil), do: nil
+  end
+
+  defmodule ModelPickerPriceCategory do
+    @moduledoc "Price category for the model picker."
+    @type t :: :high | :low | :medium | :very_high
+
+    def from_string("high"), do: :high
+    def from_string("low"), do: :low
+    def from_string("medium"), do: :medium
+    def from_string("very_high"), do: :very_high
+    def from_string(nil), do: nil
+  end
+
+  defmodule SlashCommandInput do
+    @moduledoc "Input specification for a slash command."
+    @type t :: %__MODULE__{
+            hint: String.t(),
+            completion: SlashCommandInputCompletion.t() | nil
+          }
+    defstruct [:hint, :completion]
 
     def from_map(nil), do: nil
-    def from_map(m) when is_map(m), do: %__MODULE__{multiplier: m["multiplier"]}
+
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        hint: m["hint"],
+        completion: SlashCommandInputCompletion.from_string(m["completion"])
+      }
+    end
+  end
+
+  defmodule SlashCommandInfo do
+    @moduledoc "Information about a slash command."
+    @type t :: %__MODULE__{
+            allow_during_agent_execution: boolean(),
+            description: String.t(),
+            kind: SlashCommandKind.t(),
+            name: String.t(),
+            aliases: [String.t()] | nil,
+            experimental: boolean() | nil,
+            input: SlashCommandInput.t() | nil
+          }
+    defstruct [
+      :allow_during_agent_execution,
+      :description,
+      :kind,
+      :name,
+      :aliases,
+      :experimental,
+      :input
+    ]
+
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        allow_during_agent_execution: m["allowDuringAgentExecution"],
+        description: m["description"],
+        kind: SlashCommandKind.from_string(m["kind"]),
+        name: m["name"],
+        aliases: m["aliases"],
+        experimental: m["experimental"],
+        input: SlashCommandInput.from_map(m["input"])
+      }
+    end
+  end
+
+  defmodule CommandsInvokeRequest do
+    @moduledoc "Request to invoke a command."
+    @type t :: %__MODULE__{
+            name: String.t(),
+            input: String.t() | nil
+          }
+    defstruct [:name, :input]
+
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        name: m["name"],
+        input: m["input"]
+      }
+    end
+  end
+
+  defmodule CommandsListRequest do
+    @moduledoc "Request to list available commands."
+    @type t :: %__MODULE__{
+            include_builtins: boolean() | nil,
+            include_client_commands: boolean() | nil,
+            include_skills: boolean() | nil
+          }
+    defstruct [:include_builtins, :include_client_commands, :include_skills]
+
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        include_builtins: m["includeBuiltins"],
+        include_client_commands: m["includeClientCommands"],
+        include_skills: m["includeSkills"]
+      }
+    end
+  end
+
+  defmodule ModelBillingTokenPrices do
+    @moduledoc "Token prices for model billing."
+    @type t :: %__MODULE__{
+            batch_size: integer() | nil,
+            cache_price: integer() | nil,
+            input_price: integer() | nil,
+            output_price: integer() | nil
+          }
+    defstruct [:batch_size, :cache_price, :input_price, :output_price]
+
+    def from_map(nil), do: nil
+
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        batch_size: m["batchSize"],
+        cache_price: m["cachePrice"],
+        input_price: m["inputPrice"],
+        output_price: m["outputPrice"]
+      }
+    end
+  end
+
+  # Experimental
+  defmodule SkillsLoadDiagnostics do
+    @moduledoc "Diagnostics from loading skills."
+    @type t :: %__MODULE__{
+            errors: [String.t()],
+            warnings: [String.t()]
+          }
+    defstruct [:errors, :warnings]
+
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        errors: m["errors"] || [],
+        warnings: m["warnings"] || []
+      }
+    end
+  end
+
+  defmodule ModelBilling do
+    @moduledoc "Model billing information."
+    @type t :: %__MODULE__{
+            multiplier: float(),
+            token_prices: ModelBillingTokenPrices.t() | nil,
+            picker_price_category: ModelPickerPriceCategory.t() | nil
+          }
+    defstruct [:multiplier, :token_prices, :picker_price_category]
+
+    def from_map(nil), do: nil
+
+    def from_map(m) when is_map(m) do
+      %__MODULE__{
+        multiplier: m["multiplier"],
+        token_prices: ModelBillingTokenPrices.from_map(m["tokenPrices"]),
+        picker_price_category: ModelPickerPriceCategory.from_string(m["pickerPriceCategory"])
+      }
+    end
   end
 
   defmodule ModelInfo do

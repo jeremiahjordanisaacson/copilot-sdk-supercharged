@@ -527,6 +527,97 @@
     vision   (assoc :vision vision)))
 
 ;; ============================================================================
+;; Slash Command types
+;; ============================================================================
+
+(defn slash-command-input
+  "Construct a slash command input map.
+
+  `hint` - hint string for the command input
+  Optional: :completion (\"directory\")"
+  [hint & {:keys [completion]}]
+  (cond-> {:hint hint}
+    completion (assoc :completion completion)))
+
+(defn slash-command-info
+  "Construct a slash command info map.
+
+  `allow-during-agent-execution` - boolean
+  `description`                  - description string
+  `kind`                         - one of \"builtin\" \"client\" \"skill\"
+  `name`                         - command name
+  Optional: :aliases (vector of strings), :experimental (boolean),
+            :input (slash-command-input map)"
+  [allow-during-agent-execution description kind name & {:as opts}]
+  (cond-> {:allowDuringAgentExecution allow-during-agent-execution
+           :description               description
+           :kind                      kind
+           :name                      name}
+    (:aliases opts)      (assoc :aliases (:aliases opts))
+    (:experimental opts) (assoc :experimental (:experimental opts))
+    (:input opts)        (assoc :input (:input opts))))
+
+;; ============================================================================
+;; Command request types
+;; ============================================================================
+
+(defn commands-invoke-request
+  "Construct a commands invoke request map.
+
+  `name`  - command name
+  Optional: :input (string)"
+  [name & {:keys [input]}]
+  (cond-> {:name name}
+    input (assoc :input input)))
+
+(defn commands-list-request
+  "Construct a commands list request map.
+
+  Optional: :include-builtins (boolean), :include-client-commands (boolean),
+            :include-skills (boolean)"
+  [& {:keys [include-builtins include-client-commands include-skills]}]
+  (cond-> {}
+    (some? include-builtins)        (assoc :includeBuiltins include-builtins)
+    (some? include-client-commands) (assoc :includeClientCommands include-client-commands)
+    (some? include-skills)          (assoc :includeSkills include-skills)))
+
+;; ============================================================================
+;; Model Billing types
+;; ============================================================================
+
+(defn model-billing-token-prices
+  "Construct a model billing token prices map.
+
+  Optional: :batch-size (int), :cache-price (int),
+            :input-price (int), :output-price (int)"
+  [& {:keys [batch-size cache-price input-price output-price]}]
+  (cond-> {}
+    batch-size   (assoc :batchSize batch-size)
+    cache-price  (assoc :cachePrice cache-price)
+    input-price  (assoc :inputPrice input-price)
+    output-price (assoc :outputPrice output-price)))
+
+(defn model-billing
+  "Construct a model billing map.
+
+  `multiplier` - billing multiplier (double)
+  Optional: :token-prices (model-billing-token-prices map),
+            :picker-price-category (one of \"high\" \"low\" \"medium\" \"very_high\")"
+  [multiplier & {:keys [token-prices picker-price-category]}]
+  (cond-> {:multiplier multiplier}
+    token-prices          (assoc :tokenPrices token-prices)
+    picker-price-category (assoc :pickerPriceCategory picker-price-category)))
+
+;; Experimental
+(defn skills-load-diagnostics
+  "Construct a skills load diagnostics map.
+
+  `errors`   - vector of error strings
+  `warnings` - vector of warning strings"
+  [errors warnings]
+  {:errors errors :warnings warnings})
+
+;; ============================================================================
 ;; Client options
 ;; ============================================================================
 

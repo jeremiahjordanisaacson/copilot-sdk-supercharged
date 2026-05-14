@@ -299,6 +299,102 @@ export interface SolidityExtendedSessionConfig extends SoliditySessionConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Slash command types
+// ---------------------------------------------------------------------------
+
+/** Completion type for slash command input. */
+export type SlashCommandInputCompletion = "directory";
+
+/** Kind of a slash command. */
+export type SlashCommandKind = "builtin" | "client" | "skill";
+
+/** Price category for the model picker. */
+export type ModelPickerPriceCategory = "high" | "low" | "medium" | "very_high";
+
+/** Input specification for a slash command. */
+export interface SlashCommandInput {
+    /** Hint string for the command input. */
+    hint: string;
+    /** Completion type. */
+    completion?: SlashCommandInputCompletion;
+}
+
+/** Information about a slash command. */
+export interface SlashCommandInfo {
+    /** Whether the command can run during agent execution. */
+    allowDuringAgentExecution: boolean;
+    /** Description of the command. */
+    description: string;
+    /** Kind of command. */
+    kind: SlashCommandKind;
+    /** Name of the command. */
+    name: string;
+    /** Aliases for the command. */
+    aliases?: string[];
+    /** Whether the command is experimental. */
+    experimental?: boolean;
+    /** Input specification. */
+    input?: SlashCommandInput;
+}
+
+// ---------------------------------------------------------------------------
+// Command request types
+// ---------------------------------------------------------------------------
+
+/** Request to invoke a command. */
+export interface CommandsInvokeRequest {
+    /** Command name. */
+    name: string;
+    /** Input string for the command. */
+    input?: string;
+}
+
+/** Request to list available commands. */
+export interface CommandsListRequest {
+    /** Include built-in commands. */
+    includeBuiltins?: boolean;
+    /** Include client commands. */
+    includeClientCommands?: boolean;
+    /** Include skill commands. */
+    includeSkills?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Model billing types
+// ---------------------------------------------------------------------------
+
+/** Token prices for model billing. */
+export interface ModelBillingTokenPrices {
+    /** Batch size for pricing. */
+    batchSize?: number;
+    /** Cache price. */
+    cachePrice?: number;
+    /** Input token price. */
+    inputPrice?: number;
+    /** Output token price. */
+    outputPrice?: number;
+}
+
+/** Model billing information. */
+export interface ModelBilling {
+    /** Billing multiplier. */
+    multiplier: number;
+    /** Token prices. */
+    tokenPrices?: ModelBillingTokenPrices;
+    /** Picker price category. */
+    pickerPriceCategory?: ModelPickerPriceCategory;
+}
+
+/** Experimental
+ *  Diagnostics from loading skills. */
+export interface SkillsLoadDiagnostics {
+    /** Error messages. */
+    errors: string[];
+    /** Warning messages. */
+    warnings: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Session Event Envelope
 // ---------------------------------------------------------------------------
 

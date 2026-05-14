@@ -779,6 +779,151 @@ Namespace GitHub.Copilot.SDK
     End Class
 
     ''' <summary>
+    ''' Completion type for slash command input.
+    ''' </summary>
+    Public Enum SlashCommandInputCompletion
+        Directory
+    End Enum
+
+    ''' <summary>
+    ''' Kind of a slash command.
+    ''' </summary>
+    Public Enum SlashCommandKind
+        Builtin
+        Client
+        Skill
+    End Enum
+
+    ''' <summary>
+    ''' Price category for the model picker.
+    ''' </summary>
+    Public Enum ModelPickerPriceCategory
+        High
+        Low
+        Medium
+        VeryHigh
+    End Enum
+
+    ''' <summary>
+    ''' Input specification for a slash command.
+    ''' </summary>
+    Public Class SlashCommandInput
+
+        <JsonPropertyName("hint")>
+        Public Property Hint As String
+
+        <JsonPropertyName("completion")>
+        Public Property Completion As String
+
+    End Class
+
+    ''' <summary>
+    ''' Information about a slash command.
+    ''' </summary>
+    Public Class SlashCommandInfo
+
+        <JsonPropertyName("allowDuringAgentExecution")>
+        Public Property AllowDuringAgentExecution As Boolean
+
+        <JsonPropertyName("description")>
+        Public Property Description As String
+
+        <JsonPropertyName("kind")>
+        Public Property Kind As String
+
+        <JsonPropertyName("name")>
+        Public Property Name As String
+
+        <JsonPropertyName("aliases")>
+        Public Property Aliases As String()
+
+        <JsonPropertyName("experimental")>
+        Public Property Experimental As Boolean?
+
+        <JsonPropertyName("input")>
+        Public Property Input As SlashCommandInput
+
+    End Class
+
+    ''' <summary>
+    ''' Request to invoke a command.
+    ''' </summary>
+    Public Class CommandsInvokeRequest
+
+        <JsonPropertyName("name")>
+        Public Property Name As String
+
+        <JsonPropertyName("input")>
+        Public Property Input As String
+
+    End Class
+
+    ''' <summary>
+    ''' Request to list available commands.
+    ''' </summary>
+    Public Class CommandsListRequest
+
+        <JsonPropertyName("includeBuiltins")>
+        Public Property IncludeBuiltins As Boolean?
+
+        <JsonPropertyName("includeClientCommands")>
+        Public Property IncludeClientCommands As Boolean?
+
+        <JsonPropertyName("includeSkills")>
+        Public Property IncludeSkills As Boolean?
+
+    End Class
+
+    ''' <summary>
+    ''' Token prices for model billing.
+    ''' </summary>
+    Public Class ModelBillingTokenPrices
+
+        <JsonPropertyName("batchSize")>
+        Public Property BatchSize As Integer?
+
+        <JsonPropertyName("cachePrice")>
+        Public Property CachePrice As Integer?
+
+        <JsonPropertyName("inputPrice")>
+        Public Property InputPrice As Integer?
+
+        <JsonPropertyName("outputPrice")>
+        Public Property OutputPrice As Integer?
+
+    End Class
+
+    ''' <summary>
+    ''' Model billing information.
+    ''' </summary>
+    Public Class ModelBilling
+
+        <JsonPropertyName("multiplier")>
+        Public Property Multiplier As Double
+
+        <JsonPropertyName("tokenPrices")>
+        Public Property TokenPrices As ModelBillingTokenPrices
+
+        <JsonPropertyName("pickerPriceCategory")>
+        Public Property PickerPriceCategory As String
+
+    End Class
+
+    ''' <summary>
+    ''' Experimental
+    ''' Diagnostics from loading skills.
+    ''' </summary>
+    Public Class SkillsLoadDiagnostics
+
+        <JsonPropertyName("errors")>
+        Public Property Errors As String()
+
+        <JsonPropertyName("warnings")>
+        Public Property Warnings As String()
+
+    End Class
+
+    ''' <summary>
     ''' Session capabilities reported by the host.
     ''' </summary>
     Public Class SessionCapabilities

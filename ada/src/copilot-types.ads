@@ -348,6 +348,63 @@ package Copilot.Types is
      function (Req : Exit_Plan_Mode_Request) return Exit_Plan_Mode_Response;
 
    --  -----------------------------------------------------------------------
+   --  Slash command types
+   --  -----------------------------------------------------------------------
+
+   type Slash_Command_Input is record
+      Hint       : UString := Null_UString;
+      Completion : UString := Null_UString;
+   end record;
+
+   type Slash_Command_Info is record
+      Allow_During_Agent_Execution : Boolean := False;
+      Description                  : UString := Null_UString;
+      Kind                         : UString := Null_UString;
+      Name                         : UString := Null_UString;
+      Aliases_Json                 : UString := Null_UString;
+      Experimental                 : Boolean := False;
+      Input                        : UString := Null_UString;
+   end record;
+
+   --  -----------------------------------------------------------------------
+   --  Command request types
+   --  -----------------------------------------------------------------------
+
+   type Commands_Invoke_Request is record
+      Name  : UString := Null_UString;
+      Input : UString := Null_UString;
+   end record;
+
+   type Commands_List_Request is record
+      Include_Builtins        : Boolean := False;
+      Include_Client_Commands : Boolean := False;
+      Include_Skills          : Boolean := False;
+   end record;
+
+   --  -----------------------------------------------------------------------
+   --  Model billing types
+   --  -----------------------------------------------------------------------
+
+   type Model_Billing_Token_Prices is record
+      Batch_Size   : Natural := 0;
+      Cache_Price  : Natural := 0;
+      Input_Price  : Natural := 0;
+      Output_Price : Natural := 0;
+   end record;
+
+   type Model_Billing is record
+      Multiplier            : Float   := 0.0;
+      Token_Prices          : Model_Billing_Token_Prices;
+      Picker_Price_Category : UString := Null_UString;
+   end record;
+
+   --  Experimental
+   type Skills_Load_Diagnostics is record
+      Errors_Json   : UString := Null_UString;
+      Warnings_Json : UString := Null_UString;
+   end record;
+
+   --  -----------------------------------------------------------------------
    --  Exceptions
    --  -----------------------------------------------------------------------
 

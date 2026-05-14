@@ -292,6 +292,77 @@
            88 TRACE-PROVIDER-INACTIVE           VALUE 0.
 
       *----------------------------------------------------------------*
+      * Slash command input                                             *
+      *----------------------------------------------------------------*
+       01  WS-SLASH-CMD-INPUT.
+           05 WS-SCI-HINT            PIC X(256) VALUE SPACES.
+           05 WS-SCI-COMPLETION      PIC X(16)  VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Slash command info                                              *
+      *----------------------------------------------------------------*
+       01  WS-SLASH-CMD-INFO.
+           05 WS-SCMD-ALLOW-AGENT    PIC 9      VALUE 0.
+               88 SCMD-ALLOW-AGENT-YES          VALUE 1.
+               88 SCMD-ALLOW-AGENT-NO           VALUE 0.
+           05 WS-SCMD-DESCRIPTION    PIC X(256) VALUE SPACES.
+           05 WS-SCMD-KIND           PIC X(16)  VALUE SPACES.
+           05 WS-SCMD-NAME           PIC X(64)  VALUE SPACES.
+           05 WS-SCMD-ALIASES        PIC X(512) VALUE SPACES.
+           05 WS-SCMD-EXPERIMENTAL   PIC 9      VALUE 0.
+               88 SCMD-EXPERIMENTAL-YES         VALUE 1.
+               88 SCMD-EXPERIMENTAL-NO          VALUE 0.
+           05 WS-SCMD-INPUT          PIC X(256) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Commands invoke request                                         *
+      *----------------------------------------------------------------*
+       01  WS-CMD-INVOKE-REQ.
+           05 WS-CINV-NAME           PIC X(64)  VALUE SPACES.
+           05 WS-CINV-INPUT          PIC X(1024) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Commands list request                                           *
+      *----------------------------------------------------------------*
+       01  WS-CMD-LIST-REQ.
+           05 WS-CLST-INCL-BUILTINS  PIC 9      VALUE 0.
+               88 CLST-BUILTINS-YES             VALUE 1.
+               88 CLST-BUILTINS-NO              VALUE 0.
+           05 WS-CLST-INCL-CLIENT    PIC 9      VALUE 0.
+               88 CLST-CLIENT-YES               VALUE 1.
+               88 CLST-CLIENT-NO                VALUE 0.
+           05 WS-CLST-INCL-SKILLS    PIC 9      VALUE 0.
+               88 CLST-SKILLS-YES               VALUE 1.
+               88 CLST-SKILLS-NO                VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Model billing token prices                                      *
+      *----------------------------------------------------------------*
+       01  WS-MODEL-BILL-PRICES.
+           05 WS-MBP-BATCH-SIZE      PIC 9(10)  VALUE 0.
+           05 WS-MBP-CACHE-PRICE     PIC 9(10)  VALUE 0.
+           05 WS-MBP-INPUT-PRICE     PIC 9(10)  VALUE 0.
+           05 WS-MBP-OUTPUT-PRICE    PIC 9(10)  VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Model billing                                                   *
+      *----------------------------------------------------------------*
+       01  WS-MODEL-BILLING.
+           05 WS-MB-MULTIPLIER       PIC 9(5)V9(4) VALUE 0.
+           05 WS-MB-HAS-PRICES       PIC 9      VALUE 0.
+               88 MB-HAS-PRICES-YES             VALUE 1.
+               88 MB-HAS-PRICES-NO              VALUE 0.
+           05 WS-MB-PRICE-CATEGORY   PIC X(16)  VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Experimental                                                    *
+      * Diagnostics from loading skills                                 *
+      *----------------------------------------------------------------*
+       01  WS-SKILLS-DIAG.
+           05 WS-SDIAG-ERRORS        PIC X(2048) VALUE SPACES.
+           05 WS-SDIAG-WARNINGS      PIC X(2048) VALUE SPACES.
+
+      *----------------------------------------------------------------*
       * Model capabilities override                                    *
       *----------------------------------------------------------------*
        01  WS-MODEL-CAP-OVERRIDE.

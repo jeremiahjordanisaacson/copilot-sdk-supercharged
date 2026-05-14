@@ -383,6 +383,272 @@ let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
   `Assoc fields
 
 (* ========================================================================== *)
+(* Slash Command Types                                                        *)
+(* ========================================================================== *)
+
+type slash_command_input_completion = SCICDirectory
+
+let slash_command_input_completion_to_string = function
+  | SCICDirectory -> "directory"
+
+let slash_command_input_completion_of_string = function
+  | "directory" -> SCICDirectory
+  | _ -> SCICDirectory
+
+type slash_command_kind = SCKBuiltin | SCKClient | SCKSkill
+
+let slash_command_kind_to_string = function
+  | SCKBuiltin -> "builtin"
+  | SCKClient -> "client"
+  | SCKSkill -> "skill"
+
+let slash_command_kind_of_string = function
+  | "builtin" -> SCKBuiltin
+  | "client" -> SCKClient
+  | "skill" -> SCKSkill
+  | _ -> SCKBuiltin
+
+type model_picker_price_category = MPPCHigh | MPPCLow | MPPCMedium | MPPCVeryHigh
+
+let model_picker_price_category_to_string = function
+  | MPPCHigh -> "high"
+  | MPPCLow -> "low"
+  | MPPCMedium -> "medium"
+  | MPPCVeryHigh -> "very_high"
+
+let model_picker_price_category_of_string = function
+  | "high" -> MPPCHigh
+  | "low" -> MPPCLow
+  | "medium" -> MPPCMedium
+  | "very_high" -> MPPCVeryHigh
+  | _ -> MPPCMedium
+
+type slash_command_input = {
+  sci_hint : string;
+  sci_completion : slash_command_input_completion option;
+}
+
+let slash_command_input_of_yojson (json : Yojson.Safe.t)
+    : (slash_command_input, string) result =
+  try
+    Ok
+      { sci_hint = json |> member "hint" |> to_string
+      ; sci_completion =
+          (try Some (slash_command_input_completion_of_string
+                       (json |> member "completion" |> to_string))
+           with _ -> None)
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let slash_command_input_to_yojson (s : slash_command_input) : Yojson.Safe.t =
+  let fields = [ ("hint", `String s.sci_hint) ] in
+  let fields =
+    match s.sci_completion with
+    | Some c -> ("completion", `String (slash_command_input_completion_to_string c)) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+type slash_command_info = {
+  sc_allow_during_agent_execution : bool;
+  sc_description : string;
+  sc_kind : slash_command_kind;
+  sc_name : string;
+  sc_aliases : string list option;
+  sc_experimental : bool option;
+  sc_input : slash_command_input option;
+}
+
+let slash_command_info_of_yojson (json : Yojson.Safe.t)
+    : (slash_command_info, string) result =
+  try
+    Ok
+      { sc_allow_during_agent_execution =
+          json |> member "allowDuringAgentExecution" |> to_bool
+      ; sc_description = json |> member "description" |> to_string
+      ; sc_kind =
+          slash_command_kind_of_string (json |> member "kind" |> to_string)
+      ; sc_name = json |> member "name" |> to_string
+      ; sc_aliases =
+          (try Some (json |> member "aliases" |> to_list |> List.map to_string)
+           with _ -> None)
+      ; sc_experimental =
+          (try Some (json |> member "experimental" |> to_bool)
+           with _ -> None)
+      ; sc_input =
+          (try
+             match slash_command_input_of_yojson (json |> member "input") with
+             | Ok v -> Some v
+             | Error _ -> None
+           with _ -> None)
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let slash_command_info_to_yojson (s : slash_command_info) : Yojson.Safe.t =
+  let fields =
+    [ ("allowDuringAgentExecution", `Bool s.sc_allow_during_agent_execution)
+    ; ("description", `String s.sc_description)
+    ; ("kind", `String (slash_command_kind_to_string s.sc_kind))
+    ; ("name", `String s.sc_name)
+    ]
+  in
+  let fields =
+    match s.sc_aliases with
+    | Some a -> ("aliases", `List (List.map (fun s -> `String s) a)) :: fields
+    | None -> fields
+  in
+  let fields =
+    match s.sc_experimental with
+    | Some e -> ("experimental", `Bool e) :: fields
+    | None -> fields
+  in
+  let fields =
+    match s.sc_input with
+    | Some i -> ("input", slash_command_input_to_yojson i) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+(* ========================================================================== *)
+(* Command Request Types                                                      *)
+(* ========================================================================== *)
+
+type commands_invoke_request = {
+  cir_name : string;
+  cir_input : string option;
+}
+
+let commands_invoke_request_of_yojson (json : Yojson.Safe.t)
+    : (commands_invoke_request, string) result =
+  try
+    Ok
+      { cir_name = json |> member "name" |> to_string
+      ; cir_input =
+          (try Some (json |> member "input" |> to_string) with _ -> None)
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let commands_invoke_request_to_yojson (r : commands_invoke_request) : Yojson.Safe.t =
+  let fields = [ ("name", `String r.cir_name) ] in
+  let fields =
+    match r.cir_input with
+    | Some i -> ("input", `String i) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+type commands_list_request = {
+  clr_include_builtins : bool option;
+  clr_include_client_commands : bool option;
+  clr_include_skills : bool option;
+}
+
+let commands_list_request_of_yojson (json : Yojson.Safe.t)
+    : (commands_list_request, string) result =
+  try
+    Ok
+      { clr_include_builtins =
+          (try Some (json |> member "includeBuiltins" |> to_bool) with _ -> None)
+      ; clr_include_client_commands =
+          (try Some (json |> member "includeClientCommands" |> to_bool) with _ -> None)
+      ; clr_include_skills =
+          (try Some (json |> member "includeSkills" |> to_bool) with _ -> None)
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let commands_list_request_to_yojson (r : commands_list_request) : Yojson.Safe.t =
+  let fields = [] in
+  let fields =
+    match r.clr_include_builtins with
+    | Some b -> ("includeBuiltins", `Bool b) :: fields
+    | None -> fields
+  in
+  let fields =
+    match r.clr_include_client_commands with
+    | Some b -> ("includeClientCommands", `Bool b) :: fields
+    | None -> fields
+  in
+  let fields =
+    match r.clr_include_skills with
+    | Some b -> ("includeSkills", `Bool b) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+(* ========================================================================== *)
+(* Model Billing Types                                                        *)
+(* ========================================================================== *)
+
+type model_billing_token_prices = {
+  mbtp_batch_size : int option;
+  mbtp_cache_price : int option;
+  mbtp_input_price : int option;
+  mbtp_output_price : int option;
+}
+
+let model_billing_token_prices_of_yojson (json : Yojson.Safe.t)
+    : (model_billing_token_prices, string) result =
+  try
+    Ok
+      { mbtp_batch_size =
+          (try Some (json |> member "batchSize" |> to_int) with _ -> None)
+      ; mbtp_cache_price =
+          (try Some (json |> member "cachePrice" |> to_int) with _ -> None)
+      ; mbtp_input_price =
+          (try Some (json |> member "inputPrice" |> to_int) with _ -> None)
+      ; mbtp_output_price =
+          (try Some (json |> member "outputPrice" |> to_int) with _ -> None)
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let model_billing_token_prices_to_yojson (p : model_billing_token_prices) : Yojson.Safe.t =
+  let fields = [] in
+  let fields =
+    match p.mbtp_batch_size with
+    | Some v -> ("batchSize", `Int v) :: fields
+    | None -> fields
+  in
+  let fields =
+    match p.mbtp_cache_price with
+    | Some v -> ("cachePrice", `Int v) :: fields
+    | None -> fields
+  in
+  let fields =
+    match p.mbtp_input_price with
+    | Some v -> ("inputPrice", `Int v) :: fields
+    | None -> fields
+  in
+  let fields =
+    match p.mbtp_output_price with
+    | Some v -> ("outputPrice", `Int v) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+(* Experimental *)
+(* Diagnostics from loading skills. *)
+
+type skills_load_diagnostics = {
+  sld_errors : string list;
+  sld_warnings : string list;
+}
+
+let skills_load_diagnostics_of_yojson (json : Yojson.Safe.t)
+    : (skills_load_diagnostics, string) result =
+  try
+    Ok
+      { sld_errors = json |> member "errors" |> to_list |> List.map to_string
+      ; sld_warnings = json |> member "warnings" |> to_list |> List.map to_string
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let skills_load_diagnostics_to_yojson (d : skills_load_diagnostics) : Yojson.Safe.t =
+  `Assoc
+    [ ("errors", `List (List.map (fun s -> `String s) d.sld_errors))
+    ; ("warnings", `List (List.map (fun s -> `String s) d.sld_warnings))
+    ]
+
+(* ========================================================================== *)
 (* Session Events                                                             *)
 (* ========================================================================== *)
 
