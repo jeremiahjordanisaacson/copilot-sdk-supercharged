@@ -481,9 +481,11 @@ When using BYOK, be aware of these limitations:
 
 ### Identity limitations
 
-BYOK authentication uses credentials supplied by your application. 
+BYOK authentication uses credentials supplied by your application.
 
-You must use an API key or bearer token that you manage yourself. The SDK sends the token you provide, but it does not acquire, rotate, or refresh credentials automatically. For Azure Entra ID / Managed Identity scenarios, obtain a fresh short-lived token in your application and pass it as `bearerToken` / `bearer_token` when creating a session.
+You must use an API key or bearer token that you manage yourself. The SDK sends the token you provide, but it does not acquire, rotate, or refresh credentials automatically.
+
+For Azure Entra ID / Managed Identity scenarios, obtain a fresh short-lived token in your application and pass it as `bearerToken` / `bearer_token` when creating a session.
 
 ### Feature limitations
 

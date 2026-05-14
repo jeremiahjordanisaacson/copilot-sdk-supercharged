@@ -70,22 +70,23 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
 
-          replacements = {
-              "../auth/byok.md": "BYOK",
-              "./index.md": "Authentication",
-              "../getting-started.md": "Getting-Started",
-              "./bundled-cli.md": "Setup-Bundled-CLI",
-              "./local-cli.md": "Setup-Local-CLI",
-              "./github-oauth.md": "Setup-GitHub-OAuth",
-              "./backend-services.md": "Setup-Backend-Services",
-              "../auth/authenticate.md": "Authentication",
-              "../features/session-persistence.md": "Session-Persistence",
-              "../features/mcp.md": "MCP-Server-Integration",
-              "../hooks/index.md": "Hooks",
-              "../hooks/hooks-overview.md": "Hooks",
-              "../troubleshooting/debugging.md": "Debugging",
-              "./debugging.md": "Debugging",
-          }
+          # Multiple source docs intentionally collapse to a single wiki page.
+          wiki_link_aliases = [
+              ("../auth/byok.md", "BYOK"),
+              ("./index.md", "Authentication"),
+              ("../auth/authenticate.md", "Authentication"),
+              ("../getting-started.md", "Getting-Started"),
+              ("./bundled-cli.md", "Setup-Bundled-CLI"),
+              ("./local-cli.md", "Setup-Local-CLI"),
+              ("./github-oauth.md", "Setup-GitHub-OAuth"),
+              ("./backend-services.md", "Setup-Backend-Services"),
+              ("../features/session-persistence.md", "Session-Persistence"),
+              ("../features/mcp.md", "MCP-Server-Integration"),
+              ("../hooks/index.md", "Hooks"),
+              ("../hooks/hooks-overview.md", "Hooks"),
+              ("../troubleshooting/debugging.md", "Debugging"),
+              ("./debugging.md", "Debugging"),
+          ]
 
           for name in [
               "BYOK.md",
@@ -96,7 +97,7 @@ jobs:
           ]:
               path = Path("wiki") / name
               text = path.read_text()
-              for old, new in replacements.items():
+              for old, new in wiki_link_aliases:
                   text = text.replace(f"]({old})", f"]({new})")
               path.write_text(text)
           PY
