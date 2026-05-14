@@ -625,6 +625,44 @@ let model_billing_token_prices_to_yojson (p : model_billing_token_prices) : Yojs
   in
   `Assoc fields
 
+type model_billing = {
+  mb_multiplier : float;
+  mb_token_prices : model_billing_token_prices option;
+  mb_picker_price_category : model_picker_price_category option;
+}
+
+let model_billing_of_yojson (json : Yojson.Safe.t)
+    : (model_billing, string) result =
+  try
+    Ok
+      { mb_multiplier = json |> member "multiplier" |> to_float
+      ; mb_token_prices =
+          (try
+             match model_billing_token_prices_of_yojson (json |> member "tokenPrices") with
+             | Ok v -> Some v
+             | Error _ -> None
+           with _ -> None)
+      ; mb_picker_price_category =
+          (try Some (model_picker_price_category_of_string
+                       (json |> member "pickerPriceCategory" |> to_string))
+           with _ -> None)
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let model_billing_to_yojson (b : model_billing) : Yojson.Safe.t =
+  let fields = [ ("multiplier", `Float b.mb_multiplier) ] in
+  let fields =
+    match b.mb_token_prices with
+    | Some tp -> ("tokenPrices", model_billing_token_prices_to_yojson tp) :: fields
+    | None -> fields
+  in
+  let fields =
+    match b.mb_picker_price_category with
+    | Some c -> ("pickerPriceCategory", `String (model_picker_price_category_to_string c)) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
 (* Experimental *)
 (* Diagnostics from loading skills. *)
 

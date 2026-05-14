@@ -890,9 +890,62 @@ case class ModelPolicy(
 object ModelPolicy:
   given Decoder[ModelPolicy] = deriveDecoder
 
+/** Completion type for slash command input. */
+enum SlashCommandInputCompletion(val value: String):
+  case Directory extends SlashCommandInputCompletion("directory")
+
+object SlashCommandInputCompletion:
+  given Encoder[SlashCommandInputCompletion] = Encoder.encodeString.contramap(_.value)
+  given Decoder[SlashCommandInputCompletion] = Decoder.decodeString.emap:
+    case "directory" => Right(SlashCommandInputCompletion.Directory)
+    case other       => Left(s"Unknown SlashCommandInputCompletion: $other")
+
+/** Kind of slash command. */
+enum SlashCommandKind(val value: String):
+  case Builtin extends SlashCommandKind("builtin")
+  case Client  extends SlashCommandKind("client")
+  case Skill   extends SlashCommandKind("skill")
+
+object SlashCommandKind:
+  given Encoder[SlashCommandKind] = Encoder.encodeString.contramap(_.value)
+  given Decoder[SlashCommandKind] = Decoder.decodeString.emap:
+    case "builtin" => Right(SlashCommandKind.Builtin)
+    case "client"  => Right(SlashCommandKind.Client)
+    case "skill"   => Right(SlashCommandKind.Skill)
+    case other     => Left(s"Unknown SlashCommandKind: $other")
+
+/** Price category for the model picker. */
+enum ModelPickerPriceCategory(val value: String):
+  case High     extends ModelPickerPriceCategory("high")
+  case Low      extends ModelPickerPriceCategory("low")
+  case Medium   extends ModelPickerPriceCategory("medium")
+  case VeryHigh extends ModelPickerPriceCategory("very_high")
+
+object ModelPickerPriceCategory:
+  given Encoder[ModelPickerPriceCategory] = Encoder.encodeString.contramap(_.value)
+  given Decoder[ModelPickerPriceCategory] = Decoder.decodeString.emap:
+    case "high"      => Right(ModelPickerPriceCategory.High)
+    case "low"       => Right(ModelPickerPriceCategory.Low)
+    case "medium"    => Right(ModelPickerPriceCategory.Medium)
+    case "very_high" => Right(ModelPickerPriceCategory.VeryHigh)
+    case other       => Left(s"Unknown ModelPickerPriceCategory: $other")
+
+/** Token prices for model billing. */
+case class ModelBillingTokenPrices(
+  batchSize: Option[Int] = None,
+  cachePrice: Option[Int] = None,
+  inputPrice: Option[Int] = None,
+  outputPrice: Option[Int] = None
+)
+
+object ModelBillingTokenPrices:
+  given Decoder[ModelBillingTokenPrices] = deriveDecoder
+
 /** Model billing information. */
 case class ModelBilling(
-  multiplier: Double
+  multiplier: Double,
+  tokenPrices: Option[ModelBillingTokenPrices] = None,
+  pickerPriceCategory: Option[ModelPickerPriceCategory] = None
 )
 
 object ModelBilling:
@@ -911,6 +964,67 @@ case class ModelInfo(
 
 object ModelInfo:
   given Decoder[ModelInfo] = deriveDecoder
+
+// ============================================================================
+// Slash Command Types
+// ============================================================================
+
+/** Input configuration for a slash command. */
+case class SlashCommandInput(
+  hint: String,
+  completion: Option[SlashCommandInputCompletion] = None
+)
+
+object SlashCommandInput:
+  given Decoder[SlashCommandInput] = deriveDecoder
+
+/** Information about a slash command. */
+case class SlashCommandInfo(
+  allowDuringAgentExecution: Boolean,
+  description: String,
+  kind: SlashCommandKind,
+  name: String,
+  aliases: Option[List[String]] = None,
+  experimental: Option[Boolean] = None,
+  input: Option[SlashCommandInput] = None
+)
+
+object SlashCommandInfo:
+  given Decoder[SlashCommandInfo] = deriveDecoder
+
+// ============================================================================
+// Command Request Types
+// ============================================================================
+
+/** Request to invoke a command. */
+case class CommandsInvokeRequest(
+  name: String,
+  input: Option[String] = None
+)
+
+object CommandsInvokeRequest:
+  given Encoder[CommandsInvokeRequest] = deriveEncoder
+  given Decoder[CommandsInvokeRequest] = deriveDecoder
+
+/** Request to list commands. */
+case class CommandsListRequest(
+  includeBuiltins: Option[Boolean] = None,
+  includeClientCommands: Option[Boolean] = None,
+  includeSkills: Option[Boolean] = None
+)
+
+object CommandsListRequest:
+  given Encoder[CommandsListRequest] = deriveEncoder
+  given Decoder[CommandsListRequest] = deriveDecoder
+
+/** Experimental: Diagnostics from loading skills. */
+case class SkillsLoadDiagnostics(
+  errors: List[String],
+  warnings: List[String]
+)
+
+object SkillsLoadDiagnostics:
+  given Decoder[SkillsLoadDiagnostics] = deriveDecoder
 
 // ============================================================================
 // Session Metadata

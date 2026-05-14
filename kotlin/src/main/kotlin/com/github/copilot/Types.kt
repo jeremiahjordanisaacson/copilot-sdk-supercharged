@@ -726,11 +726,53 @@ data class ModelPolicy(
 )
 
 /**
+ * Completion type for slash command input.
+ */
+@Serializable
+enum class SlashCommandInputCompletion {
+    @SerialName("directory") DIRECTORY
+}
+
+/**
+ * Kind of slash command.
+ */
+@Serializable
+enum class SlashCommandKind {
+    @SerialName("builtin") BUILTIN,
+    @SerialName("client") CLIENT,
+    @SerialName("skill") SKILL
+}
+
+/**
+ * Price category for the model picker.
+ */
+@Serializable
+enum class ModelPickerPriceCategory {
+    @SerialName("high") HIGH,
+    @SerialName("low") LOW,
+    @SerialName("medium") MEDIUM,
+    @SerialName("very_high") VERY_HIGH
+}
+
+/**
+ * Token prices for model billing.
+ */
+@Serializable
+data class ModelBillingTokenPrices(
+    val batchSize: Int? = null,
+    val cachePrice: Int? = null,
+    val inputPrice: Int? = null,
+    val outputPrice: Int? = null
+)
+
+/**
  * Model billing information.
  */
 @Serializable
 data class ModelBilling(
-    val multiplier: Double
+    val multiplier: Double,
+    val tokenPrices: ModelBillingTokenPrices? = null,
+    val pickerPriceCategory: ModelPickerPriceCategory? = null
 )
 
 /**
@@ -745,6 +787,65 @@ data class ModelInfo(
     val billing: ModelBilling? = null,
     val supportedReasoningEfforts: List<String>? = null,
     val defaultReasoningEffort: String? = null
+)
+
+// ============================================================================
+// Slash Command Types
+// ============================================================================
+
+/**
+ * Input configuration for a slash command.
+ */
+@Serializable
+data class SlashCommandInput(
+    val hint: String,
+    val completion: SlashCommandInputCompletion? = null
+)
+
+/**
+ * Information about a slash command.
+ */
+@Serializable
+data class SlashCommandInfo(
+    val allowDuringAgentExecution: Boolean,
+    val description: String,
+    val kind: SlashCommandKind,
+    val name: String,
+    val aliases: List<String>? = null,
+    val experimental: Boolean? = null,
+    val input: SlashCommandInput? = null
+)
+
+// ============================================================================
+// Command Request Types
+// ============================================================================
+
+/**
+ * Request to invoke a command.
+ */
+@Serializable
+data class CommandsInvokeRequest(
+    val name: String,
+    val input: String? = null
+)
+
+/**
+ * Request to list commands.
+ */
+@Serializable
+data class CommandsListRequest(
+    val includeBuiltins: Boolean? = null,
+    val includeClientCommands: Boolean? = null,
+    val includeSkills: Boolean? = null
+)
+
+/**
+ * Experimental: Diagnostics from loading skills.
+ */
+@Serializable
+data class SkillsLoadDiagnostics(
+    val errors: List<String>,
+    val warnings: List<String>
 )
 
 // ============================================================================

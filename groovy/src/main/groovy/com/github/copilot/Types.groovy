@@ -344,4 +344,77 @@ final class Types {
         String traceparent
         String tracestate
     }
+
+    /** Completion type for slash command input. */
+    enum SlashCommandInputCompletion {
+        DIRECTORY
+    }
+
+    /** Kind of slash command. */
+    enum SlashCommandKind {
+        BUILTIN, CLIENT, SKILL
+    }
+
+    /** Price category for the model picker. */
+    enum ModelPickerPriceCategory {
+        HIGH, LOW, MEDIUM, VERY_HIGH
+    }
+
+    /** Input configuration for a slash command. */
+    @ToString(includeNames = true)
+    static class SlashCommandInput {
+        String hint
+        SlashCommandInputCompletion completion
+    }
+
+    /** Information about a slash command. */
+    @ToString(includeNames = true)
+    static class SlashCommandInfo {
+        boolean allowDuringAgentExecution
+        String description
+        SlashCommandKind kind
+        String name
+        List<String> aliases
+        Boolean experimental
+        SlashCommandInput input
+    }
+
+    /** Request to invoke a command. */
+    @ToString(includeNames = true)
+    static class CommandsInvokeRequest {
+        String name
+        String input
+    }
+
+    /** Request to list commands. */
+    @ToString(includeNames = true)
+    static class CommandsListRequest {
+        Boolean includeBuiltins
+        Boolean includeClientCommands
+        Boolean includeSkills
+    }
+
+    /** Token prices for model billing. */
+    @ToString(includeNames = true)
+    static class ModelBillingTokenPrices {
+        Integer batchSize
+        Integer cachePrice
+        Integer inputPrice
+        Integer outputPrice
+    }
+
+    /** Model billing information. */
+    @ToString(includeNames = true)
+    static class ModelBilling {
+        double multiplier
+        ModelBillingTokenPrices tokenPrices
+        ModelPickerPriceCategory pickerPriceCategory
+    }
+
+    /** Experimental: Diagnostics from loading skills. */
+    @ToString(includeNames = true)
+    static class SkillsLoadDiagnostics {
+        List<String> errors
+        List<String> warnings
+    }
 }

@@ -512,4 +512,82 @@ public final class Types {
     public interface TraceContextProvider {
         TraceContext getTraceContext() throws Exception;
     }
+
+    /** Completion type for slash command input. */
+    public enum SlashCommandInputCompletion {
+        @JsonProperty("directory") DIRECTORY
+    }
+
+    /** Kind of slash command. */
+    public enum SlashCommandKind {
+        @JsonProperty("builtin") BUILTIN,
+        @JsonProperty("client") CLIENT,
+        @JsonProperty("skill") SKILL
+    }
+
+    /** Price category for the model picker. */
+    public enum ModelPickerPriceCategory {
+        @JsonProperty("high") HIGH,
+        @JsonProperty("low") LOW,
+        @JsonProperty("medium") MEDIUM,
+        @JsonProperty("very_high") VERY_HIGH
+    }
+
+    /** Input configuration for a slash command. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class SlashCommandInput {
+        @JsonProperty("hint") public String hint;
+        @JsonProperty("completion") public SlashCommandInputCompletion completion;
+    }
+
+    /** Information about a slash command. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class SlashCommandInfo {
+        @JsonProperty("allowDuringAgentExecution") public boolean allowDuringAgentExecution;
+        @JsonProperty("description") public String description;
+        @JsonProperty("kind") public SlashCommandKind kind;
+        @JsonProperty("name") public String name;
+        @JsonProperty("aliases") public List<String> aliases;
+        @JsonProperty("experimental") public Boolean experimental;
+        @JsonProperty("input") public SlashCommandInput input;
+    }
+
+    /** Request to invoke a command. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class CommandsInvokeRequest {
+        @JsonProperty("name") public String name;
+        @JsonProperty("input") public String input;
+    }
+
+    /** Request to list commands. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class CommandsListRequest {
+        @JsonProperty("includeBuiltins") public Boolean includeBuiltins;
+        @JsonProperty("includeClientCommands") public Boolean includeClientCommands;
+        @JsonProperty("includeSkills") public Boolean includeSkills;
+    }
+
+    /** Token prices for model billing. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ModelBillingTokenPrices {
+        @JsonProperty("batchSize") public Integer batchSize;
+        @JsonProperty("cachePrice") public Integer cachePrice;
+        @JsonProperty("inputPrice") public Integer inputPrice;
+        @JsonProperty("outputPrice") public Integer outputPrice;
+    }
+
+    /** Model billing information. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ModelBilling {
+        @JsonProperty("multiplier") public double multiplier;
+        @JsonProperty("tokenPrices") public ModelBillingTokenPrices tokenPrices;
+        @JsonProperty("pickerPriceCategory") public ModelPickerPriceCategory pickerPriceCategory;
+    }
+
+    /** Experimental: Diagnostics from loading skills. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class SkillsLoadDiagnostics {
+        @JsonProperty("errors") public List<String> errors;
+        @JsonProperty("warnings") public List<String> warnings;
+    }
 }
