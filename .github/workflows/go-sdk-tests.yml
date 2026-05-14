@@ -84,7 +84,7 @@ jobs:
         run: |
           if [ -z "$COPILOT_HMAC_KEY" ]; then
             echo "::warning::COPILOT_HMAC_KEY not set — running fmt, lint, and build checks only"
-            cd go && go fmt ./... && go vet ./... && go build ./...
+            go fmt ./... && go vet ./... && go build ./...
           else
             /bin/bash test.sh
           fi
