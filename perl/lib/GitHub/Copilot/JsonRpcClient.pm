@@ -6,8 +6,14 @@ use warnings;
 use Carp qw(croak);
 use Encode qw(is_utf8 encode);
 use JSON::PP;
-use threads;
-use threads::shared;
+our $HAS_THREADS;
+BEGIN {
+    $HAS_THREADS = eval { require threads; threads->import(); 1 };
+    if ($HAS_THREADS) {
+        require threads::shared;
+        threads::shared->import();
+    }
+}
 use Thread::Queue;
 use UUID::Tiny ':std';
 use Time::HiRes qw(time sleep);
@@ -51,7 +57,10 @@ sub new {
     binmode($stdin_fh,  ':raw');
     binmode($stdout_fh, ':raw');
 
-    my %pending :shared;
+    my %pending;
+    if ($HAS_THREADS) {
+        eval 'my %p :shared; %pending = %p;';
+    }
     my %self = (
         stdin_fh             => $stdin_fh,
         stdout_fh            => $stdout_fh,
@@ -77,11 +86,14 @@ sub start {
     return if $self->{_running};
     $self->{_running} = 1;
 
-    # Start the background reader thread
-    $self->{_reader_thread} = threads->create(sub {
-        $self->_read_loop();
-    });
-    $self->{_reader_thread}->detach();
+    if ($HAS_THREADS) {
+        # Start the background reader thread
+        $self->{_reader_thread} = threads->create(sub {
+            $self->_read_loop();
+        });
+        $self->{_reader_thread}->detach();
+    }
+    # Without threads, the caller must call process_incoming() periodically
 
     return $self;
 }
@@ -121,8 +133,10 @@ sub request {
 
     # Create a response queue for this request
     my $queue = Thread::Queue->new();
-    {
+    if ($HAS_THREADS) {
         lock(%{ $self->{_pending} });
+        $self->{_pending}{$id} = 1;
+    } else {
         $self->{_pending}{$id} = 1;
     }
     $self->{_response_queues}{$id} = $queue;
@@ -140,12 +154,21 @@ sub request {
     my $deadline = time() + $timeout;
     my $response;
     while (1) {
+        # In non-threaded mode, read messages directly
+        unless ($HAS_THREADS) {
+            while (my $msg = $self->_read_message()) {
+                $self->_handle_message($msg);
+            }
+        }
+
         # Process any incoming requests/notifications on the main thread
         $self->_process_incoming();
 
         my $remaining = $deadline - time();
         if ($remaining <= 0) {
-            lock(%{ $self->{_pending} });
+            if ($HAS_THREADS) {
+                lock(%{ $self->{_pending} });
+            }
             delete $self->{_pending}{$id};
             delete $self->{_response_queues}{$id};
             croak "JSON-RPC request '$method' timed out after ${timeout}s";
@@ -157,8 +180,10 @@ sub request {
     }
 
     # Cleanup
-    {
+    if ($HAS_THREADS) {
         lock(%{ $self->{_pending} });
+        delete $self->{_pending}{$id};
+    } else {
         delete $self->{_pending}{$id};
     }
     delete $self->{_response_queues}{$id};
@@ -319,8 +344,12 @@ sub _handle_message {
     if (exists $message->{id} && (exists $message->{result} || exists $message->{error})) {
         my $id = $message->{id};
         my $queue;
-        {
+        if ($HAS_THREADS) {
             lock(%{ $self->{_pending} });
+            if (exists $self->{_pending}{$id}) {
+                $queue = $self->{_response_queues}{$id};
+            }
+        } else {
             if (exists $self->{_pending}{$id}) {
                 $queue = $self->{_response_queues}{$id};
             }

@@ -247,3 +247,13 @@ val default_client_options : unit -> client_options
 
 val make_message : ?mode:string -> string -> message_options
 val make_tool_definition : ?parameters:Yojson.Safe.t -> string -> string -> tool_definition
+
+(** {1 Remote Enable Result} *)
+
+type remote_enable_result = {
+  rer_remote_steerable : bool;
+  rer_url : string option;
+}
+
+val remote_enable_result_of_yojson : Yojson.Safe.t -> (remote_enable_result, string) result
+val remote_enable_result_to_yojson : remote_enable_result -> Yojson.Safe.t
