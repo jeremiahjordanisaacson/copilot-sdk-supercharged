@@ -25,7 +25,7 @@ jobs:
 
       - name: Update changelog in wiki
         run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "Skipping changelog update for non-release ref ${GITHUB_REF_NAME}"
             exit 0
           fi
@@ -105,15 +105,17 @@ jobs:
           # Keep wiki-only pages aligned with current repo facts.
           python3 <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("wiki/Installation.md")
           if path.exists():
               lines = path.read_text().splitlines()
+              bundled_cli_heading = re.compile(r"^##\s+.*SDKs?.*bundled CLI.*$", re.IGNORECASE)
               heading_index = next(
                   (
                       index
                       for index, line in enumerate(lines)
-                      if line.startswith("## ") and "SDKs" in line and "bundled CLI" in line
+                      if bundled_cli_heading.match(line)
                   ),
                   None,
               )
@@ -130,6 +132,8 @@ jobs:
                           "Node.js, Python, and .NET bundle the Copilot CLI automatically. "
                           "Go is a core SDK but requires a separately installed CLI or explicit `CLIPath`."
                       )
+              else:
+                  print("Warning: Installation.md bundled CLI SDK heading was not found")
 
               path.write_text("\n".join(lines) + "\n")
           PY
