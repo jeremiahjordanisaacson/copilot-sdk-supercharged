@@ -72,6 +72,7 @@ await client.stop()
 
 > [!NOTE]
 > The Go SDK does not bundle the CLI. You must install the CLI separately or set `CLIPath` to point to an existing binary. See [Local CLI Setup](./local-cli.md) for details.
+> This example is included for core-SDK quick-start parity; Go is the bundled-CLI exception on this page.
 
 <!-- docs-validate: hidden -->
 ```go
