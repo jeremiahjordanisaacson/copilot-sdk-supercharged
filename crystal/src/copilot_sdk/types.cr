@@ -259,6 +259,43 @@ module CopilotSDK
     end
   end
 
+  # Mode for remote session control.
+  enum RemoteSessionMode
+    Export
+    Off
+    On
+
+    def to_json(json : JSON::Builder) : Nil
+      json.string(to_s.downcase)
+    end
+
+    def self.from_json(value : String) : self
+      parse(value)
+    end
+  end
+
+  # Experimental: Request to enable or configure a remote session.
+  class RemoteEnableRequest
+    include JSON::Serializable
+
+    property mode : RemoteSessionMode?
+
+    def initialize(@mode = nil)
+    end
+  end
+
+  # Experimental: Result of enabling a remote session.
+  class RemoteEnableResult
+    include JSON::Serializable
+
+    @[JSON::Field(key: "remoteSteerable")]
+    property remote_steerable : Bool
+    property url : String?
+
+    def initialize(@remote_steerable, @url = nil)
+    end
+  end
+
   # Model information returned by the server.
   class ModelInfo
     include JSON::Serializable

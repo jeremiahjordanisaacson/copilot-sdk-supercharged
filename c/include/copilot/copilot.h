@@ -794,6 +794,36 @@ typedef struct {
 void copilot_ping_response_free(copilot_ping_response_t *response);
 
 /* ============================================================================
+ * Remote Session
+ * ============================================================================ */
+
+/** Mode for remote session control. */
+typedef enum {
+    COPILOT_REMOTE_SESSION_MODE_EXPORT = 0,
+    COPILOT_REMOTE_SESSION_MODE_OFF,
+    COPILOT_REMOTE_SESSION_MODE_ON,
+} copilot_remote_session_mode_t;
+
+/* Experimental */
+/** Request to enable or configure a remote session. */
+typedef struct {
+    copilot_remote_session_mode_t mode;
+    bool has_mode;              /**< Whether mode is set */
+} copilot_remote_enable_request_t;
+
+/* Experimental */
+/** Result of enabling a remote session. */
+typedef struct {
+    bool remote_steerable;      /**< Whether the remote session is steerable */
+    char *url;                  /**< Remote session URL, may be NULL */
+} copilot_remote_enable_result_t;
+
+/**
+ * Frees a remote enable result.
+ */
+void copilot_remote_enable_result_free(copilot_remote_enable_result_t *result);
+
+/* ============================================================================
  * Session metadata
  * ============================================================================ */
 

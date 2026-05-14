@@ -1193,6 +1193,52 @@ inline void from_json(const nlohmann::json& j, ModelInfo& m) {
 }
 
 // ============================================================================
+// Remote Session
+// ============================================================================
+
+/// Mode for remote session control.
+enum class RemoteSessionMode {
+    Export,
+    Off,
+    On
+};
+
+NLOHMANN_JSON_SERIALIZE_ENUM(RemoteSessionMode, {
+    {RemoteSessionMode::Export, "export"},
+    {RemoteSessionMode::Off, "off"},
+    {RemoteSessionMode::On, "on"},
+})
+
+// Experimental
+/// Request to enable or configure a remote session.
+struct RemoteEnableRequest {
+    std::optional<RemoteSessionMode> mode;
+};
+
+inline void to_json(nlohmann::json& j, const RemoteEnableRequest& r) {
+    j = nlohmann::json::object();
+    if (r.mode.has_value()) j["mode"] = r.mode.value();
+}
+
+inline void from_json(const nlohmann::json& j, RemoteEnableRequest& r) {
+    if (j.contains("mode") && !j["mode"].is_null())
+        r.mode = j["mode"].get<RemoteSessionMode>();
+}
+
+// Experimental
+/// Result of enabling a remote session.
+struct RemoteEnableResult {
+    bool remoteSteerable = false;
+    std::optional<std::string> url;
+};
+
+inline void from_json(const nlohmann::json& j, RemoteEnableResult& r) {
+    j.at("remoteSteerable").get_to(r.remoteSteerable);
+    if (j.contains("url") && !j["url"].is_null())
+        r.url = j["url"].get<std::string>();
+}
+
+// ============================================================================
 // Session Metadata
 // ============================================================================
 

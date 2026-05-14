@@ -1252,6 +1252,79 @@ class ModelInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Remote Session
+// ---------------------------------------------------------------------------
+
+/// Mode for remote session control.
+enum RemoteSessionMode {
+  export_,
+  off,
+  on,
+}
+
+/// Extension to convert [RemoteSessionMode] to/from JSON string.
+extension RemoteSessionModeJson on RemoteSessionMode {
+  String toJson() {
+    switch (this) {
+      case RemoteSessionMode.export_:
+        return 'export';
+      case RemoteSessionMode.off:
+        return 'off';
+      case RemoteSessionMode.on:
+        return 'on';
+    }
+  }
+
+  static RemoteSessionMode fromJson(String value) {
+    switch (value) {
+      case 'export':
+        return RemoteSessionMode.export_;
+      case 'off':
+        return RemoteSessionMode.off;
+      case 'on':
+        return RemoteSessionMode.on;
+      default:
+        return RemoteSessionMode.off;
+    }
+  }
+}
+
+/// Experimental: Request to enable or configure a remote session.
+class RemoteEnableRequest {
+  final RemoteSessionMode? mode;
+
+  const RemoteEnableRequest({
+    this.mode,
+  });
+
+  factory RemoteEnableRequest.fromJson(Map<String, dynamic> json) {
+    return RemoteEnableRequest(
+      mode: json['mode'] != null
+          ? RemoteSessionModeJson.fromJson(json['mode'] as String)
+          : null,
+    );
+  }
+}
+
+/// Experimental: Result of enabling a remote session.
+class RemoteEnableResult {
+  final bool remoteSteerable;
+  final String? url;
+
+  const RemoteEnableResult({
+    required this.remoteSteerable,
+    this.url,
+  });
+
+  factory RemoteEnableResult.fromJson(Map<String, dynamic> json) {
+    return RemoteEnableResult(
+      remoteSteerable: json['remoteSteerable'] as bool,
+      url: json['url'] as String?,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Session Metadata
 // ---------------------------------------------------------------------------
 

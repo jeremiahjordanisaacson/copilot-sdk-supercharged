@@ -208,6 +208,27 @@ pub:
 	warnings []string [json: 'warnings']
 }
 
+// RemoteSessionMode is the mode for remote session control.
+pub enum RemoteSessionMode {
+	export_
+	off
+	on
+}
+
+// Experimental: RemoteEnableRequest is a request to enable or configure a remote session.
+pub struct RemoteEnableRequest {
+pub:
+	mode RemoteSessionMode [json: 'mode']
+	has_mode bool
+}
+
+// Experimental: RemoteEnableResult is the result of enabling a remote session.
+pub struct RemoteEnableResult {
+pub:
+	remote_steerable bool   [json: 'remoteSteerable']
+	url              string [json: 'url']
+}
+
 // ModelInfo describes a model the server can use.
 pub struct ModelInfo {
 pub:

@@ -1334,6 +1334,26 @@ public struct ModelInfo: Codable, Sendable {
     public let defaultReasoningEffort: String?
 }
 
+// MARK: - Remote Session
+
+/// Mode for remote session control.
+public enum RemoteSessionMode: String, Codable, Sendable {
+    case export_ = "export"
+    case off
+    case on
+}
+
+/// Experimental: Request to enable or configure a remote session.
+public struct RemoteEnableRequest: Codable, Sendable {
+    public let mode: RemoteSessionMode?
+}
+
+/// Experimental: Result of enabling a remote session.
+public struct RemoteEnableResult: Codable, Sendable {
+    public let remoteSteerable: Bool
+    public let url: String?
+}
+
 // MARK: - Session Metadata
 
 /// Metadata about a session.

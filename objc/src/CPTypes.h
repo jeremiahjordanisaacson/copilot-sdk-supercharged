@@ -203,6 +203,34 @@ typedef NS_ENUM(NSInteger, CPModelPickerPriceCategory) {
 
 @end
 
+#pragma mark - Remote Session
+
+/// Mode for remote session control.
+typedef NS_ENUM(NSInteger, CPRemoteSessionMode) {
+    CPRemoteSessionModeExport = 0,
+    CPRemoteSessionModeOff,
+    CPRemoteSessionModeOn,
+};
+
+/// Experimental: Request to enable or configure a remote session.
+@interface CPRemoteEnableRequest : NSObject
+
+@property (nonatomic, strong, nullable) NSNumber *mode; // CPRemoteSessionMode wrapped as NSNumber, nil if not set
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+/// Experimental: Result of enabling a remote session.
+@interface CPRemoteEnableResult : NSObject
+
+@property (nonatomic, assign, readonly) BOOL remoteSteerable;
+@property (nonatomic, copy, readonly, nullable) NSString *url;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+
+@end
+
 #pragma mark - Session Event
 
 /// An event received from the session.

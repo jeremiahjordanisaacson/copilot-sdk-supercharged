@@ -278,6 +278,25 @@ type
     warnings*: seq[string]
 
 # ---------------------------------------------------------------------------
+# Remote Session
+# ---------------------------------------------------------------------------
+
+type
+  RemoteSessionMode* = enum
+    rsmExport = "export"
+    rsmOff = "off"
+    rsmOn = "on"
+
+  ## Experimental
+  RemoteEnableRequest* = object
+    mode*: Option[RemoteSessionMode]
+
+  ## Experimental
+  RemoteEnableResult* = object
+    remoteSteerable*: bool
+    url*: Option[string]
+
+# ---------------------------------------------------------------------------
 # Connection state
 # ---------------------------------------------------------------------------
 

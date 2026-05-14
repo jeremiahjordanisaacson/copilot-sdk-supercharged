@@ -337,6 +337,30 @@ pub const SkillsLoadDiagnostics = struct {
 };
 
 // ---------------------------------------------------------------------------
+// Remote Session
+// ---------------------------------------------------------------------------
+
+/// Mode for remote session control.
+pub const RemoteSessionMode = enum {
+    @"export",
+    off,
+    on,
+};
+
+// Experimental
+/// Request to enable or configure a remote session.
+pub const RemoteEnableRequest = struct {
+    mode: ?RemoteSessionMode = null,
+};
+
+// Experimental
+/// Result of enabling a remote session.
+pub const RemoteEnableResult = struct {
+    remote_steerable: bool,
+    url: ?[]const u8 = null,
+};
+
+// ---------------------------------------------------------------------------
 // Server status
 // ---------------------------------------------------------------------------
 
