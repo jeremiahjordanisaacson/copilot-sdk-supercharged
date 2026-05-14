@@ -7,6 +7,10 @@
  * @brief CopilotClient implementation - spawns CLI process, manages sessions.
  */
 
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 199309L
+#endif
+
 #include "copilot/copilot.h"
 #include "copilot/sdk_protocol_version.h"
 #include "json_rpc_client.h"

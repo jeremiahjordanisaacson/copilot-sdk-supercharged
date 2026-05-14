@@ -378,14 +378,14 @@ void CopilotClient::setSessionFsProvider(const SessionFsConfig& config) {
     ensureConnected();
 
     nlohmann::json params = nlohmann::json::object();
-    if (config.initialCwd) {
-        params["initialCwd"] = *config.initialCwd;
+    if (!config.initialCwd.empty()) {
+        params["initialCwd"] = config.initialCwd;
     }
-    if (config.sessionStatePath) {
-        params["sessionStatePath"] = *config.sessionStatePath;
+    if (!config.sessionStatePath.empty()) {
+        params["sessionStatePath"] = config.sessionStatePath;
     }
-    if (config.conventions) {
-        params["conventions"] = *config.conventions;
+    if (!config.conventions.empty()) {
+        params["conventions"] = config.conventions;
     }
 
     rpcClient_->request("sessionFs.setProvider", params);

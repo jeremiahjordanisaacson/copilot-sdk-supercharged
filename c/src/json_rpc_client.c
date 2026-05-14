@@ -7,6 +7,10 @@
  * @brief Internal JSON-RPC 2.0 client implementation.
  */
 
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 199309L
+#endif
+
 #include "json_rpc_client.h"
 
 #include <stdio.h>
