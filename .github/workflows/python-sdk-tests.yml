@@ -75,7 +75,8 @@ jobs:
         run: uv run ruff check
 
       - name: Run ty type checking
-        run: uv run ty check copilot || echo "::warning::ty check reported errors (known false positives with type: ignore comments)"
+        run: |
+          uv run ty check copilot || echo "::warning::ty check reported errors (known false positives with type: ignore comments)"
 
       - name: Install test harness dependencies
         working-directory: ./test/harness
