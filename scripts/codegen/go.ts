@@ -27,6 +27,7 @@ import {
     isNodeFullyExperimental,
     isRpcMethod,
     isSchemaDeprecated,
+    isSchemaExperimental,
     isVoidSchema,
     postProcessSchema,
     refTypeName,
@@ -51,7 +52,8 @@ const wrapGoCommentText = wordwrap(goCommentTextWrapLength);
 
 function toPascalCase(s: string): string {
     return s
-        .split(/[._]/)
+        .split(/[^A-Za-z0-9]+/)
+        .filter((word) => word.length > 0)
         .map((w) => goInitialisms.has(w.toLowerCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1))
         .join("");
 }
@@ -91,7 +93,7 @@ function splitGoIdentifierWords(name: string): string[] {
     return name
         .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
         .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-        .split(/[._-]/)
+        .split(/[^A-Za-z0-9]+/)
         .filter((word) => word.length > 0);
 }
 
@@ -105,6 +107,30 @@ function pushGoComment(lines: string[], text: string, indent = "", wrap = true):
 
 function pushGoCommentForContext(lines: string[], text: string, ctx: GoCodegenCtx, indent = ""): void {
     pushGoComment(lines, text, indent, ctx.wrapComments !== false);
+}
+
+function goExperimentalTypeComment(typeName: string): string {
+    return `Experimental: ${typeName} is part of an experimental API and may change or be removed.`;
+}
+
+function pushGoExperimentalTypeComment(lines: string[], typeName: string, ctx: GoCodegenCtx): void {
+    pushGoCommentForContext(lines, goExperimentalTypeComment(typeName), ctx);
+}
+
+function pushGoExperimentalEventComment(lines: string[], constName: string, indent = ""): void {
+    pushGoComment(lines, `Experimental: ${constName} identifies an experimental event that may change or be removed.`, indent);
+}
+
+function pushGoExperimentalApiComment(lines: string[], name: string, indent = ""): void {
+    pushGoComment(lines, `Experimental: ${name} contains experimental APIs that may change or be removed.`, indent);
+}
+
+function pushGoExperimentalSubApiComment(lines: string[], name: string, indent = ""): void {
+    pushGoComment(lines, `Experimental: ${name} returns experimental APIs that may change or be removed.`, indent);
+}
+
+function pushGoExperimentalMethodComment(lines: string[], methodName: string, indent = ""): void {
+    pushGoComment(lines, `Experimental: ${methodName} is an experimental API and may change or be removed in future versions.`, indent);
 }
 
 function goCommentLines(text: string, indent = "", wrap = true): string[] {
@@ -284,6 +310,8 @@ interface GoEventVariant {
     dataClassName: string;
     dataSchema: JSONSchema7;
     dataDescription?: string;
+    eventExperimental: boolean;
+    dataExperimental: boolean;
 }
 
 interface GoEventEnvelopeProperty extends SessionEventEnvelopeProperty {
@@ -364,6 +392,8 @@ function extractGoEventVariants(schema: JSONSchema7): GoEventVariant[] {
                 dataClassName: `${toPascalCase(typeName)}Data`,
                 dataSchema,
                 dataDescription: dataSchema.description,
+                eventExperimental: isSchemaExperimental(variant),
+                dataExperimental: isSchemaExperimental(dataSchema),
             };
         });
 }
@@ -496,7 +526,8 @@ function getOrCreateGoEnum(
     values: string[],
     ctx: GoCodegenCtx,
     description?: string,
-    deprecated?: boolean
+    deprecated?: boolean,
+    experimental?: boolean
 ): string {
     const existing = ctx.enumsByName.get(enumName);
     if (existing) return existing;
@@ -504,6 +535,9 @@ function getOrCreateGoEnum(
     const lines: string[] = [];
     if (description) {
         pushGoCommentForContext(lines, description, ctx);
+    }
+    if (experimental) {
+        pushGoExperimentalTypeComment(lines, enumName, ctx);
     }
     if (deprecated) {
         pushGoCommentForContext(lines, `Deprecated: ${enumName} is deprecated and will be removed in a future version.`, ctx);
@@ -514,8 +548,17 @@ function getOrCreateGoEnum(
     const consts = values
         .map((value) => ({ value, constSuffix: goEnumConstSuffix(value) }))
         .sort((left, right) => `${enumName}${left.constSuffix}`.localeCompare(`${enumName}${right.constSuffix}`));
+    const usedConstNames = new Map<string, string>();
     for (const { value, constSuffix } of consts) {
-        lines.push(`\t${enumName}${constSuffix} ${enumName} = "${value}"`);
+        const constName = `${enumName}${constSuffix}`;
+        const existingValue = usedConstNames.get(constName);
+        if (existingValue !== undefined) {
+            throw new Error(
+                `Generated Go enum const identifier "${constName}" is not unique for values "${existingValue}" and "${value}". Add an explicit naming rule instead of stabilizing an arbitrary public const name.`
+            );
+        }
+        usedConstNames.set(constName, value);
+        lines.push(`\t${constName} ${enumName} = "${value}"`);
     }
     lines.push(`)`);
 
@@ -525,14 +568,14 @@ function getOrCreateGoEnum(
 }
 
 function goEnumConstSuffix(value: string): string {
-    return value
-        .split(/[-_.]/)
+    const suffix = splitGoIdentifierWords(value)
         .map((word) =>
             goInitialisms.has(word.toLowerCase())
                 ? word.toUpperCase()
                 : word.charAt(0).toUpperCase() + word.slice(1)
         )
         .join("");
+    return suffix || "Value";
 }
 
 function goDiscriminatedUnionVariantTypeName(
@@ -589,7 +632,7 @@ function resolveGoPropertyType(
         const resolved = resolveRef(propSchema.$ref, ctx.definitions);
         if (resolved) {
             if (resolved.enum) {
-                const enumType = getOrCreateGoEnum(typeName, resolved.enum as string[], ctx, resolved.description, isSchemaDeprecated(resolved));
+                const enumType = getOrCreateGoEnum(typeName, resolved.enum as string[], ctx, resolved.description, isSchemaDeprecated(resolved), isSchemaExperimental(resolved));
                 return isRequired ? enumType : `*${enumType}`;
             }
             if (isNamedGoObjectSchema(resolved)) {
@@ -643,7 +686,7 @@ function resolveGoPropertyType(
 
     // Handle enum
     if (propSchema.enum && Array.isArray(propSchema.enum)) {
-        const enumType = getOrCreateGoEnum((propSchema.title as string) || nestedName, propSchema.enum as string[], ctx, propSchema.description, isSchemaDeprecated(propSchema));
+        const enumType = getOrCreateGoEnum((propSchema.title as string) || nestedName, propSchema.enum as string[], ctx, propSchema.description, isSchemaDeprecated(propSchema), isSchemaExperimental(propSchema));
         return isRequired ? enumType : `*${enumType}`;
     }
 
@@ -653,7 +696,7 @@ function resolveGoPropertyType(
         if (typeof propSchema.const !== "string") {
             return resolveGoPropertyType(schemaForConstValue(propSchema.const), parentTypeName, jsonPropName, isRequired, ctx);
         }
-        const enumType = getOrCreateGoEnum((propSchema.title as string) || nestedName, [propSchema.const], ctx, propSchema.description, isSchemaDeprecated(propSchema));
+        const enumType = getOrCreateGoEnum((propSchema.title as string) || nestedName, [propSchema.const], ctx, propSchema.description, isSchemaDeprecated(propSchema), isSchemaExperimental(propSchema));
         return isRequired ? enumType : `*${enumType}`;
     }
 
@@ -870,6 +913,9 @@ function emitGoStruct(
     const desc = description || schema.description;
     if (desc) {
         pushGoCommentForContext(lines, desc, ctx);
+    }
+    if (isSchemaExperimental(schema)) {
+        pushGoExperimentalTypeComment(lines, typeName, ctx);
     }
     if (isSchemaDeprecated(schema)) {
         pushGoCommentForContext(lines, `Deprecated: ${typeName} is deprecated and will be removed in a future version.`, ctx);
@@ -1406,7 +1452,8 @@ function emitGoFlatDiscriminatedUnion(
     typeName: string,
     discriminator: GoDiscriminatorInfo,
     ctx: GoCodegenCtx,
-    description?: string
+    description?: string,
+    experimental = false
 ): void {
     if (ctx.generatedNames.has(typeName)) return;
     ctx.generatedNames.add(typeName);
@@ -1422,7 +1469,9 @@ function emitGoFlatDiscriminatedUnion(
         typeName + discGoName,
         discValues,
         ctx,
-        `${discGoName} discriminator for ${typeName}.`
+        `${discGoName} discriminator for ${typeName}.`,
+        false,
+        experimental
     );
 
     const unmarshalFuncName = goUnexportedFunctionName("unmarshal", typeName);
@@ -1433,6 +1482,9 @@ function emitGoFlatDiscriminatedUnion(
     const lines: string[] = [];
     if (description) {
         pushGoCommentForContext(lines, description, ctx);
+    }
+    if (experimental) {
+        pushGoExperimentalTypeComment(lines, typeName, ctx);
     }
     lines.push(`type ${typeName} interface {`);
     lines.push(`\t${markerName}()`);
@@ -1592,7 +1644,8 @@ function emitGoRequiredFieldDiscriminatedUnion(
     typeName: string,
     discriminator: GoRequiredFieldDiscriminatorInfo,
     ctx: GoCodegenCtx,
-    description?: string
+    description?: string,
+    experimental = false
 ): void {
     if (ctx.generatedNames.has(typeName)) return;
     ctx.generatedNames.add(typeName);
@@ -1606,6 +1659,9 @@ function emitGoRequiredFieldDiscriminatedUnion(
     const lines: string[] = [];
     if (description) {
         pushGoCommentForContext(lines, description, ctx);
+    }
+    if (experimental) {
+        pushGoExperimentalTypeComment(lines, typeName, ctx);
     }
     lines.push(`type ${typeName} interface {`);
     lines.push(`\t${markerName}()`);
@@ -1870,7 +1926,8 @@ function emitGoFlattenedObjectUnion(
     typeName: string,
     variants: JSONSchema7[],
     ctx: GoCodegenCtx,
-    description?: string
+    description?: string,
+    experimental = false
 ): void {
     if (ctx.generatedNames.has(typeName)) return;
     ctx.generatedNames.add(typeName);
@@ -1904,6 +1961,9 @@ function emitGoFlattenedObjectUnion(
     const lines: string[] = [];
     if (description) {
         pushGoCommentForContext(lines, description, ctx);
+    }
+    if (experimental) {
+        pushGoExperimentalTypeComment(lines, typeName, ctx);
     }
     lines.push(`type ${typeName} struct {`);
 
@@ -2105,6 +2165,9 @@ function emitGoPrimitiveUnionInterface(typeName: string, schema: JSONSchema7, ct
     if (schema.description) {
         pushGoCommentForContext(lines, schema.description, ctx);
     }
+    if (isSchemaExperimental(schema)) {
+        pushGoExperimentalTypeComment(lines, typeName, ctx);
+    }
     if (isSchemaDeprecated(schema)) {
         pushGoCommentForContext(lines, `Deprecated: ${typeName} is deprecated and will be removed in a future version.`, ctx);
     }
@@ -2258,6 +2321,9 @@ function emitGoUntaggedUnionInterface(typeName: string, schema: JSONSchema7, ctx
     if (schema.description) {
         pushGoCommentForContext(lines, schema.description, ctx);
     }
+    if (isSchemaExperimental(schema)) {
+        pushGoExperimentalTypeComment(lines, typeName, ctx);
+    }
     if (isSchemaDeprecated(schema)) {
         pushGoCommentForContext(lines, `Deprecated: ${typeName} is deprecated and will be removed in a future version.`, ctx);
     }
@@ -2331,16 +2397,16 @@ function planGoUnion(typeName: string, schema: JSONSchema7, ctx: GoCodegenCtx, i
 function emitGoUnionPlan(plan: GoUnionPlan, ctx: GoCodegenCtx): void {
     switch (plan.kind) {
         case "discriminated":
-            emitGoFlatDiscriminatedUnion(plan.typeName, plan.discriminator, ctx, plan.description);
+            emitGoFlatDiscriminatedUnion(plan.typeName, plan.discriminator, ctx, plan.description, isSchemaExperimental(plan.schema));
             return;
         case "requiredFieldDiscriminated":
-            emitGoRequiredFieldDiscriminatedUnion(plan.typeName, plan.discriminator, ctx, plan.description);
+            emitGoRequiredFieldDiscriminatedUnion(plan.typeName, plan.discriminator, ctx, plan.description, isSchemaExperimental(plan.schema));
             return;
         case "primitive":
             emitGoPrimitiveUnionInterface(plan.typeName, plan.schema, ctx, plan.variants);
             return;
         case "flattenedObject":
-            emitGoFlattenedObjectUnion(plan.typeName, plan.variants, ctx, plan.description);
+            emitGoFlattenedObjectUnion(plan.typeName, plan.variants, ctx, plan.description, isSchemaExperimental(plan.schema));
             return;
         case "untagged":
             emitGoUntaggedUnionInterface(plan.typeName, plan.schema, ctx, plan.variants);
@@ -2372,6 +2438,9 @@ function emitGoUnionWrapperStruct(typeName: string, schema: JSONSchema7, ctx: Go
     const lines: string[] = [];
     if (schema.description) {
         pushGoCommentForContext(lines, schema.description, ctx);
+    }
+    if (isSchemaExperimental(schema)) {
+        pushGoExperimentalTypeComment(lines, typeName, ctx);
     }
     if (isSchemaDeprecated(schema)) {
         pushGoCommentForContext(lines, `Deprecated: ${typeName} is deprecated and will be removed in a future version.`, ctx);
@@ -2436,6 +2505,9 @@ function emitGoAlias(typeName: string, schema: JSONSchema7, ctx: GoCodegenCtx): 
     if (schema.description) {
         pushGoCommentForContext(lines, schema.description, ctx);
     }
+    if (isSchemaExperimental(schema)) {
+        pushGoExperimentalTypeComment(lines, typeName, ctx);
+    }
     if (isSchemaDeprecated(schema)) {
         pushGoCommentForContext(lines, `Deprecated: ${typeName} is deprecated and will be removed in a future version.`, ctx);
     }
@@ -2448,7 +2520,7 @@ function emitGoRpcDefinition(definitionName: string, schema: JSONSchema7, ctx: G
     const effectiveSchema = resolveObjectSchema(schema, ctx.definitions) ?? resolveSchema(schema, ctx.definitions) ?? schema;
 
     if (isStringEnumDefinition(effectiveSchema)) {
-        getOrCreateGoEnum(typeName, effectiveSchema.enum, ctx, effectiveSchema.description, isSchemaDeprecated(effectiveSchema));
+        getOrCreateGoEnum(typeName, effectiveSchema.enum, ctx, effectiveSchema.description, isSchemaDeprecated(effectiveSchema), isSchemaExperimental(effectiveSchema));
         return typeName;
     }
 
@@ -2471,6 +2543,7 @@ function emitGoRpcDefinition(definitionName: string, schema: JSONSchema7, ctx: G
 interface GoGeneratedTypeCode {
     typeCode: string;
     encodingCode: string;
+    discriminatedUnions: Map<string, GoDiscriminatedUnionInfo>;
 }
 
 function stripTrailingGoWhitespace(code: string): string {
@@ -2498,10 +2571,16 @@ function goEncodingBlocksCode(blocks: string[] | undefined): string {
     return joinGoCode(lines);
 }
 
+function goDoNotEditHeader(schemaFileName: string): string[] {
+    return [
+        `// Code generated by scripts/codegen/go.ts; DO NOT EDIT.`,
+        `// Source: ${schemaFileName}`,
+    ];
+}
+
 function goGeneratedEncodingFileCode(schemaFileName: string, packageName: string, generatedEncodingCode: string, wrapComments = false): string {
     const lines: string[] = [];
-    lines.push(`// AUTO-GENERATED FILE - DO NOT EDIT`);
-    lines.push(`// Generated from: ${schemaFileName}`);
+    lines.push(...goDoNotEditHeader(schemaFileName));
     lines.push(``);
     lines.push(`package ${packageName}`);
     lines.push(``);
@@ -2559,6 +2638,7 @@ function generateGoRpcTypeCode(definitions: Record<string, JSONSchema7>, definit
     return {
         typeCode: joinGoCode(lines),
         encodingCode: goEncodingBlocksCode(ctx.encoding),
+        discriminatedUnions: new Map(ctx.discriminatedUnions),
     };
 }
 
@@ -2624,6 +2704,9 @@ function generateGoSessionEventsCode(schema: JSONSchema7): GoGeneratedTypeCode {
         } else {
             pushGoCommentForContext(lines, `${variant.dataClassName} holds the payload for ${variant.typeName} events.`, ctx);
         }
+        if (variant.dataExperimental || isSchemaExperimental(variant.dataSchema)) {
+            pushGoExperimentalTypeComment(lines, variant.dataClassName, ctx);
+        }
         lines.push(`type ${variant.dataClassName} struct {`);
 
         const fields: GoStructField[] = [];
@@ -2684,6 +2767,10 @@ function generateGoSessionEventsCode(schema: JSONSchema7): GoGeneratedTypeCode {
         }))
         .sort((left, right) => left.constName.localeCompare(right.constName));
     for (const { constName, typeName } of eventTypeConsts) {
+        const variant = variants.find((candidate) => candidate.typeName === typeName);
+        if (variant?.eventExperimental) {
+            pushGoExperimentalEventComment(eventTypeEnum, constName, "\t");
+        }
         eventTypeEnum.push(`\t${constName} SessionEventType = "${typeName}"`);
     }
     eventTypeEnum.push(`)`);
@@ -2692,8 +2779,7 @@ function generateGoSessionEventsCode(schema: JSONSchema7): GoGeneratedTypeCode {
 
     // Assemble file
     const out: string[] = [];
-    out.push(`// AUTO-GENERATED FILE - DO NOT EDIT`);
-    out.push(`// Generated from: session-events.schema.json`);
+    out.push(...goDoNotEditHeader("session-events.schema.json"));
     out.push(``);
     out.push(`package copilot`);
     out.push(``);
@@ -2881,6 +2967,7 @@ function generateGoSessionEventsCode(schema: JSONSchema7): GoGeneratedTypeCode {
     return {
         typeCode: joinGoCode(out),
         encodingCode: joinGoCode(encodingOut),
+        discriminatedUnions: new Map(ctx.discriminatedUnions),
     };
 }
 
@@ -2895,7 +2982,7 @@ async function generateSessionEvents(schemaPath?: string): Promise<void> {
     const generatedTypeCode = stripTrailingGoWhitespace(generatedSessionCode.typeCode);
     const generatedEncodingCode = stripTrailingGoWhitespace(generatedSessionCode.encodingCode);
 
-    const outPath = await writeGeneratedFile("go/generated_session_events.go", generatedTypeCode);
+    const outPath = await writeGeneratedFile("go/zsession_events.go", generatedTypeCode);
     console.log(`  ✓ ${outPath}`);
 
     await formatGoFile(outPath);
@@ -3014,7 +3101,7 @@ async function generateRpc(schemaPath?: string): Promise<void> {
     for (const typeName of experimentalTypeNames) {
         generatedTypeCode = generatedTypeCode.replace(
             new RegExp(`^(type ${typeName} struct)`, "m"),
-            `// Experimental: ${typeName} is part of an experimental API and may change or be removed.\n$1`
+            `// ${goExperimentalTypeComment(typeName)}\n$1`
         );
     }
 
@@ -3058,8 +3145,7 @@ async function generateRpc(schemaPath?: string): Promise<void> {
 
     // Build method wrappers
     const lines: string[] = [];
-    lines.push(`// AUTO-GENERATED FILE - DO NOT EDIT`);
-    lines.push(`// Generated from: api.schema.json`);
+    lines.push(...goDoNotEditHeader("api.schema.json"));
     lines.push(``);
     lines.push(`package rpc`);
     lines.push(``);
@@ -3085,24 +3171,24 @@ async function generateRpc(schemaPath?: string): Promise<void> {
     // Emit ServerRpc
     if (schema.server) {
         const publicNode = filterNodeByVisibility(schema.server, "public");
-        if (publicNode) emitRpcWrapper(lines, publicNode, false, resolveType, fields, "");
+        if (publicNode) emitRpcWrapper(lines, publicNode, false, resolveType, fields, generatedRpcCode.discriminatedUnions, "");
         const internalNode = filterNodeByVisibility(schema.server, "internal");
-        if (internalNode) emitRpcWrapper(lines, internalNode, false, resolveType, fields, "Internal");
+        if (internalNode) emitRpcWrapper(lines, internalNode, false, resolveType, fields, generatedRpcCode.discriminatedUnions, "Internal");
     }
 
     // Emit SessionRpc
     if (schema.session) {
         const publicNode = filterNodeByVisibility(schema.session, "public");
-        if (publicNode) emitRpcWrapper(lines, publicNode, true, resolveType, fields, "");
+        if (publicNode) emitRpcWrapper(lines, publicNode, true, resolveType, fields, generatedRpcCode.discriminatedUnions, "");
         const internalNode = filterNodeByVisibility(schema.session, "internal");
-        if (internalNode) emitRpcWrapper(lines, internalNode, true, resolveType, fields, "Internal");
+        if (internalNode) emitRpcWrapper(lines, internalNode, true, resolveType, fields, generatedRpcCode.discriminatedUnions, "Internal");
     }
 
     if (schema.clientSession) {
-        emitClientSessionApiRegistration(lines, schema.clientSession, resolveType);
+        emitClientSessionApiRegistration(lines, schema.clientSession, resolveType, generatedRpcCode.discriminatedUnions);
     }
 
-    const outPath = await writeGeneratedFile("go/rpc/generated_rpc.go", wrapGeneratedGoComments(lines.join("\n")));
+    const outPath = await writeGeneratedFile("go/rpc/zrpc.go", wrapGeneratedGoComments(lines.join("\n")));
     console.log(`  ✓ ${outPath}`);
 
     await formatGoFile(outPath);
@@ -3121,6 +3207,7 @@ function emitApiGroup(
     serviceName: string,
     resolveType: (name: string) => string,
     fields: Map<string, Map<string, GoExtractedField>>,
+    unionInfos: Map<string, GoDiscriminatedUnionInfo>,
     groupExperimental: boolean,
     groupDeprecated: boolean = false
 ): void {
@@ -3131,24 +3218,24 @@ function emitApiGroup(
         pushGoComment(lines, `Deprecated: ${apiName} contains deprecated APIs that will be removed in a future version.`);
     }
     if (groupExperimental) {
-        pushGoComment(lines, `Experimental: ${apiName} contains experimental APIs that may change or be removed.`);
+        pushGoExperimentalApiComment(lines, apiName);
     }
     lines.push(`type ${apiName} ${serviceName}`);
     lines.push(``);
 
     for (const [key, value] of methods) {
         if (!isRpcMethod(value)) continue;
-        emitMethod(lines, apiName, key, value, isSession, resolveType, fields, groupExperimental, false, groupDeprecated);
+        emitMethod(lines, apiName, key, value, isSession, resolveType, fields, unionInfos, groupExperimental, false, groupDeprecated);
     }
 
     for (const [subGroupName, subGroupNode] of subGroups) {
         const subApiName = apiName.replace(/Api$/, "") + toPascalCase(subGroupName) + "Api";
         const subGroupExperimental = isNodeFullyExperimental(subGroupNode as Record<string, unknown>);
         const subGroupDeprecated = isNodeFullyDeprecated(subGroupNode as Record<string, unknown>);
-        emitApiGroup(lines, subApiName, subGroupNode as Record<string, unknown>, isSession, serviceName, resolveType, fields, subGroupExperimental, subGroupDeprecated);
+        emitApiGroup(lines, subApiName, subGroupNode as Record<string, unknown>, isSession, serviceName, resolveType, fields, unionInfos, subGroupExperimental, subGroupDeprecated);
 
         if (subGroupExperimental) {
-            pushGoComment(lines, `Experimental: ${toPascalCase(subGroupName)} returns experimental APIs that may change or be removed.`);
+            pushGoExperimentalSubApiComment(lines, toPascalCase(subGroupName));
         }
         lines.push(`func (s *${apiName}) ${toPascalCase(subGroupName)}() *${subApiName} {`);
         lines.push(`\treturn (*${subApiName})(s)`);
@@ -3157,7 +3244,7 @@ function emitApiGroup(
     }
 }
 
-function emitRpcWrapper(lines: string[], node: Record<string, unknown>, isSession: boolean, resolveType: (name: string) => string, fields: Map<string, Map<string, GoExtractedField>>, classPrefix: string = ""): void {
+function emitRpcWrapper(lines: string[], node: Record<string, unknown>, isSession: boolean, resolveType: (name: string) => string, fields: Map<string, Map<string, GoExtractedField>>, unionInfos: Map<string, GoDiscriminatedUnionInfo>, classPrefix: string = ""): void {
     const groups = sortByPascalName(Object.entries(node).filter(([, v]) => typeof v === "object" && v !== null && !isRpcMethod(v)));
     const topLevelMethods = sortByPascalName(Object.entries(node).filter(([, v]) => isRpcMethod(v)));
 
@@ -3182,7 +3269,7 @@ function emitRpcWrapper(lines: string[], node: Record<string, unknown>, isSessio
         const apiName = prefix + toPascalCase(groupName) + apiSuffix;
         const groupExperimental = isNodeFullyExperimental(groupNode as Record<string, unknown>);
         const groupDeprecated = isNodeFullyDeprecated(groupNode as Record<string, unknown>);
-        emitApiGroup(lines, apiName, groupNode as Record<string, unknown>, isSession, serviceName, resolveType, fields, groupExperimental, groupDeprecated);
+        emitApiGroup(lines, apiName, groupNode as Record<string, unknown>, isSession, serviceName, resolveType, fields, unionInfos, groupExperimental, groupDeprecated);
     }
 
     // Compute field name lengths for gofmt-compatible column alignment
@@ -3212,7 +3299,7 @@ function emitRpcWrapper(lines: string[], node: Record<string, unknown>, isSessio
     // Top-level methods on the wrapper use the common service fields
     for (const [key, value] of topLevelMethods) {
         if (!isRpcMethod(value)) continue;
-        emitMethod(lines, wrapperName, key, value, isSession, resolveType, fields, false, true);
+        emitMethod(lines, wrapperName, key, value, isSession, resolveType, fields, unionInfos, false, true);
     }
 
     // Constructor
@@ -3233,13 +3320,15 @@ function emitRpcWrapper(lines: string[], node: Record<string, unknown>, isSessio
     lines.push(``);
 }
 
-function emitMethod(lines: string[], receiver: string, name: string, method: RpcMethod, isSession: boolean, resolveType: (name: string) => string, fields: Map<string, Map<string, GoExtractedField>>, groupExperimental = false, isWrapper = false, groupDeprecated = false): void {
+function emitMethod(lines: string[], receiver: string, name: string, method: RpcMethod, isSession: boolean, resolveType: (name: string) => string, fields: Map<string, Map<string, GoExtractedField>>, unionInfos: Map<string, GoDiscriminatedUnionInfo>, groupExperimental = false, isWrapper = false, groupDeprecated = false): void {
     const methodName = toPascalCase(name);
     const resultSchema = getMethodResultSchema(method);
     const nullableInner = resultSchema ? getNullableInner(resultSchema) : undefined;
     const resultType = nullableInner
         ? resolveType(goNullableResultTypeName(method, nullableInner))
         : resolveType(goResultTypeName(method));
+    const resultUnion = unionInfos.get(resultType);
+    const returnType = resultUnion ? resultType : `*${resultType}`;
 
     const effectiveParams = getMethodParamsSchema(method);
     const paramProps = effectiveParams?.properties || {};
@@ -3249,6 +3338,8 @@ function emitMethod(lines: string[], receiver: string, name: string, method: Rpc
         .sort((left, right) => compareGoFieldNames(toGoFieldName(left), toGoFieldName(right)));
     const hasParams = isSession ? nonSessionParams.length > 0 : hasSchemaPayload(effectiveParams);
     const paramsType = hasParams ? resolveType(goParamsTypeName(method)) : "";
+    const hasRequiredNonSessionParams = nonSessionParams.some((name) => requiredParams.has(name));
+    const paramsAreOptional = hasParams && !!method.params && !!getNullableInner(method.params) && !hasRequiredNonSessionParams;
 
     // For wrapper-level methods, access fields through a.common; for service type aliases, use a directly
     const clientRef = isWrapper ? "a.common.client" : "a.client";
@@ -3258,21 +3349,28 @@ function emitMethod(lines: string[], receiver: string, name: string, method: Rpc
         pushGoComment(lines, `Deprecated: ${methodName} is deprecated and will be removed in a future version.`);
     }
     if (method.stability === "experimental" && !groupExperimental) {
-        pushGoComment(lines, `Experimental: ${methodName} is an experimental API and may change or be removed in future versions.`);
+        pushGoExperimentalMethodComment(lines, methodName);
     }
     if (method.visibility === "internal") {
         pushGoComment(lines, `Internal: ${methodName} is part of the SDK's internal handshake/plumbing; external callers should not use it.`);
     }
     const sig = hasParams
-        ? `func (a *${receiver}) ${methodName}(ctx context.Context, params *${paramsType}) (*${resultType}, error)`
-        : `func (a *${receiver}) ${methodName}(ctx context.Context) (*${resultType}, error)`;
+        ? `func (a *${receiver}) ${methodName}(ctx context.Context, params ${paramsAreOptional ? "..." : ""}*${paramsType}) (${returnType}, error)`
+        : `func (a *${receiver}) ${methodName}(ctx context.Context) (${returnType}, error)`;
 
     lines.push(sig + ` {`);
+    const paramsRef = paramsAreOptional ? "requestParams" : "params";
+    if (paramsAreOptional) {
+        lines.push(`\tvar requestParams *${paramsType}`);
+        lines.push(`\tif len(params) > 0 {`);
+        lines.push(`\t\trequestParams = params[0]`);
+        lines.push(`\t}`);
+    }
 
     if (isSession) {
         lines.push(`\treq := map[string]any{"sessionId": ${sessionIDRef}}`);
         if (hasParams) {
-            lines.push(`\tif params != nil {`);
+            lines.push(`\tif ${paramsRef} != nil {`);
             for (const pName of nonSessionParams) {
                 const field = fields.get(paramsType)?.get(pName);
                 const goField = field?.name ?? toGoFieldName(pName);
@@ -3281,30 +3379,38 @@ function emitMethod(lines: string[], receiver: string, name: string, method: Rpc
                 if (isOptional) {
                     // Optional fields are usually pointers; generated union interfaces, slices,
                     // and maps are nilable values and should be passed through directly.
-                    lines.push(`\t\tif params.${goField} != nil {`);
-                    const valueExpr = goOptionalFieldNeedsDereference(goType) ? `*params.${goField}` : `params.${goField}`;
+                    lines.push(`\t\tif ${paramsRef}.${goField} != nil {`);
+                    const valueExpr = goOptionalFieldNeedsDereference(goType) ? `*${paramsRef}.${goField}` : `${paramsRef}.${goField}`;
                     lines.push(`\t\t\treq["${pName}"] = ${valueExpr}`);
                     lines.push(`\t\t}`);
                 } else {
-                    lines.push(`\t\treq["${pName}"] = params.${goField}`);
+                    lines.push(`\t\treq["${pName}"] = ${paramsRef}.${goField}`);
                 }
             }
             lines.push(`\t}`);
         }
         lines.push(`\traw, err := ${clientRef}.Request("${method.rpcMethod}", req)`);
     } else {
-        const arg = hasParams ? "params" : "nil";
+        const arg = hasParams ? paramsRef : "nil";
         lines.push(`\traw, err := ${clientRef}.Request("${method.rpcMethod}", ${arg})`);
     }
 
     lines.push(`\tif err != nil {`);
     lines.push(`\t\treturn nil, err`);
     lines.push(`\t}`);
-    lines.push(`\tvar result ${resultType}`);
-    lines.push(`\tif err := json.Unmarshal(raw, &result); err != nil {`);
-    lines.push(`\t\treturn nil, err`);
-    lines.push(`\t}`);
-    lines.push(`\treturn &result, nil`);
+    if (resultUnion) {
+        lines.push(`\tresult, err := ${resultUnion.unmarshalFuncName}(raw)`);
+        lines.push(`\tif err != nil {`);
+        lines.push(`\t\treturn nil, err`);
+        lines.push(`\t}`);
+        lines.push(`\treturn result, nil`);
+    } else {
+        lines.push(`\tvar result ${resultType}`);
+        lines.push(`\tif err := json.Unmarshal(raw, &result); err != nil {`);
+        lines.push(`\t\treturn nil, err`);
+        lines.push(`\t}`);
+        lines.push(`\treturn &result, nil`);
+    }
     lines.push(`}`);
     lines.push(``);
 }
@@ -3337,7 +3443,7 @@ function clientHandlerMethodName(rpcMethod: string): string {
     return toPascalCase(rpcMethod.split(".").at(-1)!);
 }
 
-function emitClientSessionApiRegistration(lines: string[], clientSchema: Record<string, unknown>, resolveType: (name: string) => string): void {
+function emitClientSessionApiRegistration(lines: string[], clientSchema: Record<string, unknown>, resolveType: (name: string) => string, unionInfos: Map<string, GoDiscriminatedUnionInfo>): void {
     const groups = collectClientGroups(clientSchema);
 
     for (const { groupName, groupNode, methods } of groups) {
@@ -3348,7 +3454,7 @@ function emitClientSessionApiRegistration(lines: string[], clientSchema: Record<
             pushGoComment(lines, `Deprecated: ${interfaceName} contains deprecated APIs that will be removed in a future version.`);
         }
         if (groupExperimental) {
-            pushGoComment(lines, `Experimental: ${interfaceName} contains experimental APIs that may change or be removed.`);
+            pushGoExperimentalApiComment(lines, interfaceName);
         }
         lines.push(`type ${interfaceName} interface {`);
         for (const method of methods) {
@@ -3356,7 +3462,7 @@ function emitClientSessionApiRegistration(lines: string[], clientSchema: Record<
                 pushGoComment(lines, `Deprecated: ${clientHandlerMethodName(method.rpcMethod)} is deprecated and will be removed in a future version.`, "\t");
             }
             if (method.stability === "experimental" && !groupExperimental) {
-                pushGoComment(lines, `Experimental: ${clientHandlerMethodName(method.rpcMethod)} is an experimental API and may change or be removed in future versions.`, "\t");
+                pushGoExperimentalMethodComment(lines, clientHandlerMethodName(method.rpcMethod), "\t");
             }
             const paramsType = resolveType(goParamsTypeName(method));
             const resultSchema = getMethodResultSchema(method);
@@ -3364,7 +3470,8 @@ function emitClientSessionApiRegistration(lines: string[], clientSchema: Record<
             const resultType = nullableInner
                 ? resolveType(goNullableResultTypeName(method, nullableInner))
                 : resolveType(goResultTypeName(method));
-            lines.push(`\t${clientHandlerMethodName(method.rpcMethod)}(request *${paramsType}) (*${resultType}, error)`);
+            const returnType = unionInfos.has(resultType) ? resultType : `*${resultType}`;
+            lines.push(`\t${clientHandlerMethodName(method.rpcMethod)}(request *${paramsType}) (${returnType}, error)`);
         }
         lines.push(`}`);
         lines.push(``);

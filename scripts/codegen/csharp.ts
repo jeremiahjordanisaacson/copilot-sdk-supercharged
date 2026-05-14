@@ -28,6 +28,7 @@ import {
     isNodeFullyExperimental,
     isNodeFullyDeprecated,
     isSchemaDeprecated,
+    isSchemaExperimental,
     isObjectSchema,
     isVoidSchema,
     getNullableInner,
@@ -117,18 +118,42 @@ function xmlDocEnumComment(description: string | undefined, indent: string): str
 }
 
 function toPascalCase(name: string): string {
-    if (name.includes("_") || name.includes("-")) {
-        return name.split(/[-_]/).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
-    }
+    const parts = splitCSharpIdentifierParts(name);
+    if (parts.length > 1) return parts.map(toPascalCasePart).join("");
     return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 function typeToClassName(typeName: string): string {
-    return typeName.split(/[._]/).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
+    return splitCSharpIdentifierParts(typeName).map(toPascalCasePart).join("");
 }
 
-function toPascalCaseEnumMember(value: string): string {
-    return value.split(/[-_.]/).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
+function splitCSharpIdentifierParts(value: string): string[] {
+    return value.split(/[^A-Za-z0-9]+/).filter(Boolean);
+}
+
+function toPascalCasePart(value: string): string {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function toCSharpIdentifier(value: string, fallback: string): string {
+    let identifier = splitCSharpIdentifierParts(value).map(toPascalCasePart).join("");
+    if (!identifier) {
+        identifier = fallback;
+    } else if (!/^[A-Za-z_]/.test(identifier)) {
+        identifier = `${fallback}${identifier}`;
+    }
+    return identifier;
+}
+
+function uniqueCSharpIdentifier(value: string, used: Set<string>, fallback: string): string {
+    const identifier = toCSharpIdentifier(value, fallback);
+    if (used.has(identifier)) {
+        throw new Error(
+            `Generated C# string enum member identifier "${identifier}" is not unique for value "${value}". Add an explicit naming rule instead of stabilizing an arbitrary public member name.`
+        );
+    }
+    used.add(identifier);
+    return identifier;
 }
 
 async function formatCSharpFile(filePath: string): Promise<void> {
@@ -308,6 +333,18 @@ const COPYRIGHT = `/*-----------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/`;
 
+const EXPERIMENTAL_ATTRIBUTE = "[Experimental(Diagnostics.Experimental)]";
+const OBSOLETE_ATTRIBUTE = `[Obsolete("This member is deprecated and will be removed in a future version.")]`;
+const STRING_ENUM_RESERVED_MEMBER_NAMES = new Set(["Value", "Equals", "GetHashCode", "ToString", "Converter"]);
+
+function experimentalAttribute(indent = ""): string {
+    return `${indent}${EXPERIMENTAL_ATTRIBUTE}`;
+}
+
+function pushExperimentalAttribute(lines: string[], indent = ""): void {
+    lines.push(experimentalAttribute(indent));
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // SESSION EVENTS
 // ══════════════════════════════════════════════════════════════════════════════
@@ -318,6 +355,8 @@ interface EventVariant {
     dataClassName: string;
     dataSchema: JSONSchema7;
     dataDescription?: string;
+    eventExperimental: boolean;
+    dataExperimental: boolean;
 }
 
 let generatedEnums = new Map<string, { enumName: string; values: string[] }>();
@@ -333,7 +372,8 @@ function getOrCreateEnum(
     enumOutput: string[],
     description?: string,
     explicitName?: string,
-    deprecated?: boolean
+    deprecated?: boolean,
+    experimental?: boolean
 ): string {
     const enumName = explicitName ?? `${parentClassName}${propName}`;
     const existing = generatedEnums.get(enumName);
@@ -342,7 +382,8 @@ function getOrCreateEnum(
 
     const lines: string[] = [];
     lines.push(...xmlDocEnumComment(description, ""));
-    if (deprecated) lines.push(`[Obsolete("This member is deprecated and will be removed in a future version.")]`);
+    if (experimental) pushExperimentalAttribute(lines);
+    if (deprecated) lines.push(OBSOLETE_ATTRIBUTE);
     lines.push(`[JsonConverter(typeof(Converter))]`);
     lines.push(`[DebuggerDisplay("{Value,nq}")]`);
     lines.push(`public readonly struct ${enumName} : IEquatable<${enumName}>`);
@@ -358,9 +399,11 @@ function getOrCreateEnum(
     lines.push(`    }`, "");
     lines.push(`    /// <summary>Gets the value associated with this <see cref="${enumName}"/>.</summary>`);
     lines.push(`    public string Value => _value ?? string.Empty;`, "");
+    const usedMemberNames = new Set(STRING_ENUM_RESERVED_MEMBER_NAMES);
     for (const value of values) {
+        const memberName = uniqueCSharpIdentifier(value, usedMemberNames, "Value");
         lines.push(`    /// <summary>Gets the <c>${escapeXml(value)}</c> value.</summary>`);
-        lines.push(`    public static ${enumName} ${toPascalCaseEnumMember(value)} { get; } = new("${value}");`, "");
+        lines.push(`    public static ${enumName} ${memberName} { get; } = new("${escapeCSharpStringLiteral(value)}");`, "");
     }
     lines.push(`    /// <summary>Returns a value indicating whether two <see cref="${enumName}"/> instances are equivalent.</summary>`);
     lines.push(`    public static bool operator ==(${enumName} left, ${enumName} right) => left.Equals(right);`, "");
@@ -412,6 +455,8 @@ function extractEventVariants(schema: JSONSchema7): EventVariant[] {
                 dataClassName: `${baseName}Data`,
                 dataSchema,
                 dataDescription: dataSchema?.description,
+                eventExperimental: isSchemaExperimental(variant),
+                dataExperimental: isSchemaExperimental(dataSchema),
             };
         });
 }
@@ -487,13 +532,14 @@ function generateDiscriminatedUnionClass(
     nestedClasses: Map<string, string>,
     enumOutput: string[],
     description?: string,
-    propertyResolver?: PropertyTypeResolver
+    propertyResolver?: PropertyTypeResolver,
+    experimental = false
 ): string {
     if (isBooleanDiscriminator(discriminatorInfo)) {
-        return generateFlattenedBooleanDiscriminatedClass(baseClassName, discriminatorInfo, knownTypes, nestedClasses, enumOutput, description, propertyResolver);
+        return generateFlattenedBooleanDiscriminatedClass(baseClassName, discriminatorInfo, knownTypes, nestedClasses, enumOutput, description, propertyResolver, experimental);
     }
 
-    return generatePolymorphicClasses(baseClassName, discriminatorInfo.property, variants, knownTypes, nestedClasses, enumOutput, description, propertyResolver);
+    return generatePolymorphicClasses(baseClassName, discriminatorInfo.property, variants, knownTypes, nestedClasses, enumOutput, description, propertyResolver, experimental);
 }
 
 function generateFlattenedBooleanDiscriminatedClass(
@@ -503,7 +549,8 @@ function generateFlattenedBooleanDiscriminatedClass(
     nestedClasses: Map<string, string>,
     enumOutput: string[],
     description?: string,
-    propertyResolver?: PropertyTypeResolver
+    propertyResolver?: PropertyTypeResolver,
+    experimental = false
 ): string {
     const resolver = propertyResolver ?? resolveSessionPropertyType;
     const renamedBase = applyTypeRename(baseClassName);
@@ -532,6 +579,7 @@ function generateFlattenedBooleanDiscriminatedClass(
     }
 
     lines.push(...xmlDocCommentWithFallback(description, `Data type discriminated by <c>${escapeXml(discriminatorInfo.property)}</c>.`, ""));
+    if (experimental) pushExperimentalAttribute(lines);
     lines.push(`public partial class ${renamedBase}`);
     lines.push(`{`);
     lines.push(`    /// <summary>The boolean discriminator.</summary>`);
@@ -547,7 +595,7 @@ function generateFlattenedBooleanDiscriminatedClass(
         lines.push("");
         lines.push(...xmlDocPropertyComment(info.schema.description, propName, "    "));
         lines.push(...emitDataAnnotations(info.schema, "    "));
-        if (isSchemaDeprecated(info.schema)) lines.push(`    [Obsolete("This member is deprecated and will be removed in a future version.")]`);
+        if (isSchemaDeprecated(info.schema)) lines.push(`    ${OBSOLETE_ATTRIBUTE}`);
         if (isDurationProperty(info.schema)) lines.push(`    [JsonConverter(typeof(MillisecondsTimeSpanConverter))]`);
         if (!isReq) lines.push(`    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`);
         lines.push(`    [JsonPropertyName("${propName}")]`);
@@ -570,7 +618,8 @@ function generatePolymorphicClasses(
     nestedClasses: Map<string, string>,
     enumOutput: string[],
     description?: string,
-    propertyResolver?: PropertyTypeResolver
+    propertyResolver?: PropertyTypeResolver,
+    experimental = false
 ): string {
     const resolver = propertyResolver ?? resolveSessionPropertyType;
     const lines: string[] = [];
@@ -578,6 +627,7 @@ function generatePolymorphicClasses(
     const renamedBase = applyTypeRename(baseClassName);
 
     lines.push(...xmlDocCommentWithFallback(description, `Polymorphic base type discriminated by <c>${escapeXml(discriminatorProperty)}</c>.`, ""));
+    if (experimental) pushExperimentalAttribute(lines);
     lines.push(`[JsonPolymorphic(`);
     lines.push(`    TypeDiscriminatorPropertyName = "${discriminatorProperty}",`);
     lines.push(`    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]`);
@@ -624,7 +674,8 @@ function generateDerivedClass(
     const required = new Set(schema.required || []);
 
     lines.push(...xmlDocCommentWithFallback(schema.description, `The <c>${escapeXml(discriminatorValue)}</c> variant of <see cref="${baseClassName}"/>.`, ""));
-    if (isSchemaDeprecated(schema)) lines.push(`[Obsolete("This member is deprecated and will be removed in a future version.")]`);
+    if (isSchemaExperimental(schema)) pushExperimentalAttribute(lines);
+    if (isSchemaDeprecated(schema)) lines.push(OBSOLETE_ATTRIBUTE);
     lines.push(`public partial class ${className} : ${baseClassName}`);
     lines.push(`{`);
     lines.push(`    /// <inheritdoc />`);
@@ -643,7 +694,7 @@ function generateDerivedClass(
 
             lines.push(...xmlDocPropertyComment((propSchema as JSONSchema7).description, propName, "    "));
             lines.push(...emitDataAnnotations(propSchema as JSONSchema7, "    "));
-            if (isSchemaDeprecated(propSchema as JSONSchema7)) lines.push(`    [Obsolete("This member is deprecated and will be removed in a future version.")]`);
+            if (isSchemaDeprecated(propSchema as JSONSchema7)) lines.push(`    ${OBSOLETE_ATTRIBUTE}`);
             if (isDurationProperty(propSchema as JSONSchema7)) lines.push(`    [JsonConverter(typeof(MillisecondsTimeSpanConverter))]`);
             if (!isReq) lines.push(`    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`);
             lines.push(`    [JsonPropertyName("${propName}")]`);
@@ -667,7 +718,8 @@ function generateNestedClass(
     const required = new Set(schema.required || []);
     const lines: string[] = [];
     lines.push(...xmlDocCommentWithFallback(schema.description, `Nested data type for <c>${className}</c>.`, ""));
-    if (isSchemaDeprecated(schema)) lines.push(`[Obsolete("This member is deprecated and will be removed in a future version.")]`);
+    if (isSchemaExperimental(schema)) pushExperimentalAttribute(lines);
+    if (isSchemaDeprecated(schema)) lines.push(OBSOLETE_ATTRIBUTE);
     lines.push(`public partial class ${className}`, `{`);
 
     for (const [propName, propSchema] of Object.entries(schema.properties || {}).sort(([a], [b]) => a.localeCompare(b))) {
@@ -679,7 +731,7 @@ function generateNestedClass(
 
         lines.push(...xmlDocPropertyComment(prop.description, propName, "    "));
         lines.push(...emitDataAnnotations(prop, "    "));
-        if (isSchemaDeprecated(prop)) lines.push(`    [Obsolete("This member is deprecated and will be removed in a future version.")]`);
+        if (isSchemaDeprecated(prop)) lines.push(`    ${OBSOLETE_ATTRIBUTE}`);
         if (isDurationProperty(prop)) lines.push(`    [JsonConverter(typeof(MillisecondsTimeSpanConverter))]`);
         if (!isReq) lines.push(`    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`);
         lines.push(`    [JsonPropertyName("${propName}")]`);
@@ -709,7 +761,7 @@ function resolveSessionPropertyType(
         }
 
         if (refSchema.enum && Array.isArray(refSchema.enum)) {
-            const enumName = getOrCreateEnum(className, "", refSchema.enum as string[], enumOutput, refSchema.description, undefined, isSchemaDeprecated(refSchema));
+            const enumName = getOrCreateEnum(className, "", refSchema.enum as string[], enumOutput, refSchema.description, undefined, isSchemaDeprecated(refSchema), isSchemaExperimental(refSchema));
             return isRequired ? enumName : `${enumName}?`;
         }
 
@@ -743,7 +795,7 @@ function resolveSessionPropertyType(
                 const hasNull = propSchema.anyOf.length > nonNull.length;
                 const baseClassName = (propSchema.title as string) ?? `${parentClassName}${propName}`;
                 const renamedBase = applyTypeRename(baseClassName);
-                const polymorphicCode = generateDiscriminatedUnionClass(baseClassName, discriminatorInfo, variants, knownTypes, nestedClasses, enumOutput, propSchema.description);
+                const polymorphicCode = generateDiscriminatedUnionClass(baseClassName, discriminatorInfo, variants, knownTypes, nestedClasses, enumOutput, propSchema.description, undefined, isSchemaExperimental(propSchema));
                 nestedClasses.set(renamedBase, polymorphicCode);
                 return isRequired && !hasNull ? renamedBase : `${renamedBase}?`;
             }
@@ -751,7 +803,7 @@ function resolveSessionPropertyType(
         return !isRequired ? "object?" : "object";
     }
     if (propSchema.enum && Array.isArray(propSchema.enum)) {
-        const enumName = getOrCreateEnum(parentClassName, propName, propSchema.enum as string[], enumOutput, propSchema.description, propSchema.title as string | undefined, isSchemaDeprecated(propSchema));
+        const enumName = getOrCreateEnum(parentClassName, propName, propSchema.enum as string[], enumOutput, propSchema.description, propSchema.title as string | undefined, isSchemaDeprecated(propSchema), isSchemaExperimental(propSchema));
         return isRequired ? enumName : `${enumName}?`;
     }
     if (propSchema.type === "object" && propSchema.properties) {
@@ -798,8 +850,11 @@ function generateDataClass(variant: EventVariant, knownTypes: Map<string, string
     } else {
         lines.push(...rawXmlDocSummary(`Event payload for <see cref="${variant.className}"/>.`, ""));
     }
+    if (variant.dataExperimental || isSchemaExperimental(variant.dataSchema)) {
+        pushExperimentalAttribute(lines);
+    }
     if (isSchemaDeprecated(variant.dataSchema)) {
-        lines.push(`[Obsolete("This member is deprecated and will be removed in a future version.")]`);
+        lines.push(OBSOLETE_ATTRIBUTE);
     }
     lines.push(`public partial class ${variant.dataClassName}`, `{`);
 
@@ -811,7 +866,7 @@ function generateDataClass(variant: EventVariant, knownTypes: Map<string, string
 
         lines.push(...xmlDocPropertyComment((propSchema as JSONSchema7).description, propName, "    "));
         lines.push(...emitDataAnnotations(propSchema as JSONSchema7, "    "));
-        if (isSchemaDeprecated(propSchema as JSONSchema7)) lines.push(`    [Obsolete("This member is deprecated and will be removed in a future version.")]`);
+        if (isSchemaDeprecated(propSchema as JSONSchema7)) lines.push(`    ${OBSOLETE_ATTRIBUTE}`);
         if (isDurationProperty(propSchema as JSONSchema7)) lines.push(`    [JsonConverter(typeof(MillisecondsTimeSpanConverter))]`);
         if (!isReq) lines.push(`    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`);
         lines.push(`    [JsonPropertyName("${propName}")]`);
@@ -843,7 +898,7 @@ function emitSessionEventEnvelopeProperty(
 
     lines.push(...xmlDocPropertyComment(property.schema.description, property.name, "    "));
     lines.push(...emitDataAnnotations(property.schema, "    "));
-    if (isSchemaDeprecated(property.schema)) lines.push(`    [Obsolete("This member is deprecated and will be removed in a future version.")]`);
+    if (isSchemaDeprecated(property.schema)) lines.push(`    ${OBSOLETE_ATTRIBUTE}`);
     if (isDurationProperty(property.schema)) lines.push(`    [JsonConverter(typeof(MillisecondsTimeSpanConverter))]`);
     if (!property.required) lines.push(`    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`);
     lines.push(`    [JsonPropertyName("${property.name}")]`);
@@ -910,6 +965,9 @@ namespace GitHub.Copilot.SDK;
             lines.push(remarksLine);
         } else {
             lines.push(`/// <summary>Represents the <c>${escapeXml(variant.typeName)}</c> event.</summary>`);
+        }
+        if (variant.eventExperimental) {
+            pushExperimentalAttribute(lines);
         }
         lines.push(`public partial class ${variant.className} : SessionEvent`, `{`);
         lines.push(`    /// <inheritdoc />`);
@@ -1040,7 +1098,7 @@ function resolveRpcType(schema: JSONSchema7, isRequired: boolean, parentClassNam
         }
 
         if (refSchema.enum && Array.isArray(refSchema.enum)) {
-            const enumName = getOrCreateEnum(typeName, "", refSchema.enum as string[], rpcEnumOutput, refSchema.description, undefined, isSchemaDeprecated(refSchema));
+            const enumName = getOrCreateEnum(typeName, "", refSchema.enum as string[], rpcEnumOutput, refSchema.description, undefined, isSchemaDeprecated(refSchema), isSchemaExperimental(refSchema));
             return isRequired ? enumName : `${enumName}?`;
         }
 
@@ -1083,7 +1141,7 @@ function resolveRpcType(schema: JSONSchema7, isRequired: boolean, parentClassNam
                         }
                         return result;
                     };
-                    const polymorphicCode = generateDiscriminatedUnionClass(baseClassName, discriminatorInfo, variants, rpcKnownTypes, nestedMap, rpcEnumOutput, schema.description, rpcPropertyResolver);
+                    const polymorphicCode = generateDiscriminatedUnionClass(baseClassName, discriminatorInfo, variants, rpcKnownTypes, nestedMap, rpcEnumOutput, schema.description, rpcPropertyResolver, isSchemaExperimental(schema));
                     classes.push(polymorphicCode);
                     for (const nested of nestedMap.values()) classes.push(nested);
                 }
@@ -1101,6 +1159,7 @@ function resolveRpcType(schema: JSONSchema7, isRequired: boolean, parentClassNam
             schema.description,
             schema.title as string | undefined,
             isSchemaDeprecated(schema),
+            isSchemaExperimental(schema),
         );
         return isRequired ? enumName : `${enumName}?`;
     }
@@ -1163,11 +1222,11 @@ function emitRpcClass(
     const requiredSet = new Set(effectiveSchema.required || []);
     const lines: string[] = [];
     lines.push(...xmlDocComment(schema.description || effectiveSchema.description || `RPC data type for ${className.replace(/(Request|Result|Params)$/, "")} operations.`, ""));
-    if (experimentalRpcTypes.has(className)) {
-        lines.push(`[Experimental(Diagnostics.Experimental)]`);
+    if (experimentalRpcTypes.has(className) || isSchemaExperimental(schema) || isSchemaExperimental(effectiveSchema)) {
+        pushExperimentalAttribute(lines);
     }
     if (isSchemaDeprecated(schema) || isSchemaDeprecated(effectiveSchema)) {
-        lines.push(`[Obsolete("This member is deprecated and will be removed in a future version.")]`);
+        lines.push(OBSOLETE_ATTRIBUTE);
     }
     lines.push(`${visibility} sealed class ${className}`, `{`);
 
@@ -1182,7 +1241,7 @@ function emitRpcClass(
 
         lines.push(...xmlDocPropertyComment(prop.description, propName, "    "));
         lines.push(...emitDataAnnotations(prop, "    "));
-        if (isSchemaDeprecated(prop)) lines.push(`    [Obsolete("This member is deprecated and will be removed in a future version.")]`);
+        if (isSchemaDeprecated(prop)) lines.push(`    ${OBSOLETE_ATTRIBUTE}`);
         if (isDurationProperty(prop)) lines.push(`    [JsonConverter(typeof(MillisecondsTimeSpanConverter))]`);
         lines.push(`    [JsonPropertyName("${propName}")]`);
 
@@ -1207,19 +1266,14 @@ function emitRpcClass(
     return lines.join("\n");
 }
 
-/**
- * Emit the type for a non-object RPC result schema (e.g., a bare enum).
- * Returns the C# type name to use in method signatures. For enums, ensures the enum
- * is created via getOrCreateEnum. For other primitives, returns the mapped C# type.
- */
-function emitNonObjectResultType(typeName: string, schema: JSONSchema7, classes: string[]): string {
-    if (schema.enum && Array.isArray(schema.enum)) {
-        const enumName = getOrCreateEnum("", typeName, schema.enum as string[], rpcEnumOutput, schema.description, typeName, isSchemaDeprecated(schema));
-        emittedRpcEnumResultTypes.add(enumName);
-        return enumName;
+function emitRpcResultType(typeName: string, schema: JSONSchema7, visibility: "public" | "internal", classes: string[]): string {
+    if (isObjectSchema(schema)) {
+        const resultClass = emitRpcClass(typeName, schema, visibility, classes);
+        if (resultClass) classes.push(resultClass);
+        return typeName;
     }
-    // For other non-object types, use the basic type mapping
-    return schemaTypeToCSharp(schema, true, rpcKnownTypes);
+
+    return resolveRpcType(schema, true, typeName, "", classes);
 }
 
 /**
@@ -1282,10 +1336,10 @@ function emitServerApiClass(className: string, node: Record<string, unknown>, cl
     const groupExperimental = isNodeFullyExperimental(node);
     const groupDeprecated = isNodeFullyDeprecated(node);
     if (groupExperimental) {
-        lines.push(`[Experimental(Diagnostics.Experimental)]`);
+        pushExperimentalAttribute(lines);
     }
     if (groupDeprecated) {
-        lines.push(`[Obsolete("This member is deprecated and will be removed in a future version.")]`);
+        lines.push(OBSOLETE_ATTRIBUTE);
     }
     lines.push(`public sealed class ${className}`);
     lines.push(`{`);
@@ -1340,11 +1394,8 @@ function emitServerInstanceMethod(
     if (!isVoidSchema(resultSchema) && method.stability === "experimental") {
         experimentalRpcTypes.add(resultClassName);
     }
-    if (isObjectSchema(resultSchema)) {
-        const resultClass = emitRpcClass(resultClassName, resultSchema!, methodVisibility, classes);
-        if (resultClass) classes.push(resultClass);
-    } else if (!isVoidSchema(resultSchema)) {
-        resultClassName = emitNonObjectResultType(resultClassName, resultSchema!, classes);
+    if (!isVoidSchema(resultSchema)) {
+        resultClassName = emitRpcResultType(resultClassName, resultSchema!, methodVisibility, classes);
     }
 
     const effectiveParams = resolveMethodParamsSchema(method);
@@ -1371,10 +1422,10 @@ function emitServerInstanceMethod(
     lines.push("");
     lines.push(`${indent}/// <summary>Calls "${method.rpcMethod}".</summary>`);
     if (method.stability === "experimental" && !groupExperimental) {
-        lines.push(`${indent}[Experimental(Diagnostics.Experimental)]`);
+        pushExperimentalAttribute(lines, indent);
     }
     if (method.deprecated && !groupDeprecated) {
-        lines.push(`${indent}[Obsolete("This member is deprecated and will be removed in a future version.")]`);
+        lines.push(`${indent}${OBSOLETE_ATTRIBUTE}`);
     }
 
     const sigParams: string[] = [];
@@ -1448,16 +1499,17 @@ function emitSessionMethod(key: string, method: RpcMethod, lines: string[], clas
     if (!isVoidSchema(resultSchema) && method.stability === "experimental") {
         experimentalRpcTypes.add(resultClassName);
     }
-    if (isObjectSchema(resultSchema)) {
-        const resultClass = emitRpcClass(resultClassName, resultSchema!, methodVisibility, classes);
-        if (resultClass) classes.push(resultClass);
-    } else if (!isVoidSchema(resultSchema)) {
-        resultClassName = emitNonObjectResultType(resultClassName, resultSchema!, classes);
+    if (!isVoidSchema(resultSchema)) {
+        resultClassName = emitRpcResultType(resultClassName, resultSchema!, methodVisibility, classes);
     }
 
     const effectiveParams = resolveMethodParamsSchema(method);
     const paramEntries = (effectiveParams?.properties ? Object.entries(effectiveParams.properties) : []).filter(([k]) => k !== "sessionId");
     const requiredSet = new Set(effectiveParams?.required || []);
+    const useRequestParameter =
+        paramEntries.length > 0 &&
+        !!getNullableInner(method.params) &&
+        paramEntries.every(([name]) => !requiredSet.has(name));
 
     // Sort so required params come before optional (C# requires defaults at end)
     paramEntries.sort((a, b) => {
@@ -1467,40 +1519,64 @@ function emitSessionMethod(key: string, method: RpcMethod, lines: string[], clas
     });
 
     const requestClassName = paramsTypeName(method);
+    const wireRequestClassName = useRequestParameter ? `${requestClassName}WithSession` : requestClassName;
     if (method.stability === "experimental") {
         experimentalRpcTypes.add(requestClassName);
+        if (useRequestParameter) {
+            experimentalRpcTypes.add(wireRequestClassName);
+        }
     }
     if (effectiveParams?.properties && Object.keys(effectiveParams.properties).length > 0) {
-        const reqClass = emitRpcClass(requestClassName, effectiveParams, "internal", classes);
-        if (reqClass) classes.push(reqClass);
+        if (useRequestParameter) {
+            const publicParams: JSONSchema7 = {
+                ...effectiveParams,
+                properties: Object.fromEntries(paramEntries),
+                required: effectiveParams.required?.filter((name) => name !== "sessionId"),
+            };
+            const publicReqClass = emitRpcClass(requestClassName, publicParams, methodVisibility, classes);
+            if (publicReqClass) classes.push(publicReqClass);
+            const wireReqClass = emitRpcClass(wireRequestClassName, effectiveParams, "internal", classes);
+            if (wireReqClass) classes.push(wireReqClass);
+        } else {
+            const reqClass = emitRpcClass(requestClassName, effectiveParams, "internal", classes);
+            if (reqClass) classes.push(reqClass);
+        }
     }
 
     lines.push("", `${indent}/// <summary>Calls "${method.rpcMethod}".</summary>`);
     if (method.stability === "experimental" && !groupExperimental) {
-        lines.push(`${indent}[Experimental(Diagnostics.Experimental)]`);
+        pushExperimentalAttribute(lines, indent);
     }
     if (method.deprecated && !groupDeprecated) {
-        lines.push(`${indent}[Obsolete("This member is deprecated and will be removed in a future version.")]`);
+        lines.push(`${indent}${OBSOLETE_ATTRIBUTE}`);
     }
     const sigParams: string[] = [];
     const bodyAssignments = [`SessionId = _sessionId`];
 
-    for (const [pName, pSchema] of paramEntries) {
-        if (typeof pSchema !== "object") continue;
-        const isReq = requiredSet.has(pName);
-        const csType = resolveRpcType(pSchema as JSONSchema7, isReq, requestClassName, toPascalCase(pName), classes);
-        sigParams.push(`${csType} ${pName}${isReq ? "" : " = null"}`);
-        bodyAssignments.push(`${toPascalCase(pName)} = ${pName}`);
+    if (useRequestParameter) {
+        sigParams.push(`${requestClassName}? request = null`);
+        for (const [pName] of paramEntries) {
+            bodyAssignments.push(`${toPascalCase(pName)} = request?.${toPascalCase(pName)}`);
+        }
+    } else {
+        for (const [pName, pSchema] of paramEntries) {
+            if (typeof pSchema !== "object") continue;
+            const isReq = requiredSet.has(pName);
+            const csType = resolveRpcType(pSchema as JSONSchema7, isReq, requestClassName, toPascalCase(pName), classes);
+            sigParams.push(`${csType} ${pName}${isReq ? "" : " = null"}`);
+            bodyAssignments.push(`${toPascalCase(pName)} = ${pName}`);
+        }
     }
     sigParams.push("CancellationToken cancellationToken = default");
 
     const taskType = !isVoidSchema(resultSchema) ? `Task<${resultClassName}>` : "Task";
+    const localRequestName = useRequestParameter ? "rpcRequest" : "request";
     lines.push(`${indent}${methodVisibility} async ${taskType} ${methodName}Async(${sigParams.join(", ")})`);
-    lines.push(`${indent}{`, `${indent}    var request = new ${requestClassName} { ${bodyAssignments.join(", ")} };`);
+    lines.push(`${indent}{`, `${indent}    var ${localRequestName} = new ${wireRequestClassName} { ${bodyAssignments.join(", ")} };`);
     if (!isVoidSchema(resultSchema)) {
-        lines.push(`${indent}    return await CopilotClient.InvokeRpcAsync<${resultClassName}>(_rpc, "${method.rpcMethod}", [request], cancellationToken);`, `${indent}}`);
+        lines.push(`${indent}    return await CopilotClient.InvokeRpcAsync<${resultClassName}>(_rpc, "${method.rpcMethod}", [${localRequestName}], cancellationToken);`, `${indent}}`);
     } else {
-        lines.push(`${indent}    await CopilotClient.InvokeRpcAsync(_rpc, "${method.rpcMethod}", [request], cancellationToken);`, `${indent}}`);
+        lines.push(`${indent}    await CopilotClient.InvokeRpcAsync(_rpc, "${method.rpcMethod}", [${localRequestName}], cancellationToken);`, `${indent}}`);
     }
 }
 
@@ -1509,8 +1585,8 @@ function emitSessionApiClass(className: string, node: Record<string, unknown>, c
     const displayName = className.replace(/Api$/, "");
     const groupExperimental = isNodeFullyExperimental(node);
     const groupDeprecated = isNodeFullyDeprecated(node);
-    const experimentalAttr = groupExperimental ? `[Experimental(Diagnostics.Experimental)]\n` : "";
-    const deprecatedAttr = groupDeprecated ? `[Obsolete("This member is deprecated and will be removed in a future version.")]\n` : "";
+    const experimentalAttr = groupExperimental ? `${experimentalAttribute()}\n` : "";
+    const deprecatedAttr = groupDeprecated ? `${OBSOLETE_ATTRIBUTE}\n` : "";
     const subGroups = Object.entries(node).filter(([, v]) => typeof v === "object" && v !== null && !isRpcMethod(v));
 
     const lines = [`/// <summary>Provides session-scoped ${displayName} APIs.</summary>`, `${experimentalAttr}${deprecatedAttr}public sealed class ${className}`, `{`, `    private readonly JsonRpc _rpc;`, `    private readonly string _sessionId;`, ""];
@@ -1575,12 +1651,7 @@ function emitClientSessionApiRegistration(clientSchema: Record<string, unknown>,
         for (const method of methods) {
             const resultSchema = getMethodResultSchema(method);
             if (!isVoidSchema(resultSchema)) {
-                if (isObjectSchema(resultSchema)) {
-                    const resultClass = emitRpcClass(resultTypeName(method), resultSchema!, "public", classes);
-                    if (resultClass) classes.push(resultClass);
-                } else {
-                    emitNonObjectResultType(resultTypeName(method), resultSchema!, classes);
-                }
+                emitRpcResultType(resultTypeName(method), resultSchema!, "public", classes);
             }
 
             const effectiveParams = resolveMethodParamsSchema(method);
@@ -1597,10 +1668,10 @@ function emitClientSessionApiRegistration(clientSchema: Record<string, unknown>,
         const groupDeprecated = isNodeFullyDeprecated(groupNode);
         lines.push(`/// <summary>Handles \`${groupName}\` client session API methods.</summary>`);
         if (groupExperimental) {
-            lines.push(`[Experimental(Diagnostics.Experimental)]`);
+            pushExperimentalAttribute(lines);
         }
         if (groupDeprecated) {
-            lines.push(`[Obsolete("This member is deprecated and will be removed in a future version.")]`);
+            lines.push(OBSOLETE_ATTRIBUTE);
         }
         lines.push(`public interface ${interfaceName}`);
         lines.push(`{`);
@@ -1611,10 +1682,10 @@ function emitClientSessionApiRegistration(clientSchema: Record<string, unknown>,
             const taskType = resultTaskType(method);
             lines.push(`    /// <summary>Handles "${method.rpcMethod}".</summary>`);
             if (method.stability === "experimental" && !groupExperimental) {
-                lines.push(`    [Experimental(Diagnostics.Experimental)]`);
+                pushExperimentalAttribute(lines, "    ");
             }
             if (method.deprecated && !groupDeprecated) {
-                lines.push(`    [Obsolete("This member is deprecated and will be removed in a future version.")]`);
+                lines.push(`    ${OBSOLETE_ATTRIBUTE}`);
             }
             if (hasParams) {
                 lines.push(`    ${taskType} ${clientHandlerMethodName(method.rpcMethod)}(${paramsTypeName(method)} request, CancellationToken cancellationToken = default);`);
@@ -1689,6 +1760,13 @@ function generateRpcCode(schema: ApiSchema): string {
     rpcEnumOutput = [];
     generatedEnums.clear(); // Clear shared enum deduplication map
     rpcDefinitions = collectDefinitionCollections(schema as Record<string, unknown>);
+    for (const defs of [rpcDefinitions.definitions, rpcDefinitions.$defs]) {
+        for (const [name, def] of Object.entries(defs ?? {})) {
+            if (typeof def === "object" && def !== null && isSchemaExperimental(def as JSONSchema7)) {
+                experimentalRpcTypes.add(typeToClassName(name));
+            }
+        }
+    }
     const classes: string[] = [];
 
     let serverRpcParts: string[] = [];
@@ -1717,13 +1795,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace GitHub.Copilot.SDK.Rpc;
-
-/// <summary>Diagnostic IDs for the Copilot SDK.</summary>
-internal static class Diagnostics
-{
-    /// <summary>Indicates an experimental API that may change or be removed.</summary>
-    internal const string Experimental = "GHCP001";
-}
 `);
 
     for (const cls of classes) if (cls) lines.push(cls, "");

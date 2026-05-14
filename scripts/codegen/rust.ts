@@ -4,7 +4,10 @@
  * Reads api.schema.json and session-events.schema.json, emits idiomatic Rust
  * types to rust/src/generated/.
  *
- * Usage: npx tsx scripts/codegen/rust.ts
+ * Usage:
+ *   npx tsx scripts/codegen/rust.ts
+ *   npx tsx scripts/codegen/rust.ts <apiSchemaPath>
+ *   npx tsx scripts/codegen/rust.ts <sessionEventsSchemaPath> <apiSchemaPath>
  */
 
 import { execFile } from "child_process";
@@ -21,11 +24,13 @@ import {
 	collectDefinitionCollections,
 	collectDefinitions,
 	getApiSchemaPath,
+	getNullableInner,
 	getRpcSchemaTypeName,
 	getSessionEventsSchemaPath,
 	isObjectSchema,
 	isRpcMethod,
 	isSchemaDeprecated,
+	isSchemaExperimental,
 	isVoidSchema,
 	postProcessSchema,
 	refTypeName,
@@ -55,9 +60,37 @@ const STRING_NEWTYPE_OVERRIDES: Record<string, string> = {
 
 function toPascalCase(s: string): string {
 	return s
-		.split(/[._\-\s]+/)
+		.split(/[^A-Za-z0-9]+/)
+		.filter(Boolean)
 		.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
 		.join("");
+}
+
+function toRustPascalIdentifier(value: string, fallback: string): string {
+	let identifier = toPascalCase(value);
+	if (!identifier) {
+		identifier = fallback;
+	} else if (!/^[A-Za-z_]/.test(identifier)) {
+		identifier = `${fallback}${identifier}`;
+	}
+
+	return RUST_KEYWORDS.has(identifier) ? `${identifier}Value` : identifier;
+}
+
+function uniqueRustPascalIdentifier(
+	value: string,
+	used: Set<string>,
+	fallback: string,
+	reserved: Set<string> = new Set(),
+): string {
+	const identifier = toRustPascalIdentifier(value, fallback);
+	if (used.has(identifier) || reserved.has(identifier)) {
+		throw new Error(
+			`Generated Rust enum variant identifier "${identifier}" is not unique for value "${value}". Add an explicit naming rule instead of stabilizing an arbitrary public variant name.`,
+		);
+	}
+	used.add(identifier);
+	return identifier;
 }
 
 function toSnakeCase(s: string): string {
@@ -138,6 +171,14 @@ interface RustCodegenCtx {
 	enums: string[];
 	/** Track generated type names to avoid duplicates. */
 	generatedNames: Set<string>;
+	/**
+	 * Generated type names that do not (and cannot trivially) implement
+	 * `Default` — currently `#[serde(untagged)]` enums of distinct payload
+	 * structs. Structs with a *required* field of one of these types must
+	 * also skip the `Default` derive; their names are added here on emission
+	 * so the property propagates transitively.
+	 */
+	nonDefaultableTypes: Set<string>;
 	/** Schema definitions for $ref resolution. */
 	definitions?: DefinitionCollections;
 }
@@ -211,6 +252,10 @@ function tryEmitRustDiscriminatedUnion(
 		return enumName;
 	}
 	ctx.generatedNames.add(enumName);
+	// Untagged enums of distinct payload structs have no obvious default
+	// variant; structs with a required field of this type will also skip
+	// the `Default` derive.
+	ctx.nonDefaultableTypes.add(enumName);
 
 	for (const { schema: variantSchema, typeName } of resolvedVariants) {
 		if (isObjectSchema(variantSchema)) {
@@ -224,14 +269,21 @@ function tryEmitRustDiscriminatedUnion(
 			lines.push(`/// ${line}`);
 		}
 	}
+	pushRustExperimentalDocs(lines, isSchemaExperimental(schema));
 	lines.push("#[derive(Debug, Clone, Serialize, Deserialize)]");
 	lines.push("#[serde(untagged)]");
 	lines.push(`pub enum ${enumName} {`);
 
+	const usedVariantNames = new Set<string>();
 	for (const { schema: variantSchema, typeName } of resolvedVariants) {
 		const kind = ((variantSchema.properties?.kind as JSONSchema7 | undefined)
 			?.const ?? typeName) as string;
-		lines.push(`    ${toPascalCase(kind)}(${stripOption(typeName)}),`);
+		const variantName = uniqueRustPascalIdentifier(
+			kind,
+			usedVariantNames,
+			"Variant",
+		);
+		lines.push(`    ${variantName}(${stripOption(typeName)}),`);
 	}
 
 	lines.push("}");
@@ -244,8 +296,28 @@ function makeCtx(definitions?: DefinitionCollections): RustCodegenCtx {
 		structs: [],
 		enums: [],
 		generatedNames: new Set(),
+		nonDefaultableTypes: new Set(),
 		definitions,
 	};
+}
+
+function pushRustExperimentalDocs(
+	lines: string[],
+	experimental: boolean,
+	indent = "",
+): void {
+	if (!experimental) return;
+	lines.push(`${indent}///`);
+	lines.push(`${indent}/// <div class="warning">`);
+	lines.push(`${indent}///`);
+	lines.push(
+		`${indent}/// **Experimental.** This type is part of an experimental wire-protocol surface`,
+	);
+	lines.push(
+		`${indent}/// and may change or be removed in future SDK or CLI releases.`,
+	);
+	lines.push(`${indent}///`);
+	lines.push(`${indent}/// </div>`);
 }
 
 // ── Type resolution ─────────────────────────────────────────────────────────
@@ -276,6 +348,7 @@ function resolveRustType(
 					resolved.enum as string[],
 					ctx,
 					resolved.description,
+					isSchemaExperimental(resolved),
 				);
 				return wrapOption(typeName, isRequired);
 			}
@@ -377,6 +450,7 @@ function resolveRustType(
 			propSchema.enum as string[],
 			ctx,
 			propSchema.description,
+			isSchemaExperimental(propSchema),
 		);
 		return wrapOption(enumName, isRequired);
 	}
@@ -512,13 +586,23 @@ function emitRustStruct(
 			lines.push(`/// ${line}`);
 		}
 	}
+	pushRustExperimentalDocs(lines, isSchemaExperimental(schema));
 	if (isSchemaDeprecated(schema)) {
 		lines.push("#[deprecated]");
 	}
-	lines.push("#[derive(Debug, Clone, Serialize, Deserialize)]");
-	lines.push(`#[serde(rename_all = "camelCase")]`);
-	lines.push(`pub struct ${typeName} {`);
 
+	// Resolve field types up-front so we can decide whether `Default` can be
+	// derived. A required field whose bare type is non-default-able (e.g. an
+	// untagged enum, or another struct that already opted out) blocks the
+	// derive and propagates the opt-out to this struct.
+	interface FieldInfo {
+		propName: string;
+		prop: JSONSchema7;
+		isReq: boolean;
+		rustField: string;
+		rustType: string;
+	}
+	const fields: FieldInfo[] = [];
 	for (const [propName, propSchema] of Object.entries(
 		schema.properties || {},
 	)) {
@@ -527,7 +611,22 @@ function emitRustStruct(
 		const isReq = required.has(propName);
 		const rustField = safeRustFieldName(propName);
 		const rustType = resolveRustType(prop, typeName, propName, isReq, ctx);
+		fields.push({ propName, prop, isReq, rustField, rustType });
+	}
 
+	const blocksDefault = fields.some(
+		(f) => f.isReq && ctx.nonDefaultableTypes.has(f.rustType),
+	);
+	if (blocksDefault) {
+		ctx.nonDefaultableTypes.add(typeName);
+		lines.push("#[derive(Debug, Clone, Serialize, Deserialize)]");
+	} else {
+		lines.push("#[derive(Debug, Clone, Default, Serialize, Deserialize)]");
+	}
+	lines.push(`#[serde(rename_all = "camelCase")]`);
+	lines.push(`pub struct ${typeName} {`);
+
+	for (const { propName, prop, isReq, rustField, rustType } of fields) {
 		if (prop.description) {
 			for (const line of prop.description.split(/\r?\n/)) {
 				lines.push(`    /// ${line}`);
@@ -575,6 +674,7 @@ function emitRustStringEnum(
 	values: string[],
 	ctx: RustCodegenCtx,
 	description?: string,
+	experimental = false,
 ): void {
 	if (ctx.generatedNames.has(enumName)) return;
 	ctx.generatedNames.add(enumName);
@@ -585,19 +685,32 @@ function emitRustStringEnum(
 			lines.push(`/// ${line}`);
 		}
 	}
-	lines.push("#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]");
+	pushRustExperimentalDocs(lines, experimental);
+	lines.push(
+		"#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]",
+	);
 	lines.push(`pub enum ${enumName} {`);
 
+	const usedVariantNames = new Set<string>();
+	const reservedVariantNames = new Set(["Unknown"]);
 	for (const value of values) {
-		const variantName = toPascalCase(value);
+		const variantName = uniqueRustPascalIdentifier(
+			value,
+			usedVariantNames,
+			"Value",
+			reservedVariantNames,
+		);
 		if (variantName !== value) {
 			lines.push(`    #[serde(rename = "${value}")]`);
 		}
 		lines.push(`    ${variantName},`);
 	}
 
-	// Add a catch-all for forward compatibility
+	// Add a catch-all for forward compatibility. This is also the `Default`
+	// variant — for wire-protocol enums an unknown/sentinel value is the only
+	// safe default.
 	lines.push("    /// Unknown variant for forward compatibility.");
+	lines.push("    #[default]");
 	lines.push("    #[serde(other)]");
 	lines.push("    Unknown,");
 
@@ -620,12 +733,15 @@ function emitRustConstStringEnum(
 			lines.push(`/// ${line}`);
 		}
 	}
-	lines.push("#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]");
+	lines.push(
+		"#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]",
+	);
 	lines.push(`pub enum ${enumName} {`);
-	const variantName = toPascalCase(value);
+	const variantName = toRustPascalIdentifier(value, "Value");
 	if (variantName !== value) {
 		lines.push(`    #[serde(rename = "${value}")]`);
 	}
+	lines.push("    #[default]");
 	lines.push(`    ${variantName},`);
 	lines.push("}");
 	ctx.enums.push(lines.join("\n"));
@@ -644,6 +760,10 @@ interface EventVariant {
 	dataSchema: JSONSchema7;
 	/** Description of the event */
 	description?: string;
+	/** Whether the event definition is experimental. */
+	eventExperimental: boolean;
+	/** Whether the event data definition is experimental. */
+	dataExperimental: boolean;
 }
 
 function extractEventVariants(schema: JSONSchema7): EventVariant[] {
@@ -688,6 +808,8 @@ function extractEventVariants(schema: JSONSchema7): EventVariant[] {
 				dataClassName: `${toPascalCase(typeName)}Data`,
 				dataSchema,
 				description: resolvedVariant.description || dataSchema.description,
+				eventExperimental: isSchemaExperimental(resolvedVariant),
+				dataExperimental: isSchemaExperimental(dataSchema),
 			};
 		})
 		.filter((v) => !EXCLUDED_EVENT_TYPES.has(v.typeName));
@@ -713,14 +835,20 @@ function generateSessionEventsCode(schema: JSONSchema7): string {
 	const typeEnumLines: string[] = [];
 	typeEnumLines.push("/// Identifies the kind of session event.");
 	typeEnumLines.push(
-		"#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]",
+		"#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]",
 	);
 	typeEnumLines.push("pub enum SessionEventType {");
 	for (const variant of variants) {
+		pushRustExperimentalDocs(
+			typeEnumLines,
+			variant.eventExperimental,
+			"    ",
+		);
 		typeEnumLines.push(`    #[serde(rename = "${variant.typeName}")]`);
 		typeEnumLines.push(`    ${variant.variantName},`);
 	}
 	typeEnumLines.push("    /// Unknown event type for forward compatibility.");
+	typeEnumLines.push("    #[default]");
 	typeEnumLines.push("    #[serde(other)]");
 	typeEnumLines.push("    Unknown,");
 	typeEnumLines.push("}");
@@ -738,6 +866,11 @@ function generateSessionEventsCode(schema: JSONSchema7): string {
 	dataEnumLines.push(`#[serde(tag = "type", content = "data")]`);
 	dataEnumLines.push("pub enum SessionEventData {");
 	for (const variant of variants) {
+		pushRustExperimentalDocs(
+			dataEnumLines,
+			variant.dataExperimental,
+			"    ",
+		);
 		dataEnumLines.push(`    #[serde(rename = "${variant.typeName}")]`);
 		dataEnumLines.push(`    ${variant.variantName}(${variant.dataClassName}),`);
 	}
@@ -880,7 +1013,10 @@ function generateApiTypesCode(apiSchema: ApiSchema): string {
 				schema.enum as string[],
 				ctx,
 				schema.description,
+				isSchemaExperimental(schema),
 			);
+		} else if (getUnionVariants(schema)) {
+			tryEmitRustDiscriminatedUnion(schema, name, "", ctx);
 		} else if (isObjectSchema(schema)) {
 			emitRustStruct(name, schema, ctx, schema.description);
 		}
@@ -1027,11 +1163,12 @@ function getMethodParamsInfo(
 	method: RpcMethod,
 	defCollections: DefinitionCollections,
 	isSession: boolean,
-): { hasParams: boolean; typeName: string | null } {
-	if (!method.params) return { hasParams: false, typeName: null };
+): { hasParams: boolean; optional: boolean; typeName: string | null } {
+	if (!method.params) return { hasParams: false, optional: false, typeName: null };
 	const inline = method.params as JSONSchema7 & { $ref?: string };
-	const resolved = resolveSchema(inline, defCollections);
-	if (!resolved) return { hasParams: false, typeName: null };
+	const resolved = resolveObjectSchema(inline, defCollections) ??
+		resolveSchema(inline, defCollections);
+	if (!resolved) return { hasParams: false, optional: false, typeName: null };
 
 	let typeName: string | null = null;
 	if (typeof inline.$ref === "string") {
@@ -1046,9 +1183,12 @@ function getMethodParamsInfo(
 	const props = isSession
 		? allProps.filter((p) => p !== "sessionId")
 		: allProps;
-	if (props.length === 0) return { hasParams: false, typeName: null };
-	if (!typeName) return { hasParams: false, typeName: null };
-	return { hasParams: true, typeName };
+	if (props.length === 0) return { hasParams: false, optional: false, typeName: null };
+	if (!typeName) return { hasParams: false, optional: false, typeName: null };
+	const required = new Set(resolved.required || []);
+	const hasRequiredParams = props.some((p) => required.has(p));
+	const optional = !!getNullableInner(inline) && !hasRequiredParams;
+	return { hasParams: true, optional, typeName };
 }
 
 function rpcMethodConstName(method: RpcMethod): string {
@@ -1139,6 +1279,47 @@ function getResultTypeName(
 	return `${toPascalCase(method.rpcMethod)}Result`;
 }
 
+function pushNamespaceMethodBody(
+	out: string[],
+	constName: string,
+	isSession: boolean,
+	hasParams: boolean,
+	resultIsVoid: boolean,
+): void {
+	// Build the params Value sent over the wire.
+	if (isSession) {
+		if (hasParams) {
+			out.push(`        let mut wire_params = serde_json::to_value(params)?;`);
+			out.push(
+				`        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());`,
+			);
+		} else {
+			out.push(
+				`        let wire_params = serde_json::json!({ "sessionId": self.session.id() });`,
+			);
+		}
+		out.push(
+			`        let _value = self.session.client().call(rpc_methods::${constName}, Some(wire_params)).await?;`,
+		);
+	} else {
+		if (hasParams) {
+			out.push(`        let wire_params = serde_json::to_value(params)?;`);
+		} else {
+			out.push(`        let wire_params = serde_json::json!({});`);
+		}
+		out.push(
+			`        let _value = self.client.call(rpc_methods::${constName}, Some(wire_params)).await?;`,
+		);
+	}
+
+	if (resultIsVoid) {
+		out.push(`        Ok(())`);
+	} else {
+		out.push(`        Ok(serde_json::from_value(_value)?)`);
+	}
+	out.push(`    }`);
+}
+
 function emitNamespaceMethod(
 	out: string[],
 	method: RpcMethod,
@@ -1193,42 +1374,25 @@ function emitNamespaceMethod(
 	const paramArg = hasParams ? `, params: ${paramsTypeName}` : "";
 
 	out.push(...docs);
+	if (hasParams && paramsInfo.optional) {
+		out.push(
+			`    pub async fn ${fnName}(&self) -> Result<${returnType}, Error> {`,
+		);
+		pushNamespaceMethodBody(out, constName, isSession, false, resultIsVoid);
+		out.push("");
+		out.push(...docs);
+		out.push(
+			`    pub async fn ${fnName}_with_params(&self, params: ${paramsTypeName}) -> Result<${returnType}, Error> {`,
+		);
+		pushNamespaceMethodBody(out, constName, isSession, true, resultIsVoid);
+		out.push("");
+		return;
+	}
+
 	out.push(
 		`    pub async fn ${fnName}(&self${paramArg}) -> Result<${returnType}, Error> {`,
 	);
-
-	// Build the params Value sent over the wire.
-	if (isSession) {
-		if (hasParams) {
-			out.push(`        let mut wire_params = serde_json::to_value(params)?;`);
-			out.push(
-				`        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());`,
-			);
-		} else {
-			out.push(
-				`        let wire_params = serde_json::json!({ "sessionId": self.session.id() });`,
-			);
-		}
-		out.push(
-			`        let _value = self.session.client().call(rpc_methods::${constName}, Some(wire_params)).await?;`,
-		);
-	} else {
-		if (hasParams) {
-			out.push(`        let wire_params = serde_json::to_value(params)?;`);
-		} else {
-			out.push(`        let wire_params = serde_json::json!({});`);
-		}
-		out.push(
-			`        let _value = self.client.call(rpc_methods::${constName}, Some(wire_params)).await?;`,
-		);
-	}
-
-	if (resultIsVoid) {
-		out.push(`        Ok(())`);
-	} else {
-		out.push(`        Ok(serde_json::from_value(_value)?)`);
-	}
-	out.push(`    }`);
+	pushNamespaceMethodBody(out, constName, isSession, hasParams, resultIsVoid);
 	out.push("");
 }
 
@@ -1272,8 +1436,7 @@ function generateRpcCode(apiSchema: ApiSchema): string {
 	out.push("#![allow(missing_docs)]");
 	out.push("#![allow(clippy::too_many_arguments)]");
 	out.push("");
-	out.push("use super::api_types::*;");
-	out.push("use super::api_types::rpc_methods;");
+	out.push("use super::api_types::{rpc_methods, *};");
 	out.push("use crate::session::Session;");
 	out.push("use crate::{Client, Error};");
 	out.push("");
@@ -1346,11 +1509,30 @@ async function rustfmt(filePath: string): Promise<void> {
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
+function parseSchemaArgs(): {
+	sessionEventsSchemaPath?: string;
+	apiSchemaPath?: string;
+} {
+	const [firstArg, secondArg] = process.argv.slice(2);
+	if (secondArg) {
+		return {
+			sessionEventsSchemaPath: firstArg,
+			apiSchemaPath: secondArg,
+		};
+	}
+
+	return {
+		apiSchemaPath: firstArg,
+	};
+}
+
 async function generate(): Promise<void> {
 	console.log("Loading schemas...");
 
-	const sessionEventsSchemaPath = await getSessionEventsSchemaPath();
-	const apiSchemaPath = await getApiSchemaPath(process.argv[2]);
+	const schemaArgs = parseSchemaArgs();
+	const sessionEventsSchemaPath =
+		schemaArgs.sessionEventsSchemaPath || (await getSessionEventsSchemaPath());
+	const apiSchemaPath = await getApiSchemaPath(schemaArgs.apiSchemaPath);
 
 	const sessionEventsRaw = JSON.parse(
 		await fs.readFile(sessionEventsSchemaPath, "utf-8"),
