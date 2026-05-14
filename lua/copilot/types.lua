@@ -72,6 +72,35 @@ M.SessionLifecycleEventType = {
 }
 
 -- ---------------------------------------------------------------------------
+-- Slash command input completion constants
+-- ---------------------------------------------------------------------------
+
+M.SlashCommandInputCompletion = {
+    DIRECTORY = "directory",
+}
+
+-- ---------------------------------------------------------------------------
+-- Slash command kind constants
+-- ---------------------------------------------------------------------------
+
+M.SlashCommandKind = {
+    BUILTIN = "builtin",
+    CLIENT  = "client",
+    SKILL   = "skill",
+}
+
+-- ---------------------------------------------------------------------------
+-- Model picker price category constants
+-- ---------------------------------------------------------------------------
+
+M.ModelPickerPriceCategory = {
+    HIGH      = "high",
+    LOW       = "low",
+    MEDIUM    = "medium",
+    VERY_HIGH = "very_high",
+}
+
+-- ---------------------------------------------------------------------------
 -- Constructor helpers
 -- ---------------------------------------------------------------------------
 
@@ -501,6 +530,69 @@ function M.GetAuthStatusResponse(fields)
     }
 end
 
+--- Create a SlashCommandInput table.
+-- @param fields table with keys: hint, completion
+-- @return table SlashCommandInput
+function M.SlashCommandInput(fields)
+    fields = fields or {}
+    return {
+        hint       = fields.hint or "",
+        completion = fields.completion,   -- optional string (SlashCommandInputCompletion)
+    }
+end
+
+--- Create a SlashCommandInfo table.
+-- @param fields table
+-- @return table SlashCommandInfo
+function M.SlashCommandInfo(fields)
+    fields = fields or {}
+    return {
+        allowDuringAgentExecution = fields.allowDuringAgentExecution or false,
+        description               = fields.description or "",
+        kind                      = fields.kind or "builtin",
+        name                      = fields.name or "",
+        aliases                   = fields.aliases,       -- optional array of strings
+        experimental              = fields.experimental,  -- optional boolean
+        input                     = fields.input,         -- optional SlashCommandInput table
+    }
+end
+
+--- Create a CommandsInvokeRequest table.
+-- @param fields table with keys: name, input
+-- @return table CommandsInvokeRequest
+function M.CommandsInvokeRequest(fields)
+    fields = fields or {}
+    return {
+        name  = fields.name or "",
+        input = fields.input,   -- optional string
+    }
+end
+
+--- Create a CommandsListRequest table.
+-- @param fields table with keys: includeBuiltins, includeClientCommands, includeSkills
+-- @return table CommandsListRequest
+function M.CommandsListRequest(fields)
+    fields = fields or {}
+    return {
+        includeBuiltins       = fields.includeBuiltins,        -- optional boolean
+        includeClientCommands = fields.includeClientCommands,   -- optional boolean
+        includeSkills         = fields.includeSkills,           -- optional boolean
+    }
+end
+
+--- Create a ModelBillingTokenPrices table.
+-- @param fields table with keys: batchSize, cachePrice, inputPrice, outputPrice
+-- @return table ModelBillingTokenPrices
+function M.ModelBillingTokenPrices(fields)
+    fields = fields or {}
+    return {
+        batchSize   = fields.batchSize,    -- optional integer
+        cachePrice  = fields.cachePrice,   -- optional integer
+        inputPrice  = fields.inputPrice,   -- optional integer
+        outputPrice = fields.outputPrice,  -- optional integer
+    }
+end
+
 --- Create a ModelInfo table.
 -- @param fields table
 -- @return table ModelInfo
@@ -808,5 +900,16 @@ end
 --   rename(sessionId, oldPath, newPath) → nil
 --
 -- Each function should return nil, err_string on error.
+
+--- Experimental: Create a SkillsLoadDiagnostics table.
+-- @param fields table with keys: errors, warnings
+-- @return table SkillsLoadDiagnostics
+function M.SkillsLoadDiagnostics(fields)
+    fields = fields or {}
+    return {
+        errors   = fields.errors or {},
+        warnings = fields.warnings or {},
+    }
+end
 
 return M

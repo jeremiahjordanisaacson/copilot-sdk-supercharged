@@ -13,7 +13,12 @@ namespace eval ::copilot::types {
                      make_session_fs_config make_mcp_server_config \
                      make_command_definition \
                      make_exit_plan_mode_request make_exit_plan_mode_response \
-                     make_trace_context
+                     make_trace_context \
+                     make_slash_command_input make_slash_command_info \
+                     make_commands_invoke_request make_commands_list_request \
+                     make_model_billing_token_prices make_skills_load_diagnostics \
+                     slash_command_input_completions slash_command_kinds \
+                     model_picker_price_categories
 }
 
 # -- Client options -----------------------------------------------------------
@@ -142,6 +147,24 @@ proc ::copilot::types::connection_states {} {
     return {disconnected connecting connected error}
 }
 
+# -- Slash command input completion constants ---------------------------------
+
+proc ::copilot::types::slash_command_input_completions {} {
+    return {directory}
+}
+
+# -- Slash command kind constants ---------------------------------------------
+
+proc ::copilot::types::slash_command_kinds {} {
+    return {builtin client skill}
+}
+
+# -- Model picker price category constants ------------------------------------
+
+proc ::copilot::types::model_picker_price_categories {} {
+    return {high low medium very_high}
+}
+
 # -- Validation helper --------------------------------------------------------
 
 proc ::copilot::types::validate_dict {d required_keys} {
@@ -233,6 +256,105 @@ proc ::copilot::types::make_command_definition {name description} {
     return [dict create name $name description $description]
 }
 
+# -- Slash command input ------------------------------------------------------
+
+proc ::copilot::types::make_slash_command_input {args} {
+    set defaults [dict create \
+        hint       "" \
+        completion "" \
+    ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown slash_command_input key: $key"
+        }
+        dict set cfg $key $value
+    }
+    if {[dict get $cfg hint] eq ""} {
+        error "hint is required for slash_command_input"
+    }
+    return $cfg
+}
+
+# -- Slash command info -------------------------------------------------------
+
+proc ::copilot::types::make_slash_command_info {args} {
+    set defaults [dict create \
+        allowDuringAgentExecution 0 \
+        description               "" \
+        kind                      "builtin" \
+        name                      "" \
+        aliases                   {} \
+        experimental              "" \
+        input                     {} \
+    ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown slash_command_info key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+# -- Commands invoke request --------------------------------------------------
+
+proc ::copilot::types::make_commands_invoke_request {args} {
+    set defaults [dict create \
+        name  "" \
+        input "" \
+    ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown commands_invoke_request key: $key"
+        }
+        dict set cfg $key $value
+    }
+    if {[dict get $cfg name] eq ""} {
+        error "name is required for commands_invoke_request"
+    }
+    return $cfg
+}
+
+# -- Commands list request ----------------------------------------------------
+
+proc ::copilot::types::make_commands_list_request {args} {
+    set defaults [dict create \
+        includeBuiltins       "" \
+        includeClientCommands "" \
+        includeSkills         "" \
+    ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown commands_list_request key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+# -- Model billing token prices -----------------------------------------------
+
+proc ::copilot::types::make_model_billing_token_prices {args} {
+    set defaults [dict create \
+        batchSize   "" \
+        cachePrice  "" \
+        inputPrice  "" \
+        outputPrice "" \
+    ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown model_billing_token_prices key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
 # -- Exit plan mode types ---------------------------------------------------
 
 proc ::copilot::types::make_exit_plan_mode_request {session_id} {
@@ -258,6 +380,23 @@ proc ::copilot::types::make_trace_context {args} {
         dict set ctx $key $value
     }
     return $ctx
+}
+
+# -- Experimental: Skills load diagnostics ------------------------------------
+
+proc ::copilot::types::make_skills_load_diagnostics {args} {
+    set defaults [dict create \
+        errors   {} \
+        warnings {} \
+    ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown skills_load_diagnostics key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
 }
 
 package provide copilot::types 2.0.0

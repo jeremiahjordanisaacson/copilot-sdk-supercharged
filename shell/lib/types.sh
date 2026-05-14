@@ -37,6 +37,20 @@ COPILOT_EVENT_ASSISTANT_TURN_END="assistant.turn_end"
 COPILOT_EVENT_TOOL_EXECUTION_START="tool.execution_start"
 COPILOT_EVENT_TOOL_EXECUTION_COMPLETE="tool.execution_complete"
 
+# --- Slash Command Input Completion Constants ---
+COPILOT_SLASH_COMMAND_INPUT_COMPLETION_DIRECTORY="directory"
+
+# --- Slash Command Kind Constants ---
+COPILOT_SLASH_COMMAND_KIND_BUILTIN="builtin"
+COPILOT_SLASH_COMMAND_KIND_CLIENT="client"
+COPILOT_SLASH_COMMAND_KIND_SKILL="skill"
+
+# --- Model Picker Price Category Constants ---
+COPILOT_MODEL_PICKER_PRICE_CATEGORY_HIGH="high"
+COPILOT_MODEL_PICKER_PRICE_CATEGORY_LOW="low"
+COPILOT_MODEL_PICKER_PRICE_CATEGORY_MEDIUM="medium"
+COPILOT_MODEL_PICKER_PRICE_CATEGORY_VERY_HIGH="very_high"
+
 # --- Model Capabilities Override ---
 # Set these variables to override model capabilities for session creation.
 # Example:

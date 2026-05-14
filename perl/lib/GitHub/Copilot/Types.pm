@@ -9,6 +9,20 @@ use constant RESPONSE_FORMAT_TEXT        => 'text';
 use constant RESPONSE_FORMAT_IMAGE       => 'image';
 use constant RESPONSE_FORMAT_JSON_OBJECT => 'json_object';
 
+# Slash command input completion constants
+use constant SLASH_COMMAND_INPUT_COMPLETION_DIRECTORY => 'directory';
+
+# Slash command kind constants
+use constant SLASH_COMMAND_KIND_BUILTIN => 'builtin';
+use constant SLASH_COMMAND_KIND_CLIENT  => 'client';
+use constant SLASH_COMMAND_KIND_SKILL   => 'skill';
+
+# Model picker price category constants
+use constant MODEL_PICKER_PRICE_CATEGORY_HIGH      => 'high';
+use constant MODEL_PICKER_PRICE_CATEGORY_LOW       => 'low';
+use constant MODEL_PICKER_PRICE_CATEGORY_MEDIUM    => 'medium';
+use constant MODEL_PICKER_PRICE_CATEGORY_VERY_HIGH => 'very_high';
+
 =head1 NAME
 
 GitHub::Copilot::Types - Type definitions for the GitHub Copilot Perl SDK
@@ -177,6 +191,140 @@ sub TO_JSON {
         timestamp => $self->timestamp,
     );
     $h{protocolVersion} = $self->protocolVersion if defined $self->protocolVersion;
+    return \%h;
+}
+
+# ============================================================================
+# SlashCommandInput
+# ============================================================================
+package GitHub::Copilot::Types::SlashCommandInput;
+use Moo;
+
+has hint       => (is => 'ro', required => 1);
+has completion => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        hint       => $hr->{hint}       // '',
+        completion => $hr->{completion},
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (hint => $self->hint);
+    $h{completion} = $self->completion if defined $self->completion;
+    return \%h;
+}
+
+# ============================================================================
+# SlashCommandInfo
+# ============================================================================
+package GitHub::Copilot::Types::SlashCommandInfo;
+use Moo;
+
+has allowDuringAgentExecution => (is => 'ro', required => 1);
+has description               => (is => 'ro', required => 1);
+has kind                      => (is => 'ro', required => 1);
+has name                      => (is => 'ro', required => 1);
+has aliases                   => (is => 'ro', default => sub { undef });
+has experimental              => (is => 'ro', default => sub { undef });
+has input                     => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    my $input = defined $hr->{input}
+        ? GitHub::Copilot::Types::SlashCommandInput->from_hashref($hr->{input})
+        : undef;
+    return $class->new(
+        allowDuringAgentExecution => $hr->{allowDuringAgentExecution} // 0,
+        description               => $hr->{description}               // '',
+        kind                      => $hr->{kind}                      // 'builtin',
+        name                      => $hr->{name}                      // '',
+        aliases                   => $hr->{aliases},
+        experimental              => $hr->{experimental},
+        input                     => $input,
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (
+        allowDuringAgentExecution => $self->allowDuringAgentExecution ? \1 : \0,
+        description               => $self->description,
+        kind                      => $self->kind,
+        name                      => $self->name,
+    );
+    $h{aliases}      = $self->aliases      if defined $self->aliases;
+    $h{experimental} = $self->experimental ? \1 : \0 if defined $self->experimental;
+    $h{input}        = $self->input->TO_JSON if defined $self->input;
+    return \%h;
+}
+
+# ============================================================================
+# CommandsInvokeRequest
+# ============================================================================
+package GitHub::Copilot::Types::CommandsInvokeRequest;
+use Moo;
+
+has name  => (is => 'ro', required => 1);
+has input => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (name => $self->name);
+    $h{input} = $self->input if defined $self->input;
+    return \%h;
+}
+
+# ============================================================================
+# CommandsListRequest
+# ============================================================================
+package GitHub::Copilot::Types::CommandsListRequest;
+use Moo;
+
+has includeBuiltins        => (is => 'ro', default => sub { undef });
+has includeClientCommands  => (is => 'ro', default => sub { undef });
+has includeSkills          => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{includeBuiltins}       = $self->includeBuiltins       ? \1 : \0 if defined $self->includeBuiltins;
+    $h{includeClientCommands} = $self->includeClientCommands  ? \1 : \0 if defined $self->includeClientCommands;
+    $h{includeSkills}         = $self->includeSkills          ? \1 : \0 if defined $self->includeSkills;
+    return \%h;
+}
+
+# ============================================================================
+# ModelBillingTokenPrices
+# ============================================================================
+package GitHub::Copilot::Types::ModelBillingTokenPrices;
+use Moo;
+
+has batchSize   => (is => 'ro', default => sub { undef });
+has cachePrice  => (is => 'ro', default => sub { undef });
+has inputPrice  => (is => 'ro', default => sub { undef });
+has outputPrice => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        batchSize   => $hr->{batchSize},
+        cachePrice  => $hr->{cachePrice},
+        inputPrice  => $hr->{inputPrice},
+        outputPrice => $hr->{outputPrice},
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{batchSize}   = $self->batchSize   if defined $self->batchSize;
+    $h{cachePrice}  = $self->cachePrice  if defined $self->cachePrice;
+    $h{inputPrice}  = $self->inputPrice  if defined $self->inputPrice;
+    $h{outputPrice} = $self->outputPrice if defined $self->outputPrice;
     return \%h;
 }
 
@@ -919,6 +1067,31 @@ sub TO_JSON {
 #   readdir_with_types => sub { my ($session_id, $path) = @_; ... }
 #   rm                => sub { my ($session_id, $path, $recursive) = @_; ... }
 #   rename            => sub { my ($session_id, $old_path, $new_path) = @_; ... }
+
+# ============================================================================
+# Experimental: SkillsLoadDiagnostics
+# ============================================================================
+package GitHub::Copilot::Types::SkillsLoadDiagnostics;
+use Moo;
+
+has errors   => (is => 'ro', required => 1);
+has warnings => (is => 'ro', required => 1);
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        errors   => $hr->{errors}   // [],
+        warnings => $hr->{warnings} // [],
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    return {
+        errors   => $self->errors,
+        warnings => $self->warnings,
+    };
+}
 
 1;
 

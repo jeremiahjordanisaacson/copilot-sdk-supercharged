@@ -262,6 +262,69 @@ module Copilot
     end
   end
 
+  # Slash command input completion constants.
+  # Valid values: "directory"
+  module SlashCommandInputCompletion
+    DIRECTORY = "directory"
+  end
+
+  # Slash command kind constants.
+  # Valid values: "builtin", "client", "skill"
+  module SlashCommandKind
+    BUILTIN = "builtin"
+    CLIENT  = "client"
+    SKILL   = "skill"
+  end
+
+  # Input configuration for a slash command.
+  SlashCommandInput = Struct.new(:hint, :completion, keyword_init: true) do
+    def to_h
+      h = { hint: hint }
+      h[:completion] = completion if completion
+      h
+    end
+  end
+
+  # Information about a slash command.
+  SlashCommandInfo = Struct.new(
+    :allow_during_agent_execution, :description, :kind, :name,
+    :aliases, :experimental, :input,
+    keyword_init: true
+  ) do
+    def to_h
+      h = {
+        allowDuringAgentExecution: allow_during_agent_execution,
+        description: description,
+        kind: kind,
+        name: name,
+      }
+      h[:aliases] = aliases if aliases
+      h[:experimental] = experimental unless experimental.nil?
+      h[:input] = input.to_h if input
+      h
+    end
+  end
+
+  # Request to invoke a command.
+  CommandsInvokeRequest = Struct.new(:name, :input, keyword_init: true) do
+    def to_h
+      h = { name: name }
+      h[:input] = input if input
+      h
+    end
+  end
+
+  # Request to list available commands.
+  CommandsListRequest = Struct.new(:include_builtins, :include_client_commands, :include_skills, keyword_init: true) do
+    def to_h
+      h = {}
+      h[:includeBuiltins] = include_builtins unless include_builtins.nil?
+      h[:includeClientCommands] = include_client_commands unless include_client_commands.nil?
+      h[:includeSkills] = include_skills unless include_skills.nil?
+      h
+    end
+  end
+
   # Context for a slash-command invocation.
   CommandContext = Struct.new(:session_id, :command, :command_name, :args, keyword_init: true)
 
@@ -438,10 +501,38 @@ module Copilot
     end
   end
 
-  # Model billing information.
-  ModelBilling = Struct.new(:multiplier, keyword_init: true) do
+  # Model billing token prices.
+  ModelBillingTokenPrices = Struct.new(
+    :batch_size, :cache_price, :input_price, :output_price,
+    keyword_init: true
+  ) do
     def self.from_hash(h)
-      new(multiplier: h["multiplier"])
+      new(
+        batch_size: h["batchSize"],
+        cache_price: h["cachePrice"],
+        input_price: h["inputPrice"],
+        output_price: h["outputPrice"]
+      )
+    end
+  end
+
+  # Model picker price category constants.
+  # Valid values: "high", "low", "medium", "very_high"
+  module ModelPickerPriceCategory
+    HIGH      = "high"
+    LOW       = "low"
+    MEDIUM    = "medium"
+    VERY_HIGH = "very_high"
+  end
+
+  # Model billing information.
+  ModelBilling = Struct.new(:multiplier, :token_prices, :picker_price_category, keyword_init: true) do
+    def self.from_hash(h)
+      new(
+        multiplier: h["multiplier"],
+        token_prices: h["tokenPrices"] ? ModelBillingTokenPrices.from_hash(h["tokenPrices"]) : nil,
+        picker_price_category: h["pickerPriceCategory"]
+      )
     end
   end
 
@@ -564,6 +655,17 @@ module Copilot
         start_time: h["startTime"],
         modified_time: h["modifiedTime"],
         summary: h["summary"]
+      )
+    end
+  end
+
+  # Experimental
+  # Diagnostics from loading skills.
+  SkillsLoadDiagnostics = Struct.new(:errors, :warnings, keyword_init: true) do
+    def self.from_hash(h)
+      new(
+        errors: h["errors"] || [],
+        warnings: h["warnings"] || []
       )
     end
   end

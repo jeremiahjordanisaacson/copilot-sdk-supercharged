@@ -386,27 +386,295 @@ ModelPolicy <- R6::R6Class(
     }
   )
 )
+# ---------------------------------------------------------------------------
+# SlashCommandInputCompletion (enum-like constants)
+# ---------------------------------------------------------------------------
+
+#' SlashCommandInputCompletion
+#'
+#' Constants for slash command input completion types.
+#' @export
+SlashCommandInputCompletion <- list(
+  DIRECTORY = "directory"
+)
+
+# ---------------------------------------------------------------------------
+# SlashCommandKind (enum-like constants)
+# ---------------------------------------------------------------------------
+
+#' SlashCommandKind
+#'
+#' Constants for slash command kinds.
+#' @export
+SlashCommandKind <- list(
+  BUILTIN = "builtin",
+  CLIENT  = "client",
+  SKILL   = "skill"
+)
+
+# ---------------------------------------------------------------------------
+# ModelPickerPriceCategory (enum-like constants)
+# ---------------------------------------------------------------------------
+
+#' ModelPickerPriceCategory
+#'
+#' Constants for model picker price categories.
+#' @export
+ModelPickerPriceCategory <- list(
+  HIGH      = "high",
+  LOW       = "low",
+  MEDIUM    = "medium",
+  VERY_HIGH = "very_high"
+)
+
+# ---------------------------------------------------------------------------
+# SlashCommandInput
+# ---------------------------------------------------------------------------
+
+#' SlashCommandInput
+#'
+#' Input configuration for a slash command.
+#'
+#' @field hint Character. Hint text for the input.
+#' @field completion Character or NULL. Completion type.
+#' @export
+SlashCommandInput <- R6::R6Class(
+  "SlashCommandInput",
+  public = list(
+    hint = NULL,
+    completion = NULL,
+
+    #' @description Create a new SlashCommandInput.
+    #' @param hint Character. Required.
+    #' @param completion Character or NULL.
+    initialize = function(hint, completion = NULL) {
+      self$hint <- hint
+      self$completion <- completion
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list(hint = self$hint)
+      if (!is.null(self$completion)) result$completion <- self$completion
+      result
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# SlashCommandInfo
+# ---------------------------------------------------------------------------
+
+#' SlashCommandInfo
+#'
+#' Information about a slash command.
+#'
+#' @field allow_during_agent_execution Logical. Whether command can run during agent execution.
+#' @field description Character. Description of the command.
+#' @field kind Character. Kind of command (builtin, client, skill).
+#' @field name Character. Name of the command.
+#' @field aliases Character vector or NULL. Alternative names.
+#' @field experimental Logical or NULL. Whether command is experimental.
+#' @field input SlashCommandInput or NULL. Input configuration.
+#' @export
+SlashCommandInfo <- R6::R6Class(
+  "SlashCommandInfo",
+  public = list(
+    allow_during_agent_execution = NULL,
+    description = NULL,
+    kind = NULL,
+    name = NULL,
+    aliases = NULL,
+    experimental = NULL,
+    input = NULL,
+
+    #' @description Create a new SlashCommandInfo.
+    #' @param allow_during_agent_execution Logical.
+    #' @param description Character.
+    #' @param kind Character.
+    #' @param name Character.
+    #' @param aliases Character vector or NULL.
+    #' @param experimental Logical or NULL.
+    #' @param input SlashCommandInput or NULL.
+    initialize = function(allow_during_agent_execution, description, kind, name,
+                          aliases = NULL, experimental = NULL, input = NULL) {
+      self$allow_during_agent_execution <- allow_during_agent_execution
+      self$description <- description
+      self$kind <- kind
+      self$name <- name
+      self$aliases <- aliases
+      self$experimental <- experimental
+      self$input <- input
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list(
+        allowDuringAgentExecution = self$allow_during_agent_execution,
+        description = self$description,
+        kind = self$kind,
+        name = self$name
+      )
+      if (!is.null(self$aliases)) result$aliases <- self$aliases
+      if (!is.null(self$experimental)) result$experimental <- self$experimental
+      if (!is.null(self$input)) result$input <- self$input$to_list()
+      result
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# CommandsInvokeRequest
+# ---------------------------------------------------------------------------
+
+#' CommandsInvokeRequest
+#'
+#' Request to invoke a command.
+#'
+#' @field name Character. Command name.
+#' @field input Character or NULL. Command input.
+#' @export
+CommandsInvokeRequest <- R6::R6Class(
+  "CommandsInvokeRequest",
+  public = list(
+    name = NULL,
+    input = NULL,
+
+    #' @description Create a new CommandsInvokeRequest.
+    #' @param name Character.
+    #' @param input Character or NULL.
+    initialize = function(name, input = NULL) {
+      self$name <- name
+      self$input <- input
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list(name = self$name)
+      if (!is.null(self$input)) result$input <- self$input
+      result
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# CommandsListRequest
+# ---------------------------------------------------------------------------
+
+#' CommandsListRequest
+#'
+#' Request to list available commands.
+#'
+#' @field include_builtins Logical or NULL.
+#' @field include_client_commands Logical or NULL.
+#' @field include_skills Logical or NULL.
+#' @export
+CommandsListRequest <- R6::R6Class(
+  "CommandsListRequest",
+  public = list(
+    include_builtins = NULL,
+    include_client_commands = NULL,
+    include_skills = NULL,
+
+    #' @description Create a new CommandsListRequest.
+    #' @param include_builtins Logical or NULL.
+    #' @param include_client_commands Logical or NULL.
+    #' @param include_skills Logical or NULL.
+    initialize = function(include_builtins = NULL, include_client_commands = NULL,
+                          include_skills = NULL) {
+      self$include_builtins <- include_builtins
+      self$include_client_commands <- include_client_commands
+      self$include_skills <- include_skills
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$include_builtins)) result$includeBuiltins <- self$include_builtins
+      if (!is.null(self$include_client_commands)) result$includeClientCommands <- self$include_client_commands
+      if (!is.null(self$include_skills)) result$includeSkills <- self$include_skills
+      result
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# ModelBillingTokenPrices
+# ---------------------------------------------------------------------------
+
+#' ModelBillingTokenPrices
+#'
+#' Token prices for model billing.
+#'
+#' @field batch_size Integer or NULL.
+#' @field cache_price Integer or NULL.
+#' @field input_price Integer or NULL.
+#' @field output_price Integer or NULL.
+#' @export
+ModelBillingTokenPrices <- R6::R6Class(
+  "ModelBillingTokenPrices",
+  public = list(
+    batch_size = NULL,
+    cache_price = NULL,
+    input_price = NULL,
+    output_price = NULL,
+
+    #' @description Create a new ModelBillingTokenPrices.
+    #' @param batch_size Integer or NULL.
+    #' @param cache_price Integer or NULL.
+    #' @param input_price Integer or NULL.
+    #' @param output_price Integer or NULL.
+    initialize = function(batch_size = NULL, cache_price = NULL,
+                          input_price = NULL, output_price = NULL) {
+      self$batch_size <- batch_size
+      self$cache_price <- cache_price
+      self$input_price <- input_price
+      self$output_price <- output_price
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$batch_size)) result$batchSize <- self$batch_size
+      if (!is.null(self$cache_price)) result$cachePrice <- self$cache_price
+      if (!is.null(self$input_price)) result$inputPrice <- self$input_price
+      if (!is.null(self$output_price)) result$outputPrice <- self$output_price
+      result
+    }
+  )
+)
 
 #' ModelBilling
 #'
 #' Model billing information.
 #'
 #' @field multiplier Numeric. Billing multiplier.
+#' @field token_prices ModelBillingTokenPrices or NULL. Token prices.
+#' @field picker_price_category Character or NULL. Price category.
 #' @export
 ModelBilling <- R6::R6Class(
   "ModelBilling",
   public = list(
     multiplier = NULL,
+    token_prices = NULL,
+    picker_price_category = NULL,
 
     #' @description Create a new ModelBilling.
     #' @param multiplier Numeric.
-    initialize = function(multiplier) {
+    #' @param token_prices ModelBillingTokenPrices or NULL.
+    #' @param picker_price_category Character or NULL.
+    initialize = function(multiplier, token_prices = NULL, picker_price_category = NULL) {
       self$multiplier <- multiplier
+      self$token_prices <- token_prices
+      self$picker_price_category <- picker_price_category
     },
 
     #' @description Convert to list.
     to_list = function() {
-      list(multiplier = self$multiplier)
+      result <- list(multiplier = self$multiplier)
+      if (!is.null(self$token_prices)) result$tokenPrices <- self$token_prices$to_list()
+      if (!is.null(self$picker_price_category)) result$pickerPriceCategory <- self$picker_price_category
+      result
     }
   )
 )
@@ -500,7 +768,20 @@ model_info_from_list <- function(obj) {
 
   billing <- NULL
   if (!is.null(obj$billing)) {
-    billing <- ModelBilling$new(multiplier = obj$billing$multiplier)
+    token_prices <- NULL
+    if (!is.null(obj$billing$tokenPrices)) {
+      token_prices <- ModelBillingTokenPrices$new(
+        batch_size = obj$billing$tokenPrices$batchSize,
+        cache_price = obj$billing$tokenPrices$cachePrice,
+        input_price = obj$billing$tokenPrices$inputPrice,
+        output_price = obj$billing$tokenPrices$outputPrice
+      )
+    }
+    billing <- ModelBilling$new(
+      multiplier = obj$billing$multiplier,
+      token_prices = token_prices,
+      picker_price_category = obj$billing$pickerPriceCategory
+    )
   }
 
   ModelInfo$new(
@@ -1638,6 +1919,42 @@ SessionConfig <- R6::R6Class(
         result$commands <- cmds_list
       }
       result
+    }
+  )
+)
+
+
+# ---------------------------------------------------------------------------
+# Experimental: SkillsLoadDiagnostics
+# ---------------------------------------------------------------------------
+
+#' SkillsLoadDiagnostics (Experimental)
+#'
+#' Diagnostics from loading skills.
+#'
+#' @field errors Character vector. Error messages.
+#' @field warnings Character vector. Warning messages.
+#' @export
+SkillsLoadDiagnostics <- R6::R6Class(
+  "SkillsLoadDiagnostics",
+  public = list(
+    errors = NULL,
+    warnings = NULL,
+
+    #' @description Create a new SkillsLoadDiagnostics.
+    #' @param errors Character vector.
+    #' @param warnings Character vector.
+    initialize = function(errors, warnings) {
+      self$errors <- errors
+      self$warnings <- warnings
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      list(
+        errors = self$errors,
+        warnings = self$warnings
+      )
     }
   )
 )

@@ -53,6 +53,30 @@ enum ToolResultType: string
     case Denied = 'denied';
 }
 
+// ============================================================================
+// Slash Command Types
+// ============================================================================
+
+enum SlashCommandInputCompletion: string
+{
+    case Directory = 'directory';
+}
+
+enum SlashCommandKind: string
+{
+    case Builtin = 'builtin';
+    case Client = 'client';
+    case Skill = 'skill';
+}
+
+enum ModelPickerPriceCategory: string
+{
+    case High = 'high';
+    case Low = 'low';
+    case Medium = 'medium';
+    case VeryHigh = 'very_high';
+}
+
 class ToolBinaryResult
 {
     public function __construct(
@@ -646,6 +670,127 @@ class CommandDefinition
         public readonly ?string $description = null,
         public /* readonly */ $handler = null,
     ) {}
+}
+
+// ============================================================================
+// Slash Command Info Types
+// ============================================================================
+
+class SlashCommandInput
+{
+    public function __construct(
+        public readonly string $hint,
+        public readonly ?SlashCommandInputCompletion $completion = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = ['hint' => $this->hint];
+        if ($this->completion !== null) {
+            $result['completion'] = $this->completion->value;
+        }
+        return $result;
+    }
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            hint: $data['hint'] ?? '',
+            completion: isset($data['completion'])
+                ? SlashCommandInputCompletion::from($data['completion'])
+                : null,
+        );
+    }
+}
+
+class SlashCommandInfo
+{
+    public function __construct(
+        public readonly bool $allowDuringAgentExecution,
+        public readonly string $description,
+        public readonly SlashCommandKind $kind,
+        public readonly string $name,
+        /** @var string[]|null */
+        public readonly ?array $aliases = null,
+        public readonly ?bool $experimental = null,
+        public readonly ?SlashCommandInput $input = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [
+            'allowDuringAgentExecution' => $this->allowDuringAgentExecution,
+            'description' => $this->description,
+            'kind' => $this->kind->value,
+            'name' => $this->name,
+        ];
+        if ($this->aliases !== null) {
+            $result['aliases'] = $this->aliases;
+        }
+        if ($this->experimental !== null) {
+            $result['experimental'] = $this->experimental;
+        }
+        if ($this->input !== null) {
+            $result['input'] = $this->input->toArray();
+        }
+        return $result;
+    }
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            allowDuringAgentExecution: (bool) ($data['allowDuringAgentExecution'] ?? false),
+            description: $data['description'] ?? '',
+            kind: SlashCommandKind::from($data['kind'] ?? 'builtin'),
+            name: $data['name'] ?? '',
+            aliases: $data['aliases'] ?? null,
+            experimental: $data['experimental'] ?? null,
+            input: isset($data['input'])
+                ? SlashCommandInput::fromArray($data['input'])
+                : null,
+        );
+    }
+}
+
+class CommandsInvokeRequest
+{
+    public function __construct(
+        public readonly string $name,
+        public readonly ?string $input = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = ['name' => $this->name];
+        if ($this->input !== null) {
+            $result['input'] = $this->input;
+        }
+        return $result;
+    }
+}
+
+class CommandsListRequest
+{
+    public function __construct(
+        public readonly ?bool $includeBuiltins = null,
+        public readonly ?bool $includeClientCommands = null,
+        public readonly ?bool $includeSkills = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [];
+        if ($this->includeBuiltins !== null) {
+            $result['includeBuiltins'] = $this->includeBuiltins;
+        }
+        if ($this->includeClientCommands !== null) {
+            $result['includeClientCommands'] = $this->includeClientCommands;
+        }
+        if ($this->includeSkills !== null) {
+            $result['includeSkills'] = $this->includeSkills;
+        }
+        return $result;
+    }
 }
 
 // ============================================================================
@@ -1733,16 +1878,44 @@ class ModelPolicy
     }
 }
 
+class ModelBillingTokenPrices
+{
+    public function __construct(
+        public readonly ?int $batchSize = null,
+        public readonly ?int $cachePrice = null,
+        public readonly ?int $inputPrice = null,
+        public readonly ?int $outputPrice = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            batchSize: isset($data['batchSize']) ? (int) $data['batchSize'] : null,
+            cachePrice: isset($data['cachePrice']) ? (int) $data['cachePrice'] : null,
+            inputPrice: isset($data['inputPrice']) ? (int) $data['inputPrice'] : null,
+            outputPrice: isset($data['outputPrice']) ? (int) $data['outputPrice'] : null,
+        );
+    }
+}
+
 class ModelBilling
 {
     public function __construct(
         public readonly float $multiplier,
+        public readonly ?ModelBillingTokenPrices $tokenPrices = null,
+        public readonly ?ModelPickerPriceCategory $pickerPriceCategory = null,
     ) {}
 
     public static function fromArray(array $data): self
     {
         return new self(
             multiplier: (float) ($data['multiplier'] ?? 1.0),
+            tokenPrices: isset($data['tokenPrices'])
+                ? ModelBillingTokenPrices::fromArray($data['tokenPrices'])
+                : null,
+            pickerPriceCategory: isset($data['pickerPriceCategory'])
+                ? ModelPickerPriceCategory::from($data['pickerPriceCategory'])
+                : null,
         );
     }
 }
@@ -1841,6 +2014,28 @@ class SessionLifecycleEvent
             type: $data['type'] ?? 'session.updated',
             sessionId: $data['sessionId'] ?? '',
             metadata: $metadata,
+        );
+    }
+}
+
+// ============================================================================
+// Experimental: Skills Load Diagnostics
+// ============================================================================
+
+class SkillsLoadDiagnostics
+{
+    public function __construct(
+        /** @var string[] */
+        public readonly array $errors,
+        /** @var string[] */
+        public readonly array $warnings,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            errors: $data['errors'] ?? [],
+            warnings: $data['warnings'] ?? [],
         );
     }
 }
