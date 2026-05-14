@@ -1233,29 +1233,42 @@ type PluginList struct {
 	Plugins []Plugin `json:"plugins"`
 }
 
+// Result of the queued command execution
+type QueuedCommandResult interface {
+	queuedCommandResult()
+	Handled() bool
+}
+
 type QueuedCommandHandled struct {
-	// The command was handled
-	Handled bool `json:"handled"`
 	// If true, stop processing remaining queued items
 	StopProcessingQueue *bool `json:"stopProcessingQueue,omitempty"`
+}
+
+func (QueuedCommandHandled) queuedCommandResult() {}
+func (QueuedCommandHandled) Handled() bool {
+	return true
 }
 
 type QueuedCommandNotHandled struct {
-	// The command was not handled
-	Handled bool `json:"handled"`
 }
 
-// Result of the queued command execution
-type QueuedCommandResult struct {
-	// The command was handled
-	Handled any `json:"handled"`
-	// If true, stop processing remaining queued items
-	StopProcessingQueue *bool `json:"stopProcessingQueue,omitempty"`
+func (QueuedCommandNotHandled) queuedCommandResult() {}
+func (QueuedCommandNotHandled) Handled() bool {
+	return false
 }
 
 // Experimental: RemoteDisableResult is part of an experimental API and may change or be
 // removed.
 type RemoteDisableResult struct {
+}
+
+// Experimental: RemoteEnableRequest is part of an experimental API and may change or be
+// removed.
+type RemoteEnableRequest struct {
+	// Per-session remote mode. "off" disables remote, "export" exports session events to
+	// Mission Control without enabling remote steering, "on" enables both export and remote
+	// steering.
+	Mode *RemoteSessionMode `json:"mode,omitempty"`
 }
 
 // Experimental: RemoteEnableResult is part of an experimental API and may change or be
@@ -2414,6 +2427,17 @@ const (
 	PermissionDecisionKindUserNotAvailable   PermissionDecisionKind = "user-not-available"
 )
 
+// Per-session remote mode. "off" disables remote, "export" exports session events to
+// Mission Control without enabling remote steering, "on" enables both export and remote
+// steering.
+type RemoteSessionMode string
+
+const (
+	RemoteSessionModeExport RemoteSessionMode = "export"
+	RemoteSessionModeOff    RemoteSessionMode = "off"
+	RemoteSessionModeOn     RemoteSessionMode = "on"
+)
+
 // Error classification
 type SessionFsErrorCode string
 
@@ -3511,8 +3535,13 @@ func (a *RemoteApi) Disable(ctx context.Context) (*RemoteDisableResult, error) {
 	return &result, nil
 }
 
-func (a *RemoteApi) Enable(ctx context.Context) (*RemoteEnableResult, error) {
+func (a *RemoteApi) Enable(ctx context.Context, params *RemoteEnableRequest) (*RemoteEnableResult, error) {
 	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		if params.Mode != nil {
+			req["mode"] = *params.Mode
+		}
+	}
 	raw, err := a.client.Request("session.remote.enable", req)
 	if err != nil {
 		return nil, err

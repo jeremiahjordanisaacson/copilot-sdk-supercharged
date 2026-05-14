@@ -419,30 +419,6 @@ pub struct DiscoveredMcpServer {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EmbeddedBlobResourceContents {
-    /// Base64-encoded binary content of the resource
-    pub blob: String,
-    /// MIME type of the blob content
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
-    /// URI identifying the resource
-    pub uri: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EmbeddedTextResourceContents {
-    /// MIME type of the text content
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
-    /// Text content of the resource
-    pub text: String,
-    /// URI identifying the resource
-    pub uri: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Extension {
     /// Source-qualified ID (e.g., 'project:my-ext', 'user:auth-helper')
     pub id: String,
@@ -1451,6 +1427,14 @@ pub struct QueuedCommandHandled {
 pub struct QueuedCommandNotHandled {
     /// The command was not handled
     pub handled: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteEnableRequest {
+    /// Per-session remote mode. "off" disables remote, "export" exports session events to Mission Control without enabling remote steering, "on" enables both export and remote steering.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<RemoteSessionMode>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3030,13 +3014,6 @@ pub struct SessionUsageGetMetricsResult {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionRemoteEnableParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SessionRemoteEnableResult {
     /// Whether remote steering is enabled
     pub remote_steerable: bool,
@@ -3642,6 +3619,21 @@ pub enum PermissionDecision {
     ApprovePermanently(PermissionDecisionApprovePermanently),
     Reject(PermissionDecisionReject),
     UserNotAvailable(PermissionDecisionUserNotAvailable),
+}
+
+/// Per-session remote mode. "off" disables remote, "export" exports session events to Mission Control without enabling remote steering, "on" enables both export and remote steering.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RemoteSessionMode {
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "export")]
+    Export,
+    #[serde(rename = "on")]
+    On,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
 }
 
 /// Error classification

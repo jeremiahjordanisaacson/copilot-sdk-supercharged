@@ -5,6 +5,8 @@
 
 import type { MessageConnection } from "vscode-jsonrpc/node.js";
 
+import type { EmbeddedBlobResourceContents, EmbeddedTextResourceContents } from "./session-events.js";
+
 /**
  * Authentication type
  *
@@ -221,6 +223,13 @@ export type PermissionDecisionApproveForLocationApproval =
   | PermissionDecisionApproveForLocationApprovalCustomTool
   | PermissionDecisionApproveForLocationApprovalExtensionManagement
   | PermissionDecisionApproveForLocationApprovalExtensionPermissionAccess;
+/**
+ * Per-session remote mode. "off" disables remote, "export" exports session events to Mission Control without enabling remote steering, "on" enables both export and remote steering.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RemoteSessionMode".
+ */
+export type RemoteSessionMode = "off" | "export" | "on";
 /**
  * Error classification
  *
@@ -600,36 +609,6 @@ export interface DiscoveredMcpServer {
    * Whether the server is enabled (not in the disabled list)
    */
   enabled: boolean;
-}
-
-export interface EmbeddedBlobResourceContents {
-  /**
-   * URI identifying the resource
-   */
-  uri: string;
-  /**
-   * MIME type of the blob content
-   */
-  mimeType?: string;
-  /**
-   * Base64-encoded binary content of the resource
-   */
-  blob: string;
-}
-
-export interface EmbeddedTextResourceContents {
-  /**
-   * URI identifying the resource
-   */
-  uri: string;
-  /**
-   * MIME type of the text content
-   */
-  mimeType?: string;
-  /**
-   * Text content of the resource
-   */
-  text: string;
 }
 
 export interface Extension {
@@ -1685,6 +1664,11 @@ export interface PluginList {
    * Installed plugins
    */
   plugins: Plugin[];
+}
+
+/** @experimental */
+export interface RemoteEnableRequest {
+  mode?: RemoteSessionMode;
 }
 
 /** @experimental */
@@ -3058,8 +3042,8 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
         },
         /** @experimental */
         remote: {
-            enable: async (): Promise<RemoteEnableResult> =>
-                connection.sendRequest("session.remote.enable", { sessionId }),
+            enable: async (params: RemoteEnableRequest): Promise<RemoteEnableResult> =>
+                connection.sendRequest("session.remote.enable", { sessionId, ...params }),
             disable: async (): Promise<void> =>
                 connection.sendRequest("session.remote.disable", { sessionId }),
         },
