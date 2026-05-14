@@ -78,10 +78,13 @@ jobs:
               "./local-cli.md": "Setup-Local-CLI",
               "./github-oauth.md": "Setup-GitHub-OAuth",
               "./backend-services.md": "Setup-Backend-Services",
+              "../auth/authenticate.md": "Authentication",
               "../features/session-persistence.md": "Session-Persistence",
               "../features/mcp.md": "MCP-Server-Integration",
               "../hooks/index.md": "Hooks",
+              "../hooks/hooks-overview.md": "Hooks",
               "../troubleshooting/debugging.md": "Debugging",
+              "./debugging.md": "Debugging",
           }
 
           for name in [
