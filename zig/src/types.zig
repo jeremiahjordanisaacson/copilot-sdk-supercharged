@@ -268,6 +268,75 @@ pub const ImageOptions = struct {
 };
 
 // ---------------------------------------------------------------------------
+// Slash Commands
+// ---------------------------------------------------------------------------
+
+/// Completion type for slash command inputs.
+pub const SlashCommandInputCompletion = enum {
+    directory,
+};
+
+/// Kind of slash command.
+pub const SlashCommandKind = enum {
+    builtin,
+    client,
+    skill,
+};
+
+/// Price category for model picker.
+pub const ModelPickerPriceCategory = enum {
+    high,
+    low,
+    medium,
+    very_high,
+};
+
+/// Input definition for a slash command.
+pub const SlashCommandInput = struct {
+    hint: []const u8,
+    completion: ?SlashCommandInputCompletion = null,
+};
+
+/// Information about a slash command.
+pub const SlashCommandInfo = struct {
+    allow_during_agent_execution: bool = false,
+    description: []const u8,
+    kind: SlashCommandKind = .builtin,
+    name: []const u8,
+    aliases: ?[]const []const u8 = null,
+    experimental: ?bool = null,
+    input: ?SlashCommandInput = null,
+};
+
+/// Request to invoke a command.
+pub const CommandsInvokeRequest = struct {
+    name: []const u8,
+    input: ?[]const u8 = null,
+};
+
+/// Request to list available commands.
+pub const CommandsListRequest = struct {
+    include_builtins: ?bool = null,
+    include_client_commands: ?bool = null,
+    include_skills: ?bool = null,
+};
+
+/// Token pricing information for model billing.
+pub const ModelBillingTokenPrices = struct {
+    batch_size: ?i64 = null,
+    cache_price: ?i64 = null,
+    input_price: ?i64 = null,
+    output_price: ?i64 = null,
+};
+
+// Experimental
+/// Diagnostics from loading skills.
+pub const SkillsLoadDiagnostics = struct {
+    errors: []const []const u8,
+    warnings: []const []const u8,
+};
+
+// ---------------------------------------------------------------------------
 // Server status
 // ---------------------------------------------------------------------------
 

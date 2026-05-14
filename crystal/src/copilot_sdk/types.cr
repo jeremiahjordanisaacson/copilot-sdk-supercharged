@@ -126,6 +126,139 @@ module CopilotSDK
     end
   end
 
+  # Completion type for slash command inputs.
+  enum SlashCommandInputCompletion
+    Directory
+
+    def to_json(json : JSON::Builder) : Nil
+      json.string(to_s.downcase)
+    end
+
+    def self.from_json(value : String) : self
+      parse(value)
+    end
+  end
+
+  # Kind of slash command.
+  enum SlashCommandKind
+    Builtin
+    Client
+    Skill
+
+    def to_json(json : JSON::Builder) : Nil
+      json.string(to_s.downcase)
+    end
+
+    def self.from_json(value : String) : self
+      parse(value)
+    end
+  end
+
+  # Price category for model picker.
+  enum ModelPickerPriceCategory
+    High
+    Low
+    Medium
+    VeryHigh
+
+    def to_json(json : JSON::Builder) : Nil
+      case self
+      when VeryHigh then json.string("very_high")
+      else json.string(to_s.downcase)
+      end
+    end
+
+    def self.from_json(value : String) : self
+      case value
+      when "very_high" then VeryHigh
+      else parse(value)
+      end
+    end
+  end
+
+  # Input definition for a slash command.
+  class SlashCommandInput
+    include JSON::Serializable
+
+    property hint : String
+    property completion : SlashCommandInputCompletion?
+
+    def initialize(@hint, @completion = nil)
+    end
+  end
+
+  # Information about a slash command.
+  class SlashCommandInfo
+    include JSON::Serializable
+
+    @[JSON::Field(key: "allowDuringAgentExecution")]
+    property allow_during_agent_execution : Bool
+    property description : String
+    property kind : SlashCommandKind
+    property name : String
+    property aliases : Array(String)?
+    property experimental : Bool?
+    property input : SlashCommandInput?
+
+    def initialize(@allow_during_agent_execution, @description, @kind, @name,
+                   @aliases = nil, @experimental = nil, @input = nil)
+    end
+  end
+
+  # Request to invoke a command.
+  class CommandsInvokeRequest
+    include JSON::Serializable
+
+    property name : String
+    property input : String?
+
+    def initialize(@name, @input = nil)
+    end
+  end
+
+  # Request to list available commands.
+  class CommandsListRequest
+    include JSON::Serializable
+
+    @[JSON::Field(key: "includeBuiltins")]
+    property include_builtins : Bool?
+    @[JSON::Field(key: "includeClientCommands")]
+    property include_client_commands : Bool?
+    @[JSON::Field(key: "includeSkills")]
+    property include_skills : Bool?
+
+    def initialize(@include_builtins = nil, @include_client_commands = nil, @include_skills = nil)
+    end
+  end
+
+  # Token pricing information for model billing.
+  class ModelBillingTokenPrices
+    include JSON::Serializable
+
+    @[JSON::Field(key: "batchSize")]
+    property batch_size : Int32?
+    @[JSON::Field(key: "cachePrice")]
+    property cache_price : Int32?
+    @[JSON::Field(key: "inputPrice")]
+    property input_price : Int32?
+    @[JSON::Field(key: "outputPrice")]
+    property output_price : Int32?
+
+    def initialize(@batch_size = nil, @cache_price = nil, @input_price = nil, @output_price = nil)
+    end
+  end
+
+  # Experimental: Diagnostics from loading skills.
+  class SkillsLoadDiagnostics
+    include JSON::Serializable
+
+    property errors : Array(String)
+    property warnings : Array(String)
+
+    def initialize(@errors, @warnings)
+    end
+  end
+
   # Model information returned by the server.
   class ModelInfo
     include JSON::Serializable

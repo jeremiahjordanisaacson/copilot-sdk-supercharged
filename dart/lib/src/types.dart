@@ -1013,15 +1013,200 @@ class ModelPolicy {
   }
 }
 
+/// Completion type for slash command inputs.
+enum SlashCommandInputCompletion {
+  directory;
+
+  factory SlashCommandInputCompletion.fromJson(String value) {
+    return SlashCommandInputCompletion.values.firstWhere((e) => e.name == value);
+  }
+}
+
+/// Kind of slash command.
+enum SlashCommandKind {
+  builtin,
+  client,
+  skill;
+
+  factory SlashCommandKind.fromJson(String value) {
+    return SlashCommandKind.values.firstWhere((e) => e.name == value);
+  }
+}
+
+/// Price category for model picker.
+enum ModelPickerPriceCategory {
+  high,
+  low,
+  medium,
+  veryHigh;
+
+  static const _jsonMap = {
+    'high': ModelPickerPriceCategory.high,
+    'low': ModelPickerPriceCategory.low,
+    'medium': ModelPickerPriceCategory.medium,
+    'very_high': ModelPickerPriceCategory.veryHigh,
+  };
+
+  factory ModelPickerPriceCategory.fromJson(String value) {
+    return _jsonMap[value]!;
+  }
+}
+
+/// Input definition for a slash command.
+class SlashCommandInput {
+  final String hint;
+  final SlashCommandInputCompletion? completion;
+
+  const SlashCommandInput({required this.hint, this.completion});
+
+  factory SlashCommandInput.fromJson(Map<String, dynamic> json) {
+    return SlashCommandInput(
+      hint: json['hint'] as String,
+      completion: json['completion'] != null
+          ? SlashCommandInputCompletion.fromJson(
+              json['completion'] as String)
+          : null,
+    );
+  }
+}
+
+/// Information about a slash command.
+class SlashCommandInfo {
+  final bool allowDuringAgentExecution;
+  final String description;
+  final SlashCommandKind kind;
+  final String name;
+  final List<String>? aliases;
+  final bool? experimental;
+  final SlashCommandInput? input;
+
+  const SlashCommandInfo({
+    required this.allowDuringAgentExecution,
+    required this.description,
+    required this.kind,
+    required this.name,
+    this.aliases,
+    this.experimental,
+    this.input,
+  });
+
+  factory SlashCommandInfo.fromJson(Map<String, dynamic> json) {
+    return SlashCommandInfo(
+      allowDuringAgentExecution: json['allowDuringAgentExecution'] as bool,
+      description: json['description'] as String,
+      kind: SlashCommandKind.fromJson(json['kind'] as String),
+      name: json['name'] as String,
+      aliases:
+          (json['aliases'] as List<dynamic>?)?.cast<String>(),
+      experimental: json['experimental'] as bool?,
+      input: json['input'] != null
+          ? SlashCommandInput.fromJson(json['input'] as Map<String, dynamic>)
+          : null,
+    );
+  }
+}
+
+/// Request to invoke a command.
+class CommandsInvokeRequest {
+  final String name;
+  final String? input;
+
+  const CommandsInvokeRequest({required this.name, this.input});
+
+  factory CommandsInvokeRequest.fromJson(Map<String, dynamic> json) {
+    return CommandsInvokeRequest(
+      name: json['name'] as String,
+      input: json['input'] as String?,
+    );
+  }
+}
+
+/// Request to list available commands.
+class CommandsListRequest {
+  final bool? includeBuiltins;
+  final bool? includeClientCommands;
+  final bool? includeSkills;
+
+  const CommandsListRequest({
+    this.includeBuiltins,
+    this.includeClientCommands,
+    this.includeSkills,
+  });
+
+  factory CommandsListRequest.fromJson(Map<String, dynamic> json) {
+    return CommandsListRequest(
+      includeBuiltins: json['includeBuiltins'] as bool?,
+      includeClientCommands: json['includeClientCommands'] as bool?,
+      includeSkills: json['includeSkills'] as bool?,
+    );
+  }
+}
+
+/// Token pricing information for model billing.
+class ModelBillingTokenPrices {
+  final int? batchSize;
+  final int? cachePrice;
+  final int? inputPrice;
+  final int? outputPrice;
+
+  const ModelBillingTokenPrices({
+    this.batchSize,
+    this.cachePrice,
+    this.inputPrice,
+    this.outputPrice,
+  });
+
+  factory ModelBillingTokenPrices.fromJson(Map<String, dynamic> json) {
+    return ModelBillingTokenPrices(
+      batchSize: json['batchSize'] as int?,
+      cachePrice: json['cachePrice'] as int?,
+      inputPrice: json['inputPrice'] as int?,
+      outputPrice: json['outputPrice'] as int?,
+    );
+  }
+}
+
+/// Experimental: Diagnostics from loading skills.
+class SkillsLoadDiagnostics {
+  final List<String> errors;
+  final List<String> warnings;
+
+  const SkillsLoadDiagnostics({
+    required this.errors,
+    required this.warnings,
+  });
+
+  factory SkillsLoadDiagnostics.fromJson(Map<String, dynamic> json) {
+    return SkillsLoadDiagnostics(
+      errors: (json['errors'] as List<dynamic>).cast<String>(),
+      warnings: (json['warnings'] as List<dynamic>).cast<String>(),
+    );
+  }
+}
+
 /// Model billing information.
 class ModelBilling {
   final double multiplier;
+  final ModelBillingTokenPrices? tokenPrices;
+  final ModelPickerPriceCategory? pickerPriceCategory;
 
-  const ModelBilling({required this.multiplier});
+  const ModelBilling({
+    required this.multiplier,
+    this.tokenPrices,
+    this.pickerPriceCategory,
+  });
 
   factory ModelBilling.fromJson(Map<String, dynamic> json) {
     return ModelBilling(
       multiplier: (json['multiplier'] as num).toDouble(),
+      tokenPrices: json['tokenPrices'] != null
+          ? ModelBillingTokenPrices.fromJson(
+              json['tokenPrices'] as Map<String, dynamic>)
+          : null,
+      pickerPriceCategory: json['pickerPriceCategory'] != null
+          ? ModelPickerPriceCategory.fromJson(
+              json['pickerPriceCategory'] as String)
+          : null,
     );
   }
 }

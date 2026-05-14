@@ -226,6 +226,58 @@ type
     defaultModel*: string
 
 # ---------------------------------------------------------------------------
+# Slash Commands
+# ---------------------------------------------------------------------------
+
+type
+  SlashCommandInputCompletion* = enum
+    scicDirectory = "directory"
+
+  SlashCommandKind* = enum
+    sckBuiltin = "builtin"
+    sckClient = "client"
+    sckSkill = "skill"
+
+  ModelPickerPriceCategory* = enum
+    mppcHigh = "high"
+    mppcLow = "low"
+    mppcMedium = "medium"
+    mppcVeryHigh = "very_high"
+
+  SlashCommandInput* = object
+    hint*: string
+    completion*: Option[SlashCommandInputCompletion]
+
+  SlashCommandInfo* = object
+    allowDuringAgentExecution*: bool
+    description*: string
+    kind*: SlashCommandKind
+    name*: string
+    aliases*: seq[string]
+    experimental*: Option[bool]
+    input*: Option[SlashCommandInput]
+
+  CommandsInvokeRequest* = object
+    name*: string
+    input*: Option[string]
+
+  CommandsListRequest* = object
+    includeBuiltins*: Option[bool]
+    includeClientCommands*: Option[bool]
+    includeSkills*: Option[bool]
+
+  ModelBillingTokenPrices* = object
+    batchSize*: Option[int]
+    cachePrice*: Option[int]
+    inputPrice*: Option[int]
+    outputPrice*: Option[int]
+
+  ## Experimental
+  SkillsLoadDiagnostics* = object
+    errors*: seq[string]
+    warnings*: seq[string]
+
+# ---------------------------------------------------------------------------
 # Connection state
 # ---------------------------------------------------------------------------
 

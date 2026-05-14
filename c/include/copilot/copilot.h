@@ -680,6 +680,83 @@ typedef struct {
 } copilot_message_options_t;
 
 /* ============================================================================
+ * Slash Commands
+ * ============================================================================ */
+
+/** Completion type for slash command inputs. */
+typedef enum {
+    COPILOT_SLASH_COMMAND_INPUT_COMPLETION_DIRECTORY = 0,
+} copilot_slash_command_input_completion_t;
+
+/** Kind of slash command. */
+typedef enum {
+    COPILOT_SLASH_COMMAND_KIND_BUILTIN = 0,
+    COPILOT_SLASH_COMMAND_KIND_CLIENT,
+    COPILOT_SLASH_COMMAND_KIND_SKILL,
+} copilot_slash_command_kind_t;
+
+/** Price category for model picker. */
+typedef enum {
+    COPILOT_MODEL_PICKER_PRICE_HIGH = 0,
+    COPILOT_MODEL_PICKER_PRICE_LOW,
+    COPILOT_MODEL_PICKER_PRICE_MEDIUM,
+    COPILOT_MODEL_PICKER_PRICE_VERY_HIGH,
+} copilot_model_picker_price_category_t;
+
+/** Input definition for a slash command. */
+typedef struct {
+    const char *hint;                                   /**< Hint text for the input */
+    copilot_slash_command_input_completion_t completion; /**< Completion type */
+    bool has_completion;                                 /**< Whether completion is set */
+} copilot_slash_command_input_t;
+
+/** Information about a slash command. */
+typedef struct {
+    bool allow_during_agent_execution;                  /**< Allow during agent execution */
+    const char *description;                            /**< Human-readable description */
+    copilot_slash_command_kind_t kind;                   /**< Kind of command */
+    const char *name;                                   /**< Command name */
+    const char **aliases;                               /**< Array of aliases, or NULL */
+    size_t aliases_count;                                /**< Number of aliases */
+    bool experimental;                                  /**< Whether command is experimental */
+    bool has_experimental;                              /**< Whether experimental is set */
+    const copilot_slash_command_input_t *input;          /**< Input definition, or NULL */
+} copilot_slash_command_info_t;
+
+/** Request to invoke a command. */
+typedef struct {
+    const char *name;       /**< Command name (required) */
+    const char *input;      /**< Command input, or NULL */
+} copilot_commands_invoke_request_t;
+
+/** Request to list available commands. */
+typedef struct {
+    bool include_builtins;          /**< Include built-in commands */
+    bool has_include_builtins;      /**< Whether include_builtins is set */
+    bool include_client_commands;   /**< Include client commands */
+    bool has_include_client_commands; /**< Whether include_client_commands is set */
+    bool include_skills;            /**< Include skill commands */
+    bool has_include_skills;        /**< Whether include_skills is set */
+} copilot_commands_list_request_t;
+
+/** Token pricing information for model billing. */
+typedef struct {
+    int batch_size;         /**< Batch size, -1 if not set */
+    int cache_price;        /**< Cache price, -1 if not set */
+    int input_price;        /**< Input price, -1 if not set */
+    int output_price;       /**< Output price, -1 if not set */
+} copilot_model_billing_token_prices_t;
+
+/* Experimental */
+/** Diagnostics from loading skills. */
+typedef struct {
+    const char **errors;        /**< Array of error messages */
+    size_t errors_count;        /**< Number of errors */
+    const char **warnings;      /**< Array of warning messages */
+    size_t warnings_count;      /**< Number of warnings */
+} copilot_skills_load_diagnostics_t;
+
+/* ============================================================================
  * Model info
  * ============================================================================ */
 

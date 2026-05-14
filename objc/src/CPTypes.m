@@ -66,6 +66,115 @@
 @implementation CPTraceContext
 @end
 
+#pragma mark - CPSlashCommandInput
+
+@implementation CPSlashCommandInput
+
+- (instancetype)initWithHint:(NSString *)hint
+                  completion:(CPSlashCommandInputCompletion)completion
+               hasCompletion:(BOOL)hasCompletion {
+    self = [super init];
+    if (self) {
+        _hint = [hint copy];
+        _completion = completion;
+        _hasCompletion = hasCompletion;
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPSlashCommandInfo
+
+@implementation CPSlashCommandInfo
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _allowDuringAgentExecution = [dict[@"allowDuringAgentExecution"] boolValue];
+        _commandDescription = dict[@"description"] ?: @"";
+        _name = dict[@"name"] ?: @"";
+
+        NSString *kindStr = dict[@"kind"];
+        if ([kindStr isEqualToString:@"client"]) _kind = CPSlashCommandKindClient;
+        else if ([kindStr isEqualToString:@"skill"]) _kind = CPSlashCommandKindSkill;
+        else _kind = CPSlashCommandKindBuiltin;
+
+        _aliases = dict[@"aliases"];
+        _experimental = dict[@"experimental"];
+
+        NSDictionary *inputDict = dict[@"input"];
+        if (inputDict) {
+            NSString *comp = inputDict[@"completion"];
+            _input = [[CPSlashCommandInput alloc] initWithHint:inputDict[@"hint"] ?: @""
+                                                    completion:CPSlashCommandInputCompletionDirectory
+                                                 hasCompletion:(comp != nil)];
+        }
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPCommandsInvokeRequest
+
+@implementation CPCommandsInvokeRequest
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"name"] = self.name;
+    if (self.input) dict[@"input"] = self.input;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPCommandsListRequest
+
+@implementation CPCommandsListRequest
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    if (self.includeBuiltins) dict[@"includeBuiltins"] = self.includeBuiltins;
+    if (self.includeClientCommands) dict[@"includeClientCommands"] = self.includeClientCommands;
+    if (self.includeSkills) dict[@"includeSkills"] = self.includeSkills;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPModelBillingTokenPrices
+
+@implementation CPModelBillingTokenPrices
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _batchSize = dict[@"batchSize"];
+        _cachePrice = dict[@"cachePrice"];
+        _inputPrice = dict[@"inputPrice"];
+        _outputPrice = dict[@"outputPrice"];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPSkillsLoadDiagnostics
+
+@implementation CPSkillsLoadDiagnostics
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _errors = dict[@"errors"] ?: @[];
+        _warnings = dict[@"warnings"] ?: @[];
+    }
+    return self;
+}
+
+@end
+
 #pragma mark - CPSessionEvent
 
 @implementation CPSessionEvent

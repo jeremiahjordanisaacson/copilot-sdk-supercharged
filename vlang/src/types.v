@@ -138,6 +138,76 @@ pub:
 	reason   string [json: 'reason']
 }
 
+// SlashCommandInputCompletion is the completion type for slash command inputs.
+pub enum SlashCommandInputCompletion {
+	directory
+}
+
+// SlashCommandKind is the kind of slash command.
+pub enum SlashCommandKind {
+	builtin
+	client
+	skill
+}
+
+// ModelPickerPriceCategory is the price category for model picker.
+pub enum ModelPickerPriceCategory {
+	high
+	low
+	medium
+	very_high
+}
+
+// SlashCommandInput defines the input for a slash command.
+pub struct SlashCommandInput {
+pub:
+	hint       string                       [json: 'hint']
+	completion SlashCommandInputCompletion   [json: 'completion']
+}
+
+// SlashCommandInfo describes a slash command.
+pub struct SlashCommandInfo {
+pub:
+	allow_during_agent_execution bool                       [json: 'allowDuringAgentExecution']
+	description                  string                     [json: 'description']
+	kind                         SlashCommandKind           [json: 'kind']
+	name                         string                     [json: 'name']
+	aliases                      []string                   [json: 'aliases']
+	experimental                 bool                       [json: 'experimental']
+	input                        SlashCommandInput          [json: 'input']
+}
+
+// CommandsInvokeRequest is a request to invoke a command.
+pub struct CommandsInvokeRequest {
+pub:
+	name  string [json: 'name']
+	input string [json: 'input']
+}
+
+// CommandsListRequest is a request to list available commands.
+pub struct CommandsListRequest {
+pub:
+	include_builtins         bool [json: 'includeBuiltins']
+	include_client_commands  bool [json: 'includeClientCommands']
+	include_skills           bool [json: 'includeSkills']
+}
+
+// ModelBillingTokenPrices holds token pricing information.
+pub struct ModelBillingTokenPrices {
+pub:
+	batch_size   int [json: 'batchSize']
+	cache_price  int [json: 'cachePrice']
+	input_price  int [json: 'inputPrice']
+	output_price int [json: 'outputPrice']
+}
+
+// Experimental: SkillsLoadDiagnostics holds diagnostics from loading skills.
+pub struct SkillsLoadDiagnostics {
+pub:
+	errors   []string [json: 'errors']
+	warnings []string [json: 'warnings']
+}
+
 // ModelInfo describes a model the server can use.
 pub struct ModelInfo {
 pub:

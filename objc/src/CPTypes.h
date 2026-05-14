@@ -110,6 +110,99 @@ typedef void (^CPExitPlanModeHandler)(NSString *sessionId,
 /// Block type for trace context provider.
 typedef CPTraceContext * _Nullable (^CPTraceContextProvider)(void);
 
+#pragma mark - Slash Command Types
+
+/// Completion type for slash command inputs.
+typedef NS_ENUM(NSInteger, CPSlashCommandInputCompletion) {
+    CPSlashCommandInputCompletionDirectory = 0,
+};
+
+/// Kind of slash command.
+typedef NS_ENUM(NSInteger, CPSlashCommandKind) {
+    CPSlashCommandKindBuiltin = 0,
+    CPSlashCommandKindClient,
+    CPSlashCommandKindSkill,
+};
+
+/// Price category for model picker.
+typedef NS_ENUM(NSInteger, CPModelPickerPriceCategory) {
+    CPModelPickerPriceCategoryHigh = 0,
+    CPModelPickerPriceCategoryLow,
+    CPModelPickerPriceCategoryMedium,
+    CPModelPickerPriceCategoryVeryHigh,
+};
+
+/// Input definition for a slash command.
+@interface CPSlashCommandInput : NSObject
+
+@property (nonatomic, copy, readonly) NSString *hint;
+@property (nonatomic, assign, readonly) CPSlashCommandInputCompletion completion;
+@property (nonatomic, assign, readonly) BOOL hasCompletion;
+
+- (instancetype)initWithHint:(NSString *)hint
+                  completion:(CPSlashCommandInputCompletion)completion
+               hasCompletion:(BOOL)hasCompletion;
+
+@end
+
+/// Information about a slash command.
+@interface CPSlashCommandInfo : NSObject
+
+@property (nonatomic, assign, readonly) BOOL allowDuringAgentExecution;
+@property (nonatomic, copy, readonly) NSString *commandDescription;
+@property (nonatomic, assign, readonly) CPSlashCommandKind kind;
+@property (nonatomic, copy, readonly) NSString *name;
+@property (nonatomic, copy, readonly, nullable) NSArray<NSString *> *aliases;
+@property (nonatomic, strong, readonly, nullable) NSNumber *experimental;
+@property (nonatomic, strong, readonly, nullable) CPSlashCommandInput *input;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+
+@end
+
+/// Request to invoke a command.
+@interface CPCommandsInvokeRequest : NSObject
+
+@property (nonatomic, copy) NSString *name;
+@property (nonatomic, copy, nullable) NSString *input;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+/// Request to list available commands.
+@interface CPCommandsListRequest : NSObject
+
+@property (nonatomic, strong, nullable) NSNumber *includeBuiltins;
+@property (nonatomic, strong, nullable) NSNumber *includeClientCommands;
+@property (nonatomic, strong, nullable) NSNumber *includeSkills;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+/// Token pricing information for model billing.
+@interface CPModelBillingTokenPrices : NSObject
+
+@property (nonatomic, strong, nullable) NSNumber *batchSize;
+@property (nonatomic, strong, nullable) NSNumber *cachePrice;
+@property (nonatomic, strong, nullable) NSNumber *inputPrice;
+@property (nonatomic, strong, nullable) NSNumber *outputPrice;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+
+@end
+
+/// Experimental: Diagnostics from loading skills.
+@interface CPSkillsLoadDiagnostics : NSObject
+
+@property (nonatomic, copy, readonly) NSArray<NSString *> *errors;
+@property (nonatomic, copy, readonly) NSArray<NSString *> *warnings;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+
+@end
+
 #pragma mark - Session Event
 
 /// An event received from the session.

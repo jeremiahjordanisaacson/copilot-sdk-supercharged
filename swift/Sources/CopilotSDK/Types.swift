@@ -1252,9 +1252,75 @@ public struct ModelPolicy: Codable, Sendable {
     public let terms: String
 }
 
+/// Completion type for slash command inputs.
+public enum SlashCommandInputCompletion: String, Codable, Sendable {
+    case directory
+}
+
+/// Kind of slash command.
+public enum SlashCommandKind: String, Codable, Sendable {
+    case builtin
+    case client
+    case skill
+}
+
+/// Price category for model picker.
+public enum ModelPickerPriceCategory: String, Codable, Sendable {
+    case high
+    case low
+    case medium
+    case veryHigh = "very_high"
+}
+
+/// Input definition for a slash command.
+public struct SlashCommandInput: Codable, Sendable {
+    public let hint: String
+    public let completion: SlashCommandInputCompletion?
+}
+
+/// Information about a slash command.
+public struct SlashCommandInfo: Codable, Sendable {
+    public let allowDuringAgentExecution: Bool
+    public let description: String
+    public let kind: SlashCommandKind
+    public let name: String
+    public let aliases: [String]?
+    public let experimental: Bool?
+    public let input: SlashCommandInput?
+}
+
+/// Request to invoke a command.
+public struct CommandsInvokeRequest: Codable, Sendable {
+    public let name: String
+    public let input: String?
+}
+
+/// Request to list available commands.
+public struct CommandsListRequest: Codable, Sendable {
+    public let includeBuiltins: Bool?
+    public let includeClientCommands: Bool?
+    public let includeSkills: Bool?
+}
+
+/// Token pricing information for model billing.
+public struct ModelBillingTokenPrices: Codable, Sendable {
+    public let batchSize: Int?
+    public let cachePrice: Int?
+    public let inputPrice: Int?
+    public let outputPrice: Int?
+}
+
+/// Experimental: Diagnostics from loading skills.
+public struct SkillsLoadDiagnostics: Codable, Sendable {
+    public let errors: [String]
+    public let warnings: [String]
+}
+
 /// Model billing information.
 public struct ModelBilling: Codable, Sendable {
     public let multiplier: Double
+    public let tokenPrices: ModelBillingTokenPrices?
+    public let pickerPriceCategory: ModelPickerPriceCategory?
 }
 
 /// Information about an available model.

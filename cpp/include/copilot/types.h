@@ -1021,12 +1021,153 @@ inline void from_json(const nlohmann::json& j, ModelPolicy& p) {
     if (j.contains("terms")) j["terms"].get_to(p.terms);
 }
 
+/// Completion type for slash command inputs.
+enum class SlashCommandInputCompletion {
+    Directory
+};
+
+inline void from_json(const nlohmann::json& j, SlashCommandInputCompletion& c) {
+    auto s = j.get<std::string>();
+    if (s == "directory") c = SlashCommandInputCompletion::Directory;
+}
+
+/// Kind of slash command.
+enum class SlashCommandKind {
+    Builtin,
+    Client,
+    Skill
+};
+
+inline void from_json(const nlohmann::json& j, SlashCommandKind& k) {
+    auto s = j.get<std::string>();
+    if (s == "builtin") k = SlashCommandKind::Builtin;
+    else if (s == "client") k = SlashCommandKind::Client;
+    else if (s == "skill") k = SlashCommandKind::Skill;
+}
+
+/// Price category for model picker.
+enum class ModelPickerPriceCategory {
+    High,
+    Low,
+    Medium,
+    VeryHigh
+};
+
+inline void from_json(const nlohmann::json& j, ModelPickerPriceCategory& c) {
+    auto s = j.get<std::string>();
+    if (s == "high") c = ModelPickerPriceCategory::High;
+    else if (s == "low") c = ModelPickerPriceCategory::Low;
+    else if (s == "medium") c = ModelPickerPriceCategory::Medium;
+    else if (s == "very_high") c = ModelPickerPriceCategory::VeryHigh;
+}
+
+/// Input definition for a slash command.
+struct SlashCommandInput {
+    std::string hint;
+    std::optional<SlashCommandInputCompletion> completion;
+};
+
+inline void from_json(const nlohmann::json& j, SlashCommandInput& i) {
+    j.at("hint").get_to(i.hint);
+    if (j.contains("completion") && !j["completion"].is_null())
+        i.completion = j["completion"].get<SlashCommandInputCompletion>();
+}
+
+/// Information about a slash command.
+struct SlashCommandInfo {
+    bool allowDuringAgentExecution = false;
+    std::string description;
+    SlashCommandKind kind = SlashCommandKind::Builtin;
+    std::string name;
+    std::optional<std::vector<std::string>> aliases;
+    std::optional<bool> experimental;
+    std::optional<SlashCommandInput> input;
+};
+
+inline void from_json(const nlohmann::json& j, SlashCommandInfo& s) {
+    j.at("allowDuringAgentExecution").get_to(s.allowDuringAgentExecution);
+    j.at("description").get_to(s.description);
+    if (j.contains("kind")) j["kind"].get_to(s.kind);
+    j.at("name").get_to(s.name);
+    if (j.contains("aliases") && !j["aliases"].is_null())
+        s.aliases = j["aliases"].get<std::vector<std::string>>();
+    if (j.contains("experimental") && !j["experimental"].is_null())
+        s.experimental = j["experimental"].get<bool>();
+    if (j.contains("input") && !j["input"].is_null())
+        s.input = j["input"].get<SlashCommandInput>();
+}
+
+/// Request to invoke a command.
+struct CommandsInvokeRequest {
+    std::string name;
+    std::optional<std::string> input;
+};
+
+inline void from_json(const nlohmann::json& j, CommandsInvokeRequest& r) {
+    j.at("name").get_to(r.name);
+    if (j.contains("input") && !j["input"].is_null())
+        r.input = j["input"].get<std::string>();
+}
+
+/// Request to list available commands.
+struct CommandsListRequest {
+    std::optional<bool> includeBuiltins;
+    std::optional<bool> includeClientCommands;
+    std::optional<bool> includeSkills;
+};
+
+inline void from_json(const nlohmann::json& j, CommandsListRequest& r) {
+    if (j.contains("includeBuiltins") && !j["includeBuiltins"].is_null())
+        r.includeBuiltins = j["includeBuiltins"].get<bool>();
+    if (j.contains("includeClientCommands") && !j["includeClientCommands"].is_null())
+        r.includeClientCommands = j["includeClientCommands"].get<bool>();
+    if (j.contains("includeSkills") && !j["includeSkills"].is_null())
+        r.includeSkills = j["includeSkills"].get<bool>();
+}
+
+/// Token pricing information for model billing.
+struct ModelBillingTokenPrices {
+    std::optional<int> batchSize;
+    std::optional<int> cachePrice;
+    std::optional<int> inputPrice;
+    std::optional<int> outputPrice;
+};
+
+inline void from_json(const nlohmann::json& j, ModelBillingTokenPrices& p) {
+    if (j.contains("batchSize") && !j["batchSize"].is_null())
+        p.batchSize = j["batchSize"].get<int>();
+    if (j.contains("cachePrice") && !j["cachePrice"].is_null())
+        p.cachePrice = j["cachePrice"].get<int>();
+    if (j.contains("inputPrice") && !j["inputPrice"].is_null())
+        p.inputPrice = j["inputPrice"].get<int>();
+    if (j.contains("outputPrice") && !j["outputPrice"].is_null())
+        p.outputPrice = j["outputPrice"].get<int>();
+}
+
+// Experimental
+/// Diagnostics from loading skills.
+struct SkillsLoadDiagnostics {
+    std::vector<std::string> errors;
+    std::vector<std::string> warnings;
+};
+
+inline void from_json(const nlohmann::json& j, SkillsLoadDiagnostics& d) {
+    if (j.contains("errors")) j["errors"].get_to(d.errors);
+    if (j.contains("warnings")) j["warnings"].get_to(d.warnings);
+}
+
 struct ModelBilling {
     double multiplier = 0.0;
+    std::optional<ModelBillingTokenPrices> tokenPrices;
+    std::optional<ModelPickerPriceCategory> pickerPriceCategory;
 };
 
 inline void from_json(const nlohmann::json& j, ModelBilling& b) {
     if (j.contains("multiplier")) j["multiplier"].get_to(b.multiplier);
+    if (j.contains("tokenPrices") && !j["tokenPrices"].is_null())
+        b.tokenPrices = j["tokenPrices"].get<ModelBillingTokenPrices>();
+    if (j.contains("pickerPriceCategory") && !j["pickerPriceCategory"].is_null())
+        b.pickerPriceCategory = j["pickerPriceCategory"].get<ModelPickerPriceCategory>();
 }
 
 struct ModelInfo {
