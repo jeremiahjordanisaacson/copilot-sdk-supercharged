@@ -102,10 +102,36 @@ jobs:
           PY
 
           # Keep wiki-only pages aligned with current repo facts.
-          if [ -f wiki/Installation.md ]; then
-            sed -i 's/^## Base SDKs (bundled CLI)$/## Core SDKs/' wiki/Installation.md
-            sed -i 's/These SDKs bundle the Copilot CLI automatically:/Node.js, Python, and .NET bundle the Copilot CLI automatically. Go is a core SDK but requires a separately installed CLI or explicit `CLIPath`./' wiki/Installation.md
-          fi
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("wiki/Installation.md")
+          if path.exists():
+              lines = path.read_text().splitlines()
+              heading_index = next(
+                  (
+                      index
+                      for index, line in enumerate(lines)
+                      if line.startswith("## ") and "SDKs" in line and "bundled CLI" in line
+                  ),
+                  None,
+              )
+
+              if heading_index is not None:
+                  lines[heading_index] = "## Core SDKs"
+
+                  paragraph_index = heading_index + 1
+                  while paragraph_index < len(lines) and not lines[paragraph_index].strip():
+                      paragraph_index += 1
+
+                  if paragraph_index < len(lines) and not lines[paragraph_index].startswith("|"):
+                      lines[paragraph_index] = (
+                          "Node.js, Python, and .NET bundle the Copilot CLI automatically. "
+                          "Go is a core SDK but requires a separately installed CLI or explicit `CLIPath`."
+                      )
+
+              path.write_text("\n".join(lines) + "\n")
+          PY
 
       - name: Update download counts
         run: |
