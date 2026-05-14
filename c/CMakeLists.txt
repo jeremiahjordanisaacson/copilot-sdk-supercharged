@@ -69,6 +69,9 @@ target_link_libraries(copilot_sdk
         Threads::Threads
 )
 
+# Ensure cJSON headers are discoverable (FetchContent may not propagate include dirs)
+target_include_directories(copilot_sdk PRIVATE ${cjson_SOURCE_DIR})
+
 # Platform-specific link libraries
 if(WIN32)
     target_link_libraries(copilot_sdk PRIVATE ws2_32)

@@ -120,7 +120,6 @@ let create ~rpc ~session_id ~config =
 (* ========================================================================== *)
 
 let dispatch_event (t : t) (event : Types.session_event) : unit Lwt.t =
-  let open Lwt.Syntax in
   (match event.event_type with
    | SessionIdle -> t.idle <- true
    | _ -> t.idle <- false);

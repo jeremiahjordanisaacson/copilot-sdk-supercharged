@@ -272,7 +272,7 @@ let ping ?(message = "ping") (t : t) : Yojson.Safe.t Lwt.t =
   let params = `Assoc [ ("message", `String message) ] in
   Jsonrpc.send_request rpc "ping" params
 
-let resume_session (t : t) (session_id : string) ?(config = Types.default_session_config ())
+let resume_session (t : t) (session_id : string) ?(config = Types.default_session_config ()) ()
     : Session.t Lwt.t =
   let open Lwt.Syntax in
   let rpc = get_rpc t in

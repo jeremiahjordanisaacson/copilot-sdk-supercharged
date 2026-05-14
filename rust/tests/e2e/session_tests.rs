@@ -5,7 +5,7 @@
 //! These tests use the replaying CAPI proxy to exercise the SDK without
 //! hitting real AI endpoints.
 
-use copilot_sdk_supercharged::*;
+use github_copilot_sdk::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;

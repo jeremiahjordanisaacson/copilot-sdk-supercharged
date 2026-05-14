@@ -232,8 +232,8 @@ type CopilotClient(options: CopilotClientOptions) =
                sdkProtocolVersion = SdkProtocolVersion.getVersion ()
                includeSubAgentStreamingEvents = config.IncludeSubAgentStreamingEvents
                requestExitPlanMode = config.OnExitPlanMode.IsSome
-               traceparent = traceCtx.Traceparent |> Option.toObj
-               tracestate = traceCtx.Tracestate |> Option.toObj |}
+               traceparent = (traceCtx.Traceparent |> Option.defaultValue "")
+               tracestate = (traceCtx.Tracestate |> Option.defaultValue "") |}
 
         let! response = t.SendRequestAsync<{| sessionId: string; workspacePath: string option |}>("session.create", request)
 
@@ -271,8 +271,8 @@ type CopilotClient(options: CopilotClientOptions) =
                model = config.Model
                sdkProtocolVersion = SdkProtocolVersion.getVersion ()
                requestExitPlanMode = config.OnExitPlanMode.IsSome
-               traceparent = traceCtx.Traceparent |> Option.toObj
-               tracestate = traceCtx.Tracestate |> Option.toObj |}
+               traceparent = (traceCtx.Traceparent |> Option.defaultValue "")
+               tracestate = (traceCtx.Tracestate |> Option.defaultValue "") |}
 
         let! response = t.SendRequestAsync<{| sessionId: string; workspacePath: string option |}>("session.resume", request)
 

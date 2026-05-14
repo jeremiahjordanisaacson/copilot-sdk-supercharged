@@ -570,10 +570,6 @@ onLifecycleEvent client handler = do
 -- Internal
 -- ============================================================================
 
-isJust :: Maybe a -> Bool
-isJust (Just _) = True
-isJust Nothing  = False
-
 hasHooks :: Maybe SessionHooks -> Bool
 hasHooks Nothing = False
 hasHooks (Just sh) = isJust (shOnPreToolUse sh)

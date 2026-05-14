@@ -77,6 +77,18 @@ type SessionFsConfig =
       Conventions: string }
 
 // ---------------------------------------------------------------------------
+// Trace Context (must precede CopilotClientOptions which references it)
+// ---------------------------------------------------------------------------
+
+/// OpenTelemetry-compatible trace context for RPC payloads.
+type TraceContext =
+    { Traceparent: string option
+      Tracestate: string option }
+
+/// Provider that returns a trace context.
+type TraceContextProvider = unit -> TraceContext
+
+// ---------------------------------------------------------------------------
 // Client options
 // ---------------------------------------------------------------------------
 
@@ -258,18 +270,6 @@ type ExitPlanModeResponse =
 
 /// Handler for exit plan mode requests.
 type ExitPlanModeHandler = ExitPlanModeRequest -> Async<ExitPlanModeResponse>
-
-// ---------------------------------------------------------------------------
-// Trace Context
-// ---------------------------------------------------------------------------
-
-/// OpenTelemetry-compatible trace context for RPC payloads.
-type TraceContext =
-    { Traceparent: string option
-      Tracestate: string option }
-
-/// Provider that returns a trace context.
-type TraceContextProvider = unit -> TraceContext
 
 // ---------------------------------------------------------------------------
 // Session configuration
