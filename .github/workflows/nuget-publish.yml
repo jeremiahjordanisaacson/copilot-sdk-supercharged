@@ -39,7 +39,7 @@ jobs:
         run: dotnet pack dotnet/src/GitHub.Copilot.SDK.csproj -c Release -o ./nupkg
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dotnet/**/*.nupkg
 

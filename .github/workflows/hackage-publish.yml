@@ -36,7 +36,7 @@ jobs:
         run: cabal sdist
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: haskell/dist-newstyle/sdist/*.tar.gz
 

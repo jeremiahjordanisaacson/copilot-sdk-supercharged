@@ -110,7 +110,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm ci
           cd $GITHUB_WORKSPACE/test/harness && npm ci
         working-directory: .
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -196,11 +196,11 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm ci
           cd $GITHUB_WORKSPACE/test/harness && npm ci
         working-directory: .
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: gradle test
 
   dart:
@@ -239,7 +239,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm ci
           cd $GITHUB_WORKSPACE/test/harness && npm ci
         working-directory: .
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -305,7 +305,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm ci
           cd $GITHUB_WORKSPACE/test/harness && npm ci
         working-directory: .
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
       - run: julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
@@ -342,8 +342,8 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm ci
           cd $GITHUB_WORKSPACE/test/harness && npm ci
         working-directory: .
-      - uses: leafo/gh-actions-lua@v10
-      - uses: leafo/gh-actions-luarocks@v4
+      - uses: leafo/gh-actions-lua@v13
+      - uses: leafo/gh-actions-luarocks@v6
       - run: |
           cd lua
           luarocks install lua-cjson
@@ -446,7 +446,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm ci
           cd $GITHUB_WORKSPACE/test/harness && npm ci
         working-directory: .
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0'
       - run: dotnet test tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj
@@ -467,7 +467,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm ci
           cd $GITHUB_WORKSPACE/test/harness && npm ci
         working-directory: .
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0'
       - run: dotnet test
@@ -488,7 +488,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm ci
           cd $GITHUB_WORKSPACE/test/harness && npm ci
         working-directory: .
-      - uses: fortran-lang/setup-fpm@v5
+      - uses: fortran-lang/setup-fpm@v10
         with:
           github-token: ${{ github.token }}
           fpm-version: 'v0.10.1'
@@ -603,11 +603,11 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm ci
           cd $GITHUB_WORKSPACE/test/harness && npm ci
         working-directory: .
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: gradle test
 
   clojure:
@@ -626,7 +626,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm ci
           cd $GITHUB_WORKSPACE/test/harness && npm ci
         working-directory: .
-      - uses: DeLaGuardo/setup-clojure@12.5
+      - uses: DeLaGuardo/setup-clojure@13.5
         with:
           cli: latest
       - run: clojure -X:test

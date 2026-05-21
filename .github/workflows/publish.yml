@@ -166,7 +166,7 @@ jobs:
       - name: Package (dry run)
         run: cargo publish --dry-run --allow-dirty
       - name: Upload artifact
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: rust-package
           path: rust/target/package/*.crate
