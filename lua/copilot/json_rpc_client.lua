@@ -40,6 +40,7 @@ function JsonRpcClient.new(write_handle, read_handle)
     self._request_handlers = {}       -- method -> function(params) -> result, err
     self._running          = false
     self._stopped          = false
+    self._in_sdk_coroutine = false    -- set to true only inside SDK-managed coroutines
     return self
 end
 
@@ -75,13 +76,17 @@ function JsonRpcClient:request(method, params)
     -- Create an entry so the read loop can fill in the response
     self._pending_requests[id] = { result = nil, error = nil, done = false }
 
-    -- If we are inside a coroutine (not the main thread), yield until the response arrives
-    local co, is_main = coroutine.running()
-    if co and not is_main then
-        self._pending_requests[id].co = co
-        -- Yield control back to the read loop driver
-        local res_result, res_err = coroutine.yield()
-        return res_result, res_err
+    -- If we are inside a coroutine managed by our SDK, yield until the response arrives.
+    -- We check self._in_sdk_coroutine instead of coroutine.running() because test
+    -- frameworks like busted also use coroutines internally, but we cannot yield to them.
+    if self._in_sdk_coroutine then
+        local co = coroutine.running()
+        if co then
+            self._pending_requests[id].co = co
+            -- Yield control back to the read loop driver
+            local res_result, res_err = coroutine.yield()
+            return res_result, res_err
+        end
     end
 
     -- Otherwise, spin the read loop inline (synchronous fallback)

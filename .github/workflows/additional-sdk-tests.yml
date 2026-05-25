@@ -561,6 +561,7 @@ jobs:
           enable-modules-cache: false
           multi-thread: true
       - run: |
+          cpanm --notest Type::Tiny Moo File::Which Test::Exception HTTP::Tiny
           cpanm --installdeps --notest .
           prove -l t/ e2e/
 

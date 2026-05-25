@@ -43,6 +43,7 @@ mutable struct CopilotClient
 end
 
 # Allow keyword construction: CopilotClient(cli_path="...", ...)
+# Also serves as the zero-arg constructor: CopilotClient()
 CopilotClient(; kwargs...) = CopilotClient(CopilotClientOptions(; kwargs...))
 
 # -- Lifecycle --------------------------------------------------------------------
