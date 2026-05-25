@@ -102,6 +102,15 @@ function send(session::CopilotSession, opts::MessageOptions)
     if opts.mode !== nothing
         params["mode"] = opts.mode
     end
+    if opts.response_format !== nothing
+        params["responseFormat"] = get(IMAGE_RESPONSE_FORMAT_STRINGS, opts.response_format, "text")
+    end
+    if opts.image_options !== nothing
+        params["imageOptions"] = to_wire(opts.image_options)
+    end
+    if opts.request_headers !== nothing && !isempty(opts.request_headers)
+        params["requestHeaders"] = opts.request_headers
+    end
     send_request(session.rpc, "session/send", params)
     return nothing
 end

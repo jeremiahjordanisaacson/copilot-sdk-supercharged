@@ -358,6 +358,7 @@ defmodule Copilot.Types do
     def safety, do: "safety"
     def tool_instructions, do: "tool_instructions"
     def custom_instructions, do: "custom_instructions"
+    def runtime_instructions, do: "runtime_instructions"
     def last_instructions, do: "last_instructions"
   end
 
@@ -368,6 +369,7 @@ defmodule Copilot.Types do
     def remove, do: "remove"
     def append, do: "append"
     def prepend, do: "prepend"
+    def transform, do: "transform"
   end
 
   @type system_message_config :: SystemMessageAppendConfig.t() | SystemMessageReplaceConfig.t() | SystemMessageCustomizeConfig.t()

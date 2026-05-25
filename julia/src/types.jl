@@ -99,7 +99,7 @@ end
 
 """Append-mode system message configuration."""
 Base.@kwdef struct SystemMessageAppendConfig
-    mode::Union{String, Nothing} = nothing
+    mode::String = "append"
     content::Union{String, Nothing} = nothing
 end
 
@@ -221,7 +221,7 @@ end
 """Configuration for creating a session."""
 Base.@kwdef mutable struct SessionConfig
     model::String = "gpt-4"
-    system_message::Union{String, Nothing} = nothing
+    system_message::Union{String, SystemMessageAppendConfig, SystemMessageReplaceConfig, SystemMessageCustomizeConfig, Nothing} = nothing
     instructions::Union{String, Nothing} = nothing
     tools::Vector{Any} = Any[]
     on_event::Union{Function, Nothing} = nothing
@@ -237,6 +237,7 @@ Base.@kwdef mutable struct SessionConfig
     commands::Vector{CommandDefinition} = CommandDefinition[]
     skill_directories::Vector{String} = String[]
     disabled_skills::Vector{String} = String[]
+    cloud::Union{CloudSessionOptions, Nothing} = nothing
     working_directory::Union{String, Nothing} = nothing
     github_token::Union{String, Nothing} = nothing
     response_format::Union{ImageResponseFormat, Nothing} = nothing
@@ -252,6 +253,9 @@ Base.@kwdef struct MessageOptions
     prompt::String
     attachments::Union{Vector{Dict{String, Any}}, Nothing} = nothing
     mode::Union{String, Nothing} = nothing
+    response_format::Union{ImageResponseFormat, Nothing} = nothing
+    image_options::Union{ImageOptions, Nothing} = nothing
+    request_headers::Union{Dict{String, String}, Nothing} = nothing
 end
 
 """Result returned from a tool handler."""
@@ -339,6 +343,71 @@ end
 Base.@kwdef struct UserInputResponse
     answer::String = ""
     was_freeform::Bool = false
+end
+
+function to_wire(value)
+    return value
+end
+
+function to_wire(value::CloudSessionRepository)
+    result = Dict{String, Any}(
+        "owner" => value.owner,
+        "name" => value.name,
+    )
+    value.branch !== nothing && (result["branch"] = value.branch)
+    return result
+end
+
+function to_wire(value::CloudSessionOptions)
+    result = Dict{String, Any}()
+    value.repository !== nothing && (result["repository"] = to_wire(value.repository))
+    return result
+end
+
+function to_wire(value::SectionOverride)
+    result = Dict{String, Any}("action" => value.action)
+    value.content !== nothing && (result["content"] = value.content)
+    return result
+end
+
+function to_wire(value::SystemMessageAppendConfig)
+    result = Dict{String, Any}("mode" => value.mode)
+    value.content !== nothing && (result["content"] = value.content)
+    return result
+end
+
+function to_wire(value::SystemMessageReplaceConfig)
+    return Dict{String, Any}(
+        "mode" => value.mode,
+        "content" => value.content,
+    )
+end
+
+function to_wire(value::SystemMessageCustomizeConfig)
+    result = Dict{String, Any}("mode" => value.mode)
+    if value.sections !== nothing
+        result["sections"] = Dict{String, Any}(
+            key => to_wire(section)
+            for (key, section) in value.sections
+        )
+    end
+    value.content !== nothing && (result["content"] = value.content)
+    return result
+end
+
+function to_wire(value::ImageOptions)
+    result = Dict{String, Any}()
+    value.size !== nothing && (result["size"] = value.size)
+    value.quality !== nothing && (result["quality"] = value.quality)
+    value.style !== nothing && (result["style"] = value.style)
+    return result
+end
+
+function to_wire(value::UserInputResponse)
+    return Dict{String, Any}(
+        "answer" => value.answer,
+        "wasFreeform" => value.was_freeform,
+    )
 end
 
 # Convenience constructors from Dict

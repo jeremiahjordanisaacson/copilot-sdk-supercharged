@@ -1124,26 +1124,28 @@ sub to_wire {
 package GitHub::Copilot::Types::SystemPromptSection;
 
 use constant {
-    IDENTITY            => 'identity',
-    TONE                => 'tone',
-    TOOL_EFFICIENCY     => 'tool_efficiency',
-    ENVIRONMENT_CONTEXT => 'environment_context',
-    CODE_CHANGE_RULES   => 'code_change_rules',
-    GUIDELINES          => 'guidelines',
-    SAFETY              => 'safety',
-    TOOL_INSTRUCTIONS   => 'tool_instructions',
-    CUSTOM_INSTRUCTIONS => 'custom_instructions',
-    LAST_INSTRUCTIONS   => 'last_instructions',
+    IDENTITY             => 'identity',
+    TONE                 => 'tone',
+    TOOL_EFFICIENCY      => 'tool_efficiency',
+    ENVIRONMENT_CONTEXT  => 'environment_context',
+    CODE_CHANGE_RULES    => 'code_change_rules',
+    GUIDELINES           => 'guidelines',
+    SAFETY               => 'safety',
+    TOOL_INSTRUCTIONS    => 'tool_instructions',
+    CUSTOM_INSTRUCTIONS  => 'custom_instructions',
+    RUNTIME_INSTRUCTIONS => 'runtime_instructions',
+    LAST_INSTRUCTIONS    => 'last_instructions',
 };
 
 # Override action for a system prompt section.
 package GitHub::Copilot::Types::SectionOverrideAction;
 
 use constant {
-    REPLACE => 'replace',
-    REMOVE  => 'remove',
-    APPEND  => 'append',
-    PREPEND => 'prepend',
+    REPLACE   => 'replace',
+    REMOVE    => 'remove',
+    APPEND    => 'append',
+    PREPEND   => 'prepend',
+    TRANSFORM => 'transform',
 };
 
 # Override operation for a single system prompt section.

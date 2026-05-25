@@ -505,19 +505,21 @@ let cloud_session_options_to_yojson (o : cloud_session_options) : Yojson.Safe.t 
 (* System Message / User Input / Image Types                                  *)
 (* ========================================================================== *)
 
-type section_override_action = SOAReplace | SOARemove | SOAAppend | SOAPrepend
+type section_override_action = SOAReplace | SOARemove | SOAAppend | SOAPrepend | SOATransform
 
 let section_override_action_to_string = function
   | SOAReplace -> "replace"
   | SOARemove -> "remove"
   | SOAAppend -> "append"
   | SOAPrepend -> "prepend"
+  | SOATransform -> "transform"
 
 let section_override_action_of_string = function
   | "replace" -> SOAReplace
   | "remove" -> SOARemove
   | "append" -> SOAAppend
   | "prepend" -> SOAPrepend
+  | "transform" -> SOATransform
   | _ -> SOAReplace
 
 type section_override = {

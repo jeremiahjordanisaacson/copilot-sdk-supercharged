@@ -1,0 +1,68 @@
+{
+   "abstract" : "Perl SDK for the GitHub Copilot CLI",
+   "author" : [
+      "Microsoft Corporation"
+   ],
+   "dynamic_config" : 0,
+   "generated_by" : "ExtUtils::MakeMaker version 7.62, CPAN::Meta::Converter version 2.150010",
+   "license" : [
+      "mit"
+   ],
+   "meta-spec" : {
+      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
+      "version" : 2
+   },
+   "name" : "GitHub-Copilot",
+   "no_index" : {
+      "directory" : [
+         "t",
+         "inc"
+      ]
+   },
+   "prereqs" : {
+      "build" : {
+         "requires" : {
+            "ExtUtils::MakeMaker" : "0"
+         }
+      },
+      "configure" : {
+         "requires" : {
+            "ExtUtils::MakeMaker" : "0"
+         }
+      },
+      "runtime" : {
+         "requires" : {
+            "Carp" : "0",
+            "File::Which" : "0",
+            "IPC::Open3" : "0",
+            "JSON::PP" : "4.00",
+            "Moo" : "2.004000",
+            "Scalar::Util" : "0",
+            "Thread::Queue" : "0",
+            "Time::HiRes" : "0",
+            "perl" : "5.020",
+            "threads" : "0"
+         }
+      },
+      "test" : {
+         "requires" : {
+            "HTTP::Tiny" : "0",
+            "Test::Exception" : "0",
+            "Test::More" : "0.96"
+         }
+      }
+   },
+   "release_status" : "stable",
+   "resources" : {
+      "bugtracker" : {
+         "web" : "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/issues"
+      },
+      "repository" : {
+         "type" : "git",
+         "url" : "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git",
+         "web" : "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged"
+      }
+   },
+   "version" : "0.01",
+   "x_serialization_backend" : "JSON::PP version 4.06"
+}

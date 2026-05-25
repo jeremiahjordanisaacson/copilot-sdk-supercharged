@@ -27,6 +27,7 @@ enum ToolResultType {
   failure,
   rejected,
   denied,
+  timeout,
 }
 
 /// Extension to convert [ToolResultType] to/from JSON string.
@@ -490,12 +491,13 @@ class CanvasLifecycleContext {
 /// System message in append mode (default).
 /// Uses the CLI foundation with optional appended content.
 class SystemMessageAppendConfig {
+  final String? mode;
   final String? content;
 
-  const SystemMessageAppendConfig({this.content});
+  const SystemMessageAppendConfig({this.mode = 'append', this.content});
 
   Map<String, dynamic> toJson() => {
-        'mode': 'append',
+        'mode': mode ?? 'append',
         if (content != null) 'content': content,
       };
 }
@@ -503,12 +505,13 @@ class SystemMessageAppendConfig {
 /// System message in replace mode.
 /// Replaces the entire SDK-managed system message.
 class SystemMessageReplaceConfig {
+  final String mode;
   final String content;
 
-  const SystemMessageReplaceConfig({required this.content});
+  const SystemMessageReplaceConfig({this.mode = 'replace', required this.content});
 
   Map<String, dynamic> toJson() => {
-        'mode': 'replace',
+        'mode': mode,
         'content': content,
       };
 }
@@ -528,6 +531,7 @@ class SystemPromptSection {
   static const String safety = 'safety';
   static const String toolInstructions = 'tool_instructions';
   static const String customInstructions = 'custom_instructions';
+  static const String runtimeInstructions = 'runtime_instructions';
   static const String lastInstructions = 'last_instructions';
 }
 
@@ -537,17 +541,18 @@ class SectionOverrideAction {
   static const String remove = 'remove';
   static const String append = 'append';
   static const String prepend = 'prepend';
+  static const String transform = 'transform';
 }
 
 /// Override operation for a single system prompt section.
 class SectionOverride {
-  final String action;
+  final dynamic action;
   final String? content;
 
   const SectionOverride({required this.action, this.content});
 
   Map<String, dynamic> toJson() => {
-        'action': action,
+        'action': action is Function ? SectionOverrideAction.transform : action,
         if (content != null) 'content': content,
       };
 
@@ -561,13 +566,18 @@ class SectionOverride {
 
 /// System message in customize mode — section-level overrides.
 class SystemMessageCustomizeConfig {
+  final String mode;
   final Map<String, SectionOverride>? sections;
   final String? content;
 
-  const SystemMessageCustomizeConfig({this.sections, this.content});
+  const SystemMessageCustomizeConfig({
+    this.mode = 'customize',
+    this.sections,
+    this.content,
+  });
 
   Map<String, dynamic> toJson() => {
-        'mode': 'customize',
+        'mode': mode,
         if (sections != null)
           'sections': sections!.map((k, v) => MapEntry(k, v.toJson())),
         if (content != null) 'content': content,
@@ -1686,6 +1696,19 @@ enum ResponseFormat {
         return 'json_object';
     }
   }
+
+  static ResponseFormat fromJson(String value) {
+    switch (value) {
+      case 'text':
+        return ResponseFormat.text;
+      case 'image':
+        return ResponseFormat.image;
+      case 'json_object':
+        return ResponseFormat.jsonObject;
+      default:
+        return ResponseFormat.text;
+    }
+  }
 }
 
 /// Options for image generation.
@@ -1706,6 +1729,14 @@ class ImageOptions {
         if (quality != null) 'quality': quality,
         if (style != null) 'style': style,
       };
+
+  factory ImageOptions.fromJson(Map<String, dynamic> json) {
+    return ImageOptions(
+      size: json['size'] as String?,
+      quality: json['quality'] as String?,
+      style: json['style'] as String?,
+    );
+  }
 }
 
 /// Image data from an assistant image response.
@@ -2023,7 +2054,8 @@ class SessionConfig {
   final String? configDir;
   final List<Tool>? tools;
 
-  /// Either [SystemMessageAppendConfig] or [SystemMessageReplaceConfig].
+  /// One of [SystemMessageAppendConfig], [SystemMessageReplaceConfig],
+  /// or [SystemMessageCustomizeConfig].
   final dynamic systemMessage;
 
   final List<String>? availableTools;

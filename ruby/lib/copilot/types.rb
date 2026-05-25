@@ -229,21 +229,23 @@ module Copilot
     SAFETY               = "safety"
     TOOL_INSTRUCTIONS    = "tool_instructions"
     CUSTOM_INSTRUCTIONS  = "custom_instructions"
+    RUNTIME_INSTRUCTIONS = "runtime_instructions"
     LAST_INSTRUCTIONS    = "last_instructions"
   end
 
   # Override action for a system prompt section.
   module SectionOverrideAction
-    REPLACE = "replace"
-    REMOVE  = "remove"
-    APPEND  = "append"
-    PREPEND = "prepend"
+    REPLACE   = "replace"
+    REMOVE    = "remove"
+    APPEND    = "append"
+    PREPEND   = "prepend"
+    TRANSFORM = "transform"
   end
 
   # Override operation for a single system prompt section.
-  SectionOverride = Struct.new(:action, :content, keyword_init: true) do
+  SectionOverride = Struct.new(:action, :content, :transform, keyword_init: true) do
     def to_h
-      h = { action: action }
+      h = { action: transform ? SectionOverrideAction::TRANSFORM : action }
       h[:content] = content if content
       h
     end

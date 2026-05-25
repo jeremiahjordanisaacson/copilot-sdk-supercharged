@@ -6,9 +6,11 @@ use File::Spec;
 use File::Basename;
 use IPC::Open3;
 use HTTP::Tiny;
+use IO::Select;
 use JSON::PP;
 use POSIX qw(:sys_wait_h);
 use Cwd qw(abs_path);
+use Symbol qw(gensym);
 
 sub new {
     my ($class) = @_;
@@ -30,19 +32,35 @@ sub start {
     my $server_path = File::Spec->catfile($harness_dir, 'server.ts');
 
     # Spawn the proxy
-    my $pid = open3(my $in, my $out, my $err,
-        'npx', 'tsx', $server_path);
+    my $err = gensym();
+    my $pid = open3(my $in, my $out, $err, 'npx', 'tsx', $server_path);
 
-    # Read first line for URL
-    my $line = <$out>;
-    chomp($line) if defined $line;
-
-    unless ($line && $line =~ /Listening: (http:\/\/\S+)/) {
-        kill 'TERM', $pid;
-        die "Failed to parse proxy URL from: $line";
+    # Read startup output from stdout/stderr until the proxy URL appears.
+    my $selector = IO::Select->new($out, $err);
+    my $startup_output = '';
+    my $proxy_url;
+    while (my @ready = $selector->can_read(10)) {
+        for my $fh (@ready) {
+            my $line = <$fh>;
+            if (!defined $line) {
+                $selector->remove($fh);
+                next;
+            }
+            $startup_output .= $line;
+            if ($line =~ /Listening: (http:\/\/\S+)/) {
+                $proxy_url = $1;
+                last;
+            }
+        }
+        last if $proxy_url || !$selector->count;
     }
 
-    $self->{proxy_url}   = $1;
+    unless ($proxy_url) {
+        kill 'TERM', $pid;
+        die "Failed to parse proxy URL from startup output: $startup_output";
+    }
+
+    $self->{proxy_url}   = $proxy_url;
     $self->{process_pid} = $pid;
     $self->{stdout_fh}   = $out;
 

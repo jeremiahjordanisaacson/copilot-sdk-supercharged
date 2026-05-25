@@ -10,7 +10,7 @@ WriteMakefile(
     LICENSE          => 'mit',
     MIN_PERL_VERSION => '5.020',
     PREREQ_PM        => {
-        'Moo'           => '2.005',
+        'Moo'           => '2.004000',
         'JSON::PP'      => '4.00',
         'IPC::Open3'    => 0,
         'threads'       => 0,
@@ -19,11 +19,11 @@ WriteMakefile(
         'Scalar::Util'  => 0,
         'Time::HiRes'   => 0,
         'File::Which'   => 0,
-        'UUID::Tiny'    => 0,
     },
     TEST_REQUIRES => {
         'Test::More'      => '0.96',
         'Test::Exception' => 0,
+        'HTTP::Tiny'      => 0,
     },
     META_MERGE => {
         'meta-spec' => { version => 2 },

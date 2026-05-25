@@ -338,13 +338,15 @@ typedef char * (*copilot_hook_handler_fn)(
 #define COPILOT_SECTION_SAFETY              "safety"
 #define COPILOT_SECTION_TOOL_INSTRUCTIONS   "tool_instructions"
 #define COPILOT_SECTION_CUSTOM_INSTRUCTIONS "custom_instructions"
+#define COPILOT_SECTION_RUNTIME_INSTRUCTIONS "runtime_instructions"
 #define COPILOT_SECTION_LAST_INSTRUCTIONS   "last_instructions"
 
 /** Override action for a system prompt section. */
-#define COPILOT_OVERRIDE_REPLACE "replace"
-#define COPILOT_OVERRIDE_REMOVE  "remove"
-#define COPILOT_OVERRIDE_APPEND  "append"
-#define COPILOT_OVERRIDE_PREPEND "prepend"
+#define COPILOT_OVERRIDE_REPLACE   "replace"
+#define COPILOT_OVERRIDE_REMOVE    "remove"
+#define COPILOT_OVERRIDE_APPEND    "append"
+#define COPILOT_OVERRIDE_PREPEND   "prepend"
+#define COPILOT_OVERRIDE_TRANSFORM "transform"
 
 /** Override operation for a single system prompt section. */
 typedef struct {

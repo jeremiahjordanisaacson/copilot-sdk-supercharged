@@ -299,6 +299,7 @@ namespace SystemPromptSection {
     inline constexpr const char* Safety = "safety";
     inline constexpr const char* ToolInstructions = "tool_instructions";
     inline constexpr const char* CustomInstructions = "custom_instructions";
+    inline constexpr const char* RuntimeInstructions = "runtime_instructions";
     inline constexpr const char* LastInstructions = "last_instructions";
 }
 
@@ -308,6 +309,7 @@ namespace SectionOverrideAction {
     inline constexpr const char* Remove = "remove";
     inline constexpr const char* Append = "append";
     inline constexpr const char* Prepend = "prepend";
+    inline constexpr const char* Transform = "transform";
 }
 
 /// Override operation for a single system prompt section.

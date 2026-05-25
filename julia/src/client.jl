@@ -117,7 +117,7 @@ function create_session(client::CopilotClient, config::SessionConfig)
     )
 
     if config.system_message !== nothing
-        params["systemMessage"] = config.system_message
+        params["systemMessage"] = to_wire(config.system_message)
     end
     if config.instructions !== nothing
         params["instructions"] = config.instructions
@@ -130,6 +130,9 @@ function create_session(client::CopilotClient, config::SessionConfig)
     end
     if !isempty(config.excluded_tools)
         params["excludedTools"] = config.excluded_tools
+    end
+    if config.cloud !== nothing
+        params["cloud"] = to_wire(config.cloud)
     end
     if config.mcp_servers !== nothing && !isempty(config.mcp_servers)
         mcp_dict = Dict{String, Any}()
@@ -305,7 +308,10 @@ function resume_session(client::CopilotClient, session_id::AbstractString, confi
     )
 
     if config.system_message !== nothing
-        params["systemMessage"] = config.system_message
+        params["systemMessage"] = to_wire(config.system_message)
+    end
+    if config.cloud !== nothing
+        params["cloud"] = to_wire(config.cloud)
     end
 
     if config.on_exit_plan_mode !== nothing

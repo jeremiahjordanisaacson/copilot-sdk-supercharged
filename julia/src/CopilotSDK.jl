@@ -56,6 +56,11 @@ export Tool, ToolResult, ToolInvocation, ToolResultType, define_tool
 export PermissionRequest, ServerStatus, AuthStatus, ModelInfo, SessionMetadata
 export ExitPlanModeRequest, ExitPlanModeResult, TraceContext
 export ConnectionState, LogLevel
+export CanvasAction, CanvasDeclaration, CanvasOpenResponse
+export CanvasHostCapabilities, CanvasHostContext, CanvasOpenContext, CanvasActionContext, CanvasLifecycleContext
+export CloudSessionRepository, CloudSessionOptions
+export SectionOverride, SystemMessageAppendConfig, SystemMessageReplaceConfig, SystemMessageCustomizeConfig
+export UserInputRequest, UserInputResponse, ResponseFormat, ImageOptions
 export start!, stop!, create_session, resume_session, get_status, get_models, list_sessions
 export get_session_metadata, set_session_fs_provider
 export on, send, send_and_wait, disconnect

@@ -15,7 +15,6 @@ BEGIN {
     }
 }
 use Thread::Queue;
-use UUID::Tiny ':std';
 use Time::HiRes qw(time sleep);
 use Scalar::Util qw(blessed);
 
@@ -46,6 +45,14 @@ request handlers and responses are sent back.
 =cut
 
 my $json = JSON::PP->new->utf8->canonical->allow_blessed->convert_blessed;
+my $REQUEST_COUNTER = 0;
+
+sub _generate_request_id {
+    $REQUEST_COUNTER = ($REQUEST_COUNTER + 1) & 0xffff;
+    my $micros = int(time() * 1_000_000);
+    my $random = int(rand(0xffff));
+    return sprintf('perl-%d-%d-%04x-%04x', $$, $micros, $REQUEST_COUNTER, $random);
+}
 
 sub new {
     my ($class, %args) = @_;
@@ -129,7 +136,7 @@ sub request {
 
     croak "Client not started" unless $self->{_running};
 
-    my $id = create_uuid_as_string(UUID_V4);
+    my $id = _generate_request_id();
 
     # Create a response queue for this request
     my $queue = Thread::Queue->new();

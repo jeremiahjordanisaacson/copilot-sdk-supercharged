@@ -369,17 +369,19 @@ M.SystemPromptSection = {
     CODE_CHANGE_RULES   = "code_change_rules",
     GUIDELINES          = "guidelines",
     SAFETY              = "safety",
-    TOOL_INSTRUCTIONS   = "tool_instructions",
-    CUSTOM_INSTRUCTIONS = "custom_instructions",
-    LAST_INSTRUCTIONS   = "last_instructions",
+    TOOL_INSTRUCTIONS    = "tool_instructions",
+    CUSTOM_INSTRUCTIONS  = "custom_instructions",
+    RUNTIME_INSTRUCTIONS = "runtime_instructions",
+    LAST_INSTRUCTIONS    = "last_instructions",
 }
 
 --- Override action constants for system prompt sections.
 M.SectionOverrideAction = {
-    REPLACE = "replace",
-    REMOVE  = "remove",
-    APPEND  = "append",
-    PREPEND = "prepend",
+    REPLACE   = "replace",
+    REMOVE    = "remove",
+    APPEND    = "append",
+    PREPEND   = "prepend",
+    TRANSFORM = "transform",
 }
 
 --- Create a SectionOverride table.

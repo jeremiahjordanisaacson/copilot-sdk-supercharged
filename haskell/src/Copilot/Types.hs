@@ -591,6 +591,7 @@ data SystemPromptSection
   | SectionSafety
   | SectionToolInstructions
   | SectionCustomInstructions
+  | SectionRuntimeInstructions
   | SectionLastInstructions
   deriving (Show, Eq, Ord, Generic)
 
@@ -604,6 +605,7 @@ instance ToJSON SystemPromptSection where
   toJSON SectionSafety             = String "safety"
   toJSON SectionToolInstructions   = String "tool_instructions"
   toJSON SectionCustomInstructions = String "custom_instructions"
+  toJSON SectionRuntimeInstructions = String "runtime_instructions"
   toJSON SectionLastInstructions   = String "last_instructions"
 
 instance FromJSON SystemPromptSection where
@@ -617,6 +619,7 @@ instance FromJSON SystemPromptSection where
     "safety"               -> pure SectionSafety
     "tool_instructions"    -> pure SectionToolInstructions
     "custom_instructions"  -> pure SectionCustomInstructions
+    "runtime_instructions" -> pure SectionRuntimeInstructions
     "last_instructions"    -> pure SectionLastInstructions
     other                  -> fail $ "Unknown SystemPromptSection: " <> T.unpack other
 
@@ -631,6 +634,7 @@ instance ToJSONKey SystemPromptSection where
     SectionSafety             -> "safety"
     SectionToolInstructions   -> "tool_instructions"
     SectionCustomInstructions -> "custom_instructions"
+    SectionRuntimeInstructions -> "runtime_instructions"
     SectionLastInstructions   -> "last_instructions"
 
 instance FromJSONKey SystemPromptSection where
@@ -644,6 +648,7 @@ instance FromJSONKey SystemPromptSection where
     "safety"               -> pure SectionSafety
     "tool_instructions"    -> pure SectionToolInstructions
     "custom_instructions"  -> pure SectionCustomInstructions
+    "runtime_instructions" -> pure SectionRuntimeInstructions
     "last_instructions"    -> pure SectionLastInstructions
     other                  -> fail $ "Unknown SystemPromptSection: " <> T.unpack other
 
@@ -653,20 +658,23 @@ data SectionOverrideAction
   | OverrideRemove
   | OverrideAppend
   | OverridePrepend
+  | OverrideTransform
   deriving (Show, Eq, Generic)
 
 instance ToJSON SectionOverrideAction where
-  toJSON OverrideReplace = String "replace"
-  toJSON OverrideRemove  = String "remove"
-  toJSON OverrideAppend  = String "append"
-  toJSON OverridePrepend = String "prepend"
+  toJSON OverrideReplace   = String "replace"
+  toJSON OverrideRemove    = String "remove"
+  toJSON OverrideAppend    = String "append"
+  toJSON OverridePrepend   = String "prepend"
+  toJSON OverrideTransform = String "transform"
 
 instance FromJSON SectionOverrideAction where
   parseJSON = withText "SectionOverrideAction" $ \case
-    "replace" -> pure OverrideReplace
-    "remove"  -> pure OverrideRemove
-    "append"  -> pure OverrideAppend
-    "prepend" -> pure OverridePrepend
+    "replace"   -> pure OverrideReplace
+    "remove"    -> pure OverrideRemove
+    "append"    -> pure OverrideAppend
+    "prepend"   -> pure OverridePrepend
+    "transform" -> pure OverrideTransform
     other     -> fail $ "Unknown SectionOverrideAction: " <> T.unpack other
 
 -- | Override operation for a single system prompt section.
