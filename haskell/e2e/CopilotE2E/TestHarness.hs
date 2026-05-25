@@ -51,8 +51,8 @@ getCliPath = do
   where
     fallbackCliPath = do
       cwd <- getCurrentDirectory
-      -- We're in haskell/e2e, so go up two levels to repo root
-      let repoRoot = cwd </> ".." </> ".."
+     -- cabal test runs from haskell/, so go up one level to repo root
+     let repoRoot = cwd </> ".."
           cliPath  = repoRoot </> "nodejs" </> "node_modules"
                      </> "@github" </> "copilot" </> "index.js"
       exists <- doesFileExist cliPath
@@ -71,7 +71,7 @@ getCliPath = do
 startProxy :: IO ProxyHandle
 startProxy = do
   cwd <- getCurrentDirectory
-  let harnessDir  = cwd </> ".." </> ".." </> "test" </> "harness"
+  let harnessDir  = cwd </> ".." </> "test" </> "harness"
       serverPath  = harnessDir </> "server.ts"
 
   let cpSpec = if isWindows
@@ -162,7 +162,7 @@ isWindows = "mingw" `isInfixOf` os || "windows" `isInfixOf` os
 snapshotsDir :: IO FilePath
 snapshotsDir = do
   cwd <- getCurrentDirectory
-  let repoRoot = cwd </> ".." </> ".."
+  let repoRoot = cwd </> ".."
   pure (repoRoot </> "test" </> "snapshots")
 
 -- | Configure the proxy with a specific snapshot file and working directory.

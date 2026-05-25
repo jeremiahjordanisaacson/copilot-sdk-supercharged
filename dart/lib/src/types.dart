@@ -1278,12 +1278,12 @@ class ModelLimits {
   final int? maxPromptTokens;
   final int maxContextWindowTokens;
 
-  const ModelLimits({this.maxPromptTokens, required this.maxContextWindowTokens});
+  const ModelLimits({this.maxPromptTokens, this.maxContextWindowTokens = 0});
 
   factory ModelLimits.fromJson(Map<String, dynamic> json) {
     return ModelLimits(
       maxPromptTokens: json['max_prompt_tokens'] as int?,
-      maxContextWindowTokens: json['max_context_window_tokens'] as int,
+      maxContextWindowTokens: (json['max_context_window_tokens'] as int?) ?? 0,
     );
   }
 }

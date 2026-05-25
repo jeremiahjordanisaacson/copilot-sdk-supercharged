@@ -15,7 +15,7 @@
     },
     "scripts": {
         "build": "tsc",
-        "test": "vitest run",
+        "test": "node node_modules/vitest/vitest.mjs run",
         "test:watch": "vitest",
         "lint": "tsc --noEmit",
         "clean": "rimraf dist"

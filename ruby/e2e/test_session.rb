@@ -312,19 +312,18 @@ class TestSession < E2E::TestCase
 
   # Verifies that a session with tools can handle a message.
   def test_tools
-    weather_tool = Copilot.define_tool(
-      name: "get_weather",
-      description: "Get weather for a location",
+    secret_tool = Copilot.define_tool(
+      name: "get_secret_number",
+      description: "Get a secret number for a given key",
       parameters: {
         type: "object",
         properties: {
-          location: { type: "string", description: "City name" }
+          key: { type: "string", description: "The key to look up" }
         },
-        required: ["location"]
+        required: ["key"]
       }
     ) do |args, _invocation|
-      location = args["location"] || args[:location] || "unknown"
-      "Weather in #{location}: 72F, sunny"
+      "54321"
     end
 
     client = Copilot::CopilotClient.new(
@@ -335,7 +334,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "claude-sonnet-4.5", tools: [weather_tool])
+    session = client.create_session(model: "claude-sonnet-4.5", tools: [secret_tool])
     refute_nil session.session_id
 
     response = session.send_and_wait(prompt: "What is the secret number for key ALPHA?")
@@ -474,7 +473,7 @@ class TestSession < E2E::TestCase
   def test_compaction
     # Use multi-turn snapshot to avoid prefix matching issues with growing conversation
     harness.configure(
-      File.expand_path(File.join(TestHarness.snapshots_dir, "session", "should_have_stateful_conversation.yaml")),
+      File.expand_path(File.join(E2E::TestHarness.snapshots_dir, "session", "should_have_stateful_conversation.yaml")),
       File.expand_path(work_dir)
     )
 

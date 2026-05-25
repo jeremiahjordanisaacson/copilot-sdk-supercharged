@@ -73,14 +73,15 @@ class SessionE2ETest {
         val env = mutableMapOf<String, String>()
         // Inherit all current process env vars (PATH, HOME, etc.)
         env.putAll(System.getenv())
-        // Override with test-specific vars
+        // Add proxy env (CONNECT proxy routing, CA certs, etc.)
+        env.putAll(harness.getProxyEnv())
+        // Override with test-specific vars (AFTER proxy env so tokens aren't blanked)
         env["COPILOT_API_URL"] = proxyUrl
         env["COPILOT_HOME"] = workDir
         env["XDG_CONFIG_HOME"] = workDir
         env["XDG_STATE_HOME"] = workDir
         env["GH_TOKEN"] = System.getenv("GH_TOKEN") ?: "fake-test-token"
         env["GITHUB_TOKEN"] = System.getenv("GITHUB_TOKEN") ?: "fake-test-token"
-        env.putAll(harness.getProxyEnv())
         return env
     }
 
