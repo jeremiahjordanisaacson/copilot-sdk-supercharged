@@ -45,7 +45,6 @@ hooks, and configuration types.
 # ============================================================================
 package GitHub::Copilot::Types::SessionEvent;
 use Moo;
-use Types::Standard qw(Str HashRef Any Maybe);
 
 has type => (is => 'ro', required => 1);
 has data => (is => 'ro', default => sub { {} });
@@ -276,7 +275,7 @@ sub from_hashref {
 
 sub TO_JSON {
     my ($self) = @_;
-    return { canvases => $self->canvases ?  :   };
+    return { canvases => $self->canvases ? \1 : \0 };
 }
 
 # ============================================================================
@@ -1448,139 +1447,6 @@ sub TO_JSON {
     $h{url} = $self->url if defined $self->url;
     return \%h;
 }
-
-# ============================================================================
-# Canvas Types
-# ============================================================================
-package GitHub::Copilot::Types::CanvasAction;
-use Moo;
-has name         => (is => 'ro', required => 1);
-has description  => (is => 'ro', required => 1);
-has input_schema => (is => 'ro');
-
-sub TO_JSON {
-    my ($self) = @_;
-    my %h = (name => $self->name, description => $self->description);
-    $h{inputSchema} = $self->input_schema if defined $self->input_schema;
-    return \%h;
-}
-
-package GitHub::Copilot::Types::CanvasDeclaration;
-use Moo;
-has id           => (is => 'ro', required => 1);
-has display_name => (is => 'ro', required => 1);
-has description  => (is => 'ro', required => 1);
-has input_schema => (is => 'ro');
-has actions      => (is => 'ro');
-
-sub TO_JSON {
-    my ($self) = @_;
-    my %h = (id => $self->id, displayName => $self->display_name, description => $self->description);
-    $h{inputSchema} = $self->input_schema if defined $self->input_schema;
-    $h{actions} = $self->actions if defined $self->actions;
-    return \%h;
-}
-
-package GitHub::Copilot::Types::CanvasOpenResponse;
-use Moo;
-has url    => (is => 'ro');
-has title  => (is => 'ro');
-has status => (is => 'ro');
-
-package GitHub::Copilot::Types::CanvasHostCapabilities;
-use Moo;
-has canvases => (is => 'ro', default => sub { 0 });
-
-package GitHub::Copilot::Types::CanvasHostContext;
-use Moo;
-has capabilities => (is => 'ro');
-
-package GitHub::Copilot::Types::CanvasOpenContext;
-use Moo;
-has session_id   => (is => 'ro', required => 1);
-has extension_id => (is => 'ro', required => 1);
-has canvas_id    => (is => 'ro', required => 1);
-has instance_id  => (is => 'ro', required => 1);
-has input        => (is => 'ro');
-has host         => (is => 'ro');
-
-package GitHub::Copilot::Types::CanvasActionContext;
-use Moo;
-has session_id   => (is => 'ro', required => 1);
-has extension_id => (is => 'ro', required => 1);
-has canvas_id    => (is => 'ro', required => 1);
-has instance_id  => (is => 'ro', required => 1);
-has action_name  => (is => 'ro', required => 1);
-has input        => (is => 'ro');
-has host         => (is => 'ro');
-
-package GitHub::Copilot::Types::CanvasLifecycleContext;
-use Moo;
-has session_id   => (is => 'ro', required => 1);
-has extension_id => (is => 'ro', required => 1);
-has canvas_id    => (is => 'ro', required => 1);
-has instance_id  => (is => 'ro', required => 1);
-has host         => (is => 'ro');
-
-# ============================================================================
-# Cloud Session Types
-# ============================================================================
-package GitHub::Copilot::Types::CloudSessionRepository;
-use Moo;
-has owner  => (is => 'ro', required => 1);
-has name   => (is => 'ro', required => 1);
-has branch => (is => 'ro');
-
-package GitHub::Copilot::Types::CloudSessionOptions;
-use Moo;
-has repository => (is => 'ro');
-
-# ============================================================================
-# System Message Config Types
-# ============================================================================
-package GitHub::Copilot::Types::SystemMessageAppendConfig;
-use Moo;
-has mode    => (is => 'ro', default => sub { 'append' });
-has content => (is => 'ro');
-
-package GitHub::Copilot::Types::SystemMessageReplaceConfig;
-use Moo;
-has mode    => (is => 'ro', default => sub { 'replace' });
-has content => (is => 'ro', required => 1);
-
-package GitHub::Copilot::Types::SectionOverride;
-use Moo;
-has action  => (is => 'ro', required => 1);
-has content => (is => 'ro');
-
-package GitHub::Copilot::Types::SystemMessageCustomizeConfig;
-use Moo;
-has mode     => (is => 'ro', default => sub { 'customize' });
-has sections => (is => 'ro');
-has content  => (is => 'ro');
-
-# ============================================================================
-# User Input Types
-# ============================================================================
-package GitHub::Copilot::Types::UserInputRequest;
-use Moo;
-has question       => (is => 'ro');
-has choices        => (is => 'ro');
-has allow_freeform => (is => 'ro');
-
-package GitHub::Copilot::Types::UserInputResponse;
-use Moo;
-has answer       => (is => 'ro', required => 1);
-has was_freeform => (is => 'ro', required => 1);
-
-# ============================================================================
-# Image Generation Types
-# ============================================================================
-package GitHub::Copilot::Types::ImageOptions;
-use Moo;
-has size    => (is => 'ro');
-has quality => (is => 'ro');
-has style   => (is => 'ro');
 
 1;
 

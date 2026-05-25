@@ -62,9 +62,7 @@ async fn main() -> Result<(), Error> {
             "required": ["location"]
         }));
 
-    let config = SessionConfig::default()
-        .with_tools(vec![weather_tool])
-        .with_skip_permission(true);
+    let config = SessionConfig::default().with_tools(vec![weather_tool]);
 
     let session = client.create_session(config).await?;
     println!("\nSession created: {}", session.id());
@@ -175,7 +173,7 @@ async fn main() -> Result<(), Error> {
     // ========================================================================
     println!("\nCleaning up...");
     event_task.abort();
-    session.destroy().await?;
+    session.disconnect().await?;
     if let Err(e) = client.stop().await {
         eprintln!("Cleanup errors: {}", e);
     }

@@ -1316,14 +1316,14 @@ type PermissionHandler = PermissionRequest -> Text -> IO PermissionRequestResult
 
 -- | Request for user input from the agent.
 data UserInputRequest = UserInputRequest
-  { uirQuestion      :: !(Maybe Text)
+  { uirQuestion      :: !Text
   , uirChoices       :: !(Maybe [Text])
   , uirAllowFreeform :: !(Maybe Bool)
   } deriving (Show, Eq, Generic)
 
 instance ToJSON UserInputRequest where
   toJSON UserInputRequest{..} = object $ catMaybes
-    [ ("question" .=) <$> uirQuestion
+    [ Just $ "question" .= uirQuestion
     , ("choices" .=) <$> uirChoices
     , ("allowFreeform" .=) <$> uirAllowFreeform
     ]
@@ -1331,7 +1331,7 @@ instance ToJSON UserInputRequest where
 instance FromJSON UserInputRequest where
   parseJSON = withObject "UserInputRequest" $ \o ->
     UserInputRequest
-      <$> o .:? "question"
+      <$> o .:  "question"
       <*> o .:? "choices"
       <*> o .:? "allowFreeform"
 

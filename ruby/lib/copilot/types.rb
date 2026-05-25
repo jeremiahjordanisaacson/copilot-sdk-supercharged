@@ -875,54 +875,6 @@ module Copilot
     def rename(session_id, old_path, new_path) raise NotImplementedError end
   end
 
-  # --- Canvas Types ---
-
-  CanvasAction = Struct.new(:name, :description, :input_schema, keyword_init: true) do
-    def to_h
-      h = { name: name, description: description }
-      h[:inputSchema] = input_schema if input_schema
-      h
-    end
-  end
-
-  CanvasDeclaration = Struct.new(:id, :display_name, :description, :input_schema, :actions, keyword_init: true) do
-    def to_h
-      h = { id: id, displayName: display_name, description: description }
-      h[:inputSchema] = input_schema if input_schema
-      h[:actions] = actions&.map(&:to_h) if actions
-      h
-    end
-  end
-
-  CanvasOpenResponse = Struct.new(:url, :title, :status, keyword_init: true)
-  CanvasHostCapabilities = Struct.new(:canvases, keyword_init: true)
-  CanvasHostContext = Struct.new(:capabilities, keyword_init: true)
-  CanvasOpenContext = Struct.new(:session_id, :extension_id, :canvas_id, :instance_id, :input, :host, keyword_init: true)
-  CanvasActionContext = Struct.new(:session_id, :extension_id, :canvas_id, :instance_id, :action_name, :input, :host, keyword_init: true)
-  CanvasLifecycleContext = Struct.new(:session_id, :extension_id, :canvas_id, :instance_id, :host, keyword_init: true)
-
-  # --- Cloud Session Types ---
-
-  CloudSessionRepository = Struct.new(:owner, :name, :branch, keyword_init: true)
-  CloudSessionOptions = Struct.new(:repository, keyword_init: true)
-
-  # --- System Message Config Types ---
-
-  SystemMessageAppendConfig = Struct.new(:mode, :content, keyword_init: true)
-  SystemMessageReplaceConfig = Struct.new(:mode, :content, keyword_init: true)
-  SectionOverride = Struct.new(:action, :content, keyword_init: true)
-  SystemMessageCustomizeConfig = Struct.new(:mode, :sections, :content, keyword_init: true)
-
-  # --- User Input Types ---
-
-  UserInputRequest = Struct.new(:question, :choices, :allow_freeform, keyword_init: true)
-  UserInputResponse = Struct.new(:answer, :was_freeform, keyword_init: true)
-
-  # --- Image Generation Types ---
-
-  RESPONSE_FORMATS = %w[text image json_object].freeze
-  ImageOptions = Struct.new(:size, :quality, :style, keyword_init: true)
-
   # Client options.
   ClientOptions = Struct.new(
     :cli_path, :cli_args, :cwd, :port, :use_stdio, :cli_url,
