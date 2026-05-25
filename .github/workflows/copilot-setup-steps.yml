@@ -87,7 +87,7 @@ jobs:
       # Install JavaScript dependencies
       - name: Install Node.js dependencies
         working-directory: ./nodejs
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       # Install Python dependencies
       - name: Install Python dependencies
@@ -107,12 +107,12 @@ jobs:
       # Install test harness dependencies
       - name: Install test harness dependencies
         working-directory: ./test/harness
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       # Install Java codegen dependencies
       - name: Install Java codegen dependencies
         working-directory: ./java/scripts/codegen
-        run: npm ci
+        run: npm install --ignore-scripts
 
       # Verify installations
       - name: Verify tool installations

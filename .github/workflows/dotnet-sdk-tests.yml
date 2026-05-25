@@ -53,7 +53,7 @@ jobs:
 
       - name: Install Node.js dependencies (for CLI version extraction)
         working-directory: ./nodejs
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       - name: Restore .NET dependencies
         run: dotnet restore
@@ -73,7 +73,7 @@ jobs:
 
       - name: Install test harness dependencies
         working-directory: ./test/harness
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       - name: Warm up PowerShell
         if: runner.os == 'Windows'

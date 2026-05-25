@@ -56,11 +56,11 @@ jobs:
 
       - name: Install nodejs SDK dependencies
         working-directory: ./nodejs
-        run: npm ci
+        run: npm install --ignore-scripts
 
       - name: Install codegen dependencies
         working-directory: ./scripts/codegen
-        run: npm ci
+        run: npm install --ignore-scripts
 
       - name: Run codegen
         working-directory: ./scripts/codegen

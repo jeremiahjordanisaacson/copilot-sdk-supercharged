@@ -46,7 +46,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22.x"
-      - run: npm ci --ignore-scripts
+      - run: npm install --ignore-scripts
       - name: Get version
         id: version
         run: |
@@ -90,7 +90,7 @@ jobs:
           node-version: "22.x"
       - name: Update npm for OIDC support
         run: npm i -g "npm@11.6.3"
-      - run: npm ci --ignore-scripts
+      - run: npm install --ignore-scripts
       - name: Set version
         run: node scripts/set-version.js
         env:
@@ -208,7 +208,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
       - name: Install Node.js dependencies (for CLI version)
         working-directory: ./nodejs
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
       - name: Set version
         run: sed -i "s/^version = .*/version = \"${{ needs.version.outputs.version }}\"/" pyproject.toml
       - name: Build platform wheels

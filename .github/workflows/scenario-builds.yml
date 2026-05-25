@@ -47,7 +47,7 @@ jobs:
       # Build the SDK so local file: references resolve
       - name: Build SDK
         working-directory: nodejs
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       - name: Build all TypeScript scenarios
         run: |

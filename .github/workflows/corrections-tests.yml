@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - run: npm ci
+      - run: npm install --ignore-scripts
         working-directory: scripts/corrections
       - run: npm test
         working-directory: scripts/corrections

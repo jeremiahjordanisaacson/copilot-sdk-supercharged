@@ -65,7 +65,7 @@ jobs:
 
       - name: Install test harness dependencies
         working-directory: ./test/harness
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       - name: Run spotless check
         run: |
