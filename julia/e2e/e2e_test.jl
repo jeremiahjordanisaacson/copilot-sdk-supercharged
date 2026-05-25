@@ -11,6 +11,7 @@
       cd julia && julia --project=. e2e/e2e_test.jl
 =#
 
+using JSON3
 using Test
 
 # ── Bootstrap: load the test harness and the SDK ────────────────────────────
@@ -26,6 +27,19 @@ proxy_url = start_proxy()
 cli_path  = cli_path_from_repo()
 work_dir  = mktempdir("copilot-julia-e2e-")
 test_env  = proxy_test_env(work_dir)
+const snapshots_dir = normpath(joinpath(@__DIR__, "..", "..", "test", "snapshots"))
+
+function configure_snapshot(category::String, test_name::String)
+    snapshot_path = joinpath(snapshots_dir, category, "$(test_name).yaml")
+    response = TestHarness.HTTP.post(
+        string(proxy_url, "/config");
+        headers=Dict("Content-Type" => "application/json"),
+        body=JSON3.write(Dict("filePath" => snapshot_path, "workDir" => work_dir)),
+        readtimeout=5,
+        connect_timeout=5,
+    )
+    response.status == 200 || error("Failed to configure snapshot: $(response.status)")
+end
 
 # Ensure the proxy is torn down no matter what
 atexit() do
@@ -50,6 +64,8 @@ end
     end
 
     @testset "Send message and receive response" begin
+        configure_snapshot("session", "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message")
+
         client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
@@ -70,7 +86,7 @@ end
         session = create_session(client, config)
 
         # send_and_wait blocks until the session goes idle
-        send_and_wait(session, "Hello!")
+        send_and_wait(session, "What is 2+2?")
 
         @test length(messages) > 0
         @test any(m -> !isempty(m), messages)
@@ -109,6 +125,8 @@ end
 
     # ── Test 4: Multi-turn conversation ──────────────────────────────────────
     @testset "Multi-turn conversation" begin
+        configure_snapshot("session", "should_have_stateful_conversation")
+
         client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
@@ -128,11 +146,11 @@ end
         session = create_session(client, config)
 
         # First turn
-        try send_and_wait(session, "Hello!") catch; end
+        try send_and_wait(session, "What is 1+1?") catch; end
         first_count = length(messages)
 
         # Second turn (follow-up)
-        try send_and_wait(session, "Tell me more.") catch; end
+        try send_and_wait(session, "Now if you double that, what do you get?") catch; end
         second_count = length(messages)
 
         @test first_count >= 0
@@ -145,6 +163,8 @@ end
 
     # ── Test 5: Session resume ───────────────────────────────────────────────
     @testset "Session resume by ID" begin
+        configure_snapshot("session", "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message")
+
         client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
@@ -153,14 +173,9 @@ end
         @test !isempty(original_id)
 
         disconnect(session)
-        stop!(client)
-
-        # New client, resume by the captured session ID
-        client2 = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
-        start!(client2)
 
         try
-            resumed = resume_session(client2, original_id, SessionConfig(model="claude-sonnet-4.5"))
+            resumed = resume_session(client, original_id, SessionConfig(model="claude-sonnet-4.5"))
             @test resumed isa CopilotSession
             @test resumed.session_id == original_id
             disconnect(resumed)
@@ -169,7 +184,7 @@ end
             @test e isa Exception
         end
 
-        stop!(client2)
+        stop!(client)
     end
 
     # ── Test 6: Session list ─────────────────────────────────────────────────
@@ -318,6 +333,8 @@ end
 
     # ── Test 14: Tool definition and invocation ──────────────────────────────
     @testset "Tool definition and invocation" begin
+        configure_snapshot("session", "should_create_session_with_custom_tool")
+
         tool_called = Ref(false)
         tool_args   = Ref{Any}(nothing)
 
@@ -352,7 +369,7 @@ end
 
         # Send a prompt that would trigger the tool
         try
-            send_and_wait(session, "What is the weather in Seattle?")
+            send_and_wait(session, "What is the secret number for key ALPHA?")
         catch; end
 
         # The tool wire format should be well-formed
@@ -542,6 +559,8 @@ end
 
     # ── Test 20: Compaction events ───────────────────────────────────────────
     @testset "Compaction events" begin
+        configure_snapshot("session", "should_have_stateful_conversation")
+
         client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
@@ -563,10 +582,8 @@ end
 
         session = create_session(client, config)
 
-        # Send several messages to try to trigger compaction
-        for msg in ["Message 1", "Message 2", "Message 3", "Message 4", "Message 5"]
-            try send_and_wait(session, msg) catch; end
-        end
+        try send_and_wait(session, "What is 1+1?") catch; end
+        try send_and_wait(session, "Now if you double that, what do you get?") catch; end
 
         # Compaction is proxy-dependent; just verify the counters are consistent
         @test compaction_starts[] >= 0

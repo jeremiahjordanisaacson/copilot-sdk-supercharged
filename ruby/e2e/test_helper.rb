@@ -43,12 +43,13 @@ module E2E
       "client_lifecycle"            => "should_create_session_with_custom_tool",
       "foreground_session"          => "should_create_session_with_custom_tool",
       "tool_handling"               => "should_create_session_with_custom_tool",
-      "streaming"                   => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
-      "system_message"              => "should_create_a_session_with_appended_systemmessage_config",
-      "session_fs_with_messaging"   => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
-      "mcp_server_config"           => "should_create_session_with_custom_tool",
-      "skill_directories"           => "should_create_session_with_custom_tool",
-      "compaction"                  => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
+     "tools"                       => "should_create_session_with_custom_tool",
+     "streaming"                   => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
+     "system_message"              => "should_create_a_session_with_appended_systemmessage_config",
+     "session_fs_with_messaging"   => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
+     "mcp_server_config"           => "should_create_session_with_custom_tool",
+     "skill_directories"           => "should_create_session_with_custom_tool",
+     "compaction"                  => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
     }.freeze
 
     def setup
@@ -113,6 +114,19 @@ module E2E
 
     def github_token
       ENV["GH_TOKEN"] || ENV["GITHUB_TOKEN"] || "fake-test-token"
+    end
+
+    # Reconfigure the proxy with the current test's snapshot (resets replay state)
+    def reconfigure_snapshot
+      test_name = name.sub(/^test_/, "")
+      snapshot_name = SNAPSHOT_MAP.fetch(test_name, nil)
+      snapshot_path = if snapshot_name
+                        File.join(TestHarness.snapshots_dir, "session", "#{snapshot_name}.yaml")
+                      else
+                        candidate = File.join(TestHarness.snapshots_dir, "session", "#{test_name}.yaml")
+                        File.exist?(candidate) ? candidate : File.join(TestHarness.snapshots_dir, "session", "#{DEFAULT_SNAPSHOT}.yaml")
+                      end
+      harness.configure(File.expand_path(snapshot_path), File.expand_path(work_dir))
     end
 
     def clean_dir(dir)

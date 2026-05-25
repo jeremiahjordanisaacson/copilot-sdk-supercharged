@@ -1252,9 +1252,10 @@ class ModelCapabilities {
 
   factory ModelCapabilities.fromJson(Map<String, dynamic> json) {
     return ModelCapabilities(
-      supports:
-          ModelSupports.fromJson(json['supports'] as Map<String, dynamic>),
-      limits: ModelLimits.fromJson(json['limits'] as Map<String, dynamic>),
+      supports: ModelSupports.fromJson(
+          (json['supports'] as Map<String, dynamic>?) ?? {}),
+      limits: ModelLimits.fromJson(
+          (json['limits'] as Map<String, dynamic>?) ?? {}),
     );
   }
 }

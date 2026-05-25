@@ -13,6 +13,8 @@ module CopilotE2E.TestHarness
   , stopProxy
   , withProxy
   , getCliPath
+  , configureProxy
+  , snapshotsDir
   ) where
 
 import Control.Exception    (SomeException, bracket, catch)
@@ -155,3 +157,24 @@ withProxy = bracket startProxy stopProxy
 -- | Detect Windows at runtime.
 isWindows :: Bool
 isWindows = "mingw" `isInfixOf` os || "windows" `isInfixOf` os
+
+-- | The directory containing test snapshot YAML files.
+snapshotsDir :: IO FilePath
+snapshotsDir = do
+  cwd <- getCurrentDirectory
+  let repoRoot = cwd </> ".." </> ".."
+  pure (repoRoot </> "test" </> "snapshots")
+
+-- | Configure the proxy with a specific snapshot file and working directory.
+--
+-- Uses curl to POST JSON to the proxy's /config endpoint.
+configureProxy :: ProxyHandle -> FilePath -> FilePath -> IO ()
+configureProxy proxy filePath wd = do
+  let configUrl = phUrl proxy ++ "/config"
+      body = "{\"filePath\":\"" ++ filePath ++ "\",\"workDir\":\"" ++ wd ++ "\"}"
+      cpSpec = if isWindows
+        then shell $ "curl -s -X POST -H \"Content-Type: application/json\" -d '" ++ body ++ "' " ++ show configUrl
+        else proc "curl" ["-s", "-X", "POST", "-H", "Content-Type: application/json", "-d", body, configUrl]
+  (_, _, _, ph) <- createProcess cpSpec { std_out = CreatePipe, std_err = CreatePipe }
+  _ <- waitForProcess ph
+  pure ()

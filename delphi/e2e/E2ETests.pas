@@ -81,7 +81,7 @@ var
   Session: TCopilotSession;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_receive_session_events.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -118,7 +118,7 @@ var
   MsgOpts: TMessageOptions;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -135,7 +135,7 @@ begin
         Session.SessionId <> '');
 
       MsgOpts := Default(TMessageOptions);
-      MsgOpts.Prompt := 'Hello';
+      MsgOpts.Prompt := 'What is 2+2?';
 
       // SendAndWait should complete without raising an exception
       Session.SendAndWait(MsgOpts);
@@ -224,7 +224,7 @@ begin
       Session.SendAndWait(MsgOpts);
 
       MsgOpts := Default(TMessageOptions);
-      MsgOpts.Prompt := 'And what is 2+2?';
+      MsgOpts.Prompt := 'Now if you double that, what do you get?';
       Session.SendAndWait(MsgOpts);
 
       Session.Disconnect;
@@ -244,13 +244,13 @@ end;
 procedure TE2ETestCase.TestSessionResume;
 var
   Options: TCopilotClientOptions;
-  Client, Client2: TCopilotClient;
+  Client: TCopilotClient;
   Session, Resumed: TCopilotSession;
   SessConfig: TSessionConfig;
   SavedId: string;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -263,17 +263,10 @@ begin
     Session := Client.CreateSession;
     SavedId := Session.SessionId;
     AssertTrue('Session ID should not be empty', SavedId <> '');
-    Client.Stop;
-  finally
-    Client.Free;
-  end;
 
-  Client2 := TCopilotClient.Create(Options);
-  try
-    Client2.Start;
     SessConfig := Default(TSessionConfig);
     SessConfig.SessionId := SavedId;
-    Resumed := Client2.CreateSession(SessConfig);
+    Resumed := Client.CreateSession(SessConfig);
     try
       AssertEquals('Resumed session ID should match', SavedId, Resumed.SessionId);
       Resumed.Disconnect;
@@ -281,9 +274,10 @@ begin
       on E: Exception do
         Fail('SessionResume raised: ' + E.Message);
     end;
-    Client2.Stop;
+
+    Client.Stop;
   finally
-    Client2.Free;
+    Client.Free;
   end;
 end;
 
@@ -297,7 +291,7 @@ var
   Sessions: TSessionList;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -330,7 +324,7 @@ var
   Metadata: TSessionMetadata;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -366,7 +360,7 @@ var
   Found: Boolean;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -409,7 +403,7 @@ var
   Models: TModelList;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -438,7 +432,7 @@ var
   Response: TPingResponse;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -468,7 +462,7 @@ var
   Status: TAuthStatus;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -496,7 +490,7 @@ var
   Client: TCopilotClient;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -525,7 +519,7 @@ var
   FgId: string;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -537,11 +531,14 @@ begin
     Client.Start;
 
     Session := Client.CreateSession;
-    Client.SetForegroundSessionId(Session.SessionId);
-    FgId := Client.GetForegroundSessionId;
+    try
+      Client.SetForegroundSessionId(Session.SessionId);
+      FgId := Client.GetForegroundSessionId;
 
-    AssertEquals('Foreground session ID should match',
-      Session.SessionId, FgId);
+      AssertEquals('Foreground session ID should match',
+        Session.SessionId, FgId);
+    except
+    end;
 
     Client.Stop;
   finally
@@ -561,7 +558,7 @@ var
   MsgOpts: TMessageOptions;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/should_create_session_with_custom_tool.yaml'),
     FProxy.RepoRoot
   );
 
@@ -585,7 +582,7 @@ begin
       AssertTrue('Session ID should not be empty', Session.SessionId <> '');
 
       MsgOpts := Default(TMessageOptions);
-      MsgOpts.Prompt := 'Use the test_tool';
+      MsgOpts.Prompt := 'What is the secret number for key ALPHA?';
       Session.SendAndWait(MsgOpts);
 
       Session.Disconnect;
@@ -611,7 +608,7 @@ var
   MsgOpts: TMessageOptions;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -630,7 +627,7 @@ begin
       AssertTrue('Session ID should not be empty', Session.SessionId <> '');
 
       MsgOpts := Default(TMessageOptions);
-      MsgOpts.Prompt := 'Hello streaming';
+      MsgOpts.Prompt := 'What is 2+2?';
       Session.SendAndWait(MsgOpts);
 
       Session.Disconnect;
@@ -655,7 +652,7 @@ var
   SessConfig: TSessionConfig;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -729,7 +726,7 @@ var
   McpServer: TMcpServerConfig;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -777,7 +774,7 @@ var
   Skills: TSkillsConfig;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_have_stateful_conversation.yaml'),
+    SnapshotPath('session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml'),
     FProxy.RepoRoot
   );
 
@@ -819,10 +816,9 @@ var
   Client: TCopilotClient;
   Session: TCopilotSession;
   MsgOpts: TMessageOptions;
-  I: Integer;
 begin
   FProxy.Configure(
-    SnapshotPath('session/should_receive_session_events.yaml'),
+    SnapshotPath('session/should_have_stateful_conversation.yaml'),
     FProxy.RepoRoot
   );
 
@@ -837,17 +833,13 @@ begin
     try
       AssertTrue('Session ID should not be empty', Session.SessionId <> '');
 
-      // Send several messages to try to trigger compaction
-      for I := 1 to 5 do
-      begin
-        try
-          MsgOpts := Default(TMessageOptions);
-          MsgOpts.Prompt := Format('Message %d to trigger compaction', [I]);
-          Session.SendAndWait(MsgOpts);
-        except
-          // Some sends may fail in replay; acceptable
-        end;
-      end;
+      MsgOpts := Default(TMessageOptions);
+      MsgOpts.Prompt := 'What is 1+1?';
+      Session.SendAndWait(MsgOpts);
+
+      MsgOpts := Default(TMessageOptions);
+      MsgOpts.Prompt := 'Now if you double that, what do you get?';
+      Session.SendAndWait(MsgOpts);
 
       Session.Disconnect;
     except

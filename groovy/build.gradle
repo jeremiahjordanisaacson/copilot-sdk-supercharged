@@ -28,6 +28,9 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // ByteBuddy required by Spock for mocking concrete classes
+    testImplementation 'net.bytebuddy:byte-buddy:1.14.18'
+    testImplementation 'org.objenesis:objenesis:3.3'
 }
 
 test {

@@ -147,7 +147,7 @@
       (fn [c]
         (let [sess (client/create-session! c)]
           ;; First turn
-          (let [result1 (session/send-and-wait! sess {:prompt "What is 2+2?"} 30000)]
+          (let [result1 (session/send-and-wait! sess {:prompt "What is 1+1?"} 30000)]
             (when result1
               (is (= "assistant.message" (:type result1))
                   "First turn should produce an assistant.message")
@@ -155,7 +155,7 @@
                   "First turn data should not be nil")))
 
           ;; Follow-up turn in same session
-          (let [result2 (session/send-and-wait! sess {:prompt "And what is 3+3?"} 30000)]
+          (let [result2 (session/send-and-wait! sess {:prompt "Now if you double that, what do you get?"} 30000)]
             (when result2
               (is (= "assistant.message" (:type result2))
                   "Second turn should produce an assistant.message")
@@ -163,22 +163,16 @@
                   "Second turn data should not be nil"))))))))
 
 (deftest test-session-resume
-  (testing "Create a session, capture its ID, stop the client, then resume with a new client"
-    (let [sid (atom nil)]
-      ;; First client: create a session and record its ID
-      (with-client
-        (fn [c]
-          (let [sess (client/create-session! c)]
-            (reset! sid (session/session-id sess))
-            (is (string? @sid) "Should capture a session ID"))))
-
-      ;; Second client: resume the session by its ID
-      (when (seq @sid)
-        (with-client
-          (fn [c2]
+  (testing "Create a session, capture its ID, then resume with the same client"
+    (with-client
+      (fn [c]
+        (let [sess (client/create-session! c)
+              sid  (session/session-id sess)]
+          (is (string? sid) "Should capture a session ID")
+          (when (seq sid)
             (try
-              (let [resumed (client/resume-session! c2 @sid)]
-                (is (= @sid (session/session-id resumed))
+              (let [resumed (client/resume-session! c sid)]
+                (is (= sid (session/session-id resumed))
                     "Resumed session should have the same ID"))
               (catch Exception e
                 ;; Proxy may not have a matching snapshot for resume
@@ -322,19 +316,22 @@
       (fn [c]
         (let [tool-called (atom false)
               test-tool   (define-tool/define-tool
-                            "get_weather"
-                            "Get the current weather for a city"
+                            "get_secret_number"
+                            "Gets the secret number"
                             {:type       "object"
-                             :properties {"city" {:type        "string"
-                                                  :description "City name"}}}
+                             :properties {"key" {:type        "string"
+                                                  :description "Key"}}
+                             :required   ["key"]}
                             (fn [args _invocation]
                               (reset! tool-called true)
-                              (str "Weather in " (get args "city") ": 72°F, sunny")))
+                              (if (= "ALPHA" (get args "key"))
+                                "54321"
+                                "unknown")))
               events      (atom [])
               sess        (client/create-session! c :tools [test-tool])
               _unsub      (session/on! sess (fn [e] (swap! events conj e)))]
           (try
-            (session/send-and-wait! sess {:prompt "What is the weather in Seattle?"} 30000)
+            (session/send-and-wait! sess {:prompt "What is the secret number for key ALPHA?"} 30000)
             ;; We expect events to have been emitted
             (is (pos? (count @events))
                 "Should have received events during tool session")
@@ -448,13 +445,13 @@
         (let [events (atom [])
               sess   (client/create-session! c)
               _unsub (session/on! sess (fn [e] (swap! events conj e)))]
-          ;; Send several messages to potentially trigger compaction
+          ;; Send two turns using the stateful conversation snapshot
           (try
-            (dotimes [i 3]
-              (session/send-and-wait!
-                sess
-                {:prompt (str "Message number " (inc i) ". Tell me something.")}
-                30000))
+            (session/send-and-wait! sess {:prompt "What is 1+1?"} 30000)
+            (session/send-and-wait!
+              sess
+              {:prompt "Now if you double that, what do you get?"}
+              30000)
             (catch Exception e
               (is (instance? Exception e)
                   "Compaction multi-send threw (proxy snapshot may be missing)")))

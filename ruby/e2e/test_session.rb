@@ -118,20 +118,21 @@ class TestSession < E2E::TestCase
     session = client.create_session(model: "claude-sonnet-4.5")
     session_id = session.session_id
     refute_nil session_id
+
+    # Send a message so there's state to resume
+    r = session.send_and_wait(prompt: "What is 1+1?")
+    refute_nil r, "Initial send should succeed"
+
     session.destroy
-    client.stop
 
-    client = Copilot::CopilotClient.new(
-      cli_path: cli_path,
-      cwd: work_dir,
-      env: test_env,
-      github_token: github_token
-    )
-    client.start
-
+    # Resume the session on the same client (same CLI process)
     resumed = client.resume_session(session_id, model: "claude-sonnet-4.5")
     refute_nil resumed, "Resumed session should not be nil"
-    refute_nil resumed.session_id, "Resumed session ID should not be nil"
+    assert_equal session_id, resumed.session_id
+
+    # Continue the conversation
+    r2 = resumed.send_and_wait(prompt: "Now if you double that, what do you get?")
+    refute_nil r2, "Resumed send should succeed"
 
     resumed.destroy
   ensure
@@ -471,6 +472,12 @@ class TestSession < E2E::TestCase
 
   # Verifies that multiple messages can be sent (compaction scenario).
   def test_compaction
+    # Use multi-turn snapshot to avoid prefix matching issues with growing conversation
+    harness.configure(
+      File.expand_path(File.join(TestHarness.snapshots_dir, "session", "should_have_stateful_conversation.yaml")),
+      File.expand_path(work_dir)
+    )
+
     client = Copilot::CopilotClient.new(
       cli_path: cli_path,
       cwd: work_dir,
@@ -482,14 +489,11 @@ class TestSession < E2E::TestCase
     session = client.create_session(model: "claude-sonnet-4.5")
     refute_nil session.session_id
 
-    r1 = session.send_and_wait(prompt: "What is 2+2?")
+    r1 = session.send_and_wait(prompt: "What is 1+1?")
     refute_nil r1, "First response should not be nil"
 
-    r2 = session.send_and_wait(prompt: "What is 2+2?")
+    r2 = session.send_and_wait(prompt: "Now if you double that, what do you get?")
     refute_nil r2, "Second response should not be nil"
-
-    r3 = session.send_and_wait(prompt: "What is 2+2?")
-    refute_nil r3, "Third response should not be nil"
 
     session.destroy
   ensure

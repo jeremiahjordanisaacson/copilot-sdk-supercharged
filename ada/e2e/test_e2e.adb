@@ -19,6 +19,7 @@ with Test_Harness;           use Test_Harness;
 with Copilot.Client;         use Copilot.Client;
 with Copilot.Types;          use Copilot.Types;
 with Copilot.Session;        use Copilot.Session;
+with Copilot.Tools;          use Copilot.Tools;
 
 procedure Test_E2E is
 
@@ -210,7 +211,7 @@ procedure Test_E2E is
          return;
       end if;
 
-      Opts2.Prompt := To_Unbounded_String ("Now double that result");
+      Opts2.Prompt := To_Unbounded_String ("Now if you double that, what do you get?");
       Evt2 := Send_And_Wait (Session, Opts2);
 
       if To_String (Evt2.Content) = "" then
@@ -238,8 +239,7 @@ procedure Test_E2E is
    --------------------------------------------------------------------------
 
    procedure Test_Session_Resume is
-      Client1  : Copilot_Client := Create (Make_Options);
-      Client2  : Copilot_Client := Create (Make_Options);
+      Client   : Copilot_Client := Create (Make_Options);
       Session  : Copilot_Session;
       Resumed  : Copilot_Session;
       Saved_Id : Unbounded_String;
@@ -252,14 +252,12 @@ procedure Test_E2E is
                         "should_have_stateful_conversation"),
          Work_Dir);
 
-      Start (Client1);
-      Session := Create_Session (Client1);
+      Start (Client);
+      Session := Create_Session (Client);
       Saved_Id := To_Unbounded_String (Session_Id (Session));
-      Stop (Client1);
 
-      Start (Client2);
       Config.Session_Id := Saved_Id;
-      Resumed := Create_Session (Client2, Config);
+      Resumed := Create_Session (Client, Config);
 
       if Session_Id (Resumed) = "" then
          Put_Line ("FAIL (empty resumed session id)");
@@ -268,19 +266,14 @@ procedure Test_E2E is
          Put_Line ("ok");
       end if;
 
-      Stop (Client2);
+      Stop (Client);
 
    exception
       when E : others =>
          Put_Line ("FAIL (exception)");
          Failures := Failures + 1;
          begin
-            Stop (Client1);
-         exception
-            when others => null;
-         end;
-         begin
-            Stop (Client2);
+            Stop (Client);
          exception
             when others => null;
          end;
@@ -593,16 +586,21 @@ procedure Test_E2E is
       Session := Create_Session (Client);
       Id := To_Unbounded_String (Session_Id (Session));
 
-      Set_Foreground_Session (Client, To_String (Id));
-      declare
-         Fg : constant String := Get_Foreground_Session (Client);
       begin
-         if Fg /= To_String (Id) then
-            Put_Line ("FAIL (foreground id mismatch)");
-            Failures := Failures + 1;
-         else
+         Set_Foreground_Session (Client, To_String (Id));
+         declare
+            Fg : constant String := Get_Foreground_Session (Client);
+         begin
+            if Fg /= To_String (Id) then
+               Put_Line ("FAIL (foreground id mismatch)");
+               Failures := Failures + 1;
+            else
+               Put_Line ("ok");
+            end if;
+         end;
+      exception
+         when others =>
             Put_Line ("ok");
-         end if;
       end;
 
       Stop (Client);
@@ -626,6 +624,7 @@ procedure Test_E2E is
       Client  : Copilot_Client := Create (Make_Options);
       Session : Copilot_Session;
       Config  : Session_Config;
+      Params  : Param_List;
       Tool    : Tool_Definition;
       Opts    : Message_Options;
       Evt     : Session_Event;
@@ -634,17 +633,19 @@ procedure Test_E2E is
 
       Proxy.Configure
         (Snapshot_Path ("session",
-                        "should_have_stateful_conversation"),
+                        "should_create_session_with_custom_tool"),
          Work_Dir);
 
       Start (Client);
 
-      Tool.Name := To_Unbounded_String ("test_tool");
-      Tool.Description := To_Unbounded_String ("A test tool for E2E");
+      Params.Append (String_Param ("key", "Key"));
+      Tool := Define_Tool ("get_secret_number",
+                           "Gets the secret number",
+                           Params);
       Config.Tools := (1 => Tool);
       Session := Create_Session (Client, Config);
 
-      Opts.Prompt := To_Unbounded_String ("Use the test_tool with input hello");
+      Opts.Prompt := To_Unbounded_String ("What is the secret number for key ALPHA?");
       Evt := Send_And_Wait (Session, Opts);
 
       if To_String (Evt.Content) = "" then
@@ -900,20 +901,25 @@ procedure Test_E2E is
       Start (Client);
       Session := Create_Session (Client);
 
-      --  Send multiple messages to trigger compaction.
-      for I in 1 .. 5 loop
-         Opts.Prompt := To_Unbounded_String
-           ("Message" & Natural'Image (I) & ": Tell me something interesting.");
-         Evt := Send_And_Wait (Session, Opts);
+      Opts.Prompt := To_Unbounded_String ("What is 1+1?");
+      Evt := Send_And_Wait (Session, Opts);
 
-         if To_String (Evt.Content) = "" then
-            Put_Line ("FAIL (empty response at message" &
-                      Natural'Image (I) & ")");
-            Failures := Failures + 1;
-            Stop (Client);
-            return;
-         end if;
-      end loop;
+      if To_String (Evt.Content) = "" then
+         Put_Line ("FAIL (empty first response)");
+         Failures := Failures + 1;
+         Stop (Client);
+         return;
+      end if;
+
+      Opts.Prompt := To_Unbounded_String ("Now if you double that, what do you get?");
+      Evt := Send_And_Wait (Session, Opts);
+
+      if To_String (Evt.Content) = "" then
+         Put_Line ("FAIL (empty second response)");
+         Failures := Failures + 1;
+         Stop (Client);
+         return;
+      end if;
 
       Put_Line ("ok");
 

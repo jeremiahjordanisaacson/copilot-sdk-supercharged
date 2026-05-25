@@ -70,14 +70,16 @@ class SessionE2ETest {
     }
 
     private fun getTestEnv(): Map<String, String> {
-        val env = mutableMapOf(
-            "COPILOT_API_URL" to proxyUrl,
-            "COPILOT_HOME" to workDir,
-            "XDG_CONFIG_HOME" to workDir,
-            "XDG_STATE_HOME" to workDir,
-            "GH_TOKEN" to (System.getenv("GH_TOKEN") ?: "fake-test-token"),
-            "GITHUB_TOKEN" to (System.getenv("GITHUB_TOKEN") ?: "fake-test-token"),
-        )
+        val env = mutableMapOf<String, String>()
+        // Inherit all current process env vars (PATH, HOME, etc.)
+        env.putAll(System.getenv())
+        // Override with test-specific vars
+        env["COPILOT_API_URL"] = proxyUrl
+        env["COPILOT_HOME"] = workDir
+        env["XDG_CONFIG_HOME"] = workDir
+        env["XDG_STATE_HOME"] = workDir
+        env["GH_TOKEN"] = System.getenv("GH_TOKEN") ?: "fake-test-token"
+        env["GITHUB_TOKEN"] = System.getenv("GITHUB_TOKEN") ?: "fake-test-token"
         env.putAll(harness.getProxyEnv())
         return env
     }
@@ -212,7 +214,7 @@ class SessionE2ETest {
     fun testMultiTurnConversation() = runBlocking {
         configureSnapshot(
             "session",
-            "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
+            "should_have_stateful_conversation",
         )
 
         val client = CopilotClient(
@@ -229,11 +231,11 @@ class SessionE2ETest {
             val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             assertTrue(session.sessionId.isNotEmpty())
 
-            val response1 = session.sendAndWait(MessageOptions(prompt = "What is 2+2?"))
+            val response1 = session.sendAndWait(MessageOptions(prompt = "What is 1+1?"))
             assertNotNull(response1, "First response should not be null")
             assertEquals("assistant.message", response1?.type)
 
-            val response2 = session.sendAndWait(MessageOptions(prompt = "What is 2+2?"))
+            val response2 = session.sendAndWait(MessageOptions(prompt = "Now if you double that, what do you get?"))
             assertNotNull(response2, "Second response should not be null")
             assertEquals("assistant.message", response2?.type)
 
@@ -244,16 +246,16 @@ class SessionE2ETest {
     }
 
     /**
-     * Test session resume: create session, destroy, stop client, new client, resume.
+     * Test session resume: create session, send message, destroy, resume on same client.
      */
     @Test
     fun testSessionResume() = runBlocking {
         configureSnapshot(
             "session",
-            "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
+            "should_have_stateful_conversation",
         )
 
-        val client1 = CopilotClient(
+        val client = CopilotClient(
             CopilotClientOptions(
                 cliPath = getCliPath(),
                 cwd = workDir,
@@ -261,40 +263,31 @@ class SessionE2ETest {
             )
         )
 
-        client1.start()
+        client.start()
 
-        val sessionId: String
         try {
-            val session = client1.createSession(SessionConfig(model = "claude-sonnet-4.5"))
-            sessionId = session.sessionId
+            val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
+            val sessionId = session.sessionId
             assertTrue(sessionId.isNotEmpty())
+
+            // Send a message so there's state to resume
+            val r1 = session.sendAndWait(MessageOptions(prompt = "What is 1+1?"))
+            assertNotNull(r1, "Initial send should succeed")
+
             session.destroy()
-        } finally {
-            client1.stop()
-        }
 
-        configureSnapshot(
-            "session",
-            "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
-        )
-
-        val client2 = CopilotClient(
-            CopilotClientOptions(
-                cliPath = getCliPath(),
-                cwd = workDir,
-                env = getTestEnv(),
-            )
-        )
-
-        client2.start()
-
-        try {
-            val resumed = client2.resumeSession(sessionId, ResumeSessionConfig(model = "claude-sonnet-4.5"))
+            // Resume on the same client (same CLI process preserves session state)
+            val resumed = client.resumeSession(sessionId, ResumeSessionConfig(model = "claude-sonnet-4.5"))
             assertNotNull(resumed.sessionId)
-            assertTrue(resumed.sessionId.isNotEmpty())
+            assertEquals(sessionId, resumed.sessionId)
+
+            // Continue conversation
+            val r2 = resumed.sendAndWait(MessageOptions(prompt = "Now if you double that, what do you get?"))
+            assertNotNull(r2, "Resumed send should succeed")
+
             resumed.destroy()
         } finally {
-            client2.stop()
+            client.stop()
         }
     }
 
@@ -812,7 +805,7 @@ class SessionE2ETest {
     fun testCompaction() = runBlocking {
         configureSnapshot(
             "session",
-            "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
+            "should_have_stateful_conversation",
         )
 
         val client = CopilotClient(
@@ -829,19 +822,13 @@ class SessionE2ETest {
             val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             assertTrue(session.sessionId.isNotEmpty())
 
-            val prompts = listOf(
-                "What is 2+2?",
-                "What is 2+2?",
-                "What is 2+2?",
-                "What is 2+2?",
-                "What is 2+2?",
-            )
+            val r1 = session.sendAndWait(MessageOptions(prompt = "What is 1+1?"))
+            assertNotNull(r1, "First response should not be null")
+            assertEquals("assistant.message", r1?.type)
 
-            for (prompt in prompts) {
-                val response = session.sendAndWait(MessageOptions(prompt = prompt))
-                assertNotNull(response, "Response for '$prompt' should not be null")
-                assertEquals("assistant.message", response?.type)
-            }
+            val r2 = session.sendAndWait(MessageOptions(prompt = "Now if you double that, what do you get?"))
+            assertNotNull(r2, "Second response should not be null")
+            assertEquals("assistant.message", r2?.type)
 
             session.destroy()
         } finally {

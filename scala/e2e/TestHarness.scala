@@ -38,7 +38,10 @@ object TestHarness:
 
   /** Environment variables that route the CLI through the proxy. */
   def testEnv(workDir: String): Map[String, String] =
-   val base = scala.collection.mutable.Map[String, String](
+   // Start with parent environment so PATH and other system vars are inherited
+   val base = scala.collection.mutable.Map[String, String]()
+   base ++= scala.jdk.CollectionConverters.MapHasAsScala(System.getenv()).asScala
+   base ++= Seq(
      "COPILOT_API_URL" -> proxyUrl,
      "COPILOT_HOME" -> workDir,
      "XDG_CONFIG_HOME" -> workDir,
