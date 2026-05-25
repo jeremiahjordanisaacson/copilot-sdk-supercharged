@@ -18,6 +18,7 @@ public class SystemMessageConfig {
     private String content;
     private Map<String, SectionOverride> sections;
 
+    /** Creates a new system message configuration with default values. */
     public SystemMessageConfig() {}
 
     // Builder-style setters
@@ -34,9 +35,22 @@ public class SystemMessageConfig {
     public static SystemMessageConfig append() { return new SystemMessageConfig().mode("append"); }
     public static SystemMessageConfig append(String content) { return new SystemMessageConfig().mode("append").content(content); }
     public static SystemMessageConfig replace(String content) { return new SystemMessageConfig().mode("replace").content(content); }
+    /**
+     * Creates a customize-mode configuration with section overrides.
+     *
+     * @param sections the section overrides
+     * @return the system message configuration
+     */
     public static SystemMessageConfig customize(Map<String, SectionOverride> sections) {
         return new SystemMessageConfig().mode("customize").sections(sections);
     }
+    /**
+     * Creates a customize-mode configuration with section overrides and content.
+     *
+     * @param sections the section overrides
+     * @param content the additional content
+     * @return the system message configuration
+     */
     public static SystemMessageConfig customize(Map<String, SectionOverride> sections, String content) {
         return new SystemMessageConfig().mode("customize").sections(sections).content(content);
     }

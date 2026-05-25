@@ -127,10 +127,14 @@ readListeningUrl h = do
 stopProxy :: ProxyHandle -> IO ()
 stopProxy ph = do
   -- Best-effort graceful stop via HTTP
-  sendStopRequest (phUrl ph) `catch` \(_ :: SomeException) -> pure ()
+  sendStopRequest (phUrl ph) `catch` ignoreException
   terminateProcess (phProcess ph)
   _ <- waitForProcess (phProcess ph)
-  hClose (phStdout ph) `catch` \(_ :: SomeException) -> pure ()
+  hClose (phStdout ph) `catch` ignoreException
+
+-- | Ignore any exception (used for best-effort cleanup).
+ignoreException :: SomeException -> IO ()
+ignoreException _ = pure ()
 
 -- | Send a POST to /stop on the proxy. We use a simple shell curl to avoid
 -- pulling in an HTTP client dependency just for tests.

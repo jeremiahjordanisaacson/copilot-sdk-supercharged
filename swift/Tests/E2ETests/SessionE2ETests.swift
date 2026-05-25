@@ -122,7 +122,7 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
 
             // Session ID must be non-empty
@@ -155,7 +155,7 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
 
             let sessionId = await session.sessionId
@@ -206,7 +206,7 @@ final class SessionE2ETests: XCTestCase {
         do {
             // If sessionFs config was invalid, start() or createSession() would throw
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
 
             let sessionId = await session.sessionId
@@ -235,7 +235,7 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
 
             let response1 = try await session.sendAndWait(
@@ -272,7 +272,7 @@ final class SessionE2ETests: XCTestCase {
         var savedSessionId: String = ""
         do {
             let session = try await client1.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
             savedSessionId = await session.sessionId
             XCTAssertFalse(savedSessionId.isEmpty)
@@ -298,7 +298,7 @@ final class SessionE2ETests: XCTestCase {
         do {
             let resumed = try await client2.resumeSession(
                 savedSessionId,
-                config: ResumeSessionConfig(model: "gpt-4")
+                config: ResumeSessionConfig(model: "claude-sonnet-4.5")
             )
             let resumedId = await resumed.sessionId
             XCTAssertEqual(resumedId, savedSessionId, "Resumed session ID should match original")
@@ -325,10 +325,10 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session1 = try await client.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
             let session2 = try await client.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
 
             let sessions = try await client.listSessions()
@@ -358,7 +358,7 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
             let sessionId = await session.sessionId
 
@@ -388,7 +388,7 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
             let sessionId = await session.sessionId
             XCTAssertFalse(sessionId.isEmpty)
@@ -506,7 +506,7 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
             let sessionId = await session.sessionId
 
@@ -546,7 +546,7 @@ final class SessionE2ETests: XCTestCase {
             }
 
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4", tools: [tool])
+                SessionConfig(model: "claude-sonnet-4.5", tools: [tool])
             )
 
             let sessionId = await session.sessionId
@@ -580,7 +580,7 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4", streaming: true)
+                SessionConfig(model: "claude-sonnet-4.5", streaming: true)
             )
 
             let deltasCollector = DeltasCollector()
@@ -620,7 +620,7 @@ final class SessionE2ETests: XCTestCase {
             )
 
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4", systemMessage: systemMessage)
+                SessionConfig(model: "claude-sonnet-4.5", systemMessage: systemMessage)
             )
 
             let sessionId = await session.sessionId
@@ -656,7 +656,7 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
             let sessionId = await session.sessionId
             XCTAssertFalse(sessionId.isEmpty, "Session with fs provider should have a valid ID")
@@ -689,7 +689,7 @@ final class SessionE2ETests: XCTestCase {
             )
 
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4", mcpServers: ["test-mcp": mcpServer])
+                SessionConfig(model: "claude-sonnet-4.5", mcpServers: ["test-mcp": mcpServer])
             )
 
             let sessionId = await session.sessionId
@@ -718,7 +718,7 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4", skillDirectories: ["/skills"])
+                SessionConfig(model: "claude-sonnet-4.5", skillDirectories: ["/skills"])
             )
 
             let sessionId = await session.sessionId
@@ -747,7 +747,7 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let session = try await client.createSession(
-                SessionConfig(model: "gpt-4")
+                SessionConfig(model: "claude-sonnet-4.5")
             )
 
             let prompts = [

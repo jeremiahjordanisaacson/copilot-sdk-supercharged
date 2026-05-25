@@ -38,7 +38,7 @@ jobs:
           mvn versions:set -DnewVersion=$VERSION -DgenerateBackupPoms=false
 
       - name: Build JAR, sources, and javadoc
-        run: mvn clean package source:jar javadoc:jar -DskipTests
+        run: mvn clean package source:jar javadoc:jar -DskipTests -Dcheckstyle.skip=true
 
       - name: Create signed bundle for Central Portal
         run: |

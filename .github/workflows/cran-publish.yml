@@ -51,7 +51,9 @@ jobs:
         run: |
           Rscript -e '
           pkg <- list.files(pattern = "copilot\\.sdk\\.supercharged_.+\\.tar\\.gz")
-          devtools::submit_cran(pkg)
+          if (length(pkg) == 0) stop("No package tarball found")
+          devtools::submit_cran(pkg, args = "--no-manual")
           '
         env:
           CRAN_MAINTAINER_EMAIL: ${{ secrets.CRAN_MAINTAINER_EMAIL }}
+          CI: true

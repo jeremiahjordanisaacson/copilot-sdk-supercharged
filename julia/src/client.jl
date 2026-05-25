@@ -38,7 +38,7 @@ mutable struct CopilotClient
     state::ConnectionState
     sessions::Dict{String, CopilotSession}
 
-    CopilotClient(opts::CopilotClientOptions=CopilotClientOptions()) =
+    CopilotClient(opts::CopilotClientOptions) =
         new(opts, nothing, nothing, DISCONNECTED, Dict{String, CopilotSession}())
 end
 

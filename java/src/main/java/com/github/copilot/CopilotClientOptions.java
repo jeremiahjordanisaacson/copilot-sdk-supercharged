@@ -32,6 +32,7 @@ public class CopilotClientOptions {
     /** Provider for distributed trace context. */
     private Types.TraceContextProvider onGetTraceContext;
 
+    /** Creates new client options with default values. */
     public CopilotClientOptions() {}
 
     // Builder-style setters

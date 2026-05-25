@@ -40,7 +40,7 @@ end
         client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
 
         @test session isa CopilotSession
         @test !isempty(session.session_id)
@@ -56,7 +56,7 @@ end
         # Collect assistant messages via event handler
         messages = String[]
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             on_event=function (event)
                 if event.type == "assistant.message"
                     content = get(event.data, "content", "")
@@ -100,7 +100,7 @@ end
 
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
         @test session isa CopilotSession
 
         disconnect(session)
@@ -114,7 +114,7 @@ end
 
         messages = String[]
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             on_event=function (event)
                 if event.type == "assistant.message"
                     content = get(event.data, "content", "")
@@ -148,7 +148,7 @@ end
         client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
         original_id = session.session_id
         @test !isempty(original_id)
 
@@ -160,7 +160,7 @@ end
         start!(client2)
 
         try
-            resumed = resume_session(client2, original_id, SessionConfig(model="gpt-4"))
+            resumed = resume_session(client2, original_id, SessionConfig(model="claude-sonnet-4.5"))
             @test resumed isa CopilotSession
             @test resumed.session_id == original_id
             disconnect(resumed)
@@ -177,8 +177,8 @@ end
         client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        s1 = create_session(client, SessionConfig(model="gpt-4"))
-        s2 = create_session(client, SessionConfig(model="gpt-4"))
+        s1 = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
+        s2 = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
 
         @test s1.session_id != s2.session_id
 
@@ -199,7 +199,7 @@ end
         client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
         sid = session.session_id
 
         try
@@ -218,7 +218,7 @@ end
         client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
         sid = session.session_id
         @test haskey(client.sessions, sid)
 
@@ -300,7 +300,7 @@ end
         client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
         sid = session.session_id
 
         try
@@ -341,7 +341,7 @@ end
         start!(client)
 
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             tools=[my_tool],
             on_permission_request=approve_all,
         )
@@ -373,7 +373,7 @@ end
         deltas   = String[]
         finals   = String[]
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             streaming=true,
             on_event=function (event)
                 if event.type == "assistant.message_delta"
@@ -411,7 +411,7 @@ end
 
         messages = String[]
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             system_message="You are a pirate. Always respond in pirate speak.",
             on_event=function (event)
                 if event.type == "assistant.message"
@@ -454,7 +454,7 @@ end
 
         messages = String[]
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             on_event=function (event)
                 if event.type == "assistant.message"
                     content = get(event.data, "content", "")
@@ -493,7 +493,7 @@ end
         )
 
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             mcp_servers=mcp_servers,
         )
 
@@ -519,7 +519,7 @@ end
         start!(client)
 
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             skill_directories=["/home/user/skills", "/home/user/more-skills"],
             disabled_skills=["dangerous-skill"],
         )
@@ -550,7 +550,7 @@ end
         all_events = String[]
 
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             on_event=function (event)
                 push!(all_events, event.type)
                 if event.type == "session.compaction_start"

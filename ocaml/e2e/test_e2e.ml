@@ -88,7 +88,7 @@ let test_session_fs () =
   in
   ignore (Sys.command cmd);
   let session_url = url ^ "/v1/chat/sessions" in
-  let fs_body = {|{"model":"gpt-4","sessionFs":{"initialCwd":"/","sessionStatePath":"/session-state","conventions":"posix"}}|} in
+  let fs_body = {|{"model":"claude-sonnet-4.5","sessionFs":{"initialCwd":"/","sessionStatePath":"/session-state","conventions":"posix"}}|} in
   let ic = Unix.open_process_in (Printf.sprintf
     "curl -sf -X POST %s -H 'Content-Type: application/json' -H 'Authorization: Bearer fake-token-for-e2e-tests' -d '%s'"
     (Filename.quote session_url) fs_body)
@@ -161,7 +161,7 @@ let test_session_resume () =
   ignore (Sys.command cmd);
   (* Create first session *)
   let session_url = url ^ "/v1/chat/sessions" in
-  let session_body = {|{"model":"gpt-4"}|} in
+  let session_body = {|{"model":"claude-sonnet-4.5"}|} in
   let ic1 = Unix.open_process_in (Printf.sprintf
     "curl -sf -X POST %s -H 'Content-Type: application/json' -H 'Authorization: Bearer fake-token-for-e2e-tests' -d '%s'"
     (Filename.quote session_url) session_body)
@@ -200,7 +200,7 @@ let test_session_list () =
   ignore (Sys.command cmd);
   (* Create two sessions *)
   let session_url = url ^ "/v1/chat/sessions" in
-  let session_body = {|{"model":"gpt-4"}|} in
+  let session_body = {|{"model":"claude-sonnet-4.5"}|} in
   let ic1 = Unix.open_process_in (Printf.sprintf
     "curl -sf -X POST %s -H 'Content-Type: application/json' -H 'Authorization: Bearer fake-token-for-e2e-tests' -d '%s'"
     (Filename.quote session_url) session_body)
@@ -238,7 +238,7 @@ let test_session_metadata () =
   ignore (Sys.command cmd);
   (* Create a session *)
   let session_url = url ^ "/v1/chat/sessions" in
-  let session_body = {|{"model":"gpt-4"}|} in
+  let session_body = {|{"model":"claude-sonnet-4.5"}|} in
   let ic = Unix.open_process_in (Printf.sprintf
     "curl -sf -X POST %s -H 'Content-Type: application/json' -H 'Authorization: Bearer fake-token-for-e2e-tests' -d '%s'"
     (Filename.quote session_url) session_body)
@@ -270,7 +270,7 @@ let test_session_delete () =
   ignore (Sys.command cmd);
   (* Create a session *)
   let session_url = url ^ "/v1/chat/sessions" in
-  let session_body = {|{"model":"gpt-4"}|} in
+  let session_body = {|{"model":"claude-sonnet-4.5"}|} in
   let ic = Unix.open_process_in (Printf.sprintf
     "curl -sf -X POST %s -H 'Content-Type: application/json' -H 'Authorization: Bearer fake-token-for-e2e-tests' -d '%s'"
     (Filename.quote session_url) session_body)
@@ -402,7 +402,7 @@ let test_foreground_session () =
   ignore (Sys.command cmd);
   (* Create a session *)
   let session_url = url ^ "/v1/chat/sessions" in
-  let session_body = {|{"model":"gpt-4"}|} in
+  let session_body = {|{"model":"claude-sonnet-4.5"}|} in
   let ic = Unix.open_process_in (Printf.sprintf
     "curl -sf -X POST %s -H 'Content-Type: application/json' -H 'Authorization: Bearer fake-token-for-e2e-tests' -d '%s'"
     (Filename.quote session_url) session_body)
@@ -537,7 +537,7 @@ let test_session_fs_provider () =
   ignore (Sys.command cmd);
   (* POST with sessionFs provider configuration *)
   let session_url = url ^ "/v1/chat/sessions" in
-  let fs_body = {|{"model":"gpt-4","sessionFs":{"initialCwd":"/home","sessionStatePath":"/home/session-state","conventions":"posix"}}|} in
+  let fs_body = {|{"model":"claude-sonnet-4.5","sessionFs":{"initialCwd":"/home","sessionStatePath":"/home/session-state","conventions":"posix"}}|} in
   let ic = Unix.open_process_in (Printf.sprintf
     "curl -sf -X POST %s -H 'Content-Type: application/json' -H 'Authorization: Bearer fake-token-for-e2e-tests' -d '%s'"
     (Filename.quote session_url) fs_body)

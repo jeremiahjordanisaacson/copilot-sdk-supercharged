@@ -10,10 +10,17 @@ public class SectionOverride {
     private String action;
     private String content;
 
+    /** Creates a new section override with default values. */
     public SectionOverride() {}
 
     public SectionOverride(String action) { this.action = action; }
 
+    /**
+     * Creates a new section override.
+     *
+     * @param action the override action
+     * @param content the replacement content
+     */
     public SectionOverride(String action, String content) {
         this.action = action;
         this.content = content;

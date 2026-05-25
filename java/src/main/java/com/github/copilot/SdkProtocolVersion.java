@@ -14,6 +14,11 @@ public final class SdkProtocolVersion {
 
     private SdkProtocolVersion() {}
 
+    /**
+     * Returns the SDK protocol version.
+     *
+     * @return the SDK protocol version
+     */
     public static int get() {
         return SDK_PROTOCOL_VERSION;
     }

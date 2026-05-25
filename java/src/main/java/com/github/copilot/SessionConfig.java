@@ -53,6 +53,7 @@ public class SessionConfig {
     /** Handler for exit plan mode requests from the server. */
     private ExitPlanModeHandler onExitPlanMode;
 
+    /** Creates a new session configuration with default values. */
     public SessionConfig() {}
 
     // Builder-style setters

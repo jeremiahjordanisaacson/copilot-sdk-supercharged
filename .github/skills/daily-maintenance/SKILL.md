@@ -389,13 +389,89 @@ bash scripts/verify-version-sync.sh
 ### Step 6c: Create GitHub Release
 ```bash
 VERSION=$(node -p "require('./nodejs/package.json').version")
-gh release create "v$VERSION" \
-    --title "v$VERSION — Upstream Sync $(date +%Y-%m-%d)" \
-    --generate-notes \
-    --target main
+
+# Tag and push — this triggers ALL publish workflows automatically
+git tag "v$VERSION"
+git push origin "v$VERSION"
+
+# The tag push triggers these workflows automatically:
+# - release.yml         → Creates GitHub Release with SDK zip archives + checksums
+# - pypi-publish.yml    → Publishes to PyPI (needs PYPI_TOKEN secret)
+# - npm-publish.yml     → Publishes to npm (needs NPM_TOKEN secret)
+# - cargo-publish.yml   → Publishes to crates.io (needs CARGO_REGISTRY_TOKEN)
+# - rubygems-publish.yml → Publishes to RubyGems (needs RUBYGEMS_API_KEY)
+# - nuget-publish.yml   → Publishes to NuGet (needs NUGET_API_KEY)
+# - hex-publish.yml     → Publishes to Hex.pm (needs HEX_API_KEY)
+# - maven-publish.yml   → Publishes to Maven Central (needs MAVEN_* secrets)
+# - pub-publish.yml     → Publishes to pub.dev (needs PUB_DEV_CREDENTIALS)
+# - luarocks-publish.yml → Publishes to LuaRocks (needs LUAROCKS_API_KEY)
+# - cpan-publish.yml    → Publishes to CPAN (needs PAUSE_* secrets)
+# - clojars-publish.yml → Publishes to Clojars (needs CLOJARS_* secrets)
+# - hackage-publish.yml → Publishes to Hackage (needs HACKAGE_* secrets)
+# - cran-publish.yml    → Publishes to CRAN (needs CRAN_MAINTAINER_EMAIL)
+# - packagist-publish.yml → Publishes to Packagist (needs PACKAGIST_* secrets)
 ```
 
-### Step 6d: Post Discussion Announcement
+### Step 6d: Watch ALL Publish Workflows
+**DO NOT skip this step. Every publish must succeed.**
+
+```bash
+# Wait for publish workflows to complete
+sleep 120
+
+# Check all publish workflows for the tag
+TAG="v$VERSION"
+for wf in release pypi-publish npm-publish cargo-publish rubygems-publish nuget-publish \
+  hex-publish maven-publish pub-publish luarocks-publish cpan-publish clojars-publish \
+  hackage-publish cran-publish packagist-publish; do
+  RESULT=$(gh run list --workflow="${wf}.yml" --limit 1 \
+    --json status,conclusion,headBranch \
+    -q '.[0] | "\(.conclusion // .status)"' 2>/dev/null)
+  echo "$wf: $RESULT"
+done
+
+# If ANY show "failure": read logs, fix the workflow, and re-run
+# gh run view <ID> --log-failed | tail -50
+# Common fixes:
+# - Attestation runs before build → move attestation AFTER build step
+# - Expired token → user must regenerate (npm, PyPI, etc.)
+# - Missing secret → user must add to repo Settings > Secrets
+# - 403/401 → token permissions issue
+```
+
+### Step 6e: Verify Packages on Registries
+After workflows complete, verify the version is live:
+
+```bash
+# PyPI
+curl -sf https://pypi.org/pypi/copilot-sdk-supercharged/json | \
+  python3 -c "import sys,json; print('PyPI:', json.load(sys.stdin)['info']['version'])"
+
+# npm
+curl -sf https://registry.npmjs.org/copilot-sdk-supercharged/latest | \
+  python3 -c "import sys,json; print('npm:', json.load(sys.stdin)['version'])"
+
+# crates.io
+curl -sf https://crates.io/api/v1/crates/github-copilot-sdk | \
+  python3 -c "import sys,json; print('crates.io:', json.load(sys.stdin)['crate']['newest_version'])"
+
+# RubyGems
+curl -sf https://rubygems.org/api/v1/gems/copilot-sdk-supercharged.json | \
+  python3 -c "import sys,json; print('RubyGems:', json.load(sys.stdin)['version'])"
+
+# NuGet
+curl -sf "https://api.nuget.org/v3-flatcontainer/copilotsdk.supercharged/index.json" | \
+  python3 -c "import sys,json; print('NuGet:', json.load(sys.stdin)['versions'][-1])"
+
+# Hex
+curl -sf https://hex.pm/api/packages/copilot_sdk_supercharged | \
+  python3 -c "import sys,json; r=json.load(sys.stdin)['releases']; print('Hex:', r[0]['version'] if r else '?')"
+
+# If ANY registry shows the OLD version, the publish workflow failed.
+# Fix and re-trigger: gh workflow run "<workflow>.yml" --ref "v$VERSION"
+```
+
+### Step 6f: Post Discussion Announcement
 ```bash
 REPO_ID=$(gh api repos/jeremiahjordanisaacson/copilot-sdk-supercharged --jq '.node_id')
 VERSION=$(node -p "require('./nodejs/package.json').version")
@@ -411,7 +487,7 @@ mutation {
 }"
 ```
 
-### Step 6e: Close Sync Issue
+### Step 6g: Close Sync Issue
 ```bash
 gh issue list --state open --json number,title \
   --jq '.[] | select(.title | startswith("Upstream sync:")) | .number' | \
@@ -475,4 +551,8 @@ gh issue create --title "🚨 Rollback: upstream sync reverted" --body "Rolled b
 | Dependabot alerts | `cd <dir> && npm audit fix`. Check ALL package dirs. Must be 0 vulnerabilities. |
 | TypeScript build fails with TS5107/TS5110 | Update tsconfig: `module: "Node16"`, `moduleResolution: "node16"`, add `rootDir: "./src"` |
 | Additional SDKs didn't trigger | Path filters may skip — manually trigger: `gh workflow run "additional-sdk-tests.yml"` |
+| Publish workflow attestation fails | Attestation step runs BEFORE build step. Move it AFTER the build/package step. |
+| npm publish 403 "Two-factor authentication required" | npm token needs "bypass 2fa" enabled. User must regenerate at npmjs.com. |
+| PyPI still shows old version after release | Check `pypi-publish.yml` ran successfully. Verify with `curl https://pypi.org/pypi/copilot-sdk-supercharged/json`. |
+| Elixir version not updated by sed | Elixir uses `@version "X.X.X"` module attribute, NOT `version: "X.X.X"` in project(). Use `sed 's/@version ".*"/@version "NEW"/'` |
 | CI shows green locally but red on GitHub | Old run showing. Check the specific commit SHA matches HEAD. Old failures from previous commits don't count. |

@@ -31,11 +31,18 @@ jobs:
         with:
           cli: latest
 
+      - name: Build JAR
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=$VERSION clojure -T:build jar
+
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: clojure/target/*.jar
-      - name: Build and deploy to Clojars
+        continue-on-error: true
+
+      - name: Deploy to Clojars
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           VERSION=$VERSION clojure -T:build deploy

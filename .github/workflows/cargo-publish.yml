@@ -28,6 +28,9 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           sed -i "s/^version = .*/version = \"$VERSION\"/" Cargo.toml
 
+      - name: Package crate
+        run: cargo package --allow-dirty
+
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:

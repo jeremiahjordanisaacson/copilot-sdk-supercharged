@@ -131,7 +131,7 @@ describe("Lua SDK E2E", function()
 
             -- Create a session with explicit configuration
             local session, sess_err = client:create_session({
-                model = "gpt-4",
+                model = "claude-sonnet-4.5",
                 instructions = "You are a helpful coding assistant.",
                 agent = "copilot-chat",
             })

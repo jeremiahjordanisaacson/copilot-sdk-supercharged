@@ -290,6 +290,13 @@ public class CopilotClient {
         return session;
     }
 
+    /**
+     * Resumes an existing conversation session with default configuration.
+     *
+     * @param sessionId the session identifier
+     * @return the resumed session
+     * @throws Exception if the session cannot be resumed
+     */
     public CopilotSession resumeSession(String sessionId) throws Exception {
         return resumeSession(sessionId, null);
     }

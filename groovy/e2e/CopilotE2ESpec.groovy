@@ -52,7 +52,7 @@ class CopilotE2ESpec extends Specification {
 
         when: "the client starts and creates a session"
         client.start()
-        CopilotSession session = client.createSession(model: 'gpt-4')
+        CopilotSession session = client.createSession(model: 'claude-sonnet-4.5')
 
         then: "the session has a non-null ID"
         session != null
@@ -68,7 +68,7 @@ class CopilotE2ESpec extends Specification {
         given: "a connected client with an active session"
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
-        CopilotSession session = client.createSession(model: 'gpt-4')
+        CopilotSession session = client.createSession(model: 'claude-sonnet-4.5')
 
         when: "a message is sent and we wait for the response"
         SessionEvent result = session.sendAndWait('Hello!')
@@ -115,7 +115,7 @@ class CopilotE2ESpec extends Specification {
         given: "a connected client with an active session"
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
-        CopilotSession session = client.createSession(model: 'gpt-4')
+        CopilotSession session = client.createSession(model: 'claude-sonnet-4.5')
 
         when: "two messages are sent sequentially"
         SessionEvent first = session.sendAndWait('What is 2+2?')
@@ -138,7 +138,7 @@ class CopilotE2ESpec extends Specification {
         given: "a session created on one client"
         CopilotClient client1 = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client1.start()
-        CopilotSession original = client1.createSession(model: 'gpt-4')
+        CopilotSession original = client1.createSession(model: 'claude-sonnet-4.5')
         String savedId = original.sessionId
 
         when: "we stop the first client and resume the session on a second client"
@@ -146,7 +146,7 @@ class CopilotE2ESpec extends Specification {
         client1.stop()
         CopilotClient client2 = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client2.start()
-        CopilotSession resumed = client2.resumeSession(savedId, model: 'gpt-4')
+        CopilotSession resumed = client2.resumeSession(savedId, model: 'claude-sonnet-4.5')
 
         then: "the resumed session has the same ID"
         resumed != null
@@ -161,8 +161,8 @@ class CopilotE2ESpec extends Specification {
         given: "a client with two active sessions"
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
-        CopilotSession s1 = client.createSession(model: 'gpt-4')
-        CopilotSession s2 = client.createSession(model: 'gpt-4')
+        CopilotSession s1 = client.createSession(model: 'claude-sonnet-4.5')
+        CopilotSession s2 = client.createSession(model: 'claude-sonnet-4.5')
 
         when: "listing all sessions"
         List<Types.SessionMetadata> sessions = client.listSessions()
@@ -183,7 +183,7 @@ class CopilotE2ESpec extends Specification {
         given: "a connected client with an active session"
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
-        CopilotSession session = client.createSession(model: 'gpt-4')
+        CopilotSession session = client.createSession(model: 'claude-sonnet-4.5')
 
         when: "metadata is retrieved for the session"
         Map<String, Object> metadata = client.getSessionMetadata(session.sessionId)
@@ -201,7 +201,7 @@ class CopilotE2ESpec extends Specification {
         given: "a connected client with an active session"
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
-        CopilotSession session = client.createSession(model: 'gpt-4')
+        CopilotSession session = client.createSession(model: 'claude-sonnet-4.5')
         String deletedId = session.sessionId
 
         when: "the session is deleted"
@@ -289,7 +289,7 @@ class CopilotE2ESpec extends Specification {
         given: "a connected client with a session"
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
-        CopilotSession session = client.createSession(model: 'gpt-4')
+        CopilotSession session = client.createSession(model: 'claude-sonnet-4.5')
 
         when: "the session is set as the foreground session"
         client.setForegroundSessionId(session.sessionId)
@@ -322,7 +322,7 @@ class CopilotE2ESpec extends Specification {
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(
-            model: 'gpt-4',
+            model: 'claude-sonnet-4.5',
             tools: [weatherTool]
         )
 
@@ -342,7 +342,7 @@ class CopilotE2ESpec extends Specification {
         given: "a client with a streaming session"
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
-        CopilotSession session = client.createSession(model: 'gpt-4', streaming: true)
+        CopilotSession session = client.createSession(model: 'claude-sonnet-4.5', streaming: true)
 
         and: "a collector for streaming delta events"
         List<SessionEvent> deltas = Collections.synchronizedList(new ArrayList<SessionEvent>())
@@ -368,7 +368,7 @@ class CopilotE2ESpec extends Specification {
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(
-            model: 'gpt-4',
+            model: 'claude-sonnet-4.5',
             systemMessage: [
                 content: 'You are a pirate. Always respond in pirate speak.',
                 mode   : 'append'
@@ -402,7 +402,7 @@ class CopilotE2ESpec extends Specification {
             sessionFs: fsConfig
         )
         client.start()
-        CopilotSession session = client.createSession(model: 'gpt-4')
+        CopilotSession session = client.createSession(model: 'claude-sonnet-4.5')
 
         when: "a message is sent within the sessionFs-enabled session"
         SessionEvent result = session.sendAndWait('Summarize the project')
@@ -430,7 +430,7 @@ class CopilotE2ESpec extends Specification {
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(
-            model: 'gpt-4',
+            model: 'claude-sonnet-4.5',
             mcpServers: mcpServers
         )
 
@@ -450,7 +450,7 @@ class CopilotE2ESpec extends Specification {
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(
-            model: 'gpt-4',
+            model: 'claude-sonnet-4.5',
             skillDirectories: skillDirs
         )
 
@@ -468,7 +468,7 @@ class CopilotE2ESpec extends Specification {
         CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(
-            model: 'gpt-4',
+            model: 'claude-sonnet-4.5',
             infiniteSessions: new Types.InfiniteSessionConfig().with {
                 enabled = true
                 backgroundCompactionThreshold = 0.5

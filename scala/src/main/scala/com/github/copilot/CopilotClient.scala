@@ -68,8 +68,8 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     options.useLoggedInUser.getOrElse(!options.githubToken.isDefined)
 
   // Validate options
-  if options.cliUrl.isDefined && (options.useStdio || options.cliPath.isDefined) then
-    throw new IllegalArgumentException("cliUrl is mutually exclusive with useStdio and cliPath")
+  if options.cliUrl.isDefined && options.cliPath.isDefined then
+    throw new IllegalArgumentException("cliUrl is mutually exclusive with cliPath")
   if options.cliUrl.isDefined && (options.githubToken.isDefined || options.useLoggedInUser.isDefined) then
     throw new IllegalArgumentException(
       "githubToken and useLoggedInUser cannot be used with cliUrl (external server manages its own auth)"

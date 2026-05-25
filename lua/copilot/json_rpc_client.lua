@@ -75,9 +75,9 @@ function JsonRpcClient:request(method, params)
     -- Create an entry so the read loop can fill in the response
     self._pending_requests[id] = { result = nil, error = nil, done = false }
 
-    -- If we are inside a coroutine, yield until the response arrives
-    local co = coroutine.running()
-    if co then
+    -- If we are inside a coroutine (not the main thread), yield until the response arrives
+    local co, is_main = coroutine.running()
+    if co and not is_main then
         self._pending_requests[id].co = co
         -- Yield control back to the read loop driver
         local res_result, res_err = coroutine.yield()

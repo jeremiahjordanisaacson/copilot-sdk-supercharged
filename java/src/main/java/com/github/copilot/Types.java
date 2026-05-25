@@ -51,8 +51,16 @@ public final class Types {
         @JsonProperty("sessionLog") public String sessionLog;
         @JsonProperty("toolTelemetry") public Map<String, Object> toolTelemetry;
 
+        /** Creates an empty tool result object. */
         public ToolResultObject() {}
 
+        /**
+         * Creates a tool result object.
+         *
+         * @param textResultForLlm the result text to expose to the model
+         * @param resultType the result type
+         * @param error the error message, if any
+         */
         public ToolResultObject(String textResultForLlm, String resultType, String error) {
             this.textResultForLlm = textResultForLlm;
             this.resultType = resultType;
@@ -68,6 +76,14 @@ public final class Types {
         public String toolName;
         public Object arguments;
 
+        /**
+         * Creates a tool invocation context.
+         *
+         * @param sessionId the session identifier
+         * @param toolCallId the tool call identifier
+         * @param toolName the tool name
+         * @param arguments the tool arguments
+         */
         public ToolInvocation(String sessionId, String toolCallId, String toolName, Object arguments) {
             this.sessionId = sessionId;
             this.toolCallId = toolCallId;
@@ -83,6 +99,14 @@ public final class Types {
         public Map<String, Object> parameters;
         public ToolHandler handler;
 
+        /**
+         * Creates a tool definition.
+         *
+         * @param name the tool name
+         * @param description the tool description
+         * @param parameters the tool parameter schema
+         * @param handler the tool handler
+         */
         public Tool(String name, String description, Map<String, Object> parameters, ToolHandler handler) {
             this.name = name;
             this.description = description;
@@ -94,6 +118,14 @@ public final class Types {
     /** Functional interface for tool handlers. */
     @FunctionalInterface
     public interface ToolHandler {
+        /**
+         * Handles a tool invocation.
+         *
+         * @param args the tool arguments
+         * @param invocation the invocation metadata
+         * @return the tool result
+         * @throws Exception if tool execution fails
+         */
         Object handle(Object args, ToolInvocation invocation) throws Exception;
     }
 
@@ -121,13 +153,28 @@ public final class Types {
         public String kind;
         public List<Object> rules;
 
+        /** Creates an empty permission request result. */
         public PermissionRequestResult() {}
+
+        /**
+         * Creates a permission request result with the given kind.
+         *
+         * @param kind the permission decision kind
+         */
         public PermissionRequestResult(String kind) { this.kind = kind; }
     }
 
     /** Functional interface for permission request handlers. */
     @FunctionalInterface
     public interface PermissionHandler {
+        /**
+         * Handles a permission request.
+         *
+         * @param request the permission request
+         * @param sessionId the session identifier
+         * @return the permission request result
+         * @throws Exception if handling fails
+         */
         PermissionRequestResult handle(PermissionRequest request, String sessionId) throws Exception;
     }
 
@@ -144,6 +191,12 @@ public final class Types {
         public String answer;
         public boolean wasFreeform;
 
+        /**
+         * Creates a user input response.
+         *
+         * @param answer the user's answer
+         * @param wasFreeform whether the answer was freeform
+         */
         public UserInputResponse(String answer, boolean wasFreeform) {
             this.answer = answer;
             this.wasFreeform = wasFreeform;
@@ -153,6 +206,14 @@ public final class Types {
     /** Functional interface for user input handlers. */
     @FunctionalInterface
     public interface UserInputHandler {
+        /**
+         * Handles a user input request.
+         *
+         * @param request the user input request
+         * @param sessionId the session identifier
+         * @return the user input response
+         * @throws Exception if handling fails
+         */
         UserInputResponse handle(UserInputRequest request, String sessionId) throws Exception;
     }
 
@@ -163,8 +224,17 @@ public final class Types {
         public String commandName;
         public String args;
 
+        /** Creates an empty command context. */
         public CommandContext() {}
 
+        /**
+         * Creates a command context.
+         *
+         * @param sessionId the session identifier
+         * @param command the raw command input
+         * @param commandName the command name
+         * @param args the command arguments
+         */
         public CommandContext(String sessionId, String command, String commandName, String args) {
             this.sessionId = sessionId;
             this.command = command;
@@ -176,6 +246,12 @@ public final class Types {
     /** Handler invoked when a registered slash-command is executed. */
     @FunctionalInterface
     public interface CommandHandler {
+        /**
+         * Handles a slash-command invocation.
+         *
+         * @param context the command context
+         * @throws Exception if handling fails
+         */
         void handle(CommandContext context) throws Exception;
     }
 
@@ -185,8 +261,16 @@ public final class Types {
         public String description;
         public CommandHandler handler;
 
+        /** Creates an empty command definition. */
         public CommandDefinition() {}
 
+        /**
+         * Creates a command definition.
+         *
+         * @param name the command name
+         * @param description the command description
+         * @param handler the command handler
+         */
         public CommandDefinition(String name, String description, CommandHandler handler) {
             this.name = name;
             this.description = description;
@@ -203,6 +287,7 @@ public final class Types {
         public String elicitationSource;
         public String url;
 
+        /** Creates an empty elicitation context. */
         public ElicitationContext() {}
     }
 
@@ -211,8 +296,15 @@ public final class Types {
         public String action;
         public Map<String, Object> content;
 
+        /** Creates an empty elicitation result. */
         public ElicitationResult() {}
 
+        /**
+         * Creates an elicitation result.
+         *
+         * @param action the selected action
+         * @param content the collected content
+         */
         public ElicitationResult(String action, Map<String, Object> content) {
             this.action = action;
             this.content = content;
@@ -222,6 +314,13 @@ public final class Types {
     /** Handler for elicitation requests. */
     @FunctionalInterface
     public interface ElicitationHandler {
+        /**
+         * Handles an elicitation request.
+         *
+         * @param context the elicitation context
+         * @return the elicitation result
+         * @throws Exception if handling fails
+         */
         ElicitationResult handle(ElicitationContext context) throws Exception;
     }
 
@@ -254,6 +353,12 @@ public final class Types {
     public static class MCPStdioServerConfig extends MCPServerConfig {
         public MCPStdioServerConfig() { this.type = "stdio"; }
 
+        /**
+         * Creates a stdio MCP server configuration.
+         *
+         * @param command the server command
+         * @param args the server arguments
+         */
         public MCPStdioServerConfig(String command, List<String> args) {
             this.type = "stdio";
             this.command = command;
@@ -266,6 +371,11 @@ public final class Types {
     public static class MCPHTTPServerConfig extends MCPServerConfig {
         public MCPHTTPServerConfig() { this.type = "sse"; }
 
+        /**
+         * Creates an HTTP MCP server configuration.
+         *
+         * @param url the server URL
+         */
         public MCPHTTPServerConfig(String url) {
             this.type = "sse";
             this.url = url;
@@ -324,12 +434,14 @@ public final class Types {
         public ModelSupports supports;
         public ModelLimits limits;
 
+        /** Supported features for a model. */
         @JsonIgnoreProperties(ignoreUnknown = true)
         public static class ModelSupports {
             public boolean vision;
             @JsonProperty("reasoningEffort") public boolean reasoningEffort;
         }
 
+        /** Token limits for a model. */
         @JsonIgnoreProperties(ignoreUnknown = true)
         public static class ModelLimits {
             @JsonProperty("max_prompt_tokens") public Integer maxPromptTokens;
@@ -394,12 +506,22 @@ public final class Types {
     /** Functional interface for session lifecycle handlers. */
     @FunctionalInterface
     public interface SessionLifecycleHandler {
+        /**
+         * Handles a session lifecycle event.
+         *
+         * @param event the session lifecycle event
+         */
         void handle(SessionLifecycleEvent event);
     }
 
     /** Functional interface for session event handlers. */
     @FunctionalInterface
     public interface SessionEventHandler {
+        /**
+         * Handles a session event.
+         *
+         * @param event the session event
+         */
         void handle(SessionEvent event);
     }
 
@@ -417,8 +539,16 @@ public final class Types {
         @JsonProperty("quality") public String quality;
         @JsonProperty("style") public String style;
 
+        /** Creates empty image options. */
         public ImageOptions() {}
 
+        /**
+         * Creates image options.
+         *
+         * @param size the image size
+         * @param quality the image quality
+         * @param style the image style
+         */
         public ImageOptions(String size, String quality, String style) {
             this.size = size;
             this.quality = quality;
@@ -475,15 +605,104 @@ public final class Types {
      * Implementors provide file operations scoped to a session.
      */
     public interface SessionFsProvider {
+        /**
+         * Reads a file from the session filesystem.
+         *
+         * @param sessionId the session identifier
+         * @param path the file path
+         * @return the file contents
+         * @throws Exception if reading fails
+         */
         String readFile(String sessionId, String path) throws Exception;
+
+        /**
+         * Writes a file in the session filesystem.
+         *
+         * @param sessionId the session identifier
+         * @param path the file path
+         * @param content the file contents
+         * @throws Exception if writing fails
+         */
         void writeFile(String sessionId, String path, String content) throws Exception;
+
+        /**
+         * Appends content to a file in the session filesystem.
+         *
+         * @param sessionId the session identifier
+         * @param path the file path
+         * @param content the content to append
+         * @throws Exception if the append fails
+         */
         void appendFile(String sessionId, String path, String content) throws Exception;
+
+        /**
+         * Checks whether a path exists in the session filesystem.
+         *
+         * @param sessionId the session identifier
+         * @param path the path to check
+         * @return true if the path exists
+         * @throws Exception if the check fails
+         */
         boolean exists(String sessionId, String path) throws Exception;
+
+        /**
+         * Returns metadata for a path in the session filesystem.
+         *
+         * @param sessionId the session identifier
+         * @param path the path to inspect
+         * @return the file metadata
+         * @throws Exception if the lookup fails
+         */
         SessionFsFileInfo stat(String sessionId, String path) throws Exception;
+
+        /**
+         * Creates a directory in the session filesystem.
+         *
+         * @param sessionId the session identifier
+         * @param path the directory path
+         * @param recursive whether to create parent directories
+         * @throws Exception if creation fails
+         */
         void mkdir(String sessionId, String path, boolean recursive) throws Exception;
+
+        /**
+         * Lists directory entries in the session filesystem.
+         *
+         * @param sessionId the session identifier
+         * @param path the directory path
+         * @return the directory entry names
+         * @throws Exception if reading fails
+         */
         List<String> readdir(String sessionId, String path) throws Exception;
+
+        /**
+         * Lists directory entries with type metadata.
+         *
+         * @param sessionId the session identifier
+         * @param path the directory path
+         * @return the directory entries with metadata
+         * @throws Exception if reading fails
+         */
         List<SessionFsFileInfo> readdirWithTypes(String sessionId, String path) throws Exception;
+
+        /**
+         * Removes a path from the session filesystem.
+         *
+         * @param sessionId the session identifier
+         * @param path the path to remove
+         * @param recursive whether to remove directories recursively
+         * @throws Exception if removal fails
+         */
         void rm(String sessionId, String path, boolean recursive) throws Exception;
+
+        /**
+         * Renames a path in the session filesystem.
+         *
+         * @param sessionId the session identifier
+         * @param oldPath the current path
+         * @param newPath the new path
+         * @throws Exception if renaming fails
+         */
         void rename(String sessionId, String oldPath, String newPath) throws Exception;
     }
 
@@ -497,13 +716,27 @@ public final class Types {
     public static class ExitPlanModeResponse {
         public boolean approved;
 
+        /** Creates an empty exit plan mode response. */
         public ExitPlanModeResponse() {}
+
+        /**
+         * Creates an exit plan mode response.
+         *
+         * @param approved whether the request was approved
+         */
         public ExitPlanModeResponse(boolean approved) { this.approved = approved; }
     }
 
     /** Functional interface for exit plan mode handlers. */
     @FunctionalInterface
     public interface ExitPlanModeHandler {
+        /**
+         * Handles an exit plan mode request.
+         *
+         * @param request the exit plan mode request
+         * @return the exit plan mode response
+         * @throws Exception if handling fails
+         */
         ExitPlanModeResponse handle(ExitPlanModeRequest request) throws Exception;
     }
 
@@ -517,6 +750,12 @@ public final class Types {
     /** Provider that returns a trace context for outbound requests. */
     @FunctionalInterface
     public interface TraceContextProvider {
+        /**
+         * Returns the trace context for an outbound request.
+         *
+         * @return the trace context
+         * @throws Exception if the trace context cannot be created
+         */
         TraceContext getTraceContext() throws Exception;
     }
 

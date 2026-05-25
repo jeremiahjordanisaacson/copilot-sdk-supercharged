@@ -108,7 +108,7 @@ class SessionE2ETest {
         client.start()
 
         try {
-            val session = client.createSession(SessionConfig(model = "gpt-4"))
+            val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
 
             // Session ID must be non-empty
             assertNotNull(session.sessionId, "Session ID should not be null")
@@ -144,7 +144,7 @@ class SessionE2ETest {
         client.start()
 
         try {
-            val session = client.createSession(SessionConfig(model = "gpt-4"))
+            val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             assertTrue(session.sessionId.isNotEmpty())
 
             val response = session.sendAndWait(MessageOptions(prompt = "What is 1+1?"))
@@ -194,7 +194,7 @@ class SessionE2ETest {
 
         try {
             // If sessionFs config was invalid, start() or createSession() would throw
-            val session = client.createSession(SessionConfig(model = "gpt-4"))
+            val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             assertTrue(session.sessionId.isNotEmpty())
 
             session.destroy()
@@ -226,7 +226,7 @@ class SessionE2ETest {
         client.start()
 
         try {
-            val session = client.createSession(SessionConfig(model = "gpt-4"))
+            val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             assertTrue(session.sessionId.isNotEmpty())
 
             val response1 = session.sendAndWait(MessageOptions(prompt = "What is 1+1?"))
@@ -265,7 +265,7 @@ class SessionE2ETest {
 
         val sessionId: String
         try {
-            val session = client1.createSession(SessionConfig(model = "gpt-4"))
+            val session = client1.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             sessionId = session.sessionId
             assertTrue(sessionId.isNotEmpty())
             session.destroy()
@@ -289,7 +289,7 @@ class SessionE2ETest {
         client2.start()
 
         try {
-            val resumed = client2.resumeSession(sessionId, ResumeSessionConfig(model = "gpt-4"))
+            val resumed = client2.resumeSession(sessionId, ResumeSessionConfig(model = "claude-sonnet-4.5"))
             assertNotNull(resumed.sessionId)
             assertTrue(resumed.sessionId.isNotEmpty())
             resumed.destroy()
@@ -319,8 +319,8 @@ class SessionE2ETest {
         client.start()
 
         try {
-            val session1 = client.createSession(SessionConfig(model = "gpt-4"))
-            val session2 = client.createSession(SessionConfig(model = "gpt-4"))
+            val session1 = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
+            val session2 = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             assertTrue(session1.sessionId.isNotEmpty())
             assertTrue(session2.sessionId.isNotEmpty())
 
@@ -355,7 +355,7 @@ class SessionE2ETest {
         client.start()
 
         try {
-            val session = client.createSession(SessionConfig(model = "gpt-4"))
+            val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             assertTrue(session.sessionId.isNotEmpty())
 
             val metadata = client.getSessionMetadata(session.sessionId)
@@ -388,7 +388,7 @@ class SessionE2ETest {
         client.start()
 
         try {
-            val session = client.createSession(SessionConfig(model = "gpt-4"))
+            val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             val id = session.sessionId
             assertTrue(id.isNotEmpty())
 
@@ -540,7 +540,7 @@ class SessionE2ETest {
         client.start()
 
         try {
-            val session = client.createSession(SessionConfig(model = "gpt-4"))
+            val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             val id = session.sessionId
             assertTrue(id.isNotEmpty())
 
@@ -593,7 +593,7 @@ class SessionE2ETest {
 
         try {
             val session = client.createSession(
-                SessionConfig(model = "gpt-4", tools = listOf(echoTool, greetTool))
+                SessionConfig(model = "claude-sonnet-4.5", tools = listOf(echoTool, greetTool))
             )
             assertTrue(session.sessionId.isNotEmpty())
 
@@ -628,7 +628,7 @@ class SessionE2ETest {
 
         try {
             val session = client.createSession(
-                SessionConfig(model = "gpt-4", streaming = true)
+                SessionConfig(model = "claude-sonnet-4.5", streaming = true)
             )
             assertTrue(session.sessionId.isNotEmpty())
 
@@ -667,7 +667,7 @@ class SessionE2ETest {
         try {
             val session = client.createSession(
                 SessionConfig(
-                    model = "gpt-4",
+                    model = "claude-sonnet-4.5",
                     systemMessage = SystemMessageConfig(
                         mode = "replace",
                         content = "You are a helpful test assistant.",
@@ -714,7 +714,7 @@ class SessionE2ETest {
         client.start()
 
         try {
-            val session = client.createSession(SessionConfig(model = "gpt-4"))
+            val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             assertNotNull(session.sessionId)
             assertTrue(session.sessionId.isNotEmpty())
 
@@ -758,7 +758,7 @@ class SessionE2ETest {
             )
 
             val session = client.createSession(
-                SessionConfig(model = "gpt-4", mcpServers = mcpServers)
+                SessionConfig(model = "claude-sonnet-4.5", mcpServers = mcpServers)
             )
             assertNotNull(session.sessionId)
             assertTrue(session.sessionId.isNotEmpty())
@@ -792,7 +792,7 @@ class SessionE2ETest {
         try {
             val session = client.createSession(
                 SessionConfig(
-                    model = "gpt-4",
+                    model = "claude-sonnet-4.5",
                     skillDirectories = listOf(workDir),
                 )
             )
@@ -826,7 +826,7 @@ class SessionE2ETest {
         client.start()
 
         try {
-            val session = client.createSession(SessionConfig(model = "gpt-4"))
+            val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             assertTrue(session.sessionId.isNotEmpty())
 
             val prompts = listOf(

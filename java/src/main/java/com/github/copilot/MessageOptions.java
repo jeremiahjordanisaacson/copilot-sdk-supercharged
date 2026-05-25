@@ -18,6 +18,11 @@ public class MessageOptions {
     /** Custom HTTP headers to include in outbound model requests for this turn. */
     private Map<String, String> requestHeaders;
 
+    /**
+     * Creates message options for the given prompt.
+     *
+     * @param prompt the message prompt
+     */
     public MessageOptions(String prompt) {
         this.prompt = prompt;
     }

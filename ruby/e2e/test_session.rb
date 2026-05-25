@@ -17,7 +17,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "gpt-4")
+    session = client.create_session(model: "claude-sonnet-4.5")
     assert session, "Session should not be nil"
     refute_nil session.session_id, "Session ID should not be nil"
     refute_empty session.session_id, "Session ID should not be empty"
@@ -37,7 +37,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "gpt-4")
+    session = client.create_session(model: "claude-sonnet-4.5")
     refute_nil session.session_id
 
     response = session.send_and_wait(prompt: "What is 1+1?")
@@ -69,7 +69,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "gpt-4")
+    session = client.create_session(model: "claude-sonnet-4.5")
     refute_nil session, "Session should be created"
     refute_nil session.session_id
     refute_empty session.session_id, "Session ID should not be empty"
@@ -89,7 +89,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "gpt-4")
+    session = client.create_session(model: "claude-sonnet-4.5")
     refute_nil session.session_id
 
     response1 = session.send_and_wait(prompt: "What is 2+2?")
@@ -115,7 +115,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "gpt-4")
+    session = client.create_session(model: "claude-sonnet-4.5")
     session_id = session.session_id
     refute_nil session_id
     session.destroy
@@ -129,7 +129,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    resumed = client.resume_session(session_id, model: "gpt-4")
+    resumed = client.resume_session(session_id, model: "claude-sonnet-4.5")
     refute_nil resumed, "Resumed session should not be nil"
     refute_nil resumed.session_id, "Resumed session ID should not be nil"
 
@@ -148,8 +148,8 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    s1 = client.create_session(model: "gpt-4")
-    s2 = client.create_session(model: "gpt-4")
+    s1 = client.create_session(model: "claude-sonnet-4.5")
+    s2 = client.create_session(model: "claude-sonnet-4.5")
 
     sessions = client.list_sessions
     refute_nil sessions, "Sessions list should not be nil"
@@ -172,7 +172,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "gpt-4")
+    session = client.create_session(model: "claude-sonnet-4.5")
     refute_nil session.session_id
 
     metadata = client.get_session_metadata(session.session_id)
@@ -193,7 +193,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "gpt-4")
+    session = client.create_session(model: "claude-sonnet-4.5")
     session_id = session.session_id
     refute_nil session_id
 
@@ -291,7 +291,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "gpt-4")
+    session = client.create_session(model: "claude-sonnet-4.5")
     session_id = session.session_id
     refute_nil session_id
 
@@ -334,7 +334,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "gpt-4", tools: [weather_tool])
+    session = client.create_session(model: "claude-sonnet-4.5", tools: [weather_tool])
     refute_nil session.session_id
 
     response = session.send_and_wait(prompt: "What is the weather in Seattle?")
@@ -355,7 +355,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "gpt-4", streaming: true)
+    session = client.create_session(model: "claude-sonnet-4.5", streaming: true)
     refute_nil session.session_id
 
     events = []
@@ -387,7 +387,7 @@ class TestSession < E2E::TestCase
     client.start
 
     session = client.create_session(
-      model: "gpt-4",
+      model: "claude-sonnet-4.5",
       system_message: "You are a helpful Ruby assistant."
     )
     refute_nil session, "Session with system message should be created"
@@ -414,7 +414,7 @@ class TestSession < E2E::TestCase
       session_state_path: File.join(work_dir, "state")
     )
 
-    session = client.create_session(model: "gpt-4")
+    session = client.create_session(model: "claude-sonnet-4.5")
     refute_nil session, "Session should be created after fs provider set"
     refute_nil session.session_id
 
@@ -434,7 +434,7 @@ class TestSession < E2E::TestCase
     client.start
 
     session = client.create_session(
-      model: "gpt-4",
+      model: "claude-sonnet-4.5",
       mcp_servers: [
         { name: "test-server", url: "http://localhost:9999" }
       ]
@@ -458,7 +458,7 @@ class TestSession < E2E::TestCase
     client.start
 
     session = client.create_session(
-      model: "gpt-4",
+      model: "claude-sonnet-4.5",
       skills: ["code-review", "documentation"]
     )
     refute_nil session, "Session with skills config should be created"
@@ -479,7 +479,7 @@ class TestSession < E2E::TestCase
     )
     client.start
 
-    session = client.create_session(model: "gpt-4")
+    session = client.create_session(model: "claude-sonnet-4.5")
     refute_nil session.session_id
 
     r1 = session.send_and_wait(prompt: "First message")

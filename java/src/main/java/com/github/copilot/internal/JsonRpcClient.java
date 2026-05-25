@@ -35,14 +35,28 @@ public class JsonRpcClient {
 
     @FunctionalInterface
     public interface RequestHandler {
+        /**
+         * Handles an incoming JSON-RPC request.
+         *
+         * @param params the request parameters
+         * @return the response payload
+         * @throws Exception if request handling fails
+         */
         Map<String, Object> handle(Map<String, Object> params) throws Exception;
     }
 
+    /**
+     * Creates a JSON-RPC client.
+     *
+     * @param inputStream the input stream to read from
+     * @param outputStream the output stream to write to
+     */
     public JsonRpcClient(InputStream inputStream, OutputStream outputStream) {
         this.inputStream = inputStream;
         this.outputStream = outputStream;
     }
 
+    /** Starts the JSON-RPC reader loop. */
     public void start() {
         if (running) return;
         running = true;
@@ -51,6 +65,7 @@ public class JsonRpcClient {
         readThread.start();
     }
 
+    /** Stops the client and fails pending requests. */
     public void stop() {
         running = false;
         handlerExecutor.shutdownNow();
@@ -64,10 +79,21 @@ public class JsonRpcClient {
         pendingRequests.clear();
     }
 
+    /**
+     * Sets the notification handler.
+     *
+     * @param handler the notification handler
+     */
     public void setNotificationHandler(BiConsumer<String, Map<String, Object>> handler) {
         this.notificationHandler = handler;
     }
 
+    /**
+     * Registers a handler for an incoming request method.
+     *
+     * @param method the request method name
+     * @param handler the request handler, or null to remove it
+     */
     public void setRequestHandler(String method, RequestHandler handler) {
         if (handler == null) {
             requestHandlers.remove(method);
@@ -84,6 +110,16 @@ public class JsonRpcClient {
         return request(method, params, 30, TimeUnit.SECONDS);
     }
 
+    /**
+     * Sends a JSON-RPC request and waits for the response.
+     *
+     * @param method the request method
+     * @param params the request parameters
+     * @param timeout the request timeout
+     * @param unit the timeout unit
+     * @return the response payload
+     * @throws Exception if the request fails or times out
+     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> request(String method, Object params, long timeout, TimeUnit unit) throws Exception {
         String requestId = UUID.randomUUID().toString();
@@ -255,8 +291,16 @@ public class JsonRpcClient {
         }
     }
 
+    /** Exception thrown when a JSON-RPC request returns an error. */
     public static class JsonRpcException extends Exception {
         public final int code;
+
+        /**
+         * Creates a JSON-RPC exception.
+         *
+         * @param code the JSON-RPC error code
+         * @param message the error message
+         */
         public JsonRpcException(int code, String message) {
             super("JSON-RPC Error " + code + ": " + message);
             this.code = code;
