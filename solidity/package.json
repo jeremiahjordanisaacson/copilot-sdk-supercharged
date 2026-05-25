@@ -15,7 +15,7 @@
     },
     "scripts": {
         "build": "tsc",
-        "test": "npx vitest run",
+        "test": "vitest run",
         "test:watch": "vitest",
         "lint": "tsc --noEmit",
         "clean": "rimraf dist"
