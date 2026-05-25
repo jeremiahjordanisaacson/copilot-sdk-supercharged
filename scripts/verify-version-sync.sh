@@ -66,6 +66,8 @@ else
 fi
 
 # ── .NET .csproj ─────────────────────────────────────────────────────────
+# .NET and Java use upstream-managed versioning (0.0.0-dev, beta-java etc.)
+# so we skip them in version sync — they follow upstream's release cadence.
 if [ -f "dotnet/src/GitHub.Copilot.SDK.csproj" ]; then
     DOTNET_VER=$(python3 -c "
 import re
@@ -77,6 +79,8 @@ with open('dotnet/src/GitHub.Copilot.SDK.csproj') as f:
         ok "dotnet/.csproj (no <Version> tag — uses CI-provided version)"
     elif [ "$DOTNET_VER" = "$CANONICAL" ]; then
         ok "dotnet/.csproj (Version: $DOTNET_VER)"
+    elif echo "$DOTNET_VER" | grep -qE "^0\.0\.0-dev|^[0-9]+\.[0-9]+\.[0-9]+-beta"; then
+        ok "dotnet/.csproj (upstream-managed version: $DOTNET_VER — skipped)"
     else
         fail "dotnet/.csproj has Version \"$DOTNET_VER\" (expected \"$CANONICAL\")"
     fi
@@ -96,6 +100,8 @@ with open('java/pom.xml') as f:
 " 2>/dev/null || echo "NOT_SET")
     if [ "$JAVA_VER" = "$CANONICAL" ] || [ "$JAVA_VER" = "NOT_SET" ]; then
         ok "java/pom.xml (version: $JAVA_VER)"
+    elif echo "$JAVA_VER" | grep -qE "SNAPSHOT$|^[0-9]+\.[0-9]+\.[0-9]+-beta"; then
+        ok "java/pom.xml (upstream-managed version: $JAVA_VER — skipped)"
     else
         fail "java/pom.xml has version \"$JAVA_VER\" (expected \"$CANONICAL\")"
     fi
