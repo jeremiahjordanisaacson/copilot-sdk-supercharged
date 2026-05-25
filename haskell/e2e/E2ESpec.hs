@@ -82,7 +82,7 @@ spec = do
         T.length sid `shouldSatisfy` (> 0)
 
         -- Graceful shutdown
-        stopClient client
+        void $ stopClient client
         stAfter <- getClientState client
         stAfter `shouldBe` Disconnected
 
@@ -112,7 +112,7 @@ spec = do
           Just evt -> seType evt `shouldBe` "assistant.message"
           Nothing  -> expectationFailure "Expected an assistant.message event but got Nothing"
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 3: Configure sessionFs provider
@@ -144,7 +144,7 @@ spec = do
         let sid = sessionId session
         T.length sid `shouldSatisfy` (> 0)
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 4: Multi-turn conversation
@@ -184,7 +184,7 @@ spec = do
           Just evt -> seType evt `shouldBe` "assistant.message"
           Nothing  -> expectationFailure "Expected assistant.message for second turn"
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 5: Session resume
@@ -226,7 +226,7 @@ spec = do
         sids `shouldSatisfy` elem (sessionId s1)
         sids `shouldSatisfy` elem (sessionId s2)
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 7: Session metadata
@@ -244,7 +244,7 @@ spec = do
           Just _  -> True
           Nothing -> False
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 8: Delete a session
@@ -267,7 +267,7 @@ spec = do
           Right Nothing  -> pure ()
           Right (Just _) -> pure ()  -- server may still return stale data
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 9: List models
@@ -285,7 +285,7 @@ spec = do
         T.length (miId firstModel) `shouldSatisfy` (> 0)
         T.length (miName firstModel) `shouldSatisfy` (> 0)
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 10: Ping
@@ -297,9 +297,9 @@ spec = do
 
         resp <- ping client (Just "hello")
         pingMessage resp `shouldBe` "hello"
-        pingTimestamp resp `shouldSatisfy` (> 0)
+        T.length (pingTimestamp resp) `shouldSatisfy` (> 0)
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 11: Auth status
@@ -314,7 +314,7 @@ spec = do
         -- the isAuthenticated field should be a valid Bool
         gasIsAuthenticated authResp `shouldSatisfy` const True
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 12: Client lifecycle — start → Connected, stop → Disconnected
@@ -350,7 +350,7 @@ spec = do
         mFg <- getForegroundSessionId client
         mFg `shouldBe` Just sid
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 14: Tools — register a tool, verify tool call events
@@ -398,7 +398,7 @@ spec = do
         events <- readIORef eventsRef
         events `shouldSatisfy` (not . null)
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 15: Streaming events
@@ -434,7 +434,7 @@ spec = do
         -- There should be at least one assistant-related event
         eventTypes `shouldSatisfy` any (\t -> "assistant" `T.isPrefixOf` t)
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 16: System message configuration
@@ -471,7 +471,7 @@ spec = do
           Just evt -> seType evt `shouldBe` "assistant.message"
           Nothing  -> expectationFailure "Expected assistant.message with system message"
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 17: SessionFs variant — verify session with fs config
@@ -516,7 +516,7 @@ spec = do
           Just evt -> seType evt `shouldBe` "assistant.message"
           Nothing  -> expectationFailure "Expected response with sessionFs variant"
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 18: MCP servers configuration
@@ -546,7 +546,7 @@ spec = do
           Right session -> T.length (sessionId session) `shouldSatisfy` (> 0)
           Left _err     -> pure ()  -- MCP server not found is acceptable
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 19: Skills configuration
@@ -568,7 +568,7 @@ spec = do
           Right session -> T.length (sessionId session) `shouldSatisfy` (> 0)
           Left _err     -> pure ()  -- gracefully accept if the CLI rejects it
 
-        stopClient client
+        void $ stopClient client
 
       -- ----------------------------------------------------------------
       -- Test 20: Compaction — send messages to trigger compaction events
@@ -620,4 +620,4 @@ spec = do
         -- If compaction happened, great; if not, the session still works
         evts `shouldSatisfy` const True
 
-        stopClient client
+        void $ stopClient client

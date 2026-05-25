@@ -217,7 +217,7 @@ let test_get_status_response_of_yojson () =
 
 let test_version_constants () =
   Alcotest.(check int) "sdk_protocol_version" 3 Version.sdk_protocol_version;
-  Alcotest.(check int) "min_protocol_version" 2 Version.min_protocol_version;
+  Alcotest.(check int) "min_protocol_version" 3 Version.min_protocol_version;
   Alcotest.(check string) "sdk_name"
     "copilot-sdk-supercharged-ocaml" Version.sdk_name
 

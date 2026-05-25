@@ -23,8 +23,8 @@ subtest 'session create and disconnect' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -44,8 +44,8 @@ subtest 'send message' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -65,9 +65,9 @@ subtest 'session fs config' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
-        session_fs => {
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
+        session_fs   => {
             initial_cwd        => File::Spec->tmpdir(),
             session_state_path => File::Spec->catdir(File::Spec->tmpdir(), 'copilot-state'),
         },
@@ -88,8 +88,8 @@ subtest 'multi-turn conversation' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -112,8 +112,8 @@ subtest 'session resume' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -124,8 +124,8 @@ subtest 'session resume' => sub {
     $client->stop();
 
     my $client2 = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client2->start();
 
@@ -144,8 +144,8 @@ subtest 'session list' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -167,8 +167,8 @@ subtest 'session metadata' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -188,8 +188,8 @@ subtest 'session delete' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -214,8 +214,8 @@ subtest 'model list' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -234,8 +234,8 @@ subtest 'ping' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -254,8 +254,8 @@ subtest 'auth status' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -274,8 +274,8 @@ subtest 'client lifecycle' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
     is($client->state(), 'connected', 'Client is connected after start');
@@ -294,8 +294,8 @@ subtest 'foreground session' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -318,8 +318,8 @@ subtest 'tools' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -349,8 +349,8 @@ subtest 'streaming' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -370,8 +370,8 @@ subtest 'system message customization' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -395,9 +395,9 @@ subtest 'session fs provider' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
-        session_fs => {
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
+        session_fs   => {
             initial_cwd        => File::Spec->tmpdir(),
             session_state_path => File::Spec->catdir(File::Spec->tmpdir(), 'copilot-state'),
             conventions        => 'posix',
@@ -421,8 +421,8 @@ subtest 'mcp servers config' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -445,8 +445,8 @@ subtest 'skills config' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 
@@ -469,8 +469,8 @@ subtest 'compaction' => sub {
     $proxy->configure('test/snapshots/basic.yaml', $repo_root);
 
     my $client = GitHub::Copilot::Client->new(
-        cli_url    => $proxy->url(),
-        auto_start => 0,
+        env          => $proxy->get_proxy_env(),
+        github_token => 'fake-token-for-e2e-tests',
     );
     $client->start();
 

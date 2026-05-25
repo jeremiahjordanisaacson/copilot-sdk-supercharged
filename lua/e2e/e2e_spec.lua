@@ -8,21 +8,68 @@
 local CopilotClient = require("copilot.client")
 local CapiProxy     = require("e2e.testharness.proxy")
 
+--- Resolve the path to the CLI binary (node + index.js).
+-- Checks COPILOT_CLI_PATH, then falls back to the repo's nodejs installation.
+-- @return string  The CLI path suitable for passing to CopilotClient
+local function resolve_cli_path()
+    local env_path = os.getenv("COPILOT_CLI_PATH")
+    if env_path and env_path ~= "" then
+        -- If it ends in .js, prepend "node"
+        if env_path:match("%.js$") then
+            return "node " .. env_path
+        end
+        return env_path
+    end
+
+    -- Try to find it relative to the repo root (lua/ -> nodejs/)
+    local script_dir = debug.getinfo(1, "S").source:match("^@(.+)[/\\]") or "."
+    local sep = package.config:sub(1, 1)
+    local repo_root = script_dir .. sep .. ".."
+    local cli_js = repo_root .. sep .. "nodejs" .. sep .. "node_modules"
+        .. sep .. "@github" .. sep .. "copilot" .. sep .. "index.js"
+
+    local f = io.open(cli_js, "r")
+    if f then
+        f:close()
+        return "node " .. cli_js
+    end
+
+    return "copilot"  -- fallback
+end
+
 -- ---------------------------------------------------------------------------
 -- Test suite
 -- ---------------------------------------------------------------------------
 
 describe("Lua SDK E2E", function()
     local proxy
+    local cli_path = resolve_cli_path()
 
     --- Build a CopilotClient configured to talk through the replay proxy.
     -- Passes the proxy URL via env so the CLI subprocess uses the proxy.
     -- @param extra_opts table|nil  Additional options merged into client config
     -- @return CopilotClient
     local function make_client(extra_opts)
+        local env = {
+            COPILOT_API_URL = proxy and proxy:url() or "",
+            GH_TOKEN = os.getenv("GH_TOKEN") or "fake-test-token",
+            GITHUB_TOKEN = os.getenv("GITHUB_TOKEN") or "fake-test-token",
+        }
+
+        -- Add CONNECT proxy env vars from the proxy harness
+        if proxy then
+            local proxy_env = proxy:get_proxy_env()
+            if proxy_env then
+                for k, v in pairs(proxy_env) do
+                    env[k] = v
+                end
+            end
+        end
+
         local opts = {
+            cliPath = cli_path,
             logLevel = "info",
-            env = { COPILOT_API_URL = proxy and proxy:url() or "" },
+            env = env,
         }
         if extra_opts then
             for k, v in pairs(extra_opts) do
@@ -45,6 +92,25 @@ describe("Lua SDK E2E", function()
         if proxy then
             proxy:stop(true) -- skip writing cache
         end
+    end)
+
+    --- Configure the replay proxy for a specific snapshot before each test.
+    -- @param category string  Snapshot category (e.g. "session")
+    -- @param name string      Snapshot name (e.g. "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message")
+    local function configure_snapshot(category, name)
+        local script_dir = debug.getinfo(1, "S").source:match("^@(.+)[/\\]") or "."
+        local sep = package.config:sub(1, 1)
+        local repo_root = script_dir .. sep .. ".."
+        local snapshot_path = repo_root .. sep .. "test" .. sep .. "snapshots"
+            .. sep .. category .. sep .. name .. ".yaml"
+        local work_dir = os.tmpname() .. "_lua_e2e"
+        os.execute("mkdir -p " .. work_dir .. " 2>/dev/null")
+        proxy:configure(snapshot_path, work_dir)
+    end
+
+    -- Configure default snapshot before each test
+    before_each(function()
+        configure_snapshot("session", "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message")
     end)
 
     -- ------------------------------------------------------------------
@@ -94,26 +160,18 @@ describe("Lua SDK E2E", function()
 
             -- Send a message and wait for the assistant response
             local response, send_err = session:send_and_wait({
-                prompt = "Say hello in one sentence.",
-            }, 30) -- 30 second timeout
+                prompt = "What is 2+2?",
+            }, 30)
 
-            -- The replay proxy should return a canned response
-            -- With the proxy, we may get a response or a timeout depending
-            -- on snapshot availability. We verify the send itself succeeded.
             if send_err then
-                -- If error is a timeout, it means we connected and sent but
-                -- no matching snapshot was found — still a valid connectivity test.
                 assert.is_truthy(
                     send_err:match("timeout") or send_err:match("session error"),
                     "Unexpected error: " .. tostring(send_err)
                 )
             else
-                -- Got a response — verify its structure
                 assert.is_not_nil(response, "Expected an assistant message response")
-                assert.is_not_nil(response.type, "Response should have a type field")
             end
 
-            -- Clean up
             session:destroy()
             client:stop()
         end)

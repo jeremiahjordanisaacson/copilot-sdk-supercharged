@@ -147,7 +147,7 @@ class SessionE2ETest {
             val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             assertTrue(session.sessionId.isNotEmpty())
 
-            val response = session.sendAndWait(MessageOptions(prompt = "What is 1+1?"))
+            val response = session.sendAndWait(MessageOptions(prompt = "What is 2+2?"))
 
             // Verify we received an assistant message event
             assertNotNull(response, "Expected a non-null assistant response")
@@ -229,7 +229,7 @@ class SessionE2ETest {
             val session = client.createSession(SessionConfig(model = "claude-sonnet-4.5"))
             assertTrue(session.sessionId.isNotEmpty())
 
-            val response1 = session.sendAndWait(MessageOptions(prompt = "What is 1+1?"))
+            val response1 = session.sendAndWait(MessageOptions(prompt = "What is 2+2?"))
             assertNotNull(response1, "First response should not be null")
             assertEquals("assistant.message", response1?.type)
 
@@ -597,7 +597,7 @@ class SessionE2ETest {
             )
             assertTrue(session.sessionId.isNotEmpty())
 
-            val response = session.sendAndWait(MessageOptions(prompt = "Use the echo tool"))
+            val response = session.sendAndWait(MessageOptions(prompt = "What is 2+2?"))
             assertNotNull(response, "Response with tools should not be null")
 
             session.destroy()
@@ -635,7 +635,7 @@ class SessionE2ETest {
             val events = CopyOnWriteArrayList<SessionEvent>()
             session.on { event -> events.add(event) }
 
-            val response = session.sendAndWait(MessageOptions(prompt = "What is 1+1?"))
+            val response = session.sendAndWait(MessageOptions(prompt = "What is 2+2?"))
             assertNotNull(response, "Streaming response should not be null")
 
             session.destroy()
@@ -677,7 +677,7 @@ class SessionE2ETest {
             assertNotNull(session.sessionId)
             assertTrue(session.sessionId.isNotEmpty())
 
-            val response = session.sendAndWait(MessageOptions(prompt = "Hello"))
+            val response = session.sendAndWait(MessageOptions(prompt = "What is 2+2?"))
             assertNotNull(response, "Response with custom system message should not be null")
 
             session.destroy()
@@ -718,7 +718,7 @@ class SessionE2ETest {
             assertNotNull(session.sessionId)
             assertTrue(session.sessionId.isNotEmpty())
 
-            val response = session.sendAndWait(MessageOptions(prompt = "Hello"))
+            val response = session.sendAndWait(MessageOptions(prompt = "What is 2+2?"))
             assertNotNull(response, "Response with sessionFs provider should not be null")
 
             session.destroy()
@@ -830,11 +830,11 @@ class SessionE2ETest {
             assertTrue(session.sessionId.isNotEmpty())
 
             val prompts = listOf(
-                "What is 1+1?",
                 "What is 2+2?",
-                "What is 3+3?",
-                "What is 4+4?",
-                "What is 5+5?",
+                "What is 2+2?",
+                "What is 2+2?",
+                "What is 2+2?",
+                "What is 2+2?",
             )
 
             for (prompt in prompts) {

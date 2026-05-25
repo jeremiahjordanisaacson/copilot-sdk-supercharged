@@ -28,6 +28,8 @@ module E2E
       @process_thread = nil
       @pid            = nil
       @proxy_url      = nil
+      @connect_proxy_url = nil
+      @ca_file_path      = nil
     end
 
     # Start the replaying proxy server.
@@ -55,7 +57,7 @@ module E2E
         raise "Failed to read proxy URL — server produced no output"
       end
 
-      match = line.strip.match(/Listening: (http:\/\/\S+)/)
+      match = line.strip.match(/Listening:\s+(http:\/\/\S+)\s*(.*)/)
       unless match
         stop
         raise "Unexpected proxy output: #{line}"
@@ -63,6 +65,18 @@ module E2E
 
       @proxy_url = match[1]
       @pid = @process_thread[:pid] if @process_thread.respond_to?(:[])
+
+      # Parse JSON metadata (connectProxyUrl, caFilePath) if present
+      metadata_str = match[2]
+      if metadata_str && metadata_str.start_with?("{")
+        begin
+          meta = JSON.parse(metadata_str)
+          @connect_proxy_url = meta["connectProxyUrl"]
+          @ca_file_path = meta["caFilePath"]
+        rescue JSON::ParserError
+          # ignore metadata parse errors
+        end
+      end
     end
 
     # Configure the proxy for a specific test snapshot.
@@ -143,11 +157,23 @@ module E2E
       env = ENV.to_h.dup
       env["COPILOT_API_URL"]  = @proxy_url
       env["COPILOT_HOME"]     = home_dir
+      env["GH_CONFIG_DIR"]    = home_dir
       env["XDG_CONFIG_HOME"]  = home_dir
       env["XDG_STATE_HOME"]   = home_dir
       # Provide a fake token so the CLI authenticates against the replay proxy
       env["GH_TOKEN"]         = env["GH_TOKEN"] || "fake-test-token"
       env["GITHUB_TOKEN"]     = env["GITHUB_TOKEN"] || "fake-test-token"
+
+      # CONNECT proxy env vars for HTTPS interception
+      if @connect_proxy_url
+        env["HTTPS_PROXY"] = @connect_proxy_url
+        env["https_proxy"] = @connect_proxy_url
+      end
+      if @ca_file_path
+        env["NODE_EXTRA_CA_CERTS"] = @ca_file_path
+        env["SSL_CERT_FILE"] = @ca_file_path
+      end
+
       env
     end
   end

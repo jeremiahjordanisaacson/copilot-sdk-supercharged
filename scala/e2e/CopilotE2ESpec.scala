@@ -276,7 +276,7 @@ class CopilotE2ESpec
 
     val pong = Await.result(c.ping(Some("hello")), timeout)
     pong.message should not be empty
-    pong.timestamp should be > 0L
+    pong.timestamp should not be empty
 
     c.stop()
   }

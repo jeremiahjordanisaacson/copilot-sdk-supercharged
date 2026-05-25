@@ -343,14 +343,14 @@ public actor CopilotClient {
         let result = try await rpc.sendRequest(method: "ping", params: params)
 
         guard let msg = result["message"] as? String,
-            let ts = result["timestamp"] as? Int64
+            let ts = result["timestamp"]
         else {
             throw CopilotError.invalidResponse("Invalid ping response")
         }
 
         return PingResponse(
             message: msg,
-            timestamp: ts,
+            timestamp: "\(ts)",
             protocolVersion: result["protocolVersion"] as? Int
         )
     }

@@ -40,7 +40,7 @@ class TestSession < E2E::TestCase
     session = client.create_session(model: "claude-sonnet-4.5")
     refute_nil session.session_id
 
-    response = session.send_and_wait(prompt: "What is 1+1?")
+    response = session.send_and_wait(prompt: "What is 2+2?")
     refute_nil response, "Should receive an assistant response"
 
     assert_equal "assistant.message", response.type,
@@ -92,11 +92,11 @@ class TestSession < E2E::TestCase
     session = client.create_session(model: "claude-sonnet-4.5")
     refute_nil session.session_id
 
-    response1 = session.send_and_wait(prompt: "What is 2+2?")
+    response1 = session.send_and_wait(prompt: "What is 1+1?")
     refute_nil response1, "First response should not be nil"
     assert_equal "assistant.message", response1.type
 
-    response2 = session.send_and_wait(prompt: "What about 3+3?")
+    response2 = session.send_and_wait(prompt: "Now if you double that, what do you get?")
     refute_nil response2, "Second response should not be nil"
     assert_equal "assistant.message", response2.type
 
@@ -337,7 +337,7 @@ class TestSession < E2E::TestCase
     session = client.create_session(model: "claude-sonnet-4.5", tools: [weather_tool])
     refute_nil session.session_id
 
-    response = session.send_and_wait(prompt: "What is the weather in Seattle?")
+    response = session.send_and_wait(prompt: "What is the secret number for key ALPHA?")
     refute_nil response, "Should receive a response with tools"
 
     session.destroy
@@ -363,7 +363,7 @@ class TestSession < E2E::TestCase
       events << event
     end
 
-    response = session.send_and_wait(prompt: "Say hello")
+    response = session.send_and_wait(prompt: "What is 2+2?")
     refute_nil response, "Should receive a final response"
 
     unsub.call
@@ -482,13 +482,13 @@ class TestSession < E2E::TestCase
     session = client.create_session(model: "claude-sonnet-4.5")
     refute_nil session.session_id
 
-    r1 = session.send_and_wait(prompt: "First message")
+    r1 = session.send_and_wait(prompt: "What is 2+2?")
     refute_nil r1, "First response should not be nil"
 
-    r2 = session.send_and_wait(prompt: "Second message")
+    r2 = session.send_and_wait(prompt: "What is 2+2?")
     refute_nil r2, "Second response should not be nil"
 
-    r3 = session.send_and_wait(prompt: "Third message")
+    r3 = session.send_and_wait(prompt: "What is 2+2?")
     refute_nil r3, "Third response should not be nil"
 
     session.destroy

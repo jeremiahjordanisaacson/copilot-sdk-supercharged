@@ -15,9 +15,11 @@ use Symbol qw(gensym);
 sub new {
     my ($class) = @_;
     return bless {
-        process_pid => undef,
-        proxy_url   => undef,
-        stdout_fh   => undef,
+        process_pid      => undef,
+        proxy_url        => undef,
+        connect_proxy_url => undef,
+        ca_file_path     => undef,
+        stdout_fh        => undef,
     }, $class;
 }
 
@@ -25,21 +27,18 @@ sub start {
     my ($self) = @_;
     return $self->{proxy_url} if $self->{proxy_url};
 
-    # Path to harness server (from e2e dir, up 3 levels to repo root)
     my $e2e_dir = dirname(__FILE__);
     my $harness_dir = File::Spec->catdir($e2e_dir, '..', '..', 'test', 'harness');
     $harness_dir = abs_path($harness_dir);
     my $server_path = File::Spec->catfile($harness_dir, 'server.ts');
 
-    # Spawn the proxy
     my $err = gensym();
     my $pid = open3(my $in, my $out, $err, 'npx', 'tsx', $server_path);
 
-    # Read startup output from stdout/stderr until the proxy URL appears.
     my $selector = IO::Select->new($out, $err);
     my $startup_output = '';
     my $proxy_url;
-    while (my @ready = $selector->can_read(10)) {
+    while (my @ready = $selector->can_read(15)) {
         for my $fh (@ready) {
             my $line = <$fh>;
             if (!defined $line) {
@@ -47,8 +46,17 @@ sub start {
                 next;
             }
             $startup_output .= $line;
-            if ($line =~ /Listening: (http:\/\/\S+)/) {
+            if ($line =~ /Listening:\s+(http:\/\/\S+)\s*(.*)/) {
                 $proxy_url = $1;
+                my $metadata_str = $2;
+                # Parse JSON metadata if present
+                if ($metadata_str && $metadata_str =~ /^\{/) {
+                    eval {
+                        my $meta = decode_json($metadata_str);
+                        $self->{connect_proxy_url} = $meta->{connectProxyUrl};
+                        $self->{ca_file_path} = $meta->{caFilePath};
+                    };
+                }
                 last;
             }
         }
@@ -64,7 +72,6 @@ sub start {
     $self->{process_pid} = $pid;
     $self->{stdout_fh}   = $out;
 
-    $ENV{COPILOT_API_URL} = $self->{proxy_url};
     return $self->{proxy_url};
 }
 
@@ -98,6 +105,31 @@ sub configure {
 sub url {
     my ($self) = @_;
     return $self->{proxy_url};
+}
+
+sub get_proxy_env {
+    my ($self) = @_;
+    my %env = %ENV;
+    $env{COPILOT_API_URL} = $self->{proxy_url} if $self->{proxy_url};
+    $env{GH_TOKEN} = 'fake-token-for-e2e-tests';
+    $env{GITHUB_TOKEN} = 'fake-token-for-e2e-tests';
+
+    if ($self->{connect_proxy_url}) {
+        $env{HTTPS_PROXY} = $self->{connect_proxy_url};
+        $env{https_proxy} = $self->{connect_proxy_url};
+    }
+    if ($self->{ca_file_path}) {
+        $env{NODE_EXTRA_CA_CERTS} = $self->{ca_file_path};
+    }
+
+    # Isolation: prevent real config leaking in
+    my $tmpdir = File::Spec->tmpdir();
+    $env{COPILOT_HOME} = File::Spec->catdir($tmpdir, "copilot-test-$$");
+    $env{GH_CONFIG_DIR} = File::Spec->catdir($tmpdir, "copilot-test-$$");
+    $env{XDG_CONFIG_HOME} = File::Spec->catdir($tmpdir, "copilot-test-$$");
+    $env{XDG_STATE_HOME} = File::Spec->catdir($tmpdir, "copilot-test-$$");
+
+    return \%env;
 }
 
 sub DESTROY {

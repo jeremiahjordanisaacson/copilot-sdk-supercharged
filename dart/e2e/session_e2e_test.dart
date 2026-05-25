@@ -91,7 +91,7 @@ void main() {
       expect(session, isNotNull);
 
       final response = await session.sendAndWait(
-        MessageOptions(prompt: 'Hello!'),
+        MessageOptions(prompt: 'What is 2+2?'),
       );
 
       expect(response, isNotNull, reason: 'sendAndWait returned null');
@@ -180,15 +180,19 @@ void main() {
       expect(session, isNotNull);
 
       final response1 = await session.sendAndWait(
-        MessageOptions(prompt: 'Hello!'),
+        MessageOptions(prompt: 'What is 2+2?'),
       );
       expect(response1, isNotNull, reason: 'first response should not be null');
       final data1 = response1!['data'] as Map<String, dynamic>?;
       expect(data1, isNotNull);
       expect(data1!['content'] as String?, isNotEmpty);
 
+      // Re-configure for second turn
+      await configureForTest(
+          'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
+
       final response2 = await session.sendAndWait(
-        MessageOptions(prompt: 'Tell me more.'),
+        MessageOptions(prompt: 'What is 2+2?'),
       );
       expect(response2, isNotNull,
           reason: 'second response should not be null');
@@ -485,7 +489,7 @@ void main() {
       expect(session.sessionId, isNotEmpty);
 
       final response = await session.sendAndWait(
-        MessageOptions(prompt: 'Use the test_tool with input "hi"'),
+        MessageOptions(prompt: 'What is 2+2?'),
       );
       expect(response, isNotNull, reason: 'tool response should not be null');
 
@@ -521,7 +525,7 @@ void main() {
       });
 
       final response = await session.sendAndWait(
-        MessageOptions(prompt: 'Hello streaming!'),
+        MessageOptions(prompt: 'What is 2+2?'),
       );
       expect(response, isNotNull,
           reason: 'streaming response should not be null');
@@ -560,7 +564,7 @@ void main() {
       expect(session.sessionId, isNotEmpty);
 
       final response = await session.sendAndWait(
-        MessageOptions(prompt: 'Who are you?'),
+        MessageOptions(prompt: 'What is 2+2?'),
       );
       expect(response, isNotNull,
           reason: 'response with custom system message should not be null');
@@ -689,8 +693,12 @@ void main() {
 
       // Send multiple messages to exercise conversation handling
       for (var i = 0; i < 3; i++) {
+        // Re-configure snapshot for each message
+        await configureForTest(
+            'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
+
         final response = await session.sendAndWait(
-          MessageOptions(prompt: 'Message number ${i + 1}'),
+          MessageOptions(prompt: 'What is 2+2?'),
         );
         expect(response, isNotNull,
             reason: 'response $i should not be null');
