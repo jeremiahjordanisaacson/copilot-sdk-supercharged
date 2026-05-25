@@ -1,93 +1,93 @@
 {
-    "name": "copilot-sdk-supercharged",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git"
+  "name": "copilot-sdk-supercharged",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git"
+  },
+  "version": "2.3.0",
+  "description": "GitHub Copilot SDK Supercharged - TypeScript SDK for programmatic control of GitHub Copilot CLI via JSON-RPC. Supports 40 languages.",
+  "main": "./dist/cjs/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
     },
-    "version": "2.0.0",
-    "description": "GitHub Copilot SDK Supercharged - TypeScript SDK for programmatic control of GitHub Copilot CLI via JSON-RPC. Supports 40 languages.",
-    "main": "./dist/cjs/index.js",
-    "types": "./dist/index.d.ts",
-    "exports": {
-        ".": {
-            "import": {
-                "types": "./dist/index.d.ts",
-                "default": "./dist/index.js"
-            },
-            "require": {
-                "types": "./dist/index.d.ts",
-                "default": "./dist/cjs/index.js"
-            }
-        },
-        "./extension": {
-            "import": {
-                "types": "./dist/extension.d.ts",
-                "default": "./dist/extension.js"
-            },
-            "require": {
-                "types": "./dist/extension.d.ts",
-                "default": "./dist/cjs/extension.js"
-            }
-        }
-    },
-    "type": "module",
-    "scripts": {
-        "clean": "rimraf --glob dist *.tgz",
-        "build": "tsx esbuild-copilotsdk-nodejs.ts",
-        "test": "vitest run",
-        "test:watch": "vitest",
-        "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" --ignore-path .prettierignore",
-        "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" --ignore-path .prettierignore",
-        "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
-        "lint:fix": "eslint --fix \"src/**/*.ts\" \"test/**/*.ts\"",
-        "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-        "generate": "cd ../scripts/codegen && npm run generate",
-        "update:protocol-version": "tsx scripts/update-protocol-version.ts",
-        "prepublishOnly": "npm run build",
-        "package": "npm run clean && npm run build && node scripts/set-version.js && npm pack && npm version 0.1.0 --no-git-tag-version --allow-same-version"
-    },
-    "keywords": [
-        "github",
-        "copilot",
-        "sdk",
-        "jsonrpc",
-        "agent",
-        "supercharged",
-        "ai",
-        "llm",
-        "tools"
-    ],
-    "author": "jeremiahjordanisaacson",
-    "license": "MIT",
-    "dependencies": {
-        "@github/copilot": "^1.0.55-0",
-        "vscode-jsonrpc": "^8.2.1",
-        "zod": "^4.4.1"
-    },
-    "devDependencies": {
-        "@platformatic/vfs": "^0.4.0",
-        "@types/node": "^25.6.0",
-        "@typescript-eslint/eslint-plugin": "^8.59.1",
-        "@typescript-eslint/parser": "^8.54.0",
-        "esbuild": "^0.28.0",
-        "eslint": "^10.2.1",
-        "glob": "^13.0.1",
-        "json-schema": "^0.4.0",
-        "json-schema-to-typescript": "^15.0.4",
-        "prettier": "^3.8.3",
-        "quicktype-core": "^23.2.6",
-        "rimraf": "^6.1.2",
-        "semver": "^7.7.4",
-        "tsx": "^4.20.6",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.5"
-    },
-    "engines": {
-        "node": ">=20.0.0"
-    },
-    "files": [
-        "dist/**/*",
-        "docs/**/*",
-        "README.md"
-    ]
+    "./extension": {
+      "import": {
+        "types": "./dist/extension.d.ts",
+        "default": "./dist/extension.js"
+      },
+      "require": {
+        "types": "./dist/extension.d.ts",
+        "default": "./dist/cjs/extension.js"
+      }
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "clean": "rimraf --glob dist *.tgz",
+    "build": "tsx esbuild-copilotsdk-nodejs.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" --ignore-path .prettierignore",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" --ignore-path .prettierignore",
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "lint:fix": "eslint --fix \"src/**/*.ts\" \"test/**/*.ts\"",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "generate": "cd ../scripts/codegen && npm run generate",
+    "update:protocol-version": "tsx scripts/update-protocol-version.ts",
+    "prepublishOnly": "npm run build",
+    "package": "npm run clean && npm run build && node scripts/set-version.js && npm pack && npm version 0.1.0 --no-git-tag-version --allow-same-version"
+  },
+  "keywords": [
+    "github",
+    "copilot",
+    "sdk",
+    "jsonrpc",
+    "agent",
+    "supercharged",
+    "ai",
+    "llm",
+    "tools"
+  ],
+  "author": "jeremiahjordanisaacson",
+  "license": "MIT",
+  "dependencies": {
+    "@github/copilot": "^1.0.55-0",
+    "vscode-jsonrpc": "^8.2.1",
+    "zod": "^4.4.1"
+  },
+  "devDependencies": {
+    "@platformatic/vfs": "^0.4.0",
+    "@types/node": "^25.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.1",
+    "@typescript-eslint/parser": "^8.54.0",
+    "esbuild": "^0.28.0",
+    "eslint": "^10.2.1",
+    "glob": "^13.0.1",
+    "json-schema": "^0.4.0",
+    "json-schema-to-typescript": "^15.0.4",
+    "prettier": "^3.8.3",
+    "quicktype-core": "^23.2.6",
+    "rimraf": "^6.1.2",
+    "semver": "^7.7.4",
+    "tsx": "^4.20.6",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist/**/*",
+    "docs/**/*",
+    "README.md"
+  ]
 }
