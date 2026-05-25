@@ -18,7 +18,7 @@ runs:
       with:
         node-version: 22
     - name: Install dependencies
-      run: npm --prefix "$(pwd)/nodejs" ci --ignore-scripts
+      run: npm --prefix "$(pwd)/nodejs" install --ignore-scripts
       shell: bash
     - name: Set CLI path
       id: cli-path
