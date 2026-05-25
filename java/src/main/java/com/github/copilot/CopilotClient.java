@@ -310,7 +310,7 @@ public class CopilotClient {
         Map<String, Object> result = rpcClient.request("ping", Map.of("message", message != null ? message : ""));
         PingResponse resp = new PingResponse();
         resp.message = (String) result.get("message");
-        resp.timestamp = ((Number) result.get("timestamp")).longValue();
+        resp.timestamp = result.get("timestamp") != null ? result.get("timestamp").toString() : null;
         if (result.containsKey("protocolVersion")) {
             resp.protocolVersion = ((Number) result.get("protocolVersion")).intValue();
         }

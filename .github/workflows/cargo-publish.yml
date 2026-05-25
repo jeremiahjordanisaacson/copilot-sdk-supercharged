@@ -29,10 +29,10 @@ jobs:
           sed -i "s/^version = .*/version = \"$VERSION\"/" Cargo.toml
 
       - name: Package crate
-        run: cargo package --allow-dirty
+        run: cargo package --allow-dirty --no-default-features
 
       - name: Publish to crates.io
-        run: cargo publish --allow-dirty
+        run: cargo publish --allow-dirty --no-default-features
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 

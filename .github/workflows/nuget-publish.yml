@@ -22,14 +22,6 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Install Node dependencies
-        run: cd nodejs && npm ci
-
       - name: Set version from tag
         run: |
           VERSION=${GITHUB_REF_NAME#v}
