@@ -6,13 +6,31 @@ import { CopilotClient } from "./client.js";
 import type { CopilotSession } from "./session.js";
 import {
     defaultJoinSessionPermissionHandler,
+    type ExtensionInfo,
     type PermissionHandler,
     type ResumeSessionConfig,
 } from "./types.js";
 
+export {
+    Canvas,
+    CanvasError,
+    createCanvas,
+    type CanvasAction,
+    type CanvasActionContext,
+    type CanvasDeclaration,
+    type CanvasHostContext,
+    type CanvasJsonSchema,
+    type CanvasLifecycleContext,
+    type CanvasOpenContext,
+    type CanvasOpenResponse,
+    type CanvasOptions,
+} from "./canvas.js";
+
 export type JoinSessionConfig = Omit<ResumeSessionConfig, "onPermissionRequest"> & {
     onPermissionRequest?: PermissionHandler;
 };
+
+export type { ExtensionInfo };
 
 /**
  * Joins the current foreground session.
@@ -35,10 +53,10 @@ export async function joinSession(config: JoinSessionConfig = {}): Promise<Copil
         );
     }
 
-    const client = new CopilotClient({ isChildProcess: true });
+    const client = new CopilotClient({ _internalConnection: { kind: "parent-process" } });
     return client.resumeSession(sessionId, {
         ...config,
         onPermissionRequest: config.onPermissionRequest ?? defaultJoinSessionPermissionHandler,
-        disableResume: config.disableResume ?? true,
+        suppressResumeEvent: config.suppressResumeEvent ?? true,
     });
 }

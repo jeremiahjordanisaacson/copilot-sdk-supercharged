@@ -220,7 +220,7 @@ func TestRpcSessionStateE2E(t *testing.T) {
 			t.Errorf("Expected initial answer to contain FORK_SOURCE_ALPHA, got %v", initialAnswer.Data)
 		}
 
-		sourceMessages, err := session.GetMessages(t.Context())
+		sourceMessages, err := session.GetEvents(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to read source messages: %v", err)
 		}
@@ -250,7 +250,7 @@ func TestRpcSessionStateE2E(t *testing.T) {
 			t.Fatalf("Failed to resume forked session: %v", err)
 		}
 
-		forkedMessages, err := forkedSession.GetMessages(t.Context())
+		forkedMessages, err := forkedSession.GetEvents(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to read forked messages: %v", err)
 		}
@@ -272,7 +272,7 @@ func TestRpcSessionStateE2E(t *testing.T) {
 			t.Errorf("Expected forked answer to contain FORK_CHILD_BETA, got %v", forkAnswer.Data)
 		}
 
-		sourceAfterFork, err := session.GetMessages(t.Context())
+		sourceAfterFork, err := session.GetEvents(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to read source messages after fork: %v", err)
 		}
@@ -282,7 +282,7 @@ func TestRpcSessionStateE2E(t *testing.T) {
 			}
 		}
 
-		forkAfterPrompt, err := forkedSession.GetMessages(t.Context())
+		forkAfterPrompt, err := forkedSession.GetEvents(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to read forked messages after prompt: %v", err)
 		}
@@ -319,6 +319,7 @@ func TestRpcSessionStateE2E(t *testing.T) {
 		}
 		if fork == nil {
 			t.Fatal("Expected non-nil fork result")
+			return
 		}
 		if strings.TrimSpace(fork.SessionID) == "" {
 			t.Fatal("Expected non-empty fork session id")
@@ -335,7 +336,7 @@ func TestRpcSessionStateE2E(t *testing.T) {
 		}
 		defer forkedSession.Disconnect()
 
-		forkedMessages, err := forkedSession.GetMessages(t.Context())
+		forkedMessages, err := forkedSession.GetEvents(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to read forked messages: %v", err)
 		}
@@ -365,7 +366,7 @@ func TestRpcSessionStateE2E(t *testing.T) {
 			t.Fatalf("Failed to send second prompt: %v", err)
 		}
 
-		sourceEvents, err := session.GetMessages(t.Context())
+		sourceEvents, err := session.GetEvents(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to read source messages: %v", err)
 		}
@@ -379,6 +380,7 @@ func TestRpcSessionStateE2E(t *testing.T) {
 		}
 		if secondUserEvent == nil {
 			t.Fatal("Expected the second user.message in persisted history")
+			return
 		}
 		boundaryEventID := secondUserEvent.ID
 
@@ -404,7 +406,7 @@ func TestRpcSessionStateE2E(t *testing.T) {
 		}
 		defer forkedSession.Disconnect()
 
-		forkedEvents, err := forkedSession.GetMessages(t.Context())
+		forkedEvents, err := forkedSession.GetEvents(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to read forked messages: %v", err)
 		}
@@ -467,11 +469,11 @@ func TestRpcSessionStateE2E(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to get usage metrics: %v", err)
 		}
-		if metrics.SessionStartTime <= 0 {
-			t.Errorf("Expected positive sessionStartTime, got %d", metrics.SessionStartTime)
+		if metrics.SessionStartTime.IsZero() {
+			t.Errorf("Expected non-zero sessionStartTime, got %s", metrics.SessionStartTime)
 		}
 		if metrics.TotalNanoAiu != nil && *metrics.TotalNanoAiu < 0 {
-			t.Errorf("Expected non-negative totalNanoAiu, got %d", *metrics.TotalNanoAiu)
+			t.Errorf("Expected non-negative totalNanoAiu, got %f", *metrics.TotalNanoAiu)
 		}
 		for k, detail := range metrics.TokenDetails {
 			if detail.TokenCount < 0 {
@@ -480,7 +482,7 @@ func TestRpcSessionStateE2E(t *testing.T) {
 		}
 		for modelName, modelMetric := range metrics.ModelMetrics {
 			if modelMetric.TotalNanoAiu != nil && *modelMetric.TotalNanoAiu < 0 {
-				t.Errorf("Expected non-negative totalNanoAiu for model %q, got %d", modelName, *modelMetric.TotalNanoAiu)
+				t.Errorf("Expected non-negative totalNanoAiu for model %q, got %f", modelName, *modelMetric.TotalNanoAiu)
 			}
 			for tokenType, detail := range modelMetric.TokenDetails {
 				if detail.TokenCount < 0 {

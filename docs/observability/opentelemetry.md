@@ -27,13 +27,13 @@ const client = new CopilotClient({
 
 <!-- docs-validate: skip -->
 ```python
-from copilot import CopilotClient, SubprocessConfig
+from copilot import CopilotClient
 
-client = CopilotClient(SubprocessConfig(
+client = CopilotClient(
     telemetry={
         "otlp_endpoint": "http://localhost:4318",
     },
-))
+)
 ```
 
 </details>
@@ -84,17 +84,30 @@ var client = new CopilotClient(new CopilotClientOptions()
 
 </details>
 
-> **40 languages supported.** See the [full SDK list](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks) with cookbooks for Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V, and 18 more.
+<details>
+<summary><strong>Rust</strong></summary>
 
-### TelemetryConfig Options
+<!-- docs-validate: skip -->
+```rust
+use github_copilot_sdk::{Client, ClientOptions, TelemetryConfig};
 
-| Option | Node.js | Python | Go | .NET | Java | Description |
-|---|---|---|---|---|---|---|
-| OTLP endpoint | `otlpEndpoint` | `otlp_endpoint` | `OTLPEndpoint` | `OtlpEndpoint` | `otlpEndpoint` | OTLP HTTP endpoint URL |
-| File path | `filePath` | `file_path` | `FilePath` | `FilePath` | `filePath` | File path for JSON-lines trace output |
-| Exporter type | `exporterType` | `exporter_type` | `ExporterType` | `ExporterType` | `exporterType` | `"otlp-http"` or `"file"` |
-| Source name | `sourceName` | `source_name` | `SourceName` | `SourceName` | `sourceName` | Instrumentation scope name |
-| Capture content | `captureContent` | `capture_content` | `CaptureContent` | `CaptureContent` | `captureContent` | Whether to capture message content |
+let client = Client::start(ClientOptions::new()
+    .with_telemetry(TelemetryConfig::new()
+        .with_otlp_endpoint("http://localhost:4318"))
+).await?;
+```
+
+</details>
+
+### TelemetryConfig options
+
+| Option | Node.js | Python | Go | .NET | Java | Rust | Description |
+|---|---|---|---|---|---|---|---|
+| OTLP endpoint | `otlpEndpoint` | `otlp_endpoint` | `OTLPEndpoint` | `OtlpEndpoint` | `otlpEndpoint` | `otlp_endpoint` | OTLP HTTP endpoint URL |
+| File path | `filePath` | `file_path` | `FilePath` | `FilePath` | `filePath` | `file_path` | File path for JSON-lines trace output |
+| Exporter type | `exporterType` | `exporter_type` | `ExporterType` | `ExporterType` | `exporterType` | `exporter_type` | `"otlp-http"` or `"file"` |
+| Source name | `sourceName` | `source_name` | `SourceName` | `SourceName` | `sourceName` | `source_name` | Instrumentation scope name |
+| Capture content | `captureContent` | `capture_content` | `CaptureContent` | `CaptureContent` | `captureContent` | `capture_content` | Whether to capture message content |
 
 ### Trace context propagation
 

@@ -2,14 +2,15 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.SDK.Test.Harness;
+using GitHub.Copilot.Rpc;
+using GitHub.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.SDK.Test.E2E;
+namespace GitHub.Copilot.Test.E2E;
 
 public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "permissions", output)
 {
@@ -43,20 +44,20 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
                 {
                     writePermissionRequestReceived.TrySetResult(writeRequest);
                 }
-                return Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.Approved });
+                return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
             }
         });
 
         await File.WriteAllTextAsync(Path.Combine(Ctx.WorkDir, "test.txt"), "original content");
 
-        await session.SendAsync(new MessageOptions
+        var sendTask = session.SendAndWaitAsync(new MessageOptions
         {
             Prompt = "Edit test.txt and replace 'original' with 'modified'"
         });
 
         var readRequest = await readPermissionRequestReceived.Task.WaitAsync(TimeSpan.FromSeconds(30));
         var writeRequest = await writePermissionRequestReceived.Task.WaitAsync(TimeSpan.FromSeconds(30));
-        await TestHelper.GetFinalAssistantMessageAsync(session);
+        await sendTask;
 
         List<PermissionRequest> observedPermissionRequests;
         lock (permissionRequestsLock)
@@ -86,10 +87,24 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         {
             OnPermissionRequest = (request, invocation) =>
             {
-                return Task.FromResult(new PermissionRequestResult
-                {
-                    Kind = PermissionRequestResultKind.Rejected
-                });
+                return Task.FromResult<PermissionDecision>(PermissionDecision.Reject());
+            }
+        });
+
+        // Regression check for https://github.com/github/copilot-sdk/issues/1194:
+        // the reject decision must round-trip through the CLI with its discriminator
+        // intact so the agent surfaces the user-rejected error to the model. The
+        // CLI uses a kind-specific error message ("The user rejected this tool call.")
+        // for the reject decision, which lets us assert the decision was honored
+        // — not merely that the operation didn't happen.
+        var userRejectedToolCall = false;
+        session.On<SessionEvent>(evt =>
+        {
+            if (evt is ToolExecutionCompleteEvent toolEvt &&
+                !toolEvt.Data.Success &&
+                toolEvt.Data.Error?.Message.Contains("user rejected", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                userRejectedToolCall = true;
             }
         });
 
@@ -103,6 +118,10 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
 
         await TestHelper.GetFinalAssistantMessageAsync(session);
 
+        Assert.True(
+            userRejectedToolCall,
+            "Expected a tool.execution_complete event whose error indicates the user rejected the call.");
+
         // Verify the file was NOT modified
         var content = await File.ReadAllTextAsync(testFilePath);
         Assert.Equal("protected content", content);
@@ -114,11 +133,11 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         var session = await CreateSessionAsync(new SessionConfig
         {
             OnPermissionRequest = (_, _) =>
-                Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.UserNotAvailable })
+                Task.FromResult<PermissionDecision>(PermissionDecision.UserNotAvailable())
         });
         var permissionDenied = false;
 
-        session.On(evt =>
+        session.On<SessionEvent>(evt =>
         {
             if (evt is ToolExecutionCompleteEvent toolEvt &&
                 !toolEvt.Data.Success &&
@@ -160,7 +179,7 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
             {
                 permissionRequestReceived = true;
                 await Task.Yield();
-                return new PermissionRequestResult { Kind = PermissionRequestResultKind.Approved };
+                return PermissionDecision.ApproveOnce();
             }
         });
 
@@ -183,14 +202,15 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         var session1 = await CreateSessionAsync();
         var sessionId = session1.SessionId;
         await session1.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
+        await session1.DisposeAsync();
 
         // Resume with permission handler
-        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
+        var session2 = await Client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
             OnPermissionRequest = (request, invocation) =>
             {
                 permissionRequestReceived = true;
-                return Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.Approved });
+                return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
             }
         });
 
@@ -200,6 +220,7 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         });
 
         Assert.True(permissionRequestReceived, "Permission request should have been received");
+        await session2.DisposeAsync();
     }
 
     [Fact]
@@ -234,15 +255,16 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         });
         var sessionId = session1.SessionId;
         await session1.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
+        await session1.DisposeAsync();
 
-        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
+        var session2 = await Client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
             OnPermissionRequest = (_, _) =>
-                Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.UserNotAvailable })
+                Task.FromResult<PermissionDecision>(PermissionDecision.UserNotAvailable())
         });
         var permissionDenied = false;
 
-        session2.On(evt =>
+        session2.On<SessionEvent>(evt =>
         {
             if (evt is ToolExecutionCompleteEvent toolEvt &&
                 !toolEvt.Data.Success &&
@@ -258,6 +280,7 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         });
 
         Assert.True(permissionDenied, "Expected a tool.execution_complete event with Permission denied result");
+        await session2.DisposeAsync();
     }
 
     [Fact]
@@ -272,7 +295,7 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
                 {
                     receivedToolCallId = true;
                 }
-                return Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.Approved });
+                return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
             }
         });
 
@@ -315,11 +338,11 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
                 handlerEntered.TrySetResult();
                 await releaseHandler.Task.WaitAsync(TimeSpan.FromSeconds(30));
                 AddLifecycleEvent("permission-complete", shellRequest.ToolCallId);
-                return new PermissionRequestResult { Kind = PermissionRequestResultKind.Approved };
+                return PermissionDecision.ApproveOnce();
             }
         });
 
-        using var subscription = session.On(evt =>
+        using var subscription = session.On<SessionEvent>(evt =>
         {
             switch (evt)
             {
@@ -413,11 +436,11 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
                 }
 
                 await bothPermissionRequestsStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
-                return new PermissionRequestResult { Kind = PermissionRequestResultKind.Approved };
+                return PermissionDecision.ApproveOnce();
             }
         });
 
-        session.On(evt =>
+        session.On<SessionEvent>(evt =>
         {
             if (evt is ToolExecutionCompleteEvent toolEvt)
             {
@@ -490,7 +513,7 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
             OnPermissionRequest = (_, _) =>
             {
                 permissionCalled.TrySetResult(true);
-                return Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.NoResult });
+                return Task.FromResult<PermissionDecision>(PermissionDecision.NoResult());
             }
         });
 
@@ -516,7 +539,7 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
             OnPermissionRequest = (_, _) =>
             {
                 Interlocked.Increment(ref handlerCallCount);
-                return Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.Approved });
+                return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
             },
         });
 
@@ -529,7 +552,7 @@ public partial class PermissionE2ETests(E2ETestFixture fixture, ITestOutputHelpe
         try
         {
             var toolCompleted = new TaskCompletionSource<ToolExecutionCompleteEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
-            using var subscription = session.On(evt =>
+            using var subscription = session.On<SessionEvent>(evt =>
             {
                 if (evt is ToolExecutionCompleteEvent done && done.Data.Success)
                 {

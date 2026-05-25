@@ -1,25 +1,26 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
+        <TargetFrameworks>net8.0;net10.0;netstandard2.0</TargetFrameworks>
+        <RootNamespace>GitHub.Copilot</RootNamespace>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
-        <PackageId>CopilotSDK.Supercharged</PackageId>
-        <Version>2.0.0</Version>
-        <Description>GitHub Copilot SDK Supercharged - .NET SDK for programmatic control of GitHub Copilot CLI. Supports 40 languages.</Description>
-        <Authors>jeremiahjordanisaacson</Authors>
-        <Company>copilot-sdk-supercharged</Company>
+        <Version>0.0.0-dev</Version>
+        <Description>SDK for programmatic control of GitHub Copilot CLI</Description>
+        <Authors>GitHub</Authors>
+        <Company>GitHub</Company>
         <Copyright>Copyright (c) Microsoft Corporation. All rights reserved.</Copyright>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <PackageProjectUrl>https://github.com/github/copilot-sdk</PackageProjectUrl>
         <PackageReadmeFile>README.md</PackageReadmeFile>
-        <RepositoryUrl>https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged</RepositoryUrl>
+        <RepositoryUrl>https://github.com/github/copilot-sdk</RepositoryUrl>
         <PackageIcon>copilot.png</PackageIcon>
-        <PackageTags>github;copilot;sdk;jsonrpc;agent;supercharged;ai;llm</PackageTags>
-        <PackageProjectUrl>https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged</PackageProjectUrl>
-        <IsAotCompatible>true</IsAotCompatible>
+        <PackageTags>github;copilot;sdk;jsonrpc;agent</PackageTags>
+        <IsAotCompatible Condition="'$(TargetFramework)' != 'netstandard2.0'">true</IsAotCompatible>
         <IncludeSymbols>true</IncludeSymbols>
         <SymbolPackageFormat>snupkg</SymbolPackageFormat>
         <PublishRepositoryUrl>true</PublishRepositoryUrl>
         <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <_CopilotCliVersionTarget>_GetCopilotCliVersion</_CopilotCliVersionTarget>
     </PropertyGroup>
 
   <PropertyGroup>
@@ -39,15 +40,35 @@
         <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
         <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' != '' and !$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">
         <PackageReference Include="System.Text.Json" />
     </ItemGroup>
 
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+        <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" />
+        <PackageReference Include="System.Collections.Immutable" />
+        <PackageReference Include="System.ComponentModel.Annotations" />
+        <PackageReference Include="System.Memory" />
+        <PackageReference Include="System.Threading.Channels" />
+        <PackageReference Include="System.Threading.Tasks.Extensions" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' != 'netstandard2.0'">
+        <Compile Remove="Polyfills\**\*.cs" />
+        <Compile Include="Polyfills\IsExternalInit.cs" />
+    </ItemGroup>
+
     <!-- Generate version props file at build time (gitignored) -->
-    <Target Name="_GenerateVersionProps" BeforeTargets="BeforeBuild;Pack">
+    <Target Name="_GetCopilotCliVersion" Condition="'$(CopilotCliVersion)' == ''">
         <Exec Command="node -e &quot;console.log(require('./nodejs/package-lock.json').packages['node_modules/@github/copilot'].version)&quot;" WorkingDirectory="$(MSBuildThisFileDirectory)../.." ConsoleToMSBuild="true" StandardOutputImportance="low">
             <Output TaskParameter="ConsoleOutput" PropertyName="CopilotCliVersion" />
         </Exec>
         <Error Condition="'$(CopilotCliVersion)' == ''" Text="CopilotCliVersion could not be read from nodejs/package-lock.json" />
+    </Target>
+
+    <Target Name="_GenerateVersionProps" DependsOnTargets="_GetCopilotCliVersion" BeforeTargets="_GetPackageFiles">
         <PropertyGroup>
             <_VersionPropsContent>
                 <![CDATA[<Project>
@@ -57,18 +78,18 @@
 </Project>]]>
             </_VersionPropsContent>
         </PropertyGroup>
-        <WriteLinesToFile File="$(MSBuildThisFileDirectory)build\CopilotSDK.Supercharged.props" Lines="$(_VersionPropsContent)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+        <WriteLinesToFile File="$(MSBuildThisFileDirectory)build\GitHub.Copilot.SDK.props" Lines="$(_VersionPropsContent)" Overwrite="true" WriteOnlyWhenDifferent="true" />
         <!-- Explicitly add props file to package content after generation -->
         <ItemGroup>
-            <None Include="build\CopilotSDK.Supercharged.props" Pack="true" PackagePath="build\" />
+            <None Include="build\GitHub.Copilot.SDK.props" Pack="true" PackagePath="build\" />
         </ItemGroup>
     </Target>
 
     <!-- Include .targets file in package (props is added dynamically by _GenerateVersionProps) -->
     <!-- Also import the .targets for local dev (same logic consumers get) -->
     <ItemGroup>
-        <None Include="build\CopilotSDK.Supercharged.targets" Pack="true" PackagePath="build\" CopyToOutputDirectory="Never" />
+        <None Include="build\GitHub.Copilot.SDK.targets" Pack="true" PackagePath="build\" CopyToOutputDirectory="Never" />
     </ItemGroup>
-    <Import Project="build\CopilotSDK.Supercharged.targets" />
+    <Import Project="build\GitHub.Copilot.SDK.targets" />
 
 </Project>

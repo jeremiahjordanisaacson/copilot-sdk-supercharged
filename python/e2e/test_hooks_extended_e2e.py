@@ -61,7 +61,7 @@ class TestHooksExtended:
             await session.send_and_wait("Say hi")
             assert inputs
             assert inputs[0].get("source") == "new"
-            assert inputs[0].get("cwd")
+            assert inputs[0].get("workingDirectory")
         finally:
             await session.disconnect()
 
@@ -163,7 +163,11 @@ class TestHooksExtended:
             if input_data.get("toolName") != "report_intent":
                 return None
             return {
-                "modifiedResult": "modified by post hook",
+                "modifiedResult": {
+                    "textResultForLlm": "modified by post hook",
+                    "resultType": "success",
+                    "toolTelemetry": {},
+                },
                 "suppressOutput": False,
             }
 

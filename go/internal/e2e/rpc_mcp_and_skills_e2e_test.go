@@ -19,7 +19,9 @@ func TestRpcMcpAndSkillsE2E(t *testing.T) {
 	// --yolo auto-approves extension permission gates at the CLI level,
 	// preventing breakage from new gates (e.g., extension-permission-access).
 	client := ctx.NewClient(func(o *copilot.ClientOptions) {
-		o.CLIArgs = []string{"--yolo"}
+		stdio := o.Connection.(copilot.StdioConnection)
+		stdio.Args = []string{"--yolo"}
+		o.Connection = stdio
 	})
 	t.Cleanup(func() { client.ForceStop() })
 
@@ -106,18 +108,13 @@ func TestRpcMcpAndSkillsE2E(t *testing.T) {
 		const serverName = "rpc-list-mcp-server"
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
 			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			MCPServers: map[string]copilot.MCPServerConfig{
-				serverName: copilot.MCPStdioServerConfig{
-					Command: "echo",
-					Args:    []string{"rpc-list-mcp-server"},
-					Tools:   []string{"*"},
-				},
-			},
+			MCPServers:          testMCPServers(t, serverName),
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
 
+		waitForMCPServerStatus(t, session, serverName, rpc.McpServerStatusConnected)
 		result, err := session.RPC.Mcp.List(t.Context())
 		if err != nil {
 			t.Fatalf("Mcp.List failed: %v", err)

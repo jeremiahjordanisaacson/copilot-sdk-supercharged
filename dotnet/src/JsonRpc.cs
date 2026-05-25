@@ -2,21 +2,19 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Text.Unicode;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
-namespace GitHub.Copilot.SDK;
+namespace GitHub.Copilot;
 
 /// <summary>
 /// A lightweight JSON-RPC 2.0 implementation covering only the features used
@@ -488,13 +486,21 @@ internal sealed partial class JsonRpc : IDisposable
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                var actual = ex is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : ex;
                 if (_logger.IsEnabled(LogLevel.Debug))
                 {
-                    _logger.LogDebug("Error handling JSON-RPC method {Method}: {Error}", methodName, ex.Message);
+                    _logger.LogDebug("Error handling JSON-RPC method {Method}: {Error}", methodName, actual.Message);
                 }
                 if (requestId.HasValue)
                 {
-                    await SendErrorResponseAsync(requestId.Value, ErrorCodeInternalError, ex.Message, cancellationToken).ConfigureAwait(false);
+                    if (actual is LocalRpcInvocationException lre)
+                    {
+                        await SendErrorResponseAsync(requestId.Value, lre.Code, lre.Message, lre.Data, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await SendErrorResponseAsync(requestId.Value, ErrorCodeInternalError, actual.Message, cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
         }
@@ -609,12 +615,11 @@ internal sealed partial class JsonRpc : IDisposable
             return null;
         }
 
-        if (result is not null && registration.ReturnsValueTaskOfT)
+        if (result is not null && registration.ValueTaskAsTaskMethod is { } valueTaskAsTaskMethod)
         {
-            var resultType = result.GetType();
-            var asTask = (Task)resultType.GetMethod("AsTask")!.Invoke(result, null)!;
+            var asTask = (Task)valueTaskAsTaskMethod.Invoke(result, null)!;
             await asTask.ConfigureAwait(false);
-            return asTask.GetType().GetProperty("Result")!.GetValue(asTask);
+            return registration.TaskResultGetter!.Invoke(asTask, null);
         }
 
         return result;
@@ -721,13 +726,16 @@ internal sealed partial class JsonRpc : IDisposable
     }
 
     private async Task SendErrorResponseAsync(JsonElement id, int code, string message, CancellationToken cancellationToken)
+        => await SendErrorResponseAsync(id, code, message, data: null, cancellationToken).ConfigureAwait(false);
+
+    private async Task SendErrorResponseAsync(JsonElement id, int code, string message, JsonElement? data, CancellationToken cancellationToken)
     {
         try
         {
             await SendMessageAsync(new JsonRpcErrorResponse
             {
                 Id = id,
-                Error = new JsonRpcError { Code = code, Message = message },
+                Error = new JsonRpcError { Code = code, Message = message, Data = data },
             }, JsonRpcWireContext.Default.JsonRpcErrorResponse, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
@@ -756,6 +764,9 @@ internal sealed partial class JsonRpc : IDisposable
 
     private sealed class PendingRequest() : TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private static readonly MethodInfo s_taskGetResult = typeof(Task<>).GetProperty(nameof(Task<int>.Result), BindingFlags.Instance | BindingFlags.Public)!.GetMethod!;
+    private static readonly MethodInfo s_valueTaskAsTask = typeof(ValueTask<>).GetMethod(nameof(ValueTask<int>.AsTask), BindingFlags.Instance | BindingFlags.Public)!;
+
     private sealed class MethodRegistration
     {
         public MethodRegistration(Delegate handler, bool singleObjectParam)
@@ -763,15 +774,32 @@ internal sealed partial class JsonRpc : IDisposable
             Handler = handler;
             SingleObjectParam = singleObjectParam;
             Parameters = handler.Method.GetParameters();
-            ReturnsValueTaskOfT =
-                handler.Method.ReturnType.IsGenericType &&
-                handler.Method.ReturnType.GetGenericTypeDefinition() == typeof(ValueTask<>);
+            var returnType = handler.Method.ReturnType;
+            if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(ValueTask<>))
+            {
+                ValueTaskAsTaskMethod = GetMethodFromGenericMethodDefinition(returnType, s_valueTaskAsTask);
+                TaskResultGetter = GetMethodFromGenericMethodDefinition(ValueTaskAsTaskMethod.ReturnType, s_taskGetResult);
+            }
         }
 
         public Delegate Handler { get; }
         public bool SingleObjectParam { get; }
         public ParameterInfo[] Parameters { get; }
-        public bool ReturnsValueTaskOfT { get; }
+        public MethodInfo? ValueTaskAsTaskMethod { get; }
+        public MethodInfo? TaskResultGetter { get; }
+    }
+
+    private static MethodInfo GetMethodFromGenericMethodDefinition(Type specializedType, MethodInfo genericMethodDefinition)
+    {
+        Debug.Assert(
+            specializedType.IsGenericType && specializedType.GetGenericTypeDefinition() == genericMethodDefinition.DeclaringType,
+            "Generic member definition doesn't match type.");
+#if NET8_0_OR_GREATER
+        return (MethodInfo)specializedType.GetMemberWithSameMetadataDefinitionAs(genericMethodDefinition);
+#else
+        const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance;
+        return specializedType.GetMethods(All).First(m => m.MetadataToken == genericMethodDefinition.MetadataToken);
+#endif
     }
 
     [JsonSourceGenerationOptions(
@@ -835,6 +863,10 @@ internal sealed partial class JsonRpc : IDisposable
 
         [JsonPropertyName("message")]
         public string Message { get; set; } = string.Empty;
+
+        [JsonPropertyName("data")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public JsonElement? Data { get; set; }
     }
 
     private sealed class JsonRpcNotification
@@ -873,4 +905,21 @@ internal sealed class RemoteRpcException(string message, int errorCode, Exceptio
     public const int MethodNotFoundErrorCode = -32601;
 
     public int ErrorCode { get; } = errorCode;
+}
+
+/// <summary>
+/// Allows handler methods registered via <c>JsonRpcConnection.SetLocalRpcMethod</c>
+/// to surface a structured JSON-RPC error response (code, message, and optional
+/// <c>data</c> payload) instead of the default <c>ErrorCodeInternalError</c> envelope.
+/// </summary>
+internal sealed class LocalRpcInvocationException : Exception
+{
+    public LocalRpcInvocationException(int code, string message, JsonElement? data = null) : base(message)
+    {
+        Code = code;
+        Data = data;
+    }
+
+    public int Code { get; }
+    public new JsonElement? Data { get; }
 }

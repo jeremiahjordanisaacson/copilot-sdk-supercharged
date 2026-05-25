@@ -63,9 +63,9 @@ type Session struct {
 	permissionMux         sync.RWMutex
 	userInputHandler      UserInputHandler
 	userInputMux          sync.RWMutex
-	exitPlanModeHandler   ExitPlanModeHandler
+	exitPlanModeHandler   ExitPlanModeRequestHandler
 	exitPlanModeMu        sync.RWMutex
-	autoModeSwitchHandler AutoModeSwitchHandler
+	autoModeSwitchHandler AutoModeSwitchRequestHandler
 	autoModeSwitchMu      sync.RWMutex
 	hooks                 *SessionHooks
 	hooksMux              sync.RWMutex
@@ -75,6 +75,10 @@ type Session struct {
 	commandHandlersMu     sync.RWMutex
 	elicitationHandler    ElicitationHandler
 	elicitationMu         sync.RWMutex
+	canvasHandler         CanvasHandler
+	canvasMu              sync.RWMutex
+	openCanvases          []rpc.OpenCanvasInstance
+	openCanvasesMu        sync.RWMutex
 	capabilities          SessionCapabilities
 	capabilitiesMu        sync.RWMutex
 
@@ -92,6 +96,38 @@ type Session struct {
 // Returns empty string if infinite sessions are disabled.
 func (s *Session) WorkspacePath() string {
 	return s.workspacePath
+}
+
+// OpenCanvases returns the open-canvas snapshot last reported by the runtime
+// (currently populated from the session.resume response). The returned slice
+// is a copy and is safe to mutate by the caller.
+func (s *Session) OpenCanvases() []rpc.OpenCanvasInstance {
+	s.openCanvasesMu.RLock()
+	defer s.openCanvasesMu.RUnlock()
+	if len(s.openCanvases) == 0 {
+		return nil
+	}
+	out := make([]rpc.OpenCanvasInstance, len(s.openCanvases))
+	copy(out, s.openCanvases)
+	return out
+}
+
+func (s *Session) setOpenCanvases(canvases []rpc.OpenCanvasInstance) {
+	s.openCanvasesMu.Lock()
+	defer s.openCanvasesMu.Unlock()
+	s.openCanvases = canvases
+}
+
+func (s *Session) registerCanvasHandler(handler CanvasHandler) {
+	s.canvasMu.Lock()
+	defer s.canvasMu.Unlock()
+	s.canvasHandler = handler
+}
+
+func (s *Session) getCanvasHandler() CanvasHandler {
+	s.canvasMu.RLock()
+	defer s.canvasMu.RUnlock()
+	return s.canvasHandler
 }
 
 // newSession creates a new session wrapper with the given session ID and client.
@@ -157,6 +193,14 @@ func (s *Session) Send(ctx context.Context, options MessageOptions) (string, err
 		return "", fmt.Errorf("failed to unmarshal send response: %w", err)
 	}
 	return response.MessageID, nil
+}
+
+// SendPrompt is a convenience wrapper for [Session.Send] that takes a plain
+// prompt string instead of a [MessageOptions] struct. Equivalent to:
+//
+//	session.Send(ctx, copilot.MessageOptions{Prompt: prompt})
+func (s *Session) SendPrompt(ctx context.Context, prompt string) (string, error) {
+	return s.Send(ctx, MessageOptions{Prompt: prompt})
 }
 
 // SendAndWait sends a message to this session and waits until the session becomes idle.
@@ -239,6 +283,15 @@ func (s *Session) SendAndWait(ctx context.Context, options MessageOptions) (*Ses
 	}
 }
 
+// SendPromptAndWait is a convenience wrapper for [Session.SendAndWait] that
+// takes a plain prompt string instead of a [MessageOptions] struct. Equivalent
+// to:
+//
+//	session.SendAndWait(ctx, copilot.MessageOptions{Prompt: prompt})
+func (s *Session) SendPromptAndWait(ctx context.Context, prompt string) (*SessionEvent, error) {
+	return s.SendAndWait(ctx, MessageOptions{Prompt: prompt})
+}
+
 // On subscribes to events from this session.
 //
 // Events include assistant messages, tool executions, errors, and session state
@@ -285,8 +338,8 @@ func (s *Session) On(handler SessionEventHandler) func() {
 
 // registerTools registers tool handlers for this session.
 //
-// Tools allow the assistant to execute custom functions. When the assistant
-// invokes a tool, the corresponding handler is called with the tool arguments.
+// Tools with handlers allow the assistant to execute custom functions automatically.
+// Declaration-only tools are surfaced as events and left pending for the consumer.
 //
 // This method is internal and typically called when creating a session with tools.
 func (s *Session) registerTools(tools []Tool) {
@@ -365,13 +418,13 @@ func (s *Session) handleUserInputRequest(request UserInputRequest) (UserInputRes
 	return handler(request, invocation)
 }
 
-func (s *Session) registerExitPlanModeHandler(handler ExitPlanModeHandler) {
+func (s *Session) registerExitPlanModeHandler(handler ExitPlanModeRequestHandler) {
 	s.exitPlanModeMu.Lock()
 	defer s.exitPlanModeMu.Unlock()
 	s.exitPlanModeHandler = handler
 }
 
-func (s *Session) getExitPlanModeHandler() ExitPlanModeHandler {
+func (s *Session) getExitPlanModeHandler() ExitPlanModeRequestHandler {
 	s.exitPlanModeMu.RLock()
 	defer s.exitPlanModeMu.RUnlock()
 	return s.exitPlanModeHandler
@@ -386,13 +439,13 @@ func (s *Session) handleExitPlanModeRequest(request ExitPlanModeRequest) (ExitPl
 	return handler(request, ExitPlanModeInvocation{SessionID: s.SessionID})
 }
 
-func (s *Session) registerAutoModeSwitchHandler(handler AutoModeSwitchHandler) {
+func (s *Session) registerAutoModeSwitchHandler(handler AutoModeSwitchRequestHandler) {
 	s.autoModeSwitchMu.Lock()
 	defer s.autoModeSwitchMu.Unlock()
 	s.autoModeSwitchHandler = handler
 }
 
-func (s *Session) getAutoModeSwitchHandler() AutoModeSwitchHandler {
+func (s *Session) getAutoModeSwitchHandler() AutoModeSwitchRequestHandler {
 	s.autoModeSwitchMu.RLock()
 	defer s.autoModeSwitchMu.RUnlock()
 	return s.autoModeSwitchHandler
@@ -449,6 +502,16 @@ func (s *Session) handleHooksInvoke(hookType string, rawInput json.RawMessage) (
 			return nil, fmt.Errorf("invalid hook input: %w", err)
 		}
 		return hooks.OnPreToolUse(input, invocation)
+
+	case "preMcpToolCall":
+		if hooks.OnPreMcpToolCall == nil {
+			return nil, nil
+		}
+		var input PreMcpToolCallHookInput
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			return nil, fmt.Errorf("invalid hook input: %w", err)
+		}
+		return hooks.OnPreMcpToolCall(input, invocation)
 
 	case "postToolUse":
 		if hooks.OnPostToolUse == nil {
@@ -836,7 +899,7 @@ func (ui *SessionUI) Select(ctx context.Context, message string, options []strin
 
 // Input shows a text input dialog. Returns the entered text, or empty string and
 // false if the user declines/cancels.
-func (ui *SessionUI) Input(ctx context.Context, message string, opts *InputOptions) (string, bool, error) {
+func (ui *SessionUI) Input(ctx context.Context, message string, opts *UiInputOptions) (string, bool, error) {
 	if err := ui.session.assertElicitation(); err != nil {
 		return "", false, err
 	}
@@ -849,11 +912,11 @@ func (ui *SessionUI) Input(ctx context.Context, message string, opts *InputOptio
 			prop.Description = &opts.Description
 		}
 		if opts.MinLength != nil {
-			f := float64(*opts.MinLength)
+			f := int64(*opts.MinLength)
 			prop.MinLength = &f
 		}
 		if opts.MaxLength != nil {
-			f := float64(*opts.MaxLength)
+			f := int64(*opts.MaxLength)
 			prop.MaxLength = &f
 		}
 		if opts.Format != "" {
@@ -1118,7 +1181,7 @@ func (s *Session) executePermissionAndRespond(requestID string, permissionReques
 		SessionID: s.SessionID,
 	}
 
-	result, err := handler(permissionRequest, invocation)
+	decision, err := handler(permissionRequest, invocation)
 	if err != nil {
 		s.RPC.Permissions.HandlePendingPermissionRequest(context.Background(), &rpc.PermissionDecisionRequest{
 			RequestID: requestID,
@@ -1126,30 +1189,29 @@ func (s *Session) executePermissionAndRespond(requestID string, permissionReques
 		})
 		return
 	}
-	if result.Kind == "no-result" {
+	if decision == nil {
+		// Handler returned (nil, nil); treat as user-not-available rather
+		// than sending null on the wire.
+		s.RPC.Permissions.HandlePendingPermissionRequest(context.Background(), &rpc.PermissionDecisionRequest{
+			RequestID: requestID,
+			Result:    &rpc.PermissionDecisionUserNotAvailable{},
+		})
+		return
+	}
+	if _, ok := decision.(*rpc.PermissionDecisionNoResult); ok {
+		return
+	}
+	if _, ok := decision.(rpc.PermissionDecisionNoResult); ok {
 		return
 	}
 
 	s.RPC.Permissions.HandlePendingPermissionRequest(context.Background(), &rpc.PermissionDecisionRequest{
 		RequestID: requestID,
-		Result:    rpcPermissionDecisionFromKind(rpc.PermissionDecisionKind(result.Kind)),
+		Result:    decision,
 	})
 }
 
-func rpcPermissionDecisionFromKind(kind rpc.PermissionDecisionKind) rpc.PermissionDecision {
-	switch kind {
-	case rpc.PermissionDecisionKindApproveOnce:
-		return &rpc.PermissionDecisionApproveOnce{}
-	case rpc.PermissionDecisionKindReject:
-		return &rpc.PermissionDecisionReject{}
-	case rpc.PermissionDecisionKindUserNotAvailable:
-		return &rpc.PermissionDecisionUserNotAvailable{}
-	default:
-		return &rpc.RawPermissionDecisionData{Discriminator: kind}
-	}
-}
-
-// GetMessages retrieves all events and messages from this session's history.
+// GetEvents retrieves all events from this session's history.
 //
 // This returns the complete conversation history including user messages,
 // assistant responses, tool executions, and other session events in
@@ -1159,9 +1221,9 @@ func rpcPermissionDecisionFromKind(kind rpc.PermissionDecisionKind) rpc.Permissi
 //
 // Example:
 //
-//	events, err := session.GetMessages(context.Background())
+//	events, err := session.GetEvents(context.Background())
 //	if err != nil {
-//	    log.Printf("Failed to get messages: %v", err)
+//	    log.Printf("Failed to get events: %v", err)
 //	    return
 //	}
 //	for _, event := range events {
@@ -1169,16 +1231,16 @@ func rpcPermissionDecisionFromKind(kind rpc.PermissionDecisionKind) rpc.Permissi
 //	        fmt.Println("Assistant:", d.Content)
 //	    }
 //	}
-func (s *Session) GetMessages(ctx context.Context) ([]SessionEvent, error) {
+func (s *Session) GetEvents(ctx context.Context) ([]SessionEvent, error) {
 
 	result, err := s.client.Request("session.getMessages", sessionGetMessagesRequest{SessionID: s.SessionID})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get messages: %w", err)
+		return nil, fmt.Errorf("failed to get events: %w", err)
 	}
 
 	var response sessionGetMessagesResponse
 	if err := json.Unmarshal(result, &response); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal get messages response: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal get events response: %w", err)
 	}
 	return response.Events, nil
 }
@@ -1235,14 +1297,6 @@ func (s *Session) Disconnect() error {
 	s.elicitationMu.Unlock()
 
 	return nil
-}
-
-// Deprecated: Use [Session.Disconnect] instead. Destroy will be removed in a future release.
-//
-// Destroy closes this session and releases all in-memory resources.
-// Session data on disk is preserved for later resumption.
-func (s *Session) Destroy() error {
-	return s.Disconnect()
 }
 
 // Abort aborts the currently processing message in this session.

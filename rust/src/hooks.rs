@@ -25,10 +25,13 @@ pub struct HookContext {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreToolUseInput {
+    /// The runtime session ID of the session that triggered the hook.
+    pub session_id: String,
     /// Unix timestamp (ms).
     pub timestamp: i64,
     /// Working directory.
-    pub cwd: PathBuf,
+    #[serde(rename = "cwd")]
+    pub working_directory: PathBuf,
     /// Name of the tool about to execute.
     pub tool_name: String,
     /// Arguments passed to the tool.
@@ -56,14 +59,56 @@ pub struct PreToolUseOutput {
     pub suppress_output: Option<bool>,
 }
 
+/// Input for the `preMcpToolCall` hook — received before an MCP tool call is dispatched.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreMcpToolCallInput {
+    /// The runtime session ID of the session that triggered the hook.
+    pub session_id: String,
+    /// Unix timestamp (ms).
+    pub timestamp: i64,
+    /// Working directory.
+    #[serde(rename = "cwd")]
+    pub working_directory: PathBuf,
+    /// Name of the MCP server being called.
+    pub server_name: String,
+    /// Name of the MCP tool being called.
+    pub tool_name: String,
+    /// Arguments for the MCP tool call.
+    pub arguments: Value,
+    /// Tool call ID, if available.
+    #[serde(default)]
+    pub tool_call_id: Option<String>,
+    /// MCP request metadata.
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+/// Output for the `preMcpToolCall` hook.
+///
+/// `meta_to_use` has tri-state semantics:
+/// - `None`: field is absent in JSON, meaning preserve existing `_meta`
+/// - `Some(Value::Null)`: serialized as JSON `null`, meaning omit `_meta`
+/// - `Some(Value::Object(...))`: serialized as JSON object, meaning replace `_meta`
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreMcpToolCallOutput {
+    /// Hook-controlled metadata for the outgoing MCP request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta_to_use: Option<Value>,
+}
+
 /// Input for the `postToolUse` hook — received after a tool executes.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PostToolUseInput {
+    /// The runtime session ID of the session that triggered the hook.
+    pub session_id: String,
     /// Unix timestamp (ms).
     pub timestamp: i64,
     /// Working directory.
-    pub cwd: PathBuf,
+    #[serde(rename = "cwd")]
+    pub working_directory: PathBuf,
     /// Name of the tool that executed.
     pub tool_name: String,
     /// Arguments that were passed to the tool.
@@ -91,10 +136,13 @@ pub struct PostToolUseOutput {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserPromptSubmittedInput {
+    /// The runtime session ID of the session that triggered the hook.
+    pub session_id: String,
     /// Unix timestamp (ms).
     pub timestamp: i64,
     /// Working directory.
-    pub cwd: PathBuf,
+    #[serde(rename = "cwd")]
+    pub working_directory: PathBuf,
     /// The user's message text.
     pub prompt: String,
 }
@@ -118,10 +166,13 @@ pub struct UserPromptSubmittedOutput {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionStartInput {
+    /// The runtime session ID of the session that triggered the hook.
+    pub session_id: String,
     /// Unix timestamp (ms).
     pub timestamp: i64,
     /// Working directory.
-    pub cwd: PathBuf,
+    #[serde(rename = "cwd")]
+    pub working_directory: PathBuf,
     /// How the session was started: `"startup"`, `"resume"`, or `"new"`.
     pub source: String,
     /// The first user message, if any.
@@ -145,10 +196,13 @@ pub struct SessionStartOutput {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionEndInput {
+    /// The runtime session ID of the session that triggered the hook.
+    pub session_id: String,
     /// Unix timestamp (ms).
     pub timestamp: i64,
     /// Working directory.
-    pub cwd: PathBuf,
+    #[serde(rename = "cwd")]
+    pub working_directory: PathBuf,
     /// Why the session ended: `"complete"`, `"error"`, `"abort"`, `"timeout"`, `"user_exit"`.
     pub reason: String,
     /// The last assistant message.
@@ -178,10 +232,13 @@ pub struct SessionEndOutput {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorOccurredInput {
+    /// The runtime session ID of the session that triggered the hook.
+    pub session_id: String,
     /// Unix timestamp (ms).
     pub timestamp: i64,
     /// Working directory.
-    pub cwd: PathBuf,
+    #[serde(rename = "cwd")]
+    pub working_directory: PathBuf,
     /// The error message.
     pub error: String,
     /// Context where the error occurred: `"model_call"`, `"tool_execution"`, `"system"`, `"user_input"`.
@@ -220,6 +277,13 @@ pub enum HookEvent {
     PreToolUse {
         /// Typed input data.
         input: PreToolUseInput,
+        /// Session context.
+        ctx: HookContext,
+    },
+    /// Fired before an MCP tool call is dispatched.
+    PreMcpToolCall {
+        /// Typed input data.
+        input: PreMcpToolCallInput,
         /// Session context.
         ctx: HookContext,
     },
@@ -271,6 +335,8 @@ pub enum HookOutput {
     None,
     /// Response for a pre-tool-use hook.
     PreToolUse(PreToolUseOutput),
+    /// Response for a pre-MCP-tool-call hook.
+    PreMcpToolCall(PreMcpToolCallOutput),
     /// Response for a post-tool-use hook.
     PostToolUse(PostToolUseOutput),
     /// Response for a user-prompt-submitted hook.
@@ -288,6 +354,7 @@ impl HookOutput {
         match self {
             Self::None => "None",
             Self::PreToolUse(_) => "PreToolUse",
+            Self::PreMcpToolCall(_) => "PreMcpToolCall",
             Self::PostToolUse(_) => "PostToolUse",
             Self::UserPromptSubmitted(_) => "UserPromptSubmitted",
             Self::SessionStart(_) => "SessionStart",
@@ -326,6 +393,11 @@ pub trait SessionHooks: Send + Sync + 'static {
                 .await
                 .map(HookOutput::PreToolUse)
                 .unwrap_or(HookOutput::None),
+            HookEvent::PreMcpToolCall { input, ctx } => self
+                .on_pre_mcp_tool_call(input, ctx)
+                .await
+                .map(HookOutput::PreMcpToolCall)
+                .unwrap_or(HookOutput::None),
             HookEvent::PostToolUse { input, ctx } => self
                 .on_post_tool_use(input, ctx)
                 .await
@@ -361,6 +433,16 @@ pub trait SessionHooks: Send + Sync + 'static {
         _input: PreToolUseInput,
         _ctx: HookContext,
     ) -> Option<PreToolUseOutput> {
+        None
+    }
+
+    /// Called before an MCP tool call is dispatched. Return `Some(output)` to
+    /// modify or remove request metadata, or `None` (default) to pass through unchanged.
+    async fn on_pre_mcp_tool_call(
+        &self,
+        _input: PreMcpToolCallInput,
+        _ctx: HookContext,
+    ) -> Option<PreMcpToolCallOutput> {
         None
     }
 
@@ -437,6 +519,10 @@ pub(crate) async fn dispatch_hook(
             let input: PreToolUseInput = serde_json::from_value(raw_input)?;
             HookEvent::PreToolUse { input, ctx }
         }
+        "preMcpToolCall" => {
+            let input: PreMcpToolCallInput = serde_json::from_value(raw_input)?;
+            HookEvent::PreMcpToolCall { input, ctx }
+        }
         "postToolUse" => {
             let input: PostToolUseInput = serde_json::from_value(raw_input)?;
             HookEvent::PostToolUse { input, ctx }
@@ -483,6 +569,7 @@ pub(crate) async fn dispatch_hook(
     let output_value = match (hook_type, &output) {
         (_, HookOutput::None) => None,
         ("preToolUse", HookOutput::PreToolUse(o)) => Some(serde_json::to_value(o)?),
+        ("preMcpToolCall", HookOutput::PreMcpToolCall(o)) => Some(serde_json::to_value(o)?),
         ("postToolUse", HookOutput::PostToolUse(o)) => Some(serde_json::to_value(o)?),
         ("userPromptSubmitted", HookOutput::UserPromptSubmitted(o)) => {
             Some(serde_json::to_value(o)?)
@@ -540,6 +627,7 @@ mod tests {
     async fn dispatch_pre_tool_use_deny() {
         let hooks = TestHooks;
         let input = serde_json::json!({
+            "sessionId": "sess-1",
             "timestamp": 1234567890,
             "cwd": "/tmp",
             "toolName": "dangerous_tool",
@@ -557,6 +645,7 @@ mod tests {
     async fn dispatch_pre_tool_use_passthrough() {
         let hooks = TestHooks;
         let input = serde_json::json!({
+            "sessionId": "sess-1",
             "timestamp": 1234567890,
             "cwd": "/tmp",
             "toolName": "safe_tool",
@@ -573,6 +662,7 @@ mod tests {
     async fn dispatch_user_prompt_submitted() {
         let hooks = TestHooks;
         let input = serde_json::json!({
+            "sessionId": "sess-1",
             "timestamp": 1234567890,
             "cwd": "/tmp",
             "prompt": "hello world"
@@ -592,6 +682,7 @@ mod tests {
     async fn dispatch_unregistered_hook_returns_empty() {
         let hooks = TestHooks;
         let input = serde_json::json!({
+            "sessionId": "sess-1",
             "timestamp": 1234567890,
             "cwd": "/tmp",
             "reason": "complete"
@@ -629,6 +720,7 @@ mod tests {
 
         let hooks = MismatchHooks;
         let input = serde_json::json!({
+            "sessionId": "sess-1",
             "timestamp": 1234567890,
             "cwd": "/tmp",
             "toolName": "some_tool",
@@ -645,6 +737,7 @@ mod tests {
     async fn dispatch_post_tool_use_default() {
         let hooks = TestHooks;
         let input = serde_json::json!({
+            "sessionId": "sess-1",
             "timestamp": 1234567890,
             "cwd": "/tmp",
             "toolName": "some_tool",
@@ -677,6 +770,7 @@ mod tests {
 
         let hooks = StartHooks;
         let input = serde_json::json!({
+            "sessionId": "sess-1",
             "timestamp": 1234567890,
             "cwd": "/tmp",
             "source": "new"
@@ -708,6 +802,7 @@ mod tests {
 
         let hooks = ErrorHooks;
         let input = serde_json::json!({
+            "sessionId": "sess-1",
             "timestamp": 1234567890,
             "cwd": "/tmp",
             "error": "model timeout",

@@ -45,6 +45,8 @@ mod pending_work_resume;
 mod per_session_auth;
 #[path = "e2e/permissions.rs"]
 mod permissions;
+#[path = "e2e/pre_mcp_tool_call_hook.rs"]
+mod pre_mcp_tool_call_hook;
 #[path = "e2e/rpc_additional_edge_cases.rs"]
 mod rpc_additional_edge_cases;
 #[path = "e2e/rpc_agent.rs"]
@@ -71,12 +73,16 @@ mod session;
 mod session_config;
 #[path = "e2e/session_fs.rs"]
 mod session_fs;
+#[path = "e2e/session_fs_sqlite.rs"]
+mod session_fs_sqlite;
 #[path = "e2e/session_lifecycle.rs"]
 mod session_lifecycle;
 #[path = "e2e/skills.rs"]
 mod skills;
 #[path = "e2e/streaming_fidelity.rs"]
 mod streaming_fidelity;
+#[path = "e2e/subagent_hooks.rs"]
+mod subagent_hooks;
 #[path = "e2e/support.rs"]
 mod support;
 #[path = "e2e/suspend.rs"]

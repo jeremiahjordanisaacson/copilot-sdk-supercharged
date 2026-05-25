@@ -5,7 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { CopilotClient } from "../../src/index.js";
+import { CopilotClient, RuntimeConnection } from "../../src/index.js";
 import { createSdkTestContext } from "./harness/sdkTestContext.js";
 
 describe("Server-scoped RPC", async () => {
@@ -17,10 +17,10 @@ describe("Server-scoped RPC", async () => {
             COPILOT_DEBUG_GITHUB_API_URL: env.COPILOT_API_URL,
         };
         const authClient = new CopilotClient({
-            cwd: workDir,
+            workingDirectory: workDir,
             env: childEnv,
             logLevel: "error",
-            cliPath: process.env.COPILOT_CLI_PATH,
+            connection: RuntimeConnection.forStdio({ path: process.env.COPILOT_CLI_PATH }),
             gitHubToken: token,
         });
         onTestFinished(async () => {
@@ -76,7 +76,7 @@ describe("Server-scoped RPC", async () => {
         await client.start();
         const result = await client.ping("typed rpc test");
         expect(result.message).toBe("pong: typed rpc test");
-        expect(result.timestamp).toBeGreaterThanOrEqual(0);
+        expect(Date.parse(result.timestamp)).not.toBeNaN();
     });
 
     it("should call rpc models list with typed result", async () => {

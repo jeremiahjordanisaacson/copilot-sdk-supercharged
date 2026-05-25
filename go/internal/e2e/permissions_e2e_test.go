@@ -25,7 +25,7 @@ func TestPermissionsE2E(t *testing.T) {
 		var permissionRequests []copilot.PermissionRequest
 		var mu sync.Mutex
 
-		onPermissionRequest := func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+		onPermissionRequest := func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
 			mu.Lock()
 			permissionRequests = append(permissionRequests, request)
 			mu.Unlock()
@@ -34,7 +34,7 @@ func TestPermissionsE2E(t *testing.T) {
 				t.Error("Expected non-empty session ID in invocation")
 			}
 
-			return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+			return &rpc.PermissionDecisionApproveOnce{}, nil
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
@@ -80,12 +80,12 @@ func TestPermissionsE2E(t *testing.T) {
 		var permissionRequests []copilot.PermissionRequest
 		var mu sync.Mutex
 
-		onPermissionRequest := func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+		onPermissionRequest := func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
 			mu.Lock()
 			permissionRequests = append(permissionRequests, request)
 			mu.Unlock()
 
-			return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+			return &rpc.PermissionDecisionApproveOnce{}, nil
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
@@ -119,8 +119,8 @@ func TestPermissionsE2E(t *testing.T) {
 	t.Run("deny permission", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		onPermissionRequest := func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-			return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindRejected}, nil
+		onPermissionRequest := func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+			return &rpc.PermissionDecisionReject{}, nil
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
@@ -129,6 +129,26 @@ func TestPermissionsE2E(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
+
+		// Regression check for https://github.com/github/copilot-sdk/issues/1194:
+		// the reject decision must round-trip through the CLI with its discriminator
+		// intact so the agent surfaces the user-rejected error to the model. The
+		// CLI emits a kind-specific error message ("The user rejected this tool call.")
+		// for the reject decision, which lets us assert the decision was honored
+		// — not merely that the operation didn't happen.
+		var mu sync.Mutex
+		userRejectedToolCall := false
+
+		session.On(func(event copilot.SessionEvent) {
+			if d, ok := event.Data.(*copilot.ToolExecutionCompleteData); ok &&
+				!d.Success &&
+				d.Error != nil &&
+				strings.Contains(strings.ToLower(d.Error.Message), "user rejected") {
+				mu.Lock()
+				userRejectedToolCall = true
+				mu.Unlock()
+			}
+		})
 
 		testFile := filepath.Join(ctx.WorkDir, "protected.txt")
 		originalContent := []byte("protected content")
@@ -149,6 +169,12 @@ func TestPermissionsE2E(t *testing.T) {
 			t.Fatalf("Failed to get final message: %v", err)
 		}
 
+		mu.Lock()
+		if !userRejectedToolCall {
+			t.Error("Expected a tool.execution_complete event whose error indicates the user rejected the call.")
+		}
+		mu.Unlock()
+
 		// Verify the file was NOT modified
 		content, err := os.ReadFile(testFile)
 		if err != nil {
@@ -164,8 +190,8 @@ func TestPermissionsE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindUserNotAvailable}, nil
+			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+				return &rpc.PermissionDecisionUserNotAvailable{}, nil
 			},
 		})
 		if err != nil {
@@ -214,8 +240,8 @@ func TestPermissionsE2E(t *testing.T) {
 		}
 
 		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindUserNotAvailable}, nil
+			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+				return &rpc.PermissionDecisionUserNotAvailable{}, nil
 			},
 		})
 		if err != nil {
@@ -283,9 +309,9 @@ func TestPermissionsE2E(t *testing.T) {
 
 		var permissionRequestReceived atomicBool
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
 				permissionRequestReceived.Set(true)
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+				return &rpc.PermissionDecisionApproveOnce{}, nil
 			},
 		})
 		if err != nil {
@@ -322,9 +348,9 @@ func TestPermissionsE2E(t *testing.T) {
 
 		var permissionRequestReceived atomicBool
 		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
-			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
 				permissionRequestReceived.Set(true)
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+				return &rpc.PermissionDecisionApproveOnce{}, nil
 			},
 		})
 		if err != nil {
@@ -346,8 +372,8 @@ func TestPermissionsE2E(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-				return copilot.PermissionRequestResult{}, fmt.Errorf("handler error")
+			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+				return nil, fmt.Errorf("handler error")
 			},
 		})
 		if err != nil {
@@ -383,11 +409,11 @@ func TestPermissionsE2E(t *testing.T) {
 
 		var receivedToolCallID atomicBool
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
 				if shellReq, ok := req.(*copilot.PermissionRequestShell); ok && shellReq.ToolCallID != nil && *shellReq.ToolCallID != "" {
 					receivedToolCallID.Set(true)
 				}
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+				return &rpc.PermissionDecisionApproveOnce{}, nil
 			},
 		})
 		if err != nil {
@@ -424,10 +450,10 @@ func TestPermissionsE2E(t *testing.T) {
 		}
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
 				shellReq, ok := req.(*copilot.PermissionRequestShell)
 				if !ok {
-					return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+					return &rpc.PermissionDecisionApproveOnce{}, nil
 				}
 				toolCallID := ""
 				if shellReq.ToolCallID != nil {
@@ -444,7 +470,7 @@ func TestPermissionsE2E(t *testing.T) {
 				}
 				<-releaseHandler
 				addLifecycle("permission-complete", toolCallID)
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+				return &rpc.PermissionDecisionApproveOnce{}, nil
 			},
 		})
 		if err != nil {
@@ -581,7 +607,7 @@ func TestPermissionsE2E(t *testing.T) {
 					}),
 			},
 			AvailableTools: []string{"first_permission_tool", "second_permission_tool"},
-			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
 				permissionRequestsMu.Lock()
 				permissionRequestCount++
 				permissionRequests = append(permissionRequests, req)
@@ -594,7 +620,7 @@ func TestPermissionsE2E(t *testing.T) {
 				case <-bothStarted:
 				case <-time.After(30 * time.Second):
 				}
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+				return &rpc.PermissionDecisionApproveOnce{}, nil
 			},
 		})
 		if err != nil {
@@ -699,12 +725,12 @@ func TestPermissionsE2E(t *testing.T) {
 		permissionCalled := make(chan struct{}, 1)
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
 				select {
 				case permissionCalled <- struct{}{}:
 				default:
 				}
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindNoResult}, nil
+				return &rpc.PermissionDecisionNoResult{}, nil
 			},
 		})
 		if err != nil {
@@ -735,11 +761,11 @@ func TestPermissionsE2E(t *testing.T) {
 		var handlerCallCountMu sync.Mutex
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+			OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
 				handlerCallCountMu.Lock()
 				handlerCallCount++
 				handlerCallCountMu.Unlock()
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+				return &rpc.PermissionDecisionApproveOnce{}, nil
 			},
 		})
 		if err != nil {

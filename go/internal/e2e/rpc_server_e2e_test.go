@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	copilot "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
@@ -32,8 +33,8 @@ func TestRpcServerE2E(t *testing.T) {
 		if !strings.Contains(result.Message, "typed rpc test") {
 			t.Errorf("Expected ping response to contain 'typed rpc test', got %q", result.Message)
 		}
-		if result.Timestamp < 0 {
-			t.Errorf("Expected non-negative Timestamp, got %d", result.Timestamp)
+		if result.Timestamp.IsZero() {
+			t.Errorf("Expected non-zero Timestamp, got %s", result.Timestamp)
 		}
 	})
 
@@ -117,7 +118,11 @@ func TestRpcServerE2E(t *testing.T) {
 		if !chat.OverageAllowedWithExhaustedQuota {
 			t.Errorf("Expected OverageAllowedWithExhaustedQuota=true")
 		}
-		if chat.ResetDate == nil || *chat.ResetDate != "2026-04-30T00:00:00Z" {
+		expectedResetDate, err := time.Parse(time.RFC3339, "2026-04-30T00:00:00Z")
+		if err != nil {
+			t.Fatalf("Parse expected reset date: %v", err)
+		}
+		if chat.ResetDate == nil || !chat.ResetDate.Equal(expectedResetDate) {
 			t.Errorf("Expected ResetDate='2026-04-30T00:00:00Z', got %v", chat.ResetDate)
 		}
 	})
@@ -175,6 +180,7 @@ func TestRpcServerE2E(t *testing.T) {
 		discovered := findServerSkill(skills.Skills, skillName)
 		if discovered == nil {
 			t.Fatalf("Expected to discover skill %q", skillName)
+			return
 		}
 		if discovered.Description != "Skill discovered by server-scoped RPC tests." {
 			t.Errorf("Expected description to match, got %q", discovered.Description)
@@ -206,6 +212,7 @@ func TestRpcServerE2E(t *testing.T) {
 		disabledSkill := findServerSkill(disabled.Skills, skillName)
 		if disabledSkill == nil {
 			t.Fatalf("Expected to find skill %q after disable", skillName)
+			return
 		}
 		if disabledSkill.Enabled {
 			t.Errorf("Expected skill %q to be Enabled=false after global disable", skillName)

@@ -12,11 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from copilot import CopilotClient
-from copilot.client import SubprocessConfig
+from copilot import CopilotClient, RuntimeConnection
 from copilot.generated.rpc import (
     AccountGetQuotaRequest,
     MCPDiscoverRequest,
+    ModelsListRequest,
     PingRequest,
     SkillsConfigSetDisabledSkillsRequest,
     SkillsDiscoverRequest,
@@ -47,7 +47,7 @@ def _create_skill_directory(work_dir: str, skill_name: str, description: str) ->
 @pytest.fixture(scope="module")
 async def authed_ctx(ctx: E2ETestContext):
     """Configure proxy to redirect GitHub user lookups so per-token auth works."""
-    ctx.client._config.env["COPILOT_DEBUG_GITHUB_API_URL"] = ctx.proxy_url
+    ctx.client._options.env["COPILOT_DEBUG_GITHUB_API_URL"] = ctx.proxy_url
     return ctx
 
 
@@ -55,12 +55,10 @@ def _make_authed_client(ctx: E2ETestContext, token: str) -> CopilotClient:
     env = ctx.get_env()
     env["COPILOT_DEBUG_GITHUB_API_URL"] = ctx.proxy_url
     return CopilotClient(
-        SubprocessConfig(
-            cli_path=ctx.cli_path,
-            cwd=ctx.work_dir,
-            env=env,
-            github_token=token,
-        )
+        connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
+        working_directory=ctx.work_dir,
+        env=env,
+        github_token=token,
     )
 
 
@@ -88,7 +86,7 @@ class TestRpcServer:
         await ctx.client.start()
         result = await ctx.client.rpc.ping(PingRequest(message="typed rpc test"))
         assert result.message == "pong: typed rpc test"
-        assert result.timestamp >= 0
+        assert result.timestamp is not None
 
     async def test_should_call_rpc_models_list_with_typed_result(self, authed_ctx: E2ETestContext):
         token = "rpc-models-token"
@@ -96,7 +94,7 @@ class TestRpcServer:
         client = _make_authed_client(authed_ctx, token)
         try:
             await client.start()
-            result = await client.rpc.models.list()
+            result = await client.rpc.models.list(ModelsListRequest())
             assert result.models is not None
             assert any(model.id == "claude-sonnet-4.5" for model in result.models)
             assert all((model.name or "").strip() for model in result.models)

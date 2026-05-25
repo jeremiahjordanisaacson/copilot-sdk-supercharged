@@ -7,7 +7,7 @@ use github_copilot_sdk::hooks::{
     PreToolUseInput, PreToolUseOutput, SessionEndInput, SessionEndOutput, SessionHooks,
     SessionStartInput, SessionStartOutput, UserPromptSubmittedInput, UserPromptSubmittedOutput,
 };
-use github_copilot_sdk::tool::{ToolHandler, ToolHandlerRouter};
+use github_copilot_sdk::tool::ToolHandler;
 use github_copilot_sdk::{Error, SessionConfig, Tool, ToolInvocation, ToolResult};
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -36,7 +36,7 @@ async fn should_invoke_onsessionstart_hook_on_new_session() {
                 let input = recv_with_timeout(&mut rx, "sessionStart hook").await;
                 assert_eq!(input.source, "new");
                 assert!(input.timestamp > 0);
-                assert!(!input.cwd.as_os_str().is_empty());
+                assert!(!input.working_directory.as_os_str().is_empty());
 
                 session.disconnect().await.expect("disconnect session");
                 client.stop().await.expect("stop client");
@@ -68,7 +68,7 @@ async fn should_invoke_onuserpromptsubmitted_hook_when_sending_a_message() {
                 let input = recv_with_timeout(&mut rx, "userPromptSubmitted hook").await;
                 assert!(input.prompt.contains("Say hello"));
                 assert!(input.timestamp > 0);
-                assert!(!input.cwd.as_os_str().is_empty());
+                assert!(!input.working_directory.as_os_str().is_empty());
 
                 session.disconnect().await.expect("disconnect session");
                 client.stop().await.expect("stop client");
@@ -100,7 +100,7 @@ async fn should_invoke_onsessionend_hook_when_session_is_disconnected() {
                 session.disconnect().await.expect("disconnect session");
                 let input = recv_with_timeout(&mut rx, "sessionEnd hook").await;
                 assert!(input.timestamp > 0);
-                assert!(!input.cwd.as_os_str().is_empty());
+                assert!(!input.working_directory.as_os_str().is_empty());
 
                 client.stop().await.expect("stop client");
             })
@@ -285,18 +285,13 @@ async fn should_allow_pretooluse_to_return_modifiedargs_and_suppressoutput() {
             Box::pin(async move {
                 ctx.set_default_copilot_user();
                 let (tx, mut rx) = mpsc::unbounded_channel();
-                let router = ToolHandlerRouter::new(
-                    vec![Box::new(EchoValueTool)],
-                    Arc::new(ApproveAllHandler),
-                );
-                let tools = router.tools();
                 let client = ctx.start_client().await;
                 let session = client
                     .create_session(
                         SessionConfig::default()
                             .with_github_token(super::support::DEFAULT_TEST_TOKEN)
-                            .with_handler(Arc::new(router))
-                            .with_tools(tools)
+                            .with_permission_handler(Arc::new(ApproveAllHandler))
+                            .with_tools(vec![echo_value_tool()])
                             .with_hooks(Arc::new(RecordingHooks::pre_tool(tx))),
                     )
                     .await
@@ -522,10 +517,16 @@ impl SessionHooks for RecordingHooks {
         input: PostToolUseInput,
         _ctx: HookContext,
     ) -> Option<PostToolUseOutput> {
-        let output = (input.tool_name == "report_intent").then(|| PostToolUseOutput {
-            modified_result: Some(json!("modified by post hook")),
-            suppress_output: Some(false),
-            ..PostToolUseOutput::default()
+        let output = (self.post_tool.is_some() && input.tool_name == "report_intent").then(|| {
+            PostToolUseOutput {
+                modified_result: Some(json!({
+                    "textResultForLlm": "modified by post hook",
+                    "resultType": "success",
+                    "toolTelemetry": {},
+                })),
+                suppress_output: Some(false),
+                ..PostToolUseOutput::default()
+            }
         });
         if let Some(tx) = &self.post_tool {
             let _ = tx.send(input);
@@ -536,20 +537,21 @@ impl SessionHooks for RecordingHooks {
 
 struct EchoValueTool;
 
+fn echo_value_tool() -> Tool {
+    Tool::new("echo_value")
+        .with_description("Echoes the supplied value")
+        .with_parameters(json!({
+            "type": "object",
+            "properties": {
+                "value": { "type": "string" }
+            },
+            "required": ["value"]
+        }))
+        .with_handler(Arc::new(EchoValueTool))
+}
+
 #[async_trait]
 impl ToolHandler for EchoValueTool {
-    fn tool(&self) -> Tool {
-        Tool::new("echo_value")
-            .with_description("Echoes the supplied value")
-            .with_parameters(json!({
-                "type": "object",
-                "properties": {
-                    "value": { "type": "string" }
-                },
-                "required": ["value"]
-            }))
-    }
-
     async fn call(&self, invocation: ToolInvocation) -> Result<ToolResult, Error> {
         Ok(ToolResult::Text(
             invocation

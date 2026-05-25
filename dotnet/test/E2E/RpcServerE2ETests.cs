@@ -2,12 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.SDK.Rpc;
-using GitHub.Copilot.SDK.Test.Harness;
+using GitHub.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.SDK.Test.E2E;
+namespace GitHub.Copilot.Test.E2E;
 
 public class RpcServerE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "rpc_server", output)
@@ -46,7 +45,7 @@ public class RpcServerE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         var result = await Client.Rpc.PingAsync(message: "typed rpc test");
 
         Assert.Equal("pong: typed rpc test", result.Message);
-        Assert.True(result.Timestamp >= 0);
+        Assert.NotEqual(default, result.Timestamp);
     }
 
     [Fact]
@@ -91,7 +90,7 @@ public class RpcServerE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         Assert.Equal(2, chatQuota.Overage);
         Assert.True(chatQuota.UsageAllowedWithExhaustedQuota);
         Assert.True(chatQuota.OverageAllowedWithExhaustedQuota);
-        Assert.Equal("2026-04-30T00:00:00Z", chatQuota.ResetDate);
+        Assert.Equal(DateTimeOffset.Parse("2026-04-30T00:00:00Z"), chatQuota.ResetDate);
     }
 
     [Fact]

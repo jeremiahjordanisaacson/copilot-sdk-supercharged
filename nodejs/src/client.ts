@@ -31,26 +31,33 @@ import {
     createInternalServerRpc,
     registerClientSessionApiHandlers,
 } from "./generated/rpc.js";
+import type { OpenCanvasInstance } from "./generated/rpc.js";
+import {
+    type CanvasActionInvokeParams,
+    type CanvasProviderRequestParams,
+    dispatchCanvasProviderRequest,
+} from "./canvas.js";
 import { getSdkProtocolVersion } from "./sdkProtocolVersion.js";
-import { CopilotSession, NO_RESULT_PERMISSION_V2_ERROR } from "./session.js";
-import { createSessionFsAdapter } from "./sessionFsProvider.js";
+import { CopilotSession } from "./session.js";
+import { createSessionFsAdapter, type SessionFsProvider } from "./sessionFsProvider.js";
 import { getTraceContext } from "./telemetry.js";
 import type {
     AutoModeSwitchRequest,
     AutoModeSwitchResponse,
-    ConnectionState,
     CopilotClientOptions,
+    CustomAgentConfig,
     ExitPlanModeRequest,
     ExitPlanModeResult,
     ForegroundSessionInfo,
     GetAuthStatusResponse,
     GetStatusResponse,
+    InternalRuntimeConnection,
+    MCPServerConfig,
     ModelInfo,
-    ProviderConfig,
     ResumeSessionConfig,
     SectionTransformFn,
     SessionConfig,
-    SessionContext,
+    SessionCapabilities,
     SessionEvent,
     SessionFsConfig,
     SessionLifecycleEvent,
@@ -61,30 +68,16 @@ import type {
     SystemMessageCustomizeConfig,
     TelemetryConfig,
     Tool,
-    ToolCallRequestPayload,
-    ToolCallResponsePayload,
-    ToolResultObject,
     TraceContextProvider,
     TypedSessionLifecycleHandler,
 } from "./types.js";
 import { defaultJoinSessionPermissionHandler } from "./types.js";
 
 /**
- * Convert a {@link ProviderConfig} to its JSON-RPC wire shape, remapping
- * camelCase SDK property names to the wire keys expected by the runtime
- * (e.g. `maxInputTokens` → `maxPromptTokens`).
- */
-function toWireProviderConfig(provider: ProviderConfig): Record<string, unknown> {
-    const { maxInputTokens, ...rest } = provider;
-    if (maxInputTokens === undefined) return rest;
-    return { ...rest, maxPromptTokens: maxInputTokens };
-}
-
-/**
  * Minimum protocol version this SDK can communicate with.
  * Servers reporting a version below this are rejected.
  */
-const MIN_PROTOCOL_VERSION = 2;
+const MIN_PROTOCOL_VERSION = 3;
 
 /**
  * Check if value is a Zod schema (has toJSONSchema method)
@@ -107,6 +100,64 @@ function toJsonSchema(parameters: Tool["parameters"]): Record<string, unknown> |
         return parameters.toJSONSchema();
     }
     return parameters;
+}
+
+/**
+ * Convert MCP server configs from public API format (workingDirectory) to
+ * wire format (cwd) expected by the runtime.
+ */
+function toWireMcpServers(
+    mcpServers: Record<string, MCPServerConfig> | undefined
+): Record<string, unknown> | undefined {
+    if (!mcpServers) return undefined;
+    return Object.fromEntries(
+        Object.entries(mcpServers).map(([name, server]) => {
+            if ("workingDirectory" in server) {
+                const { workingDirectory, ...rest } = server;
+                return [name, { ...rest, cwd: workingDirectory }];
+            }
+            return [name, server];
+        })
+    );
+}
+
+/**
+ * Convert custom agent configs, transforming nested mcpServers from
+ * public API format (workingDirectory) to wire format (cwd).
+ */
+function toWireCustomAgents(agents: CustomAgentConfig[] | undefined): unknown[] | undefined {
+    if (!agents) return undefined;
+    return agents.map((agent) => {
+        if (!agent.mcpServers) return agent;
+        const { mcpServers, ...rest } = agent;
+        return { ...rest, mcpServers: toWireMcpServers(mcpServers) };
+    });
+}
+
+function isCanvasProviderRequestParams(params: unknown): params is CanvasProviderRequestParams {
+    if (!params || typeof params !== "object") {
+        return false;
+    }
+
+    const request = params as {
+        sessionId?: unknown;
+        extensionId?: unknown;
+        canvasId?: unknown;
+        instanceId?: unknown;
+    };
+    return (
+        typeof request.sessionId === "string" &&
+        typeof request.extensionId === "string" &&
+        typeof request.canvasId === "string" &&
+        typeof request.instanceId === "string"
+    );
+}
+
+function isCanvasActionInvokeParams(params: unknown): params is CanvasActionInvokeParams {
+    return (
+        isCanvasProviderRequestParams(params) &&
+        typeof (params as { actionName?: unknown }).actionName === "string"
+    );
 }
 
 /**
@@ -204,7 +255,7 @@ function getBundledCliPath(): string {
  * const client = new CopilotClient();
  *
  * // Or connect to an existing server
- * const client = new CopilotClient({ cliUrl: "localhost:3000" });
+ * const client = new CopilotClient({ connection: RuntimeConnection.forUri("localhost:3000") });
  *
  * // Create a session
  * const session = await client.createSession({ onPermissionRequest: approveAll, model: "gpt-4" });
@@ -227,32 +278,26 @@ export class CopilotClient {
     private cliProcess: ChildProcess | null = null;
     private connection: MessageConnection | null = null;
     private socket: Socket | null = null;
-    private actualPort: number | null = null;
+    private runtimePort: number | null = null;
     private actualHost: string = "localhost";
-    private state: ConnectionState = "disconnected";
+    private state: "disconnected" | "connecting" | "connected" | "error" = "disconnected";
     private sessions: Map<string, CopilotSession> = new Map();
     private stderrBuffer: string = ""; // Captures CLI stderr for error messages
-    private options: Required<
-        Omit<
-            CopilotClientOptions,
-            | "cliPath"
-            | "cliUrl"
-            | "gitHubToken"
-            | "useLoggedInUser"
-            | "onListModels"
-            | "telemetry"
-            | "onGetTraceContext"
-            | "sessionFs"
-            | "tcpConnectionToken"
-            | "copilotHome"
-        >
-    > & {
-        cliPath?: string;
-        cliUrl?: string;
+    /** Resolved connection mode chosen in the constructor. */
+    private connectionConfig: InternalRuntimeConnection;
+    /** Resolved path to the runtime executable (only used for child-process kinds). */
+    private resolvedCliPath: string | undefined;
+    /** Resolved environment passed to the spawned runtime. */
+    private resolvedEnv: Record<string, string | undefined>;
+    private options: {
+        workingDirectory: string;
+        logLevel?: string;
         gitHubToken?: string;
-        useLoggedInUser?: boolean;
+        useLoggedInUser: boolean;
         telemetry?: TelemetryConfig;
-        copilotHome?: string;
+        baseDirectory?: string;
+        sessionIdleTimeoutSeconds: number;
+        enableRemoteSessions: boolean;
     };
     private isExternalServer: boolean = false;
     private forceStopping: boolean = false;
@@ -307,73 +352,72 @@ export class CopilotClient {
      * Creates a new CopilotClient instance.
      *
      * @param options - Configuration options for the client
-     * @throws Error if mutually exclusive options are provided (e.g., cliUrl with useStdio or cliPath)
      *
      * @example
      * ```typescript
-     * // Default options - spawns CLI server using stdio
+     * // Default: spawns the bundled runtime over stdio
      * const client = new CopilotClient();
      *
-     * // Connect to an existing server
-     * const client = new CopilotClient({ cliUrl: "localhost:3000" });
-     *
-     * // Custom CLI path with specific log level
+     * // Connect to an existing runtime
      * const client = new CopilotClient({
-     *   cliPath: "/usr/local/bin/copilot",
-     *   logLevel: "debug"
+     *   connection: RuntimeConnection.forUri("localhost:3000"),
+     * });
+     *
+     * // Spawn the runtime over TCP on a chosen port
+     * const client = new CopilotClient({
+     *   connection: RuntimeConnection.forTcp({ port: 9001 }),
+     * });
+     *
+     * // Use a custom runtime binary
+     * const client = new CopilotClient({
+     *   connection: RuntimeConnection.forStdio({ path: "/usr/local/bin/copilot" }),
+     *   logLevel: "debug",
      * });
      * ```
      */
     constructor(options: CopilotClientOptions = {}) {
-        // Validate mutually exclusive options
-        if (options.cliUrl && (options.useStdio === true || options.cliPath)) {
-            throw new Error("cliUrl is mutually exclusive with useStdio and cliPath");
-        }
+        // Resolve the connection mode. `_internalConnection` is set by
+        // `joinSession()` to opt into the parent-process stdio path; consumers
+        // should always go through the public `connection` field.
+        const conn: InternalRuntimeConnection = options._internalConnection ??
+            options.connection ?? { kind: "stdio" };
 
-        if (options.isChildProcess && (options.cliUrl || options.useStdio === false)) {
+        if (
+            conn.kind === "uri" &&
+            (options.gitHubToken !== undefined || options.useLoggedInUser !== undefined)
+        ) {
             throw new Error(
-                "isChildProcess must be used in conjunction with useStdio and not with cliUrl"
+                "gitHubToken and useLoggedInUser cannot be used with RuntimeConnection.forUri (external server manages its own auth)"
             );
         }
-
-        // Validate auth options with external server
-        if (options.cliUrl && (options.gitHubToken || options.useLoggedInUser !== undefined)) {
-            throw new Error(
-                "gitHubToken and useLoggedInUser cannot be used with cliUrl (external server manages its own auth)"
-            );
-        }
-
-        if (options.tcpConnectionToken !== undefined) {
-            if (
-                typeof options.tcpConnectionToken !== "string" ||
-                options.tcpConnectionToken.length === 0
-            ) {
-                throw new Error("tcpConnectionToken must be a non-empty string");
-            }
-            if (options.useStdio === true) {
-                throw new Error("tcpConnectionToken cannot be used with useStdio: true");
+        if (conn.kind === "tcp" && conn.connectionToken !== undefined) {
+            if (typeof conn.connectionToken !== "string" || conn.connectionToken.length === 0) {
+                throw new Error("connectionToken must be a non-empty string");
             }
         }
 
-        const willUseStdio = options.cliUrl ? false : (options.useStdio ?? true);
-        const sdkSpawnsCli = !willUseStdio && !options.cliUrl && !options.isChildProcess;
-        this.effectiveConnectionToken =
-            options.tcpConnectionToken ?? (sdkSpawnsCli ? randomUUID() : undefined);
+        this.connectionConfig = conn;
 
         if (options.sessionFs) {
             this.validateSessionFsConfig(options.sessionFs);
         }
 
-        // Parse cliUrl if provided
-        if (options.cliUrl) {
-            const { host, port } = this.parseCliUrl(options.cliUrl);
+        // Pre-parse the URI host/port and mark as external if applicable.
+        if (conn.kind === "uri") {
+            const { host, port } = this.parseCliUrl(conn.url);
             this.actualHost = host;
-            this.actualPort = port;
+            this.runtimePort = port;
+            this.isExternalServer = true;
+        } else if (conn.kind === "parent-process") {
             this.isExternalServer = true;
         }
 
-        if (options.isChildProcess) {
-            this.isExternalServer = true;
+        // Effective TCP connection token: explicit, else auto-generated when we
+        // spawn our own runtime over TCP, else undefined.
+        if (conn.kind === "tcp") {
+            this.effectiveConnectionToken = conn.connectionToken ?? randomUUID();
+        } else if (conn.kind === "uri") {
+            this.effectiveConnectionToken = conn.connectionToken;
         }
 
         this.onListModels = options.onListModels;
@@ -381,30 +425,31 @@ export class CopilotClient {
         this.sessionFsConfig = options.sessionFs ?? null;
 
         const effectiveEnv = options.env ?? process.env;
-        this.options = {
-            cliPath: options.cliUrl
-                ? undefined
-                : options.cliPath || effectiveEnv.COPILOT_CLI_PATH || getBundledCliPath(),
-            cliArgs: options.cliArgs ?? [],
-            cwd: options.cwd ?? process.cwd(),
-            port: options.port || 0,
-            useStdio: options.cliUrl ? false : (options.useStdio ?? true), // Default to stdio unless cliUrl is provided
-            isChildProcess: options.isChildProcess ?? false,
-            cliUrl: options.cliUrl,
-            logLevel: options.logLevel || "debug",
-            autoStart: options.autoStart ?? true,
-            autoRestart: false,
+        this.resolvedEnv = effectiveEnv;
+        this.resolvedCliPath =
+            conn.kind === "stdio" || conn.kind === "tcp"
+                ? (conn.path ?? effectiveEnv.COPILOT_CLI_PATH ?? getBundledCliPath())
+                : undefined;
 
-            env: effectiveEnv,
+        // Collect extra CLI args from the connection variant (if any).
+        const connArgs: readonly string[] =
+            conn.kind === "stdio" || conn.kind === "tcp" ? (conn.args ?? []) : [];
+        this.connectionExtraArgs = [...connArgs];
+
+        this.options = {
+            workingDirectory: options.workingDirectory ?? process.cwd(),
+            logLevel: options.logLevel,
             gitHubToken: options.gitHubToken,
-            // Default useLoggedInUser to false when gitHubToken is provided, otherwise true
+            // Default useLoggedInUser to false when gitHubToken is provided, otherwise true.
             useLoggedInUser: options.useLoggedInUser ?? (options.gitHubToken ? false : true),
             telemetry: options.telemetry,
-            copilotHome: options.copilotHome,
+            baseDirectory: options.baseDirectory,
             sessionIdleTimeoutSeconds: options.sessionIdleTimeoutSeconds ?? 0,
-            remote: options.remote ?? false,
+            enableRemoteSessions: options.enableRemoteSessions ?? false,
         };
     }
+
+    private connectionExtraArgs: string[] = [];
 
     /**
      * Parse CLI URL into host and port
@@ -451,20 +496,41 @@ export class CopilotClient {
         }
     }
 
+    private setupSessionFs(
+        session: CopilotSession,
+        config: { createSessionFsProvider?: (session: CopilotSession) => SessionFsProvider }
+    ): void {
+        if (!this.sessionFsConfig) {
+            return;
+        }
+        if (!config.createSessionFsProvider) {
+            throw new Error(
+                "createSessionFsProvider is required in session config when sessionFs is enabled in client options."
+            );
+        }
+        const provider = config.createSessionFsProvider(session);
+        if (this.sessionFsConfig.capabilities?.sqlite && !provider.sqlite) {
+            throw new Error(
+                "SessionFsConfig declares capabilities.sqlite but the provider does not implement sqlite."
+            );
+        }
+        session.clientSessionApis.sessionFs = createSessionFsAdapter(provider);
+    }
+
     /**
      * Starts the CLI server and establishes a connection.
      *
      * If connecting to an external server (via cliUrl), only establishes the connection.
      * Otherwise, spawns the CLI server process and then connects.
      *
-     * This method is called automatically when creating a session if `autoStart` is true (default).
+     * This method is called automatically the first time you create or resume a session.
      *
      * @returns A promise that resolves when the connection is established
      * @throws Error if the server fails to start or the connection fails
      *
      * @example
      * ```typescript
-     * const client = new CopilotClient({ autoStart: false });
+     * const client = new CopilotClient();
      * await client.start();
      * // Now ready to create sessions
      * ```
@@ -496,6 +562,7 @@ export class CopilotClient {
                     initialCwd: this.sessionFsConfig.initialCwd,
                     sessionStatePath: this.sessionFsConfig.sessionStatePath,
                     conventions: this.sessionFsConfig.conventions,
+                    capabilities: this.sessionFsConfig.capabilities,
                 });
             }
 
@@ -583,9 +650,17 @@ export class CopilotClient {
         // Clear models cache
         this.modelsCache = null;
 
+        // Close the TCP socket and wait for the close to complete before returning.
         if (this.socket) {
+            const socket = this.socket;
+            this.socket = null;
             try {
-                this.socket.end();
+                if (!socket.destroyed) {
+                    await new Promise<void>((resolve) => {
+                        socket.once("close", () => resolve());
+                        socket.end();
+                    });
+                }
             } catch (error) {
                 errors.push(
                     new Error(
@@ -593,13 +668,22 @@ export class CopilotClient {
                     )
                 );
             }
-            this.socket = null;
         }
 
-        // Kill CLI process (only if we spawned it)
+        // Send SIGTERM and await child exit. If the child ignores SIGTERM we
+        // intentionally block here — callers who need a guaranteed-bounded
+        // shutdown should reach for forceStop() instead, which sends SIGKILL.
         if (this.cliProcess && !this.isExternalServer) {
+            const child = this.cliProcess;
+            this.cliProcess = null;
             try {
-                this.cliProcess.kill();
+                if (child.exitCode === null && child.signalCode === null) {
+                    const exited = new Promise<void>((resolve) => {
+                        child.once("exit", () => resolve());
+                    });
+                    child.kill();
+                    await exited;
+                }
             } catch (error) {
                 errors.push(
                     new Error(
@@ -607,7 +691,6 @@ export class CopilotClient {
                     )
                 );
             }
-            this.cliProcess = null;
         }
         if (this.cliStartTimeout) {
             clearTimeout(this.cliStartTimeout);
@@ -615,11 +698,27 @@ export class CopilotClient {
         }
 
         this.state = "disconnected";
-        this.actualPort = null;
+        this.runtimePort = null;
         this.stderrBuffer = "";
         this.processExitPromise = null;
 
         return errors;
+    }
+
+    /**
+     * Alias for {@link stop} that lets `CopilotClient` participate in `await using`
+     * blocks for automatic cleanup.
+     *
+     * @example
+     * ```typescript
+     * await using client = new CopilotClient();
+     * const session = await client.createSession({ onPermissionRequest: approveAll });
+     * await session.sendAndWait("Hello");
+     * // client.stop() is called automatically when the block exits.
+     * ```
+     */
+    async [Symbol.asyncDispose](): Promise<void> {
+        await this.stop();
     }
 
     /**
@@ -692,7 +791,7 @@ export class CopilotClient {
         }
 
         this.state = "disconnected";
-        this.actualPort = null;
+        this.runtimePort = null;
         this.stderrBuffer = "";
         this.processExitPromise = null;
     }
@@ -701,12 +800,11 @@ export class CopilotClient {
      * Creates a new conversation session with the Copilot CLI.
      *
      * Sessions maintain conversation state, handle events, and manage tool execution.
-     * If the client is not connected and `autoStart` is enabled, this will automatically
-     * start the connection.
+     * If the client is not connected, this method automatically starts the connection.
      *
      * @param config - Optional configuration for the session
      * @returns A promise that resolves with the created session
-     * @throws Error if the client is not connected and autoStart is disabled
+     * @throws Error if the client fails to start
      *
      * @example
      * ```typescript
@@ -727,18 +825,8 @@ export class CopilotClient {
      * ```
      */
     async createSession(config: SessionConfig): Promise<CopilotSession> {
-        if (!config?.onPermissionRequest) {
-            throw new Error(
-                "An onPermissionRequest handler is required when creating a session. For example, to allow all permissions, use { onPermissionRequest: approveAll }."
-            );
-        }
-
         if (!this.connection) {
-            if (this.options.autoStart) {
-                await this.start();
-            } else {
-                throw new Error("Client not connected. Call start() first.");
-            }
+            await this.start();
         }
 
         const sessionId = config.sessionId ?? randomUUID();
@@ -752,6 +840,7 @@ export class CopilotClient {
             this.onGetTraceContext
         );
         session.registerTools(config.tools);
+        session.registerCanvases(config.canvases);
         session.registerCommands(config.commands);
         session.registerPermissionHandler(config.onPermissionRequest);
         if (config.onUserInputRequest) {
@@ -760,11 +849,11 @@ export class CopilotClient {
         if (config.onElicitationRequest) {
             session.registerElicitationHandler(config.onElicitationRequest);
         }
-        if (config.onExitPlanMode) {
-            session.registerExitPlanModeHandler(config.onExitPlanMode);
+        if (config.onExitPlanModeRequest) {
+            session.registerExitPlanModeHandler(config.onExitPlanModeRequest);
         }
-        if (config.onAutoModeSwitch) {
-            session.registerAutoModeSwitchHandler(config.onAutoModeSwitch);
+        if (config.onAutoModeSwitchRequest) {
+            session.registerAutoModeSwitchHandler(config.onAutoModeSwitchRequest);
         }
         if (config.hooks) {
             session.registerHooks(config.hooks);
@@ -782,17 +871,7 @@ export class CopilotClient {
             session.on(config.onEvent);
         }
         this.sessions.set(sessionId, session);
-        if (this.sessionFsConfig) {
-            if (config.createSessionFsHandler) {
-                session.clientSessionApis.sessionFs = createSessionFsAdapter(
-                    config.createSessionFsHandler(session)
-                );
-            } else {
-                throw new Error(
-                    "createSessionFsHandler is required in session config when sessionFs is enabled in client options."
-                );
-            }
-        }
+        this.setupSessionFs(session, config);
 
         try {
             const response = await this.connection!.sendRequest("session.create", {
@@ -808,6 +887,10 @@ export class CopilotClient {
                     overridesBuiltInTool: tool.overridesBuiltInTool,
                     skipPermission: tool.skipPermission,
                 })),
+                canvases: config.canvases?.map((canvas) => canvas.declaration),
+                requestCanvasRenderer: config.requestCanvasRenderer,
+                requestExtensions: config.requestExtensions,
+                extensionInfo: config.extensionInfo,
                 commands: config.commands?.map((cmd) => ({
                     name: cmd.name,
                     description: cmd.description,
@@ -815,21 +898,21 @@ export class CopilotClient {
                 systemMessage: wireSystemMessage,
                 availableTools: config.availableTools,
                 excludedTools: config.excludedTools,
-                provider: config.provider ? toWireProviderConfig(config.provider) : undefined,
+                provider: config.provider,
                 enableSessionTelemetry: config.enableSessionTelemetry,
                 modelCapabilities: config.modelCapabilities,
-                requestPermission: true,
+                requestPermission: !!config.onPermissionRequest,
                 requestUserInput: !!config.onUserInputRequest,
                 requestElicitation: !!config.onElicitationRequest,
-                requestExitPlanMode: !!config.onExitPlanMode,
-                requestAutoModeSwitch: !!config.onAutoModeSwitch,
+                requestExitPlanMode: !!config.onExitPlanModeRequest,
+                requestAutoModeSwitch: !!config.onAutoModeSwitchRequest,
                 hooks: !!(config.hooks && Object.values(config.hooks).some(Boolean)),
                 workingDirectory: config.workingDirectory,
                 streaming: config.streaming,
                 includeSubAgentStreamingEvents: config.includeSubAgentStreamingEvents ?? true,
-                mcpServers: config.mcpServers,
+                mcpServers: toWireMcpServers(config.mcpServers),
                 envValueMode: "direct",
-                customAgents: config.customAgents,
+                customAgents: toWireCustomAgents(config.customAgents),
                 defaultAgent: config.defaultAgent,
                 agent: config.agent,
                 configDir: config.configDir,
@@ -839,12 +922,14 @@ export class CopilotClient {
                 disabledSkills: config.disabledSkills,
                 infiniteSessions: config.infiniteSessions,
                 gitHubToken: config.gitHubToken,
+                remoteSession: config.remoteSession,
+                cloud: config.cloud,
             });
 
             const { workspacePath, capabilities } = response as {
                 sessionId: string;
                 workspacePath?: string;
-                capabilities?: { ui?: { elicitation?: boolean } };
+                capabilities?: SessionCapabilities;
             };
             session["_workspacePath"] = workspacePath;
             session.setCapabilities(capabilities);
@@ -881,18 +966,8 @@ export class CopilotClient {
      * ```
      */
     async resumeSession(sessionId: string, config: ResumeSessionConfig): Promise<CopilotSession> {
-        if (!config?.onPermissionRequest) {
-            throw new Error(
-                "An onPermissionRequest handler is required when resuming a session. For example, to allow all permissions, use { onPermissionRequest: approveAll }."
-            );
-        }
-
         if (!this.connection) {
-            if (this.options.autoStart) {
-                await this.start();
-            } else {
-                throw new Error("Client not connected. Call start() first.");
-            }
+            await this.start();
         }
 
         // Create and register the session before issuing the RPC so that
@@ -904,6 +979,7 @@ export class CopilotClient {
             this.onGetTraceContext
         );
         session.registerTools(config.tools);
+        session.registerCanvases(config.canvases);
         session.registerCommands(config.commands);
         session.registerPermissionHandler(config.onPermissionRequest);
         if (config.onUserInputRequest) {
@@ -912,11 +988,11 @@ export class CopilotClient {
         if (config.onElicitationRequest) {
             session.registerElicitationHandler(config.onElicitationRequest);
         }
-        if (config.onExitPlanMode) {
-            session.registerExitPlanModeHandler(config.onExitPlanMode);
+        if (config.onExitPlanModeRequest) {
+            session.registerExitPlanModeHandler(config.onExitPlanModeRequest);
         }
-        if (config.onAutoModeSwitch) {
-            session.registerAutoModeSwitchHandler(config.onAutoModeSwitch);
+        if (config.onAutoModeSwitchRequest) {
+            session.registerAutoModeSwitchHandler(config.onAutoModeSwitchRequest);
         }
         if (config.hooks) {
             session.registerHooks(config.hooks);
@@ -934,17 +1010,7 @@ export class CopilotClient {
             session.on(config.onEvent);
         }
         this.sessions.set(sessionId, session);
-        if (this.sessionFsConfig) {
-            if (config.createSessionFsHandler) {
-                session.clientSessionApis.sessionFs = createSessionFsAdapter(
-                    config.createSessionFsHandler(session)
-                );
-            } else {
-                throw new Error(
-                    "createSessionFsHandler is required in session config when sessionFs is enabled in client options."
-                );
-            }
-        }
+        this.setupSessionFs(session, config);
 
         try {
             const response = await this.connection!.sendRequest("session.resume", {
@@ -964,67 +1030,59 @@ export class CopilotClient {
                     overridesBuiltInTool: tool.overridesBuiltInTool,
                     skipPermission: tool.skipPermission,
                 })),
+                canvases: config.canvases?.map((canvas) => canvas.declaration),
+                requestCanvasRenderer: config.requestCanvasRenderer,
+                requestExtensions: config.requestExtensions,
+                extensionInfo: config.extensionInfo,
                 commands: config.commands?.map((cmd) => ({
                     name: cmd.name,
                     description: cmd.description,
                 })),
-                provider: config.provider ? toWireProviderConfig(config.provider) : undefined,
+                provider: config.provider,
                 modelCapabilities: config.modelCapabilities,
                 requestPermission:
                     config.onPermissionRequest !== defaultJoinSessionPermissionHandler,
                 requestUserInput: !!config.onUserInputRequest,
                 requestElicitation: !!config.onElicitationRequest,
-                requestExitPlanMode: !!config.onExitPlanMode,
-                requestAutoModeSwitch: !!config.onAutoModeSwitch,
+                requestExitPlanMode: !!config.onExitPlanModeRequest,
+                requestAutoModeSwitch: !!config.onAutoModeSwitchRequest,
                 hooks: !!(config.hooks && Object.values(config.hooks).some(Boolean)),
                 workingDirectory: config.workingDirectory,
                 configDir: config.configDir,
                 enableConfigDiscovery: config.enableConfigDiscovery,
                 streaming: config.streaming,
                 includeSubAgentStreamingEvents: config.includeSubAgentStreamingEvents ?? true,
-                mcpServers: config.mcpServers,
+                mcpServers: toWireMcpServers(config.mcpServers),
                 envValueMode: "direct",
-                customAgents: config.customAgents,
+                customAgents: toWireCustomAgents(config.customAgents),
                 defaultAgent: config.defaultAgent,
                 agent: config.agent,
                 skillDirectories: config.skillDirectories,
                 instructionDirectories: config.instructionDirectories,
                 disabledSkills: config.disabledSkills,
                 infiniteSessions: config.infiniteSessions,
-                disableResume: config.disableResume,
+                suppressResumeEvent: config.suppressResumeEvent,
                 continuePendingWork: config.continuePendingWork,
                 gitHubToken: config.gitHubToken,
+                remoteSession: config.remoteSession,
+                openCanvases: config.openCanvases,
             });
 
-            const { workspacePath, capabilities } = response as {
+            const { workspacePath, capabilities, openCanvases } = response as {
                 sessionId: string;
                 workspacePath?: string;
-                capabilities?: { ui?: { elicitation?: boolean } };
+                capabilities?: SessionCapabilities;
+                openCanvases?: OpenCanvasInstance[];
             };
             session["_workspacePath"] = workspacePath;
             session.setCapabilities(capabilities);
+            session.setOpenCanvases(openCanvases ?? []);
         } catch (e) {
             this.sessions.delete(sessionId);
             throw e;
         }
 
         return session;
-    }
-
-    /**
-     * Gets the current connection state of the client.
-     *
-     * @returns The current connection state: "disconnected", "connecting", "connected", or "error"
-     *
-     * @example
-     * ```typescript
-     * if (client.getState() === "connected") {
-     *   const session = await client.createSession({ onPermissionRequest: approveAll });
-     * }
-     * ```
-     */
-    getState(): ConnectionState {
-        return this.state;
     }
 
     /**
@@ -1042,7 +1100,7 @@ export class CopilotClient {
      */
     async ping(
         message?: string
-    ): Promise<{ message: string; timestamp: number; protocolVersion?: number }> {
+    ): Promise<{ message: string; timestamp: string; protocolVersion?: number }> {
         if (!this.connection) {
             throw new Error("Client not connected");
         }
@@ -1050,7 +1108,7 @@ export class CopilotClient {
         const result = await this.connection.sendRequest("ping", { message });
         return result as {
             message: string;
-            timestamp: number;
+            timestamp: string;
             protocolVersion?: number;
         };
     }
@@ -1277,8 +1335,15 @@ export class CopilotClient {
             throw new Error("Client not connected");
         }
 
+        // Transform filter to wire format (workingDirectory → cwd)
+        let wireFilter: Record<string, unknown> | undefined;
+        if (filter) {
+            const { workingDirectory, ...rest } = filter;
+            wireFilter = { ...rest, cwd: workingDirectory };
+        }
+
         const response = await this.connection.sendRequest("session.list", {
-            filter,
+            filter: wireFilter,
         });
         const { sessions } = response as {
             sessions: Array<{
@@ -1287,7 +1352,7 @@ export class CopilotClient {
                 modifiedTime: string;
                 summary?: string;
                 isRemote: boolean;
-                context?: SessionContext;
+                context?: { cwd: string; gitRoot?: string; repository?: string; branch?: string };
             }>;
         };
 
@@ -1325,7 +1390,7 @@ export class CopilotClient {
                 modifiedTime: string;
                 summary?: string;
                 isRemote: boolean;
-                context?: SessionContext;
+                context?: { cwd: string; gitRoot?: string; repository?: string; branch?: string };
             };
         };
 
@@ -1342,15 +1407,23 @@ export class CopilotClient {
         modifiedTime: string;
         summary?: string;
         isRemote: boolean;
-        context?: SessionContext;
+        context?: { cwd: string; gitRoot?: string; repository?: string; branch?: string };
     }): SessionMetadata {
+        const { context } = raw;
         return {
             sessionId: raw.sessionId,
             startTime: new Date(raw.startTime),
             modifiedTime: new Date(raw.modifiedTime),
             summary: raw.summary,
             isRemote: raw.isRemote,
-            context: raw.context,
+            context: context
+                ? {
+                      workingDirectory: context.cwd,
+                      gitRoot: context.gitRoot,
+                      repository: context.repository,
+                      branch: context.branch,
+                  }
+                : undefined,
         };
     }
 
@@ -1422,7 +1495,7 @@ export class CopilotClient {
      * @example
      * ```typescript
      * // Listen for when a session becomes foreground in TUI
-     * const unsubscribe = client.on("session.foreground", (event) => {
+     * const unsubscribe = client.onLifecycle("session.foreground", (event) => {
      *   console.log(`Session ${event.sessionId} is now displayed in TUI`);
      * });
      *
@@ -1430,7 +1503,7 @@ export class CopilotClient {
      * unsubscribe();
      * ```
      */
-    on<K extends SessionLifecycleEventType>(
+    onLifecycle<K extends SessionLifecycleEventType>(
         eventType: K,
         handler: TypedSessionLifecycleHandler<K>
     ): () => void;
@@ -1443,7 +1516,7 @@ export class CopilotClient {
      *
      * @example
      * ```typescript
-     * const unsubscribe = client.on((event) => {
+     * const unsubscribe = client.onLifecycle((event) => {
      *   switch (event.type) {
      *     case "session.foreground":
      *       console.log(`Session ${event.sessionId} is now in foreground`);
@@ -1458,13 +1531,13 @@ export class CopilotClient {
      * unsubscribe();
      * ```
      */
-    on(handler: SessionLifecycleHandler): () => void;
+    onLifecycle(handler: SessionLifecycleHandler): () => void;
 
-    on<K extends SessionLifecycleEventType>(
+    onLifecycle<K extends SessionLifecycleEventType>(
         eventTypeOrHandler: K | SessionLifecycleHandler,
         handler?: TypedSessionLifecycleHandler<K>
     ): () => void {
-        // Overload 1: on(eventType, handler) - typed event subscription
+        // Overload 1: onLifecycle(eventType, handler) - typed event subscription
         if (typeof eventTypeOrHandler === "string" && handler) {
             const eventType = eventTypeOrHandler;
             if (!this.typedLifecycleHandlers.has(eventType)) {
@@ -1480,7 +1553,7 @@ export class CopilotClient {
             };
         }
 
-        // Overload 2: on(handler) - wildcard subscription
+        // Overload 2: onLifecycle(handler) - wildcard subscription
         const wildcardHandler = eventTypeOrHandler as SessionLifecycleHandler;
         this.sessionLifecycleHandlers.add(wildcardHandler);
         return () => {
@@ -1496,19 +1569,20 @@ export class CopilotClient {
             // Clear stderr buffer for fresh capture
             this.stderrBuffer = "";
 
-            const args = [
-                ...this.options.cliArgs,
-                "--headless",
-                "--no-auto-update",
-                "--log-level",
-                this.options.logLevel,
-            ];
+            const args = [...this.connectionExtraArgs, "--headless", "--no-auto-update"];
 
-            // Choose transport mode
-            if (this.options.useStdio) {
+            if (this.options.logLevel) {
+                args.push("--log-level", this.options.logLevel);
+            }
+
+            // Choose transport mode based on the resolved connection config.
+            if (this.connectionConfig.kind === "stdio") {
                 args.push("--stdio");
-            } else if (this.options.port > 0) {
-                args.push("--port", this.options.port.toString());
+            } else if (this.connectionConfig.kind === "tcp") {
+                const requestedPort = this.connectionConfig.port ?? 0;
+                if (requestedPort > 0) {
+                    args.push("--port", requestedPort.toString());
+                }
             }
 
             // Add auth-related flags
@@ -1529,12 +1603,12 @@ export class CopilotClient {
                 );
             }
 
-            if (this.options.remote) {
+            if (this.options.enableRemoteSessions) {
                 args.push("--remote");
             }
 
             // Suppress debug/trace output that might pollute stdout
-            const envWithoutNodeDebug = { ...this.options.env };
+            const envWithoutNodeDebug = { ...this.resolvedEnv };
             delete envWithoutNodeDebug.NODE_DEBUG;
 
             // Set auth token in environment if provided
@@ -1546,13 +1620,17 @@ export class CopilotClient {
                 envWithoutNodeDebug.COPILOT_CONNECTION_TOKEN = this.effectiveConnectionToken;
             }
 
-            if (this.options.copilotHome) {
-                envWithoutNodeDebug.COPILOT_HOME = this.options.copilotHome;
+            if (this.options.baseDirectory) {
+                envWithoutNodeDebug.COPILOT_HOME = this.options.baseDirectory;
             }
 
-            if (!this.options.cliPath) {
+            if (!this.resolvedCliPath) {
                 throw new Error(
-                    "Path to Copilot CLI is required. Please provide it via the cliPath option, or use cliUrl to rely on a remote CLI."
+                    "Path to Copilot CLI is required. Please supply it via " +
+                        "`RuntimeConnection.forStdio({ path })` or " +
+                        "`RuntimeConnection.forTcp({ path })`, set the COPILOT_CLI_PATH " +
+                        "environment variable, or use `RuntimeConnection.forUri(...)` to " +
+                        "connect to an already-running runtime."
                 );
             }
 
@@ -1575,30 +1653,30 @@ export class CopilotClient {
             }
 
             // Verify CLI exists before attempting to spawn
-            if (!existsSync(this.options.cliPath)) {
+            if (!existsSync(this.resolvedCliPath)) {
                 throw new Error(
-                    `Copilot CLI not found at ${this.options.cliPath}. Ensure @github/copilot is installed.`
+                    `Copilot CLI not found at ${this.resolvedCliPath}. Ensure @github/copilot is installed.`
                 );
             }
 
-            const stdioConfig: ["pipe", "pipe", "pipe"] | ["ignore", "pipe", "pipe"] = this.options
-                .useStdio
-                ? ["pipe", "pipe", "pipe"]
-                : ["ignore", "pipe", "pipe"];
+            const stdioConfig: ["pipe", "pipe", "pipe"] | ["ignore", "pipe", "pipe"] =
+                this.connectionConfig.kind === "stdio"
+                    ? ["pipe", "pipe", "pipe"]
+                    : ["ignore", "pipe", "pipe"];
 
             // For .js files, spawn node explicitly; for executables, spawn directly
-            const isJsFile = this.options.cliPath.endsWith(".js");
+            const isJsFile = this.resolvedCliPath.endsWith(".js");
             if (isJsFile) {
-                this.cliProcess = spawn(getNodeExecPath(), [this.options.cliPath, ...args], {
+                this.cliProcess = spawn(getNodeExecPath(), [this.resolvedCliPath, ...args], {
                     stdio: stdioConfig,
-                    cwd: this.options.cwd,
+                    cwd: this.options.workingDirectory,
                     env: envWithoutNodeDebug,
                     windowsHide: true,
                 });
             } else {
-                this.cliProcess = spawn(this.options.cliPath, args, {
+                this.cliProcess = spawn(this.resolvedCliPath, args, {
                     stdio: stdioConfig,
-                    cwd: this.options.cwd,
+                    cwd: this.options.workingDirectory,
                     env: envWithoutNodeDebug,
                     windowsHide: true,
                 });
@@ -1608,7 +1686,7 @@ export class CopilotClient {
             let resolved = false;
 
             // For stdio mode, we're ready immediately after spawn
-            if (this.options.useStdio) {
+            if (this.connectionConfig.kind === "stdio") {
                 resolved = true;
                 resolve();
             } else {
@@ -1617,7 +1695,7 @@ export class CopilotClient {
                     stdout += data.toString();
                     const match = stdout.match(/listening on port (\d+)/i);
                     if (match && !resolved) {
-                        this.actualPort = parseInt(match[1], 10);
+                        this.runtimePort = parseInt(match[1], 10);
                         resolved = true;
                         resolve();
                     }
@@ -1697,13 +1775,13 @@ export class CopilotClient {
                 }
             });
 
-            // Timeout after 10 seconds
+            // Timeout after 30 seconds (Windows CI runners can be slow to spawn processes)
             this.cliStartTimeout = setTimeout(() => {
                 if (!resolved) {
                     resolved = true;
                     reject(new Error("Timeout waiting for CLI server to start"));
                 }
-            }, 10000);
+            }, 30000);
         });
     }
 
@@ -1711,12 +1789,14 @@ export class CopilotClient {
      * Connect to the CLI server (via socket or stdio)
      */
     private async connectToServer(): Promise<void> {
-        if (this.options.isChildProcess) {
-            return this.connectToParentProcessViaStdio();
-        } else if (this.options.useStdio) {
-            return this.connectToChildProcessViaStdio();
-        } else {
-            return this.connectViaTcp();
+        switch (this.connectionConfig.kind) {
+            case "parent-process":
+                return this.connectToParentProcessViaStdio();
+            case "stdio":
+                return this.connectToChildProcessViaStdio();
+            case "tcp":
+            case "uri":
+                return this.connectViaTcp();
         }
     }
 
@@ -1810,14 +1890,20 @@ export class CopilotClient {
      * Connect to the CLI server via TCP socket
      */
     private async connectViaTcp(): Promise<void> {
-        if (!this.actualPort) {
+        if (!this.runtimePort) {
             throw new Error("Server port not available");
         }
 
         return new Promise((resolve, reject) => {
             this.socket = new Socket();
 
-            this.socket.connect(this.actualPort!, this.actualHost, () => {
+            const connectionTimeout = setTimeout(() => {
+                this.socket?.destroy();
+                reject(new Error("Timeout connecting to CLI server"));
+            }, 10000);
+
+            this.socket.connect(this.runtimePort!, this.actualHost, () => {
+                clearTimeout(connectionTimeout);
                 // Create JSON-RPC connection
                 this.connection = createMessageConnection(
                     new StreamMessageReader(this.socket!),
@@ -1830,6 +1916,7 @@ export class CopilotClient {
             });
 
             this.socket.on("error", (error) => {
+                clearTimeout(connectionTimeout);
                 reject(new Error(`Failed to connect to CLI server: ${error.message}`));
             });
         });
@@ -1847,25 +1934,6 @@ export class CopilotClient {
         this.connection.onNotification("session.lifecycle", (notification: unknown) => {
             this.handleSessionLifecycleNotification(notification);
         });
-
-        // Protocol v3 servers send tool calls and permission requests as broadcast events
-        // (external_tool.requested / permission.requested) handled in CopilotSession._dispatchEvent.
-        // Protocol v2 servers use the older tool.call / permission.request RPC model instead.
-        // We always register v2 adapters because handlers are set up before version negotiation;
-        // a v3 server will simply never send these requests.
-        this.connection.onRequest(
-            "tool.call",
-            async (params: ToolCallRequestPayload): Promise<ToolCallResponsePayload> =>
-                await this.handleToolCallRequestV2(params)
-        );
-
-        this.connection.onRequest(
-            "permission.request",
-            async (params: {
-                sessionId: string;
-                permissionRequest: unknown;
-            }): Promise<{ result: unknown }> => await this.handlePermissionRequestV2(params)
-        );
 
         this.connection.onRequest(
             "userInput.request",
@@ -1909,6 +1977,17 @@ export class CopilotClient {
                 sections: Record<string, { content: string }>;
             }): Promise<{ sections: Record<string, { content: string }> }> =>
                 await this.handleSystemMessageTransform(params)
+        );
+
+        this.connection.onRequest("canvas.open", async (params: CanvasProviderRequestParams) =>
+            this.handleCanvasProviderRequest("canvas.open", params)
+        );
+        this.connection.onRequest("canvas.close", async (params: CanvasProviderRequestParams) =>
+            this.handleCanvasProviderRequest("canvas.close", params)
+        );
+        this.connection.onRequest(
+            "canvas.action.invoke",
+            async (params: CanvasActionInvokeParams) => this.handleCanvasActionInvokeRequest(params)
         );
 
         // Register client session API handlers.
@@ -1957,7 +2036,26 @@ export class CopilotClient {
             return;
         }
 
-        const event = notification as SessionLifecycleEvent;
+        const raw = notification as {
+            type: SessionLifecycleEventType;
+            sessionId: string;
+            metadata?: { startTime?: string; modifiedTime?: string; summary?: string };
+        };
+
+        let metadata: SessionLifecycleEvent["metadata"];
+        if (raw.metadata && raw.metadata.startTime && raw.metadata.modifiedTime) {
+            metadata = {
+                startTime: new Date(raw.metadata.startTime),
+                modifiedTime: new Date(raw.metadata.modifiedTime),
+                summary: raw.metadata.summary,
+            };
+        }
+
+        const event = {
+            type: raw.type,
+            sessionId: raw.sessionId,
+            metadata,
+        } as SessionLifecycleEvent;
 
         // Dispatch to typed handlers for this specific event type
         const typedHandlers = this.typedLifecycleHandlers.get(event.type);
@@ -2096,80 +2194,12 @@ export class CopilotClient {
         return await session._handleSystemMessageTransform(params.sections);
     }
 
-    // ========================================================================
-    // Protocol v2 backward-compatibility adapters
-    // ========================================================================
-
-    /**
-     * Handles a v2-style tool.call RPC request from the server.
-     * Looks up the session and tool handler, executes it, and returns the result
-     * in the v2 response format.
-     */
-    private async handleToolCallRequestV2(
-        params: ToolCallRequestPayload
-    ): Promise<ToolCallResponsePayload> {
-        if (
-            !params ||
-            typeof params.sessionId !== "string" ||
-            typeof params.toolCallId !== "string" ||
-            typeof params.toolName !== "string"
-        ) {
-            throw new Error("Invalid tool call payload");
-        }
-
-        const session = this.sessions.get(params.sessionId);
-        if (!session) {
-            throw new Error(`Unknown session ${params.sessionId}`);
-        }
-
-        const handler = session.getToolHandler(params.toolName);
-        if (!handler) {
-            return {
-                result: {
-                    textResultForLlm: `Tool '${params.toolName}' is not supported by this client instance.`,
-                    resultType: "failure",
-                    error: `tool '${params.toolName}' not supported`,
-                    toolTelemetry: {},
-                },
-            };
-        }
-
-        try {
-            const traceparent = (params as { traceparent?: string }).traceparent;
-            const tracestate = (params as { tracestate?: string }).tracestate;
-            const invocation = {
-                sessionId: params.sessionId,
-                toolCallId: params.toolCallId,
-                toolName: params.toolName,
-                arguments: params.arguments,
-                traceparent,
-                tracestate,
-            };
-            const result = await handler(params.arguments, invocation);
-            return { result: this.normalizeToolResultV2(result) };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            return {
-                result: {
-                    textResultForLlm:
-                        "Invoking this tool produced an error. Detailed information is not available.",
-                    resultType: "failure",
-                    error: message,
-                    toolTelemetry: {},
-                },
-            };
-        }
-    }
-
-    /**
-     * Handles a v2-style permission.request RPC request from the server.
-     */
-    private async handlePermissionRequestV2(params: {
-        sessionId: string;
-        permissionRequest: unknown;
-    }): Promise<{ result: unknown }> {
-        if (!params || typeof params.sessionId !== "string" || !params.permissionRequest) {
-            throw new Error("Invalid permission request payload");
+    private async handleCanvasProviderRequest(
+        actionName: string,
+        params: unknown
+    ): Promise<unknown> {
+        if (!isCanvasProviderRequestParams(params)) {
+            throw new Error("Invalid canvas provider request payload");
         }
 
         const session = this.sessions.get(params.sessionId);
@@ -2177,50 +2207,19 @@ export class CopilotClient {
             throw new Error(`Session not found: ${params.sessionId}`);
         }
 
-        try {
-            const result = await session._handlePermissionRequestV2(params.permissionRequest);
-            return { result };
-        } catch (error) {
-            if (error instanceof Error && error.message === NO_RESULT_PERMISSION_V2_ERROR) {
-                throw error;
-            }
-            return {
-                result: {
-                    kind: "user-not-available",
-                },
-            };
+        const canvas = session.getCanvas(params.canvasId);
+        if (!canvas) {
+            throw new Error(`No canvas registered with id "${params.canvasId}"`);
         }
+
+        return dispatchCanvasProviderRequest(canvas, actionName, params);
     }
 
-    private normalizeToolResultV2(result: unknown): ToolResultObject {
-        if (result === undefined || result === null) {
-            return {
-                textResultForLlm: "Tool returned no result",
-                resultType: "failure",
-                error: "tool returned no result",
-                toolTelemetry: {},
-            };
+    private async handleCanvasActionInvokeRequest(params: unknown): Promise<unknown> {
+        if (!isCanvasActionInvokeParams(params)) {
+            throw new Error("Invalid canvas provider request payload");
         }
 
-        if (this.isToolResultObject(result)) {
-            return result;
-        }
-
-        const textResult = typeof result === "string" ? result : JSON.stringify(result);
-        return {
-            textResultForLlm: textResult,
-            resultType: "success",
-            toolTelemetry: {},
-        };
-    }
-
-    private isToolResultObject(value: unknown): value is ToolResultObject {
-        return (
-            typeof value === "object" &&
-            value !== null &&
-            "textResultForLlm" in value &&
-            typeof (value as ToolResultObject).textResultForLlm === "string" &&
-            "resultType" in value
-        );
+        return this.handleCanvasProviderRequest(params.actionName, params);
     }
 }
