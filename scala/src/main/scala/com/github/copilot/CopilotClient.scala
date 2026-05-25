@@ -710,7 +710,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
       throw new RuntimeException(s"Session not found: $sessionId")
     )
 
-    val request = UserInputRequest(question, choices, allowFreeform)
+    val request = UserInputRequest(Some(question), choices, allowFreeform)
     session.handleUserInputRequest(request).map(_.asJson)
 
   private def handleHooksInvoke(params: Json): Future[Json] =
