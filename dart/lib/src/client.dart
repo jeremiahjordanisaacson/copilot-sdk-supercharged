@@ -61,6 +61,7 @@ class CopilotClient {
   late final String _cwd;
   late final int _port;
   late final bool _useStdio;
+  // ignore: unused_field
   late final String? _cliUrl;
   late final String _logLevel;
   late final bool _autoStart;

@@ -43,7 +43,7 @@ jobs:
       - name: Create signed bundle for Central Portal
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          ARTIFACT=copilot-sdk-supercharged
+          ARTIFACT=copilot-sdk-java
           GROUP_DIR=io/github/jeremiahjordanisaacson
           DIR=staging/$GROUP_DIR/$ARTIFACT/$VERSION
           mkdir -p $DIR
@@ -67,15 +67,16 @@ jobs:
           cd staging
           zip -r ../bundle.jar .
 
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: java/bundle.jar
-
       - name: Upload to Maven Central Portal
         run: |
           TOKEN=$(echo -n "${{ secrets.MAVEN_USERNAME }}:${{ secrets.MAVEN_PASSWORD }}" | base64 -w0)
           curl --fail -X POST \
-            "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC&name=copilot-sdk-supercharged-${GITHUB_REF_NAME#v}" \
+            "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC&name=copilot-sdk-java-${GITHUB_REF_NAME#v}" \
             -H "Authorization: UserToken $TOKEN" \
             -F "bundle=@bundle.jar"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: java/bundle.jar

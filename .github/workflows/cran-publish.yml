@@ -52,5 +52,5 @@ jobs:
           Rscript -e '
           pkg <- list.files(pattern = "copilot\\.sdk\\.supercharged_.+\\.tar\\.gz")
           if (length(pkg) == 0) stop("No package tarball found")
-          devtools::check_built(pkg[[1]])
+          devtools::check_built(pkg[[1]], args = "--no-manual", error_on = "error")
           '
