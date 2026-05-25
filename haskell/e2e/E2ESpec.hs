@@ -401,7 +401,9 @@ spec = do
                 writeIORef toolCalledRef True
                 pure $ ToolResultText "54321")
 
-        let cfg = defaultSessionConfig { scTools = [secretTool] }
+        -- Approve all permissions so the tool can be invoked
+        let approveAll _req _sid = pure $ PermissionRequestResult "approved" Nothing
+        let cfg = defaultSessionConfig { scTools = [secretTool], scOnPermissionRequest = Just approveAll }
 
         session <- createSession client cfg
 

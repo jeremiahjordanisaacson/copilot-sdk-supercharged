@@ -168,11 +168,13 @@ class CopilotClient(
             // Register session filesystem provider if configured
             options.sessionFs?.let { fs ->
                 try {
-                    rpcClient?.request("sessionFs.setProvider", buildJsonObject {
-                        put("initialCwd", fs.initialCwd)
-                        put("sessionStatePath", fs.sessionStatePath)
-                        put("conventions", fs.conventions)
-                    })
+                    withTimeout(5000) {
+                        rpcClient?.request("sessionFs.setProvider", buildJsonObject {
+                            put("initialCwd", fs.initialCwd)
+                            put("sessionStatePath", fs.sessionStatePath)
+                            put("conventions", fs.conventions)
+                        })
+                    }
                 } catch (_: Exception) {
                     // sessionFs provider may not be supported in all CLI versions
                 }

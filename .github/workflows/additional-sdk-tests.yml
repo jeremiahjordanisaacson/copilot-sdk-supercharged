@@ -747,7 +747,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - run: cd ../nodejs && npm install --ignore-scripts && npx tsc -p tsconfig.json
+      - run: cd ../nodejs && npm install --ignore-scripts && npx tsx esbuild-copilotsdk-nodejs.ts
       - run: cd ../test/harness && npm install --ignore-scripts
       - run: rm -rf node_modules package-lock.json && npm install
       - run: npm test
