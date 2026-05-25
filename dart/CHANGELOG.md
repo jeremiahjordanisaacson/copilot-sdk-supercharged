@@ -12,3 +12,4 @@
 - Initial release with full v2.0 feature parity
 - JSON-RPC 2.0 client over stdio
 - Session management, tools, streaming, and event handling
+
