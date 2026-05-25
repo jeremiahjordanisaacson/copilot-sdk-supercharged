@@ -209,6 +209,267 @@ class Tool
 }
 
 // ============================================================================
+// Canvas & Cloud Session Types
+// ============================================================================
+
+class CanvasAction
+{
+    public function __construct(
+        public readonly string $name,
+        public readonly string $description,
+        public readonly ?array $inputSchema = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [
+            'name' => $this->name,
+            'description' => $this->description,
+        ];
+        if ($this->inputSchema !== null) {
+            $result['inputSchema'] = $this->inputSchema;
+        }
+        return $result;
+    }
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            name: $data['name'] ?? '',
+            description: $data['description'] ?? '',
+            inputSchema: $data['inputSchema'] ?? null,
+        );
+    }
+}
+
+class CanvasDeclaration
+{
+    /**
+     * @param CanvasAction[]|null $actions
+     */
+    public function __construct(
+        public readonly string $id,
+        public readonly string $displayName,
+        public readonly string $description,
+        public readonly ?array $inputSchema = null,
+        public readonly ?array $actions = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [
+            'id' => $this->id,
+            'displayName' => $this->displayName,
+            'description' => $this->description,
+        ];
+        if ($this->inputSchema !== null) {
+            $result['inputSchema'] = $this->inputSchema;
+        }
+        if ($this->actions !== null) {
+            $result['actions'] = array_map(
+                fn(CanvasAction $action) => $action->toArray(),
+                $this->actions,
+            );
+        }
+        return $result;
+    }
+
+    public static function fromArray(array $data): self
+    {
+        $actions = null;
+        if (isset($data['actions'])) {
+            $actions = array_map(
+                fn(array $action) => CanvasAction::fromArray($action),
+                $data['actions'],
+            );
+        }
+        return new self(
+            id: $data['id'] ?? '',
+            displayName: $data['displayName'] ?? '',
+            description: $data['description'] ?? '',
+            inputSchema: $data['inputSchema'] ?? null,
+            actions: $actions,
+        );
+    }
+}
+
+class CanvasOpenResponse
+{
+    public function __construct(
+        public readonly ?string $url = null,
+        public readonly ?string $title = null,
+        public readonly ?string $status = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        return array_filter([
+            'url' => $this->url,
+            'title' => $this->title,
+            'status' => $this->status,
+        ], fn($v) => $v !== null);
+    }
+}
+
+class CanvasHostCapabilities
+{
+    public function __construct(
+        public readonly bool $canvases = false,
+    ) {}
+
+    public function toArray(): array
+    {
+        return ['canvases' => $this->canvases];
+    }
+
+    public static function fromArray(array $data): self
+    {
+        return new self(canvases: $data['canvases'] ?? false);
+    }
+}
+
+class CanvasHostContext
+{
+    public function __construct(
+        public readonly CanvasHostCapabilities $capabilities,
+    ) {}
+
+    public function toArray(): array
+    {
+        return ['capabilities' => $this->capabilities->toArray()];
+    }
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            capabilities: CanvasHostCapabilities::fromArray($data['capabilities'] ?? []),
+        );
+    }
+}
+
+class CanvasOpenContext
+{
+    public function __construct(
+        public readonly string $sessionId,
+        public readonly string $extensionId,
+        public readonly string $canvasId,
+        public readonly string $instanceId,
+        public readonly mixed $input,
+        public readonly ?CanvasHostContext $host = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            sessionId: $data['sessionId'] ?? '',
+            extensionId: $data['extensionId'] ?? '',
+            canvasId: $data['canvasId'] ?? '',
+            instanceId: $data['instanceId'] ?? '',
+            input: $data['input'] ?? null,
+            host: isset($data['host']) ? CanvasHostContext::fromArray($data['host']) : null,
+        );
+    }
+}
+
+class CanvasActionContext
+{
+    public function __construct(
+        public readonly string $sessionId,
+        public readonly string $extensionId,
+        public readonly string $canvasId,
+        public readonly string $instanceId,
+        public readonly string $actionName,
+        public readonly mixed $input,
+        public readonly ?CanvasHostContext $host = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            sessionId: $data['sessionId'] ?? '',
+            extensionId: $data['extensionId'] ?? '',
+            canvasId: $data['canvasId'] ?? '',
+            instanceId: $data['instanceId'] ?? '',
+            actionName: $data['actionName'] ?? '',
+            input: $data['input'] ?? null,
+            host: isset($data['host']) ? CanvasHostContext::fromArray($data['host']) : null,
+        );
+    }
+}
+
+class CanvasLifecycleContext
+{
+    public function __construct(
+        public readonly string $sessionId,
+        public readonly string $extensionId,
+        public readonly string $canvasId,
+        public readonly string $instanceId,
+        public readonly ?CanvasHostContext $host = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            sessionId: $data['sessionId'] ?? '',
+            extensionId: $data['extensionId'] ?? '',
+            canvasId: $data['canvasId'] ?? '',
+            instanceId: $data['instanceId'] ?? '',
+            host: isset($data['host']) ? CanvasHostContext::fromArray($data['host']) : null,
+        );
+    }
+}
+
+class CloudSessionRepository
+{
+    public function __construct(
+        public readonly string $owner,
+        public readonly string $name,
+        public readonly ?string $branch = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        return array_filter([
+            'owner' => $this->owner,
+            'name' => $this->name,
+            'branch' => $this->branch,
+        ], fn($v) => $v !== null);
+    }
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            owner: $data['owner'] ?? '',
+            name: $data['name'] ?? '',
+            branch: $data['branch'] ?? null,
+        );
+    }
+}
+
+class CloudSessionOptions
+{
+    public function __construct(
+        public readonly ?CloudSessionRepository $repository = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [];
+        if ($this->repository !== null) {
+            $result['repository'] = $this->repository->toArray();
+        }
+        return $result;
+    }
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            repository: isset($data['repository']) ? CloudSessionRepository::fromArray($data['repository']) : null,
+        );
+    }
+}
+
+// ============================================================================
 // System Message Configuration
 // ============================================================================
 
@@ -2192,6 +2453,190 @@ interface SessionFsProvider
     public function readdirWithTypes(string $sessionId, string $path): array;
     public function rm(string $sessionId, string $path, bool $recursive = false): void;
     public function rename(string $sessionId, string $oldPath, string $newPath): void;
+}
+
+// ============================================================================
+// Canvas Types
+// ============================================================================
+
+class CanvasAction
+{
+    public function __construct(
+        public readonly string $name,
+        public readonly string $description,
+        public readonly ?array $inputSchema = null,
+    ) {}
+}
+
+class CanvasDeclaration
+{
+    public function __construct(
+        public readonly string $id,
+        public readonly string $displayName,
+        public readonly string $description,
+        public readonly ?array $inputSchema = null,
+        /** @var CanvasAction[]|null */
+        public readonly ?array $actions = null,
+    ) {}
+}
+
+class CanvasOpenResponse
+{
+    public function __construct(
+        public readonly ?string $url = null,
+        public readonly ?string $title = null,
+        public readonly ?string $status = null,
+    ) {}
+}
+
+class CanvasHostCapabilities
+{
+    public function __construct(
+        public readonly bool $canvases = false,
+    ) {}
+}
+
+class CanvasHostContext
+{
+    public function __construct(
+        public readonly ?CanvasHostCapabilities $capabilities = null,
+    ) {}
+}
+
+class CanvasOpenContext
+{
+    public function __construct(
+        public readonly string $sessionId,
+        public readonly string $extensionId,
+        public readonly string $canvasId,
+        public readonly string $instanceId,
+        public readonly mixed $input = null,
+        public readonly ?CanvasHostContext $host = null,
+    ) {}
+}
+
+class CanvasActionContext
+{
+    public function __construct(
+        public readonly string $sessionId,
+        public readonly string $extensionId,
+        public readonly string $canvasId,
+        public readonly string $instanceId,
+        public readonly string $actionName,
+        public readonly mixed $input = null,
+        public readonly ?CanvasHostContext $host = null,
+    ) {}
+}
+
+class CanvasLifecycleContext
+{
+    public function __construct(
+        public readonly string $sessionId,
+        public readonly string $extensionId,
+        public readonly string $canvasId,
+        public readonly string $instanceId,
+        public readonly ?CanvasHostContext $host = null,
+    ) {}
+}
+
+// ============================================================================
+// Cloud Session Types
+// ============================================================================
+
+class CloudSessionRepository
+{
+    public function __construct(
+        public readonly string $owner,
+        public readonly string $name,
+        public readonly ?string $branch = null,
+    ) {}
+}
+
+class CloudSessionOptions
+{
+    public function __construct(
+        public readonly ?CloudSessionRepository $repository = null,
+    ) {}
+}
+
+// ============================================================================
+// System Message Config Types
+// ============================================================================
+
+class SystemMessageAppendConfig
+{
+    public function __construct(
+        public readonly string $mode = 'append',
+        public readonly ?string $content = null,
+    ) {}
+}
+
+class SystemMessageReplaceConfig
+{
+    public function __construct(
+        public readonly string $mode = 'replace',
+        public readonly string $content = '',
+    ) {}
+}
+
+class SectionOverride
+{
+    public function __construct(
+        public readonly string $action,
+        public readonly ?string $content = null,
+    ) {}
+}
+
+class SystemMessageCustomizeConfig
+{
+    public function __construct(
+        public readonly string $mode = 'customize',
+        /** @var array<string, SectionOverride>|null */
+        public readonly ?array $sections = null,
+        public readonly ?string $content = null,
+    ) {}
+}
+
+// ============================================================================
+// User Input Types
+// ============================================================================
+
+class UserInputRequest
+{
+    public function __construct(
+        public readonly ?string $question = null,
+        /** @var string[]|null */
+        public readonly ?array $choices = null,
+        public readonly ?bool $allowFreeform = null,
+    ) {}
+}
+
+class UserInputResponse
+{
+    public function __construct(
+        public readonly string $answer,
+        public readonly bool $wasFreeform,
+    ) {}
+}
+
+// ============================================================================
+// Image Generation Types
+// ============================================================================
+
+enum ResponseFormat: string
+{
+    case Text = 'text';
+    case Image = 'image';
+    case JsonObject = 'json_object';
+}
+
+class ImageOptions
+{
+    public function __construct(
+        public readonly ?string $size = null,
+        public readonly ?string $quality = null,
+        public readonly ?string $style = null,
+    ) {}
 }
 
 // ============================================================================

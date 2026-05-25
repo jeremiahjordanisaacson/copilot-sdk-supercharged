@@ -228,6 +228,135 @@ function M.MCPHTTPServerConfig(fields)
 end
 
 -- ---------------------------------------------------------------------------
+-- Canvas and cloud session types
+-- ---------------------------------------------------------------------------
+
+--- Create a CanvasAction table.
+-- @param fields table with keys: name, description, inputSchema
+-- @return table CanvasAction
+function M.CanvasAction(fields)
+    fields = fields or {}
+    return {
+        name        = fields.name or "",
+        description = fields.description or "",
+        inputSchema = fields.inputSchema,
+    }
+end
+
+--- Create a CanvasDeclaration table.
+-- @param fields table with keys: id, displayName, description, inputSchema, actions
+-- @return table CanvasDeclaration
+function M.CanvasDeclaration(fields)
+    fields = fields or {}
+    return {
+        id          = fields.id or "",
+        displayName = fields.displayName or "",
+        description = fields.description or "",
+        inputSchema = fields.inputSchema,
+        actions     = fields.actions,
+    }
+end
+
+--- Create a CanvasOpenResponse table.
+-- @param fields table with keys: url, title, status
+-- @return table CanvasOpenResponse
+function M.CanvasOpenResponse(fields)
+    fields = fields or {}
+    return {
+        url    = fields.url,
+        title  = fields.title,
+        status = fields.status,
+    }
+end
+
+--- Create a CanvasHostCapabilities table.
+-- @param fields table with optional key: canvases
+-- @return table CanvasHostCapabilities
+function M.CanvasHostCapabilities(fields)
+    fields = fields or {}
+    return {
+        canvases = fields.canvases or false,
+    }
+end
+
+--- Create a CanvasHostContext table.
+-- @param fields table with optional key: capabilities
+-- @return table CanvasHostContext
+function M.CanvasHostContext(fields)
+    fields = fields or {}
+    return {
+        capabilities = M.CanvasHostCapabilities(fields.capabilities),
+    }
+end
+
+--- Create a CanvasOpenContext table.
+-- @param fields table with keys: sessionId, extensionId, canvasId, instanceId, input, host
+-- @return table CanvasOpenContext
+function M.CanvasOpenContext(fields)
+    fields = fields or {}
+    return {
+        sessionId   = fields.sessionId or "",
+        extensionId = fields.extensionId or "",
+        canvasId    = fields.canvasId or "",
+        instanceId  = fields.instanceId or "",
+        input       = fields.input,
+        host        = fields.host and M.CanvasHostContext(fields.host) or nil,
+    }
+end
+
+--- Create a CanvasActionContext table.
+-- @param fields table with keys: sessionId, extensionId, canvasId, instanceId, actionName, input, host
+-- @return table CanvasActionContext
+function M.CanvasActionContext(fields)
+    fields = fields or {}
+    return {
+        sessionId   = fields.sessionId or "",
+        extensionId = fields.extensionId or "",
+        canvasId    = fields.canvasId or "",
+        instanceId  = fields.instanceId or "",
+        actionName  = fields.actionName or "",
+        input       = fields.input,
+        host        = fields.host and M.CanvasHostContext(fields.host) or nil,
+    }
+end
+
+--- Create a CanvasLifecycleContext table.
+-- @param fields table with keys: sessionId, extensionId, canvasId, instanceId, host
+-- @return table CanvasLifecycleContext
+function M.CanvasLifecycleContext(fields)
+    fields = fields or {}
+    return {
+        sessionId   = fields.sessionId or "",
+        extensionId = fields.extensionId or "",
+        canvasId    = fields.canvasId or "",
+        instanceId  = fields.instanceId or "",
+        host        = fields.host and M.CanvasHostContext(fields.host) or nil,
+    }
+end
+
+--- Create a CloudSessionRepository table.
+-- @param fields table with keys: owner, name, branch
+-- @return table CloudSessionRepository
+function M.CloudSessionRepository(fields)
+    fields = fields or {}
+    return {
+        owner  = fields.owner or "",
+        name   = fields.name or "",
+        branch = fields.branch,
+    }
+end
+
+--- Create a CloudSessionOptions table.
+-- @param fields table with key: repository
+-- @return table CloudSessionOptions
+function M.CloudSessionOptions(fields)
+    fields = fields or {}
+    return {
+        repository = fields.repository and M.CloudSessionRepository(fields.repository) or nil,
+    }
+end
+
+-- ---------------------------------------------------------------------------
 -- System message configuration types
 -- ---------------------------------------------------------------------------
 
@@ -273,6 +402,40 @@ function M.SystemMessageConfig(fields)
         mode     = fields.mode,                -- "append", "replace", or "customize"
         content  = fields.content,             -- optional string
         sections = fields.sections,            -- optional table of section_id => SectionOverride
+    }
+end
+
+--- Create a SystemMessageAppendConfig table.
+-- @param fields table with optional key: content
+-- @return table SystemMessageAppendConfig
+function M.SystemMessageAppendConfig(fields)
+    fields = fields or {}
+    return {
+        mode    = fields.mode or "append",
+        content = fields.content,
+    }
+end
+
+--- Create a SystemMessageReplaceConfig table.
+-- @param fields table with key: content
+-- @return table SystemMessageReplaceConfig
+function M.SystemMessageReplaceConfig(fields)
+    fields = fields or {}
+    return {
+        mode    = "replace",
+        content = fields.content or "",
+    }
+end
+
+--- Create a SystemMessageCustomizeConfig table.
+-- @param fields table with optional keys: sections, content
+-- @return table SystemMessageCustomizeConfig
+function M.SystemMessageCustomizeConfig(fields)
+    fields = fields or {}
+    return {
+        mode     = "customize",
+        sections = fields.sections,
+        content  = fields.content,
     }
 end
 
@@ -818,16 +981,23 @@ M.ResponseFormat = {
 -- Image generation helpers
 -- ---------------------------------------------------------------------------
 
+--- Create an ImageOptions table for image generation.
+-- @param fields table with optional fields: size, quality, style
+-- @return table ImageOptions
+function M.ImageOptions(fields)
+    fields = fields or {}
+    return {
+        size    = fields.size,
+        quality = fields.quality,
+        style   = fields.style,
+    }
+end
+
 --- Create image options for image generation.
 -- @param opts table with optional fields: size, quality, style
 -- @return table image options
 function M.image_options(opts)
-    opts = opts or {}
-    return {
-        size    = opts.size,
-        quality = opts.quality,
-        style   = opts.style,
-    }
+    return M.ImageOptions(opts)
 end
 
 --- Parse assistant image data from a response.
@@ -944,6 +1114,150 @@ function M.RemoteEnableResult(fields)
         remoteSteerable = fields.remoteSteerable or false,
         url             = fields.url,  -- string or nil
     }
+end
+
+--- Create a CanvasAction table.
+-- @param fields table with keys: name, description, inputSchema
+-- @return table CanvasAction
+function M.CanvasAction(fields)
+    fields = fields or {}
+    return {
+        name        = fields.name,
+        description = fields.description,
+        inputSchema = fields.inputSchema,
+    }
+end
+
+--- Create a CanvasDeclaration table.
+-- @param fields table with keys: id, displayName, description, inputSchema, actions
+-- @return table CanvasDeclaration
+function M.CanvasDeclaration(fields)
+    fields = fields or {}
+    return {
+        id          = fields.id,
+        displayName = fields.displayName,
+        description = fields.description,
+        inputSchema = fields.inputSchema,
+        actions     = fields.actions,
+    }
+end
+
+--- Create a CanvasOpenResponse table.
+-- @param fields table with keys: url, title, status
+-- @return table CanvasOpenResponse
+function M.CanvasOpenResponse(fields)
+    fields = fields or {}
+    return { url = fields.url, title = fields.title, status = fields.status }
+end
+
+--- Create a CanvasHostCapabilities table.
+function M.CanvasHostCapabilities(fields)
+    fields = fields or {}
+    return { canvases = fields.canvases or false }
+end
+
+--- Create a CanvasHostContext table.
+function M.CanvasHostContext(fields)
+    fields = fields or {}
+    return { capabilities = fields.capabilities }
+end
+
+--- Create a CanvasOpenContext table.
+function M.CanvasOpenContext(fields)
+    fields = fields or {}
+    return {
+        sessionId   = fields.sessionId,
+        extensionId = fields.extensionId,
+        canvasId    = fields.canvasId,
+        instanceId  = fields.instanceId,
+        input       = fields.input,
+        host        = fields.host,
+    }
+end
+
+--- Create a CanvasActionContext table.
+function M.CanvasActionContext(fields)
+    fields = fields or {}
+    return {
+        sessionId   = fields.sessionId,
+        extensionId = fields.extensionId,
+        canvasId    = fields.canvasId,
+        instanceId  = fields.instanceId,
+        actionName  = fields.actionName,
+        input       = fields.input,
+        host        = fields.host,
+    }
+end
+
+--- Create a CanvasLifecycleContext table.
+function M.CanvasLifecycleContext(fields)
+    fields = fields or {}
+    return {
+        sessionId   = fields.sessionId,
+        extensionId = fields.extensionId,
+        canvasId    = fields.canvasId,
+        instanceId  = fields.instanceId,
+        host        = fields.host,
+    }
+end
+
+--- Create a CloudSessionRepository table.
+function M.CloudSessionRepository(fields)
+    fields = fields or {}
+    return { owner = fields.owner, name = fields.name, branch = fields.branch }
+end
+
+--- Create a CloudSessionOptions table.
+function M.CloudSessionOptions(fields)
+    fields = fields or {}
+    return { repository = fields.repository }
+end
+
+--- Create a SystemMessageAppendConfig table.
+function M.SystemMessageAppendConfig(fields)
+    fields = fields or {}
+    return { mode = "append", content = fields.content }
+end
+
+--- Create a SystemMessageReplaceConfig table.
+function M.SystemMessageReplaceConfig(fields)
+    fields = fields or {}
+    return { mode = "replace", content = fields.content }
+end
+
+--- Create a SectionOverride table.
+function M.SectionOverride(fields)
+    fields = fields or {}
+    return { action = fields.action, content = fields.content }
+end
+
+--- Create a SystemMessageCustomizeConfig table.
+function M.SystemMessageCustomizeConfig(fields)
+    fields = fields or {}
+    return { mode = "customize", sections = fields.sections, content = fields.content }
+end
+
+--- Create a UserInputRequest table.
+function M.UserInputRequest(fields)
+    fields = fields or {}
+    return { question = fields.question, choices = fields.choices, allowFreeform = fields.allowFreeform }
+end
+
+--- Create a UserInputResponse table.
+function M.UserInputResponse(fields)
+    fields = fields or {}
+    return { answer = fields.answer, wasFreeform = fields.wasFreeform }
+end
+
+--- Response format constants.
+M.RESPONSE_FORMAT_TEXT        = "text"
+M.RESPONSE_FORMAT_IMAGE       = "image"
+M.RESPONSE_FORMAT_JSON_OBJECT = "json_object"
+
+--- Create an ImageOptions table.
+function M.ImageOptions(fields)
+    fields = fields or {}
+    return { size = fields.size, quality = fields.quality, style = fields.style }
 end
 
 return M

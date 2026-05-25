@@ -171,6 +171,263 @@ sub TO_JSON {
 }
 
 # ============================================================================
+# CanvasAction
+# ============================================================================
+package GitHub::Copilot::Types::CanvasAction;
+use Moo;
+
+has name        => (is => 'ro', required => 1);
+has description => (is => 'ro', required => 1);
+has inputSchema => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        name        => $hr->{name} // '',
+        description => $hr->{description} // '',
+        inputSchema => $hr->{inputSchema},
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (
+        name        => $self->name,
+        description => $self->description,
+    );
+    $h{inputSchema} = $self->inputSchema if defined $self->inputSchema;
+    return \%h;
+}
+
+# ============================================================================
+# CanvasDeclaration
+# ============================================================================
+package GitHub::Copilot::Types::CanvasDeclaration;
+use Moo;
+
+has id          => (is => 'ro', required => 1);
+has displayName => (is => 'ro', required => 1);
+has description => (is => 'ro', required => 1);
+has inputSchema => (is => 'ro', default => sub { undef });
+has actions     => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    my $actions;
+    if (defined $hr->{actions}) {
+        $actions = [ map { GitHub::Copilot::Types::CanvasAction->from_hashref($_) } @{ $hr->{actions} } ];
+    }
+    return $class->new(
+        id          => $hr->{id} // '',
+        displayName => $hr->{displayName} // '',
+        description => $hr->{description} // '',
+        inputSchema => $hr->{inputSchema},
+        actions     => $actions,
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (
+        id          => $self->id,
+        displayName => $self->displayName,
+        description => $self->description,
+    );
+    $h{inputSchema} = $self->inputSchema if defined $self->inputSchema;
+    if (defined $self->actions) {
+        $h{actions} = [ map { $_->can('TO_JSON') ? $_->TO_JSON : $_ } @{ $self->actions } ];
+    }
+    return \%h;
+}
+
+# ============================================================================
+# CanvasOpenResponse
+# ============================================================================
+package GitHub::Copilot::Types::CanvasOpenResponse;
+use Moo;
+
+has url    => (is => 'ro', default => sub { undef });
+has title  => (is => 'ro', default => sub { undef });
+has status => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{url}    = $self->url    if defined $self->url;
+    $h{title}  = $self->title  if defined $self->title;
+    $h{status} = $self->status if defined $self->status;
+    return \%h;
+}
+
+# ============================================================================
+# CanvasHostCapabilities
+# ============================================================================
+package GitHub::Copilot::Types::CanvasHostCapabilities;
+use Moo;
+
+has canvases => (is => 'ro', default => sub { 0 });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        canvases => $hr->{canvases} ? 1 : 0,
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    return { canvases => $self->canvases ?  :   };
+}
+
+# ============================================================================
+# CanvasHostContext
+# ============================================================================
+package GitHub::Copilot::Types::CanvasHostContext;
+use Moo;
+
+has capabilities => (
+    is => 'ro',
+    default => sub { GitHub::Copilot::Types::CanvasHostCapabilities->new(canvases => 0) },
+);
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        capabilities => GitHub::Copilot::Types::CanvasHostCapabilities->from_hashref($hr->{capabilities} // {}),
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    return { capabilities => $self->capabilities->TO_JSON };
+}
+
+# ============================================================================
+# CanvasOpenContext
+# ============================================================================
+package GitHub::Copilot::Types::CanvasOpenContext;
+use Moo;
+
+has sessionId   => (is => 'ro', required => 1);
+has extensionId => (is => 'ro', required => 1);
+has canvasId    => (is => 'ro', required => 1);
+has instanceId  => (is => 'ro', required => 1);
+has input       => (is => 'ro', default => sub { undef });
+has host        => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        sessionId   => $hr->{sessionId} // '',
+        extensionId => $hr->{extensionId} // '',
+        canvasId    => $hr->{canvasId} // '',
+        instanceId  => $hr->{instanceId} // '',
+        input       => $hr->{input},
+        host        => defined $hr->{host} ? GitHub::Copilot::Types::CanvasHostContext->from_hashref($hr->{host}) : undef,
+    );
+}
+
+# ============================================================================
+# CanvasActionContext
+# ============================================================================
+package GitHub::Copilot::Types::CanvasActionContext;
+use Moo;
+
+has sessionId   => (is => 'ro', required => 1);
+has extensionId => (is => 'ro', required => 1);
+has canvasId    => (is => 'ro', required => 1);
+has instanceId  => (is => 'ro', required => 1);
+has actionName  => (is => 'ro', required => 1);
+has input       => (is => 'ro', default => sub { undef });
+has host        => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        sessionId   => $hr->{sessionId} // '',
+        extensionId => $hr->{extensionId} // '',
+        canvasId    => $hr->{canvasId} // '',
+        instanceId  => $hr->{instanceId} // '',
+        actionName  => $hr->{actionName} // '',
+        input       => $hr->{input},
+        host        => defined $hr->{host} ? GitHub::Copilot::Types::CanvasHostContext->from_hashref($hr->{host}) : undef,
+    );
+}
+
+# ============================================================================
+# CanvasLifecycleContext
+# ============================================================================
+package GitHub::Copilot::Types::CanvasLifecycleContext;
+use Moo;
+
+has sessionId   => (is => 'ro', required => 1);
+has extensionId => (is => 'ro', required => 1);
+has canvasId    => (is => 'ro', required => 1);
+has instanceId  => (is => 'ro', required => 1);
+has host        => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        sessionId   => $hr->{sessionId} // '',
+        extensionId => $hr->{extensionId} // '',
+        canvasId    => $hr->{canvasId} // '',
+        instanceId  => $hr->{instanceId} // '',
+        host        => defined $hr->{host} ? GitHub::Copilot::Types::CanvasHostContext->from_hashref($hr->{host}) : undef,
+    );
+}
+
+# ============================================================================
+# CloudSessionRepository
+# ============================================================================
+package GitHub::Copilot::Types::CloudSessionRepository;
+use Moo;
+
+has owner  => (is => 'ro', required => 1);
+has name   => (is => 'ro', required => 1);
+has branch => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        owner  => $hr->{owner} // '',
+        name   => $hr->{name} // '',
+        branch => $hr->{branch},
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (owner => $self->owner, name => $self->name);
+    $h{branch} = $self->branch if defined $self->branch;
+    return \%h;
+}
+
+# ============================================================================
+# CloudSessionOptions
+# ============================================================================
+package GitHub::Copilot::Types::CloudSessionOptions;
+use Moo;
+
+has repository => (is => 'ro', default => sub { undef });
+
+sub from_hashref {
+    my ($class, $hr) = @_;
+    return $class->new(
+        repository => defined $hr->{repository}
+            ? GitHub::Copilot::Types::CloudSessionRepository->from_hashref($hr->{repository})
+            : undef,
+    );
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{repository} = $self->repository->TO_JSON if defined $self->repository;
+    return \%h;
+}
+
+# ============================================================================
 # PingResponse
 # ============================================================================
 package GitHub::Copilot::Types::PingResponse;
@@ -904,6 +1161,54 @@ sub TO_JSON {
     return \%h;
 }
 
+# SystemMessageAppendConfig
+package GitHub::Copilot::Types::SystemMessageAppendConfig;
+use Moo;
+
+has mode    => (is => 'ro', default => sub { 'append' });
+has content => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (mode => 'append');
+    $h{content} = $self->content if defined $self->content;
+    return \%h;
+}
+
+# SystemMessageReplaceConfig
+package GitHub::Copilot::Types::SystemMessageReplaceConfig;
+use Moo;
+
+has mode    => (is => 'ro', default => sub { 'replace' });
+has content => (is => 'ro', required => 1);
+
+sub TO_JSON {
+    my ($self) = @_;
+    return { mode => 'replace', content => $self->content };
+}
+
+# SystemMessageCustomizeConfig
+package GitHub::Copilot::Types::SystemMessageCustomizeConfig;
+use Moo;
+
+has mode     => (is => 'ro', default => sub { 'customize' });
+has sections => (is => 'ro', default => sub { undef });
+has content  => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (mode => 'customize');
+    if (defined $self->sections) {
+        my %sec;
+        for my $key (keys %{ $self->sections }) {
+            $sec{$key} = $self->sections->{$key}->TO_JSON;
+        }
+        $h{sections} = \%sec;
+    }
+    $h{content} = $self->content if defined $self->content;
+    return \%h;
+}
+
 # System message configuration.
 # Supports "append" (default), "replace", and "customize" modes.
 package GitHub::Copilot::Types::SystemMessageConfig;
@@ -1143,6 +1448,139 @@ sub TO_JSON {
     $h{url} = $self->url if defined $self->url;
     return \%h;
 }
+
+# ============================================================================
+# Canvas Types
+# ============================================================================
+package GitHub::Copilot::Types::CanvasAction;
+use Moo;
+has name         => (is => 'ro', required => 1);
+has description  => (is => 'ro', required => 1);
+has input_schema => (is => 'ro');
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (name => $self->name, description => $self->description);
+    $h{inputSchema} = $self->input_schema if defined $self->input_schema;
+    return \%h;
+}
+
+package GitHub::Copilot::Types::CanvasDeclaration;
+use Moo;
+has id           => (is => 'ro', required => 1);
+has display_name => (is => 'ro', required => 1);
+has description  => (is => 'ro', required => 1);
+has input_schema => (is => 'ro');
+has actions      => (is => 'ro');
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (id => $self->id, displayName => $self->display_name, description => $self->description);
+    $h{inputSchema} = $self->input_schema if defined $self->input_schema;
+    $h{actions} = $self->actions if defined $self->actions;
+    return \%h;
+}
+
+package GitHub::Copilot::Types::CanvasOpenResponse;
+use Moo;
+has url    => (is => 'ro');
+has title  => (is => 'ro');
+has status => (is => 'ro');
+
+package GitHub::Copilot::Types::CanvasHostCapabilities;
+use Moo;
+has canvases => (is => 'ro', default => sub { 0 });
+
+package GitHub::Copilot::Types::CanvasHostContext;
+use Moo;
+has capabilities => (is => 'ro');
+
+package GitHub::Copilot::Types::CanvasOpenContext;
+use Moo;
+has session_id   => (is => 'ro', required => 1);
+has extension_id => (is => 'ro', required => 1);
+has canvas_id    => (is => 'ro', required => 1);
+has instance_id  => (is => 'ro', required => 1);
+has input        => (is => 'ro');
+has host         => (is => 'ro');
+
+package GitHub::Copilot::Types::CanvasActionContext;
+use Moo;
+has session_id   => (is => 'ro', required => 1);
+has extension_id => (is => 'ro', required => 1);
+has canvas_id    => (is => 'ro', required => 1);
+has instance_id  => (is => 'ro', required => 1);
+has action_name  => (is => 'ro', required => 1);
+has input        => (is => 'ro');
+has host         => (is => 'ro');
+
+package GitHub::Copilot::Types::CanvasLifecycleContext;
+use Moo;
+has session_id   => (is => 'ro', required => 1);
+has extension_id => (is => 'ro', required => 1);
+has canvas_id    => (is => 'ro', required => 1);
+has instance_id  => (is => 'ro', required => 1);
+has host         => (is => 'ro');
+
+# ============================================================================
+# Cloud Session Types
+# ============================================================================
+package GitHub::Copilot::Types::CloudSessionRepository;
+use Moo;
+has owner  => (is => 'ro', required => 1);
+has name   => (is => 'ro', required => 1);
+has branch => (is => 'ro');
+
+package GitHub::Copilot::Types::CloudSessionOptions;
+use Moo;
+has repository => (is => 'ro');
+
+# ============================================================================
+# System Message Config Types
+# ============================================================================
+package GitHub::Copilot::Types::SystemMessageAppendConfig;
+use Moo;
+has mode    => (is => 'ro', default => sub { 'append' });
+has content => (is => 'ro');
+
+package GitHub::Copilot::Types::SystemMessageReplaceConfig;
+use Moo;
+has mode    => (is => 'ro', default => sub { 'replace' });
+has content => (is => 'ro', required => 1);
+
+package GitHub::Copilot::Types::SectionOverride;
+use Moo;
+has action  => (is => 'ro', required => 1);
+has content => (is => 'ro');
+
+package GitHub::Copilot::Types::SystemMessageCustomizeConfig;
+use Moo;
+has mode     => (is => 'ro', default => sub { 'customize' });
+has sections => (is => 'ro');
+has content  => (is => 'ro');
+
+# ============================================================================
+# User Input Types
+# ============================================================================
+package GitHub::Copilot::Types::UserInputRequest;
+use Moo;
+has question       => (is => 'ro');
+has choices        => (is => 'ro');
+has allow_freeform => (is => 'ro');
+
+package GitHub::Copilot::Types::UserInputResponse;
+use Moo;
+has answer       => (is => 'ro', required => 1);
+has was_freeform => (is => 'ro', required => 1);
+
+# ============================================================================
+# Image Generation Types
+# ============================================================================
+package GitHub::Copilot::Types::ImageOptions;
+use Moo;
+has size    => (is => 'ro');
+has quality => (is => 'ro');
+has style   => (is => 'ro');
 
 1;
 

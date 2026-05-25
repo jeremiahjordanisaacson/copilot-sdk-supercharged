@@ -223,6 +223,98 @@
   {:answer answer :wasFreeform was-freeform})
 
 ;; ============================================================================
+;; Canvas / cloud session types
+;; ============================================================================
+
+(defn canvas-action
+  "Create a canvas action.
+
+  `name` and `description` are required.
+  Optional: :input-schema (JSON-schema map)."
+  [name description & {:as opts}]
+  (cond-> {:name name :description description}
+    (:input-schema opts) (assoc :inputSchema (:input-schema opts))))
+
+(defn canvas-declaration
+  "Create a canvas declaration.
+
+  Required: `id`, `display-name`, `description`.
+  Optional: :input-schema, :actions (vector of canvas-action maps)."
+  [id display-name description & {:as opts}]
+  (cond-> {:id id :displayName display-name :description description}
+    (:input-schema opts) (assoc :inputSchema (:input-schema opts))
+    (:actions opts)      (assoc :actions (:actions opts))))
+
+(defn canvas-open-response
+  "Create a canvas-open response.
+  Optional keys: :url :title :status"
+  [& {:as opts}]
+  (cond-> {}
+    (:url opts)    (assoc :url (:url opts))
+    (:title opts)  (assoc :title (:title opts))
+    (:status opts) (assoc :status (:status opts))))
+
+(defn canvas-host-capabilities
+  "Create a canvas-host-capabilities map.
+  Optional: :canvases (defaults to false)."
+  [& {:as opts}]
+  (if (contains? opts :canvases)
+    {:canvases (:canvases opts)}
+    {:canvases false}))
+
+(defn canvas-host-context
+  "Create a canvas-host-context map. `capabilities` is required."
+  [capabilities]
+  {:capabilities capabilities})
+
+(defn canvas-open-context
+  "Create a canvas-open-context map.
+  Optional: :host"
+  [session-id extension-id canvas-id instance-id input & {:as opts}]
+  (cond-> {:sessionId session-id
+           :extensionId extension-id
+           :canvasId canvas-id
+           :instanceId instance-id
+           :input input}
+    (:host opts) (assoc :host (:host opts))))
+
+(defn canvas-action-context
+  "Create a canvas-action-context map.
+  Optional: :host"
+  [session-id extension-id canvas-id instance-id action-name input & {:as opts}]
+  (cond-> {:sessionId session-id
+           :extensionId extension-id
+           :canvasId canvas-id
+           :instanceId instance-id
+           :actionName action-name
+           :input input}
+    (:host opts) (assoc :host (:host opts))))
+
+(defn canvas-lifecycle-context
+  "Create a canvas-lifecycle-context map.
+  Optional: :host"
+  [session-id extension-id canvas-id instance-id & {:as opts}]
+  (cond-> {:sessionId session-id
+           :extensionId extension-id
+           :canvasId canvas-id
+           :instanceId instance-id}
+    (:host opts) (assoc :host (:host opts))))
+
+(defn cloud-session-repository
+  "Create cloud-session repository metadata.
+  Optional: :branch"
+  [owner name & {:as opts}]
+  (cond-> {:owner owner :name name}
+    (:branch opts) (assoc :branch (:branch opts))))
+
+(defn cloud-session-options
+  "Create cloud-session options.
+  Optional: :repository"
+  [& {:as opts}]
+  (cond-> {}
+    (:repository opts) (assoc :repository (:repository opts))))
+
+;; ============================================================================
 ;; Provider configuration
 ;; ============================================================================
 

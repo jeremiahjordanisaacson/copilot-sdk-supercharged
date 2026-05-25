@@ -234,6 +234,123 @@
            05 WS-AUTH-TOKEN          PIC X(256) VALUE SPACES.
 
       *----------------------------------------------------------------*
+      * Image generation options                                       *
+      *----------------------------------------------------------------*
+       01  WS-IMAGE-OPTIONS.
+           05 WS-IMG-SIZE           PIC X(32)  VALUE SPACES.
+           05 WS-IMG-QUALITY        PIC X(16)  VALUE SPACES.
+           05 WS-IMG-STYLE          PIC X(16)  VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * System message configuration                                   *
+      *----------------------------------------------------------------*
+       01  WS-SECTION-OVERRIDE.
+           05 WS-SO-ACTION          PIC X(16)  VALUE SPACES.
+           05 WS-SO-CONTENT         PIC X(2048) VALUE SPACES.
+
+       01  WS-SYSTEM-MSG-APPEND.
+           05 WS-SMA-MODE           PIC X(16)  VALUE SPACES.
+           05 WS-SMA-CONTENT        PIC X(2048) VALUE SPACES.
+
+       01  WS-SYSTEM-MSG-REPLACE.
+           05 WS-SMR-MODE           PIC X(16)  VALUE "replace".
+           05 WS-SMR-CONTENT        PIC X(4096) VALUE SPACES.
+
+       01  WS-SYSTEM-MSG-CUSTOMIZE.
+           05 WS-SMC-MODE           PIC X(16)  VALUE "customize".
+           05 WS-SMC-SECTIONS       PIC X(4096) VALUE SPACES.
+           05 WS-SMC-CONTENT        PIC X(4096) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * User input request / response                                  *
+      *----------------------------------------------------------------*
+       01  WS-USER-INPUT-REQ.
+           05 WS-UIR-QUESTION       PIC X(1024) VALUE SPACES.
+           05 WS-UIR-CHOICES        PIC X(2048) VALUE SPACES.
+           05 WS-UIR-ALLOW-FREEFORM PIC 9      VALUE 0.
+               88 UIR-ALLOW-FREEFORM-YES       VALUE 1.
+               88 UIR-ALLOW-FREEFORM-NO        VALUE 0.
+
+       01  WS-USER-INPUT-RESP.
+           05 WS-UIRESP-ANSWER      PIC X(1024) VALUE SPACES.
+           05 WS-UIRESP-WAS-FREEFORM PIC 9     VALUE 0.
+               88 UIRESP-WAS-FREEFORM-YES      VALUE 1.
+               88 UIRESP-WAS-FREEFORM-NO       VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Cloud session metadata                                          *
+      *----------------------------------------------------------------*
+       01  WS-CLOUD-SESSION-REPOSITORY.
+           05 WS-CSR-OWNER          PIC X(128) VALUE SPACES.
+           05 WS-CSR-NAME           PIC X(128) VALUE SPACES.
+           05 WS-CSR-BRANCH         PIC X(128) VALUE SPACES.
+
+       01  WS-CLOUD-SESSION-OPTIONS.
+           05 WS-CSO-HAS-REPOSITORY PIC 9      VALUE 0.
+               88 CSO-HAS-REPOSITORY-YES       VALUE 1.
+               88 CSO-HAS-REPOSITORY-NO        VALUE 0.
+           05 WS-CSO-REPOSITORY.
+               10 WS-CSO-OWNER      PIC X(128) VALUE SPACES.
+               10 WS-CSO-NAME       PIC X(128) VALUE SPACES.
+               10 WS-CSO-BRANCH     PIC X(128) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Canvas types                                                    *
+      *----------------------------------------------------------------*
+       01  WS-CANVAS-ACTION.
+           05 WS-CVA-NAME           PIC X(128) VALUE SPACES.
+           05 WS-CVA-DESCRIPTION    PIC X(256) VALUE SPACES.
+           05 WS-CVA-INPUT-SCHEMA   PIC X(2048) VALUE SPACES.
+
+       01  WS-CANVAS-DECLARATION.
+           05 WS-CVD-ID             PIC X(128) VALUE SPACES.
+           05 WS-CVD-DISPLAY-NAME   PIC X(128) VALUE SPACES.
+           05 WS-CVD-DESCRIPTION    PIC X(256) VALUE SPACES.
+           05 WS-CVD-INPUT-SCHEMA   PIC X(2048) VALUE SPACES.
+           05 WS-CVD-ACTIONS        PIC X(4096) VALUE SPACES.
+
+       01  WS-CANVAS-OPEN-RESP.
+           05 WS-COR-URL            PIC X(256) VALUE SPACES.
+           05 WS-COR-TITLE          PIC X(128) VALUE SPACES.
+           05 WS-COR-STATUS         PIC X(128) VALUE SPACES.
+
+       01  WS-CANVAS-HOST-CAPS.
+           05 WS-CHC-CANVASES       PIC 9      VALUE 0.
+               88 CHC-CANVASES-YES             VALUE 1.
+               88 CHC-CANVASES-NO              VALUE 0.
+
+       01  WS-CANVAS-HOST-CONTEXT.
+           05 WS-CHCTX-CAPS.
+               10 WS-CHCTX-CANVASES PIC 9      VALUE 0.
+
+       01  WS-CANVAS-OPEN-CONTEXT.
+           05 WS-COC-SESSION-ID     PIC X(64)  VALUE SPACES.
+           05 WS-COC-EXTENSION-ID   PIC X(128) VALUE SPACES.
+           05 WS-COC-CANVAS-ID      PIC X(128) VALUE SPACES.
+           05 WS-COC-INSTANCE-ID    PIC X(128) VALUE SPACES.
+           05 WS-COC-INPUT          PIC X(4096) VALUE SPACES.
+           05 WS-COC-HAS-HOST       PIC 9      VALUE 0.
+           05 WS-COC-HOST           PIC X(256) VALUE SPACES.
+
+       01  WS-CANVAS-ACTION-CONTEXT.
+           05 WS-CAC-SESSION-ID     PIC X(64)  VALUE SPACES.
+           05 WS-CAC-EXTENSION-ID   PIC X(128) VALUE SPACES.
+           05 WS-CAC-CANVAS-ID      PIC X(128) VALUE SPACES.
+           05 WS-CAC-INSTANCE-ID    PIC X(128) VALUE SPACES.
+           05 WS-CAC-ACTION-NAME    PIC X(128) VALUE SPACES.
+           05 WS-CAC-INPUT          PIC X(4096) VALUE SPACES.
+           05 WS-CAC-HAS-HOST       PIC 9      VALUE 0.
+           05 WS-CAC-HOST           PIC X(256) VALUE SPACES.
+
+       01  WS-CANVAS-LIFECYCLE-CONTEXT.
+           05 WS-CLC-SESSION-ID     PIC X(64)  VALUE SPACES.
+           05 WS-CLC-EXTENSION-ID   PIC X(128) VALUE SPACES.
+           05 WS-CLC-CANVAS-ID      PIC X(128) VALUE SPACES.
+           05 WS-CLC-INSTANCE-ID    PIC X(128) VALUE SPACES.
+           05 WS-CLC-HAS-HOST       PIC 9      VALUE 0.
+           05 WS-CLC-HOST           PIC X(256) VALUE SPACES.
+
+      *----------------------------------------------------------------*
       * Client extended options                                        *
       *----------------------------------------------------------------*
        01  WS-CLIENT-EXTENDED.

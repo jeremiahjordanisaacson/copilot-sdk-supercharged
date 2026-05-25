@@ -611,7 +611,7 @@ case class PermissionInvocation(sessionId: String)
 
 /** Request for user input from the agent (enables ask_user tool). */
 case class UserInputRequest(
-  question: String,
+  question: Option[String] = None,
   choices: Option[List[String]] = None,
   allowFreeform: Option[Boolean] = None
 )
@@ -1368,3 +1368,133 @@ case class CopilotClientOptions(
   /** Auth token for TCP server connections. */
   tcpConnectionToken: Option[String] = None
 )
+
+// ============================================================================
+// Canvas, Cloud Session, and Prompt Types
+// ============================================================================
+
+/** Declaration for a canvas exposed by an extension. */
+case class CanvasDeclaration(
+  id: String,
+  displayName: String,
+  description: String,
+  inputSchema: Option[JsonObject] = None,
+  actions: Option[List[CanvasAction]] = None
+)
+
+object CanvasDeclaration:
+  given Encoder[CanvasDeclaration] = deriveEncoder
+  given Decoder[CanvasDeclaration] = deriveDecoder
+
+/** Action exposed by a canvas. */
+case class CanvasAction(
+  name: String,
+  description: String,
+  inputSchema: Option[JsonObject] = None
+)
+
+object CanvasAction:
+  given Encoder[CanvasAction] = deriveEncoder
+  given Decoder[CanvasAction] = deriveDecoder
+
+/** Response returned when opening a canvas. */
+case class CanvasOpenResponse(
+  url: Option[String] = None,
+  title: Option[String] = None,
+  status: Option[String] = None
+)
+
+object CanvasOpenResponse:
+  given Encoder[CanvasOpenResponse] = deriveEncoder
+  given Decoder[CanvasOpenResponse] = deriveDecoder
+
+/** Host capabilities available to canvases. */
+case class CanvasHostCapabilities(
+  canvases: Boolean = false
+)
+
+object CanvasHostCapabilities:
+  given Encoder[CanvasHostCapabilities] = deriveEncoder
+  given Decoder[CanvasHostCapabilities] = deriveDecoder
+
+/** Host context available to canvases. */
+case class CanvasHostContext(
+  capabilities: CanvasHostCapabilities
+)
+
+object CanvasHostContext:
+  given Encoder[CanvasHostContext] = deriveEncoder
+  given Decoder[CanvasHostContext] = deriveDecoder
+
+/** Context passed when opening a canvas. */
+case class CanvasOpenContext(
+  sessionId: String,
+  extensionId: String,
+  canvasId: String,
+  instanceId: String,
+  input: Json,
+  host: Option[CanvasHostContext] = None
+)
+
+object CanvasOpenContext:
+  given Encoder[CanvasOpenContext] = deriveEncoder
+  given Decoder[CanvasOpenContext] = deriveDecoder
+
+/** Context passed when invoking a canvas action. */
+case class CanvasActionContext(
+  sessionId: String,
+  extensionId: String,
+  canvasId: String,
+  instanceId: String,
+  actionName: String,
+  input: Json,
+  host: Option[CanvasHostContext] = None
+)
+
+object CanvasActionContext:
+  given Encoder[CanvasActionContext] = deriveEncoder
+  given Decoder[CanvasActionContext] = deriveDecoder
+
+/** Lifecycle context for a canvas instance. */
+case class CanvasLifecycleContext(
+  sessionId: String,
+  extensionId: String,
+  canvasId: String,
+  instanceId: String,
+  host: Option[CanvasHostContext] = None
+)
+
+object CanvasLifecycleContext:
+  given Encoder[CanvasLifecycleContext] = deriveEncoder
+  given Decoder[CanvasLifecycleContext] = deriveDecoder
+
+/** Repository context for a cloud session. */
+case class CloudSessionRepository(
+  owner: String,
+  name: String,
+  branch: Option[String] = None
+)
+
+object CloudSessionRepository:
+  given Encoder[CloudSessionRepository] = deriveEncoder
+  given Decoder[CloudSessionRepository] = deriveDecoder
+
+/** Options for creating a cloud session. */
+case class CloudSessionOptions(
+  repository: Option[CloudSessionRepository] = None
+)
+
+object CloudSessionOptions:
+  given Encoder[CloudSessionOptions] = deriveEncoder
+  given Decoder[CloudSessionOptions] = deriveDecoder
+
+/** System message configuration -- customize mode. */
+case class SystemMessageCustomizeConfig(
+  mode: String = "customize",
+  sections: Option[Map[String, SectionOverride]] = None,
+  content: Option[String] = None
+)
+
+object SystemMessageCustomizeConfig:
+  given Encoder[SystemMessageCustomizeConfig] = deriveEncoder
+  given Decoder[SystemMessageCustomizeConfig] = deriveDecoder

@@ -96,6 +96,250 @@ module CopilotSDK
     end
   end
 
+  # GitHub repository metadata associated with a cloud session.
+  class CloudSessionRepository
+    include JSON::Serializable
+
+    property owner : String
+    property name : String
+    property branch : String?
+
+    def initialize(@owner, @name, @branch = nil)
+    end
+  end
+
+  # Options for creating a remote session in the cloud.
+  class CloudSessionOptions
+    include JSON::Serializable
+
+    property repository : CloudSessionRepository?
+
+    def initialize(@repository = nil)
+    end
+  end
+
+  # A single agent-callable action contributed by a canvas.
+  class CanvasAction
+    include JSON::Serializable
+
+    property name : String
+    property description : String
+    @[JSON::Field(key: "inputSchema")]
+    property input_schema : Hash(String, JSON::Any)?
+
+    def initialize(@name, @description, @input_schema = nil)
+    end
+  end
+
+  # Declarative metadata for a single canvas.
+  class CanvasDeclaration
+    include JSON::Serializable
+
+    property id : String
+    @[JSON::Field(key: "displayName")]
+    property display_name : String
+    property description : String
+    @[JSON::Field(key: "inputSchema")]
+    property input_schema : Hash(String, JSON::Any)?
+    property actions : Array(CanvasAction)?
+
+    def initialize(@id, @display_name, @description, @input_schema = nil, @actions = nil)
+    end
+  end
+
+  # Response returned from a canvas open handler.
+  class CanvasOpenResponse
+    include JSON::Serializable
+
+    property url : String?
+    property title : String?
+    property status : String?
+
+    def initialize(@url = nil, @title = nil, @status = nil)
+    end
+  end
+
+  # Host capability details passed to canvas callbacks.
+  class CanvasHostCapabilities
+    include JSON::Serializable
+
+    property canvases : Bool
+
+    def initialize(@canvases = false)
+    end
+  end
+
+  # Host context passed to canvas callbacks.
+  class CanvasHostContext
+    include JSON::Serializable
+
+    property capabilities : CanvasHostCapabilities
+
+    def initialize(@capabilities = CanvasHostCapabilities.new)
+    end
+  end
+
+  # Context handed to a canvas open handler.
+  class CanvasOpenContext
+    include JSON::Serializable
+
+    @[JSON::Field(key: "sessionId")]
+    property session_id : String
+    @[JSON::Field(key: "extensionId")]
+    property extension_id : String
+    @[JSON::Field(key: "canvasId")]
+    property canvas_id : String
+    @[JSON::Field(key: "instanceId")]
+    property instance_id : String
+    property input : JSON::Any
+    property host : CanvasHostContext?
+
+    def initialize(@session_id, @extension_id, @canvas_id, @instance_id, @input, @host = nil)
+    end
+  end
+
+  # Context handed to a canvas action handler.
+  class CanvasActionContext
+    include JSON::Serializable
+
+    @[JSON::Field(key: "sessionId")]
+    property session_id : String
+    @[JSON::Field(key: "extensionId")]
+    property extension_id : String
+    @[JSON::Field(key: "canvasId")]
+    property canvas_id : String
+    @[JSON::Field(key: "instanceId")]
+    property instance_id : String
+    @[JSON::Field(key: "actionName")]
+    property action_name : String
+    property input : JSON::Any
+    property host : CanvasHostContext?
+
+    def initialize(@session_id, @extension_id, @canvas_id, @instance_id, @action_name, @input, @host = nil)
+    end
+  end
+
+  # Context handed to a canvas lifecycle handler.
+  class CanvasLifecycleContext
+    include JSON::Serializable
+
+    @[JSON::Field(key: "sessionId")]
+    property session_id : String
+    @[JSON::Field(key: "extensionId")]
+    property extension_id : String
+    @[JSON::Field(key: "canvasId")]
+    property canvas_id : String
+    @[JSON::Field(key: "instanceId")]
+    property instance_id : String
+    property host : CanvasHostContext?
+
+    def initialize(@session_id, @extension_id, @canvas_id, @instance_id, @host = nil)
+    end
+  end
+
+  # Override operation for a single system prompt section.
+  class SectionOverride
+    include JSON::Serializable
+
+    property action : String
+    property content : String?
+
+    def initialize(@action, @content = nil)
+    end
+  end
+
+  # System message in append mode (default).
+  class SystemMessageAppendConfig
+    include JSON::Serializable
+
+    property mode : String?
+    property content : String?
+
+    def initialize(@content = nil, @mode = "append")
+    end
+  end
+
+  # System message in replace mode.
+  class SystemMessageReplaceConfig
+    include JSON::Serializable
+
+    property mode : String
+    property content : String
+
+    def initialize(@content, @mode = "replace")
+    end
+  end
+
+  # System message in customize mode.
+  class SystemMessageCustomizeConfig
+    include JSON::Serializable
+
+    property mode : String
+    property sections : Hash(String, SectionOverride)?
+    property content : String?
+
+    def initialize(@sections = nil, @content = nil, @mode = "customize")
+    end
+  end
+
+  # User input request from the agent.
+  class UserInputRequest
+    include JSON::Serializable
+
+    property question : String?
+    property choices : Array(String)?
+    @[JSON::Field(key: "allowFreeform")]
+    property allow_freeform : Bool?
+
+    def initialize(@question = nil, @choices = nil, @allow_freeform = nil)
+    end
+  end
+
+  # User input response.
+  class UserInputResponse
+    include JSON::Serializable
+
+    property answer : String
+    @[JSON::Field(key: "wasFreeform")]
+    property was_freeform : Bool
+
+    def initialize(@answer, @was_freeform)
+    end
+  end
+
+  # Response format for message responses.
+  enum ResponseFormat
+    Text
+    Image
+    JsonObject
+
+    def to_json(json : JSON::Builder) : Nil
+      case self
+      when JsonObject then json.string("json_object")
+      else json.string(to_s.downcase)
+      end
+    end
+
+    def self.from_json(value : String) : self
+      case value
+      when "json_object" then JsonObject
+      else parse(value)
+      end
+    end
+  end
+
+  # Options for image generation.
+  class ImageOptions
+    include JSON::Serializable
+
+    property size : String?
+    property quality : String?
+    property style : String?
+
+    def initialize(@size = nil, @quality = nil, @style = nil)
+    end
+  end
+
   # Payload sent by the server when requesting a tool call.
   class ToolCallRequestPayload
     include JSON::Serializable

@@ -135,6 +135,177 @@ public struct Tool: @unchecked Sendable {
     }
 }
 
+// MARK: - Cloud Session Types
+
+/// GitHub repository metadata associated with a cloud session.
+public struct CloudSessionRepository: Codable, Sendable {
+    public var owner: String
+    public var name: String
+    public var branch: String?
+
+    public init(owner: String, name: String, branch: String? = nil) {
+        self.owner = owner
+        self.name = name
+        self.branch = branch
+    }
+}
+
+/// Options for creating a remote session in the cloud.
+public struct CloudSessionOptions: Codable, Sendable {
+    public var repository: CloudSessionRepository?
+
+    public init(repository: CloudSessionRepository? = nil) {
+        self.repository = repository
+    }
+}
+
+// MARK: - Canvas Types
+
+/// An agent-callable action contributed by a canvas.
+public struct CanvasAction: Codable, Sendable {
+    public var name: String
+    public var description: String
+    public var inputSchema: [String: AnyCodable]?
+
+    public init(name: String, description: String, inputSchema: [String: AnyCodable]? = nil) {
+        self.name = name
+        self.description = description
+        self.inputSchema = inputSchema
+    }
+}
+
+/// Declarative metadata for a single canvas.
+public struct CanvasDeclaration: Codable, Sendable {
+    public var id: String
+    public var displayName: String
+    public var description: String
+    public var inputSchema: [String: AnyCodable]?
+    public var actions: [CanvasAction]?
+
+    public init(
+        id: String,
+        displayName: String,
+        description: String,
+        inputSchema: [String: AnyCodable]? = nil,
+        actions: [CanvasAction]? = nil
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.description = description
+        self.inputSchema = inputSchema
+        self.actions = actions
+    }
+}
+
+/// Response returned from a canvas open handler.
+public struct CanvasOpenResponse: Codable, Sendable {
+    public var url: String?
+    public var title: String?
+    public var status: String?
+
+    public init(url: String? = nil, title: String? = nil, status: String? = nil) {
+        self.url = url
+        self.title = title
+        self.status = status
+    }
+}
+
+/// Host capability details passed to canvas callbacks.
+public struct CanvasHostCapabilities: Codable, Sendable {
+    public var canvases: Bool
+
+    public init(canvases: Bool = false) {
+        self.canvases = canvases
+    }
+}
+
+/// Host context passed to canvas callbacks.
+public struct CanvasHostContext: Codable, Sendable {
+    public var capabilities: CanvasHostCapabilities
+
+    public init(capabilities: CanvasHostCapabilities = CanvasHostCapabilities()) {
+        self.capabilities = capabilities
+    }
+}
+
+/// Context handed to a canvas open handler.
+public struct CanvasOpenContext: Codable, Sendable {
+    public var sessionId: String
+    public var extensionId: String
+    public var canvasId: String
+    public var instanceId: String
+    public var input: AnyCodable
+    public var host: CanvasHostContext?
+
+    public init(
+        sessionId: String,
+        extensionId: String,
+        canvasId: String,
+        instanceId: String,
+        input: AnyCodable,
+        host: CanvasHostContext? = nil
+    ) {
+        self.sessionId = sessionId
+        self.extensionId = extensionId
+        self.canvasId = canvasId
+        self.instanceId = instanceId
+        self.input = input
+        self.host = host
+    }
+}
+
+/// Context handed to a canvas action handler.
+public struct CanvasActionContext: Codable, Sendable {
+    public var sessionId: String
+    public var extensionId: String
+    public var canvasId: String
+    public var instanceId: String
+    public var actionName: String
+    public var input: AnyCodable
+    public var host: CanvasHostContext?
+
+    public init(
+        sessionId: String,
+        extensionId: String,
+        canvasId: String,
+        instanceId: String,
+        actionName: String,
+        input: AnyCodable,
+        host: CanvasHostContext? = nil
+    ) {
+        self.sessionId = sessionId
+        self.extensionId = extensionId
+        self.canvasId = canvasId
+        self.instanceId = instanceId
+        self.actionName = actionName
+        self.input = input
+        self.host = host
+    }
+}
+
+/// Context handed to a canvas lifecycle handler.
+public struct CanvasLifecycleContext: Codable, Sendable {
+    public var sessionId: String
+    public var extensionId: String
+    public var canvasId: String
+    public var instanceId: String
+    public var host: CanvasHostContext?
+
+    public init(
+        sessionId: String,
+        extensionId: String,
+        canvasId: String,
+        instanceId: String,
+        host: CanvasHostContext? = nil
+    ) {
+        self.sessionId = sessionId
+        self.extensionId = extensionId
+        self.canvasId = canvasId
+        self.instanceId = instanceId
+        self.host = host
+    }
+}
+
 // MARK: - System Message Configuration
 
 /// Known system prompt section identifiers for the "customize" mode.
@@ -166,6 +337,41 @@ public struct SectionOverride: Codable, Sendable {
 
     public init(action: String, content: String? = nil) {
         self.action = action
+        self.content = content
+    }
+}
+
+/// System message in append mode (default).
+public struct SystemMessageAppendConfig: Codable, Sendable {
+    public var mode: String?
+    public var content: String?
+
+    public init(mode: String? = "append", content: String? = nil) {
+        self.mode = mode
+        self.content = content
+    }
+}
+
+/// System message in replace mode.
+public struct SystemMessageReplaceConfig: Codable, Sendable {
+    public var mode: String
+    public var content: String
+
+    public init(mode: String = "replace", content: String) {
+        self.mode = mode
+        self.content = content
+    }
+}
+
+/// System message in customize mode.
+public struct SystemMessageCustomizeConfig: Codable, Sendable {
+    public var mode: String
+    public var sections: [String: SectionOverride]?
+    public var content: String?
+
+    public init(mode: String = "customize", sections: [String: SectionOverride]? = nil, content: String? = nil) {
+        self.mode = mode
+        self.sections = sections
         self.content = content
     }
 }
@@ -254,11 +460,11 @@ public typealias PermissionHandler = @Sendable (PermissionRequest, String) async
 
 /// A request for user input from the agent (ask_user tool).
 public struct UserInputRequest: Codable, Sendable {
-    public let question: String
+    public let question: String?
     public let choices: [String]?
     public let allowFreeform: Bool?
 
-    public init(question: String, choices: [String]? = nil, allowFreeform: Bool? = nil) {
+    public init(question: String? = nil, choices: [String]? = nil, allowFreeform: Bool? = nil) {
         self.question = question
         self.choices = choices
         self.allowFreeform = allowFreeform

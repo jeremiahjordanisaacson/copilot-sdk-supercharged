@@ -28,10 +28,25 @@ module Copilot.Types
   , ToolCallRequest (..)
   , ToolCallResponse (..)
 
+    -- * Canvas & cloud types
+  , CanvasAction (..)
+  , CanvasDeclaration (..)
+  , CanvasOpenResponse (..)
+  , CanvasHostCapabilities (..)
+  , CanvasHostContext (..)
+  , CanvasOpenContext (..)
+  , CanvasActionContext (..)
+  , CanvasLifecycleContext (..)
+  , CloudSessionRepository (..)
+  , CloudSessionOptions (..)
+
     -- * Session configuration
   , SystemPromptSection (..)
   , SectionOverrideAction (..)
   , SectionOverride (..)
+  , SystemMessageAppendConfig (..)
+  , SystemMessageReplaceConfig (..)
+  , SystemMessageCustomizeConfig (..)
   , SystemMessageConfig (..)
   , ProviderConfig (..)
   , AzureProviderOptions (..)
@@ -339,6 +354,229 @@ instance FromJSON ToolCallResponse where
     ToolCallResponse <$> o .: "result"
 
 -- ============================================================================
+-- Canvas & Cloud Session Types
+-- ============================================================================
+
+-- | Agent-callable canvas action declaration.
+data CanvasAction = CanvasAction
+  { canvasActionName        :: !Text
+  , canvasActionDescription :: !Text
+  , canvasActionInputSchema :: !(Maybe (Map.Map Text Value))
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CanvasAction where
+  toJSON CanvasAction{..} = object $ catMaybes
+    [ Just $ "name" .= canvasActionName
+    , Just $ "description" .= canvasActionDescription
+    , ("inputSchema" .=) <$> canvasActionInputSchema
+    ]
+
+instance FromJSON CanvasAction where
+  parseJSON = withObject "CanvasAction" $ \o ->
+    CanvasAction
+      <$> o .:  "name"
+      <*> o .:  "description"
+      <*> o .:? "inputSchema"
+
+-- | Declarative canvas metadata published by the SDK.
+data CanvasDeclaration = CanvasDeclaration
+  { canvasDeclarationId          :: !Text
+  , canvasDeclarationDisplayName :: !Text
+  , canvasDeclarationDescription :: !Text
+  , canvasDeclarationInputSchema :: !(Maybe (Map.Map Text Value))
+  , canvasDeclarationActions     :: !(Maybe [CanvasAction])
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CanvasDeclaration where
+  toJSON CanvasDeclaration{..} = object $ catMaybes
+    [ Just $ "id" .= canvasDeclarationId
+    , Just $ "displayName" .= canvasDeclarationDisplayName
+    , Just $ "description" .= canvasDeclarationDescription
+    , ("inputSchema" .=) <$> canvasDeclarationInputSchema
+    , ("actions" .=) <$> canvasDeclarationActions
+    ]
+
+instance FromJSON CanvasDeclaration where
+  parseJSON = withObject "CanvasDeclaration" $ \o ->
+    CanvasDeclaration
+      <$> o .:  "id"
+      <*> o .:  "displayName"
+      <*> o .:  "description"
+      <*> o .:? "inputSchema"
+      <*> o .:? "actions"
+
+-- | Provider response returned from a canvas open request.
+data CanvasOpenResponse = CanvasOpenResponse
+  { canvasOpenResponseUrl    :: !(Maybe Text)
+  , canvasOpenResponseTitle  :: !(Maybe Text)
+  , canvasOpenResponseStatus :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CanvasOpenResponse where
+  toJSON CanvasOpenResponse{..} = object $ catMaybes
+    [ ("url" .=) <$> canvasOpenResponseUrl
+    , ("title" .=) <$> canvasOpenResponseTitle
+    , ("status" .=) <$> canvasOpenResponseStatus
+    ]
+
+instance FromJSON CanvasOpenResponse where
+  parseJSON = withObject "CanvasOpenResponse" $ \o ->
+    CanvasOpenResponse
+      <$> o .:? "url"
+      <*> o .:? "title"
+      <*> o .:? "status"
+
+-- | Canvas-related capabilities reported by the host.
+data CanvasHostCapabilities = CanvasHostCapabilities
+  { canvasHostCapabilitiesCanvases :: !Bool
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CanvasHostCapabilities where
+  toJSON CanvasHostCapabilities{..} = object
+    [ "canvases" .= canvasHostCapabilitiesCanvases ]
+
+instance FromJSON CanvasHostCapabilities where
+  parseJSON = withObject "CanvasHostCapabilities" $ \o ->
+    CanvasHostCapabilities <$> o .:? "canvases" .!= False
+
+-- | Host context supplied alongside canvas callbacks.
+data CanvasHostContext = CanvasHostContext
+  { canvasHostContextCapabilities :: !CanvasHostCapabilities
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CanvasHostContext where
+  toJSON CanvasHostContext{..} = object
+    [ "capabilities" .= canvasHostContextCapabilities ]
+
+instance FromJSON CanvasHostContext where
+  parseJSON = withObject "CanvasHostContext" $ \o ->
+    CanvasHostContext <$> o .: "capabilities"
+
+-- | Context passed to a canvas open handler.
+data CanvasOpenContext = CanvasOpenContext
+  { canvasOpenContextSessionId   :: !Text
+  , canvasOpenContextExtensionId :: !Text
+  , canvasOpenContextCanvasId    :: !Text
+  , canvasOpenContextInstanceId  :: !Text
+  , canvasOpenContextInput       :: !Value
+  , canvasOpenContextHost        :: !(Maybe CanvasHostContext)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CanvasOpenContext where
+  toJSON CanvasOpenContext{..} = object $ catMaybes
+    [ Just $ "sessionId" .= canvasOpenContextSessionId
+    , Just $ "extensionId" .= canvasOpenContextExtensionId
+    , Just $ "canvasId" .= canvasOpenContextCanvasId
+    , Just $ "instanceId" .= canvasOpenContextInstanceId
+    , Just $ "input" .= canvasOpenContextInput
+    , ("host" .=) <$> canvasOpenContextHost
+    ]
+
+instance FromJSON CanvasOpenContext where
+  parseJSON = withObject "CanvasOpenContext" $ \o ->
+    CanvasOpenContext
+      <$> o .:  "sessionId"
+      <*> o .:  "extensionId"
+      <*> o .:  "canvasId"
+      <*> o .:  "instanceId"
+      <*> o .:  "input"
+      <*> o .:? "host"
+
+-- | Context passed to a canvas action handler.
+data CanvasActionContext = CanvasActionContext
+  { canvasActionContextSessionId   :: !Text
+  , canvasActionContextExtensionId :: !Text
+  , canvasActionContextCanvasId    :: !Text
+  , canvasActionContextInstanceId  :: !Text
+  , canvasActionContextActionName  :: !Text
+  , canvasActionContextInput       :: !Value
+  , canvasActionContextHost        :: !(Maybe CanvasHostContext)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CanvasActionContext where
+  toJSON CanvasActionContext{..} = object $ catMaybes
+    [ Just $ "sessionId" .= canvasActionContextSessionId
+    , Just $ "extensionId" .= canvasActionContextExtensionId
+    , Just $ "canvasId" .= canvasActionContextCanvasId
+    , Just $ "instanceId" .= canvasActionContextInstanceId
+    , Just $ "actionName" .= canvasActionContextActionName
+    , Just $ "input" .= canvasActionContextInput
+    , ("host" .=) <$> canvasActionContextHost
+    ]
+
+instance FromJSON CanvasActionContext where
+  parseJSON = withObject "CanvasActionContext" $ \o ->
+    CanvasActionContext
+      <$> o .:  "sessionId"
+      <*> o .:  "extensionId"
+      <*> o .:  "canvasId"
+      <*> o .:  "instanceId"
+      <*> o .:  "actionName"
+      <*> o .:  "input"
+      <*> o .:? "host"
+
+-- | Lifecycle context for a canvas instance.
+data CanvasLifecycleContext = CanvasLifecycleContext
+  { canvasLifecycleContextSessionId   :: !Text
+  , canvasLifecycleContextExtensionId :: !Text
+  , canvasLifecycleContextCanvasId    :: !Text
+  , canvasLifecycleContextInstanceId  :: !Text
+  , canvasLifecycleContextHost        :: !(Maybe CanvasHostContext)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CanvasLifecycleContext where
+  toJSON CanvasLifecycleContext{..} = object $ catMaybes
+    [ Just $ "sessionId" .= canvasLifecycleContextSessionId
+    , Just $ "extensionId" .= canvasLifecycleContextExtensionId
+    , Just $ "canvasId" .= canvasLifecycleContextCanvasId
+    , Just $ "instanceId" .= canvasLifecycleContextInstanceId
+    , ("host" .=) <$> canvasLifecycleContextHost
+    ]
+
+instance FromJSON CanvasLifecycleContext where
+  parseJSON = withObject "CanvasLifecycleContext" $ \o ->
+    CanvasLifecycleContext
+      <$> o .:  "sessionId"
+      <*> o .:  "extensionId"
+      <*> o .:  "canvasId"
+      <*> o .:  "instanceId"
+      <*> o .:? "host"
+
+-- | Repository metadata associated with a cloud session.
+data CloudSessionRepository = CloudSessionRepository
+  { cloudSessionRepositoryOwner  :: !Text
+  , cloudSessionRepositoryName   :: !Text
+  , cloudSessionRepositoryBranch :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CloudSessionRepository where
+  toJSON CloudSessionRepository{..} = object $ catMaybes
+    [ Just $ "owner" .= cloudSessionRepositoryOwner
+    , Just $ "name" .= cloudSessionRepositoryName
+    , ("branch" .=) <$> cloudSessionRepositoryBranch
+    ]
+
+instance FromJSON CloudSessionRepository where
+  parseJSON = withObject "CloudSessionRepository" $ \o ->
+    CloudSessionRepository
+      <$> o .:  "owner"
+      <*> o .:  "name"
+      <*> o .:? "branch"
+
+-- | Options for creating a cloud session.
+data CloudSessionOptions = CloudSessionOptions
+  { cloudSessionOptionsRepository :: !(Maybe CloudSessionRepository)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CloudSessionOptions where
+  toJSON CloudSessionOptions{..} = object
+    [ "repository" .= cloudSessionOptionsRepository ]
+
+instance FromJSON CloudSessionOptions where
+  parseJSON = withObject "CloudSessionOptions" $ \o ->
+    CloudSessionOptions <$> o .:? "repository"
+
+-- ============================================================================
 -- System Message Configuration
 -- ============================================================================
 
@@ -447,6 +685,63 @@ instance FromJSON SectionOverride where
   parseJSON = withObject "SectionOverride" $ \o ->
     SectionOverride
       <$> o .:  "action"
+      <*> o .:? "content"
+
+-- | Append-mode system message configuration.
+data SystemMessageAppendConfig = SystemMessageAppendConfig
+  { smacMode    :: !(Maybe Text)
+  , smacContent :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON SystemMessageAppendConfig where
+  toJSON SystemMessageAppendConfig{..} = object $ catMaybes
+    [ ("mode" .=) <$> smacMode
+    , ("content" .=) <$> smacContent
+    ]
+
+instance FromJSON SystemMessageAppendConfig where
+  parseJSON = withObject "SystemMessageAppendConfig" $ \o ->
+    SystemMessageAppendConfig
+      <$> o .:? "mode"
+      <*> o .:? "content"
+
+-- | Replace-mode system message configuration.
+data SystemMessageReplaceConfig = SystemMessageReplaceConfig
+  { smrcMode    :: !Text
+  , smrcContent :: !Text
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON SystemMessageReplaceConfig where
+  toJSON SystemMessageReplaceConfig{..} = object
+    [ "mode" .= smrcMode
+    , "content" .= smrcContent
+    ]
+
+instance FromJSON SystemMessageReplaceConfig where
+  parseJSON = withObject "SystemMessageReplaceConfig" $ \o ->
+    SystemMessageReplaceConfig
+      <$> o .: "mode"
+      <*> o .: "content"
+
+-- | Customize-mode system message configuration.
+data SystemMessageCustomizeConfig = SystemMessageCustomizeConfig
+  { smccMode     :: !Text
+  , smccSections :: !(Maybe (Map.Map Text SectionOverride))
+  , smccContent  :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON SystemMessageCustomizeConfig where
+  toJSON SystemMessageCustomizeConfig{..} = object $ catMaybes
+    [ Just $ "mode" .= smccMode
+    , ("sections" .=) <$> smccSections
+    , ("content" .=) <$> smccContent
+    ]
+
+instance FromJSON SystemMessageCustomizeConfig where
+  parseJSON = withObject "SystemMessageCustomizeConfig" $ \o ->
+    SystemMessageCustomizeConfig
+      <$> o .:  "mode"
+      <*> o .:? "sections"
       <*> o .:? "content"
 
 -- | System message configuration for session creation.
@@ -1021,22 +1316,22 @@ type PermissionHandler = PermissionRequest -> Text -> IO PermissionRequestResult
 
 -- | Request for user input from the agent.
 data UserInputRequest = UserInputRequest
-  { uirQuestion      :: !Text
+  { uirQuestion      :: !(Maybe Text)
   , uirChoices       :: !(Maybe [Text])
   , uirAllowFreeform :: !(Maybe Bool)
   } deriving (Show, Eq, Generic)
 
 instance ToJSON UserInputRequest where
-  toJSON UserInputRequest{..} = object
-    [ "question"      .= uirQuestion
-    , "choices"       .= uirChoices
-    , "allowFreeform" .= uirAllowFreeform
+  toJSON UserInputRequest{..} = object $ catMaybes
+    [ ("question" .=) <$> uirQuestion
+    , ("choices" .=) <$> uirChoices
+    , ("allowFreeform" .=) <$> uirAllowFreeform
     ]
 
 instance FromJSON UserInputRequest where
   parseJSON = withObject "UserInputRequest" $ \o ->
     UserInputRequest
-      <$> o .:  "question"
+      <$> o .:? "question"
       <*> o .:? "choices"
       <*> o .:? "allowFreeform"
 

@@ -79,6 +79,106 @@ Base.@kwdef struct CommandDefinition
     description::String = ""
 end
 
+"""Repository metadata associated with a cloud session."""
+Base.@kwdef struct CloudSessionRepository
+    owner::String = ""
+    name::String = ""
+    branch::Union{String, Nothing} = nothing
+end
+
+"""Options for creating a cloud session."""
+Base.@kwdef struct CloudSessionOptions
+    repository::Union{CloudSessionRepository, Nothing} = nothing
+end
+
+"""Override operation for a single system prompt section."""
+Base.@kwdef struct SectionOverride
+    action::String = ""
+    content::Union{String, Nothing} = nothing
+end
+
+"""Append-mode system message configuration."""
+Base.@kwdef struct SystemMessageAppendConfig
+    mode::Union{String, Nothing} = nothing
+    content::Union{String, Nothing} = nothing
+end
+
+"""Replace-mode system message configuration."""
+Base.@kwdef struct SystemMessageReplaceConfig
+    mode::String = "replace"
+    content::String = ""
+end
+
+"""Customize-mode system message configuration."""
+Base.@kwdef struct SystemMessageCustomizeConfig
+    mode::String = "customize"
+    sections::Union{Dict{String, SectionOverride}, Nothing} = nothing
+    content::Union{String, Nothing} = nothing
+end
+
+"""Metadata for an agent-callable canvas action."""
+Base.@kwdef struct CanvasAction
+    name::String = ""
+    description::String = ""
+    input_schema::Union{Dict{String, Any}, Nothing} = nothing
+end
+
+"""Declarative metadata for a canvas provided by the SDK."""
+Base.@kwdef struct CanvasDeclaration
+    id::String = ""
+    display_name::String = ""
+    description::String = ""
+    input_schema::Union{Dict{String, Any}, Nothing} = nothing
+    actions::Union{Vector{CanvasAction}, Nothing} = nothing
+end
+
+"""Response returned by a canvas open handler."""
+Base.@kwdef struct CanvasOpenResponse
+    url::Union{String, Nothing} = nothing
+    title::Union{String, Nothing} = nothing
+    status::Union{String, Nothing} = nothing
+end
+
+"""Canvas-related capabilities reported by the host."""
+Base.@kwdef struct CanvasHostCapabilities
+    canvases::Bool = false
+end
+
+"""Host context supplied alongside canvas callbacks."""
+Base.@kwdef struct CanvasHostContext
+    capabilities::CanvasHostCapabilities = CanvasHostCapabilities()
+end
+
+"""Context passed to a canvas open handler."""
+Base.@kwdef struct CanvasOpenContext
+    session_id::String = ""
+    extension_id::String = ""
+    canvas_id::String = ""
+    instance_id::String = ""
+    input::Any = nothing
+    host::Union{CanvasHostContext, Nothing} = nothing
+end
+
+"""Context passed to a canvas action handler."""
+Base.@kwdef struct CanvasActionContext
+    session_id::String = ""
+    extension_id::String = ""
+    canvas_id::String = ""
+    instance_id::String = ""
+    action_name::String = ""
+    input::Any = nothing
+    host::Union{CanvasHostContext, Nothing} = nothing
+end
+
+"""Lifecycle context for a canvas instance."""
+Base.@kwdef struct CanvasLifecycleContext
+    session_id::String = ""
+    extension_id::String = ""
+    canvas_id::String = ""
+    instance_id::String = ""
+    host::Union{CanvasHostContext, Nothing} = nothing
+end
+
 """Image/response format options."""
 @enum ImageResponseFormat FORMAT_TEXT FORMAT_IMAGE FORMAT_JSON_OBJECT
 
@@ -87,6 +187,15 @@ const IMAGE_RESPONSE_FORMAT_STRINGS = Dict{ImageResponseFormat, String}(
     FORMAT_IMAGE       => "image",
     FORMAT_JSON_OBJECT => "json_object",
 )
+
+const ResponseFormat = ImageResponseFormat
+
+"""Image generation options."""
+Base.@kwdef struct ImageOptions
+    size::Union{String, Nothing} = nothing
+    quality::Union{String, Nothing} = nothing
+    style::Union{String, Nothing} = nothing
+end
 
 """Options for creating a CopilotClient."""
 Base.@kwdef mutable struct CopilotClientOptions
@@ -217,6 +326,19 @@ Base.@kwdef struct PermissionRequest
     tool_name::String = ""
     description::String = ""
     arguments::Dict{String, Any} = Dict{String, Any}()
+end
+
+"""Request for user input from the agent."""
+Base.@kwdef struct UserInputRequest
+    question::Union{String, Nothing} = nothing
+    choices::Union{Vector{String}, Nothing} = nothing
+    allow_freeform::Union{Bool, Nothing} = nothing
+end
+
+"""Response to a user input request."""
+Base.@kwdef struct UserInputResponse
+    answer::String = ""
+    was_freeform::Bool = false
 end
 
 # Convenience constructors from Dict

@@ -141,6 +141,108 @@ pub const ToolResult = struct {
 };
 
 // ---------------------------------------------------------------------------
+// Cloud Session
+// ---------------------------------------------------------------------------
+
+pub const CloudSessionRepository = struct {
+    owner: []const u8,
+    name: []const u8,
+    branch: ?[]const u8 = null,
+};
+
+pub const CloudSessionOptions = struct {
+    repository: ?CloudSessionRepository = null,
+};
+
+// ---------------------------------------------------------------------------
+// Canvas
+// ---------------------------------------------------------------------------
+
+pub const CanvasJsonSchema = std.StringHashMap(JsonValue);
+
+pub const CanvasAction = struct {
+    name: []const u8,
+    description: []const u8,
+    input_schema: ?CanvasJsonSchema = null,
+};
+
+pub const CanvasDeclaration = struct {
+    id: []const u8,
+    display_name: []const u8,
+    description: []const u8,
+    input_schema: ?CanvasJsonSchema = null,
+    actions: ?[]const CanvasAction = null,
+};
+
+pub const CanvasOpenResponse = struct {
+    url: ?[]const u8 = null,
+    title: ?[]const u8 = null,
+    status: ?[]const u8 = null,
+};
+
+pub const CanvasHostCapabilities = struct {
+    canvases: bool = false,
+};
+
+pub const CanvasHostContext = struct {
+    capabilities: CanvasHostCapabilities = .{},
+};
+
+pub const CanvasOpenContext = struct {
+    session_id: []const u8,
+    extension_id: []const u8,
+    canvas_id: []const u8,
+    instance_id: []const u8,
+    input: JsonValue,
+    host: ?CanvasHostContext = null,
+};
+
+pub const CanvasActionContext = struct {
+    session_id: []const u8,
+    extension_id: []const u8,
+    canvas_id: []const u8,
+    instance_id: []const u8,
+    action_name: []const u8,
+    input: JsonValue,
+    host: ?CanvasHostContext = null,
+};
+
+pub const CanvasLifecycleContext = struct {
+    session_id: []const u8,
+    extension_id: []const u8,
+    canvas_id: []const u8,
+    instance_id: []const u8,
+    host: ?CanvasHostContext = null,
+};
+
+// ---------------------------------------------------------------------------
+// System message configuration
+// ---------------------------------------------------------------------------
+
+pub const SectionOverride = struct {
+    action: []const u8,
+    content: ?[]const u8 = null,
+};
+
+pub const SectionOverrideMap = std.StringHashMap(SectionOverride);
+
+pub const SystemMessageAppendConfig = struct {
+    mode: ?[]const u8 = "append",
+    content: ?[]const u8 = null,
+};
+
+pub const SystemMessageReplaceConfig = struct {
+    mode: []const u8 = "replace",
+    content: []const u8,
+};
+
+pub const SystemMessageCustomizeConfig = struct {
+    mode: []const u8 = "customize",
+    sections: ?SectionOverrideMap = null,
+    content: ?[]const u8 = null,
+};
+
+// ---------------------------------------------------------------------------
 // Permissions
 // ---------------------------------------------------------------------------
 
@@ -172,13 +274,14 @@ pub const PermissionResult = struct {
 // ---------------------------------------------------------------------------
 
 pub const UserInputRequest = struct {
-    question: []const u8,
-    options: ?[]const []const u8 = null,
+    question: ?[]const u8 = null,
+    choices: ?[]const []const u8 = null,
+    allow_freeform: ?bool = null,
 };
 
 pub const UserInputResponse = struct {
     answer: []const u8,
-    was_freeform: bool = true,
+    was_freeform: bool,
 };
 
 // ---------------------------------------------------------------------------
@@ -259,6 +362,7 @@ pub const MessageOptions = struct {
 pub const ResponseFormat = enum {
     text,
     image,
+    json_object,
 };
 
 pub const ImageOptions = struct {

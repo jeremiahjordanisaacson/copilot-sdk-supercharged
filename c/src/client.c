@@ -503,7 +503,7 @@ static cJSON *on_user_input_request(const char *method, cJSON *params, void *use
     cJSON *session_id_item = cJSON_GetObjectItem(params, "sessionId");
     cJSON *question_item = cJSON_GetObjectItem(params, "question");
 
-    if (!session_id_item || !question_item) {
+    if (!session_id_item) {
         *out_error_code = -32602;
         *out_error_message = strdup("Invalid user input request params");
         return NULL;
@@ -518,8 +518,9 @@ static cJSON *on_user_input_request(const char *method, cJSON *params, void *use
 
     copilot_user_input_request_t request;
     memset(&request, 0, sizeof(request));
-    request.question = question_item->valuestring;
-    request.allow_freeform = true;
+    request.question = (question_item && cJSON_IsString(question_item)) ? question_item->valuestring : NULL;
+    request.allow_freeform = false;
+    request.has_allow_freeform = false;
 
     cJSON *choices_item = cJSON_GetObjectItem(params, "choices");
     const char *choices_arr[64];
@@ -538,6 +539,7 @@ static cJSON *on_user_input_request(const char *method, cJSON *params, void *use
     cJSON *freeform_item = cJSON_GetObjectItem(params, "allowFreeform");
     if (freeform_item && cJSON_IsBool(freeform_item)) {
         request.allow_freeform = cJSON_IsTrue(freeform_item);
+        request.has_allow_freeform = true;
     }
 
     copilot_user_input_response_t response;

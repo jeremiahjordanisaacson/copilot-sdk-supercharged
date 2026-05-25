@@ -8,18 +8,7 @@
 package require Tcl 8.6
 
 namespace eval ::copilot::types {
-    namespace export make_client_options make_session_config make_tool \
-                     make_send_options make_session_event validate_dict \
-                     make_session_fs_config make_mcp_server_config \
-                     make_command_definition \
-                     make_exit_plan_mode_request make_exit_plan_mode_response \
-                     make_trace_context \
-                     make_slash_command_input make_slash_command_info \
-                     make_commands_invoke_request make_commands_list_request \
-                     make_model_billing_token_prices make_skills_load_diagnostics \
-                     slash_command_input_completions slash_command_kinds \
-                     model_picker_price_categories remote_session_modes \
-                     make_remote_enable_request make_remote_enable_result
+    namespace export make_client_options make_session_config make_tool                      make_send_options make_session_event validate_dict                      make_session_fs_config make_mcp_server_config                      make_command_definition                      make_exit_plan_mode_request make_exit_plan_mode_response                      make_trace_context                      make_slash_command_input make_slash_command_info                      make_commands_invoke_request make_commands_list_request                      make_model_billing_token_prices make_skills_load_diagnostics                      make_user_input_request make_user_input_response                      make_image_options response_formats                      section_override_actions make_section_override                      make_system_message_append_config                      make_system_message_replace_config                      make_system_message_customize_config                      make_canvas_action make_canvas_declaration                      make_canvas_open_response make_canvas_host_capabilities                      make_canvas_host_context make_canvas_open_context                      make_canvas_action_context make_canvas_lifecycle_context                      make_cloud_session_repository make_cloud_session_options                      slash_command_input_completions slash_command_kinds                      model_picker_price_categories remote_session_modes                      make_remote_enable_request make_remote_enable_result
 }
 
 # -- Client options -----------------------------------------------------------
@@ -164,6 +153,254 @@ proc ::copilot::types::slash_command_kinds {} {
 
 proc ::copilot::types::model_picker_price_categories {} {
     return {high low medium very_high}
+}
+
+# -- Response format constants -----------------------------------------------
+
+proc ::copilot::types::response_formats {} {
+    return {text image json_object}
+}
+
+# -- UserInput types -----------------------------------------------------------
+
+proc ::copilot::types::make_user_input_request {args} {
+    set defaults [dict create         question      ""         choices       {}         allowFreeform ""     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown user_input_request key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_user_input_response {args} {
+    set defaults [dict create         answer      ""         wasFreeform 0     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown user_input_response key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+# -- ImageOptions types --------------------------------------------------------
+
+proc ::copilot::types::make_image_options {args} {
+    set defaults [dict create         size    ""         quality ""         style   ""     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown image_options key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+# -- SectionOverride / SystemMessage types ------------------------------------
+
+proc ::copilot::types::section_override_actions {} {
+    return {replace remove append prepend}
+}
+
+proc ::copilot::types::make_section_override {args} {
+    set defaults [dict create         action  ""         content ""     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown section_override key: $key"
+        }
+        dict set cfg $key $value
+    }
+    if {[dict get $cfg action] eq ""} {
+        error "action is required for section_override"
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_system_message_append_config {args} {
+    set defaults [dict create         mode    "append"         content ""     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown system_message_append_config key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_system_message_replace_config {args} {
+    set defaults [dict create         mode    "replace"         content ""     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown system_message_replace_config key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_system_message_customize_config {args} {
+    set defaults [dict create         mode     "customize"         sections {}         content  ""     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown system_message_customize_config key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+# -- Canvas types --------------------------------------------------------------
+
+proc ::copilot::types::make_canvas_action {args} {
+    set defaults [dict create         name        ""         description ""         inputSchema {}     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown canvas_action key: $key"
+        }
+        dict set cfg $key $value
+    }
+    if {[dict get $cfg name] eq ""} {
+        error "name is required for canvas_action"
+    }
+    if {[dict get $cfg description] eq ""} {
+        error "description is required for canvas_action"
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_canvas_declaration {args} {
+    set defaults [dict create         id          ""         displayName ""         description ""         inputSchema {}         actions     {}     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown canvas_declaration key: $key"
+        }
+        dict set cfg $key $value
+    }
+    if {[dict get $cfg id] eq ""} {
+        error "id is required for canvas_declaration"
+    }
+    if {[dict get $cfg displayName] eq ""} {
+        error "displayName is required for canvas_declaration"
+    }
+    if {[dict get $cfg description] eq ""} {
+        error "description is required for canvas_declaration"
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_canvas_open_response {args} {
+    set defaults [dict create         url    ""         title  ""         status ""     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown canvas_open_response key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_canvas_host_capabilities {args} {
+    set defaults [dict create         canvases 0     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown canvas_host_capabilities key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_canvas_host_context {args} {
+    set defaults [dict create         capabilities [make_canvas_host_capabilities]     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown canvas_host_context key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_canvas_open_context {args} {
+    set defaults [dict create         sessionId   ""         extensionId ""         canvasId    ""         instanceId  ""         input       ""         host        {}     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown canvas_open_context key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_canvas_action_context {args} {
+    set defaults [dict create         sessionId   ""         extensionId ""         canvasId    ""         instanceId  ""         actionName  ""         input       ""         host        {}     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown canvas_action_context key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_canvas_lifecycle_context {args} {
+    set defaults [dict create         sessionId   ""         extensionId ""         canvasId    ""         instanceId  ""         host        {}     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown canvas_lifecycle_context key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
+}
+
+# -- CloudSession types --------------------------------------------------------
+
+proc ::copilot::types::make_cloud_session_repository {args} {
+    set defaults [dict create         owner  ""         name   ""         branch ""     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown cloud_session_repository key: $key"
+        }
+        dict set cfg $key $value
+    }
+    if {[dict get $cfg owner] eq ""} {
+        error "owner is required for cloud_session_repository"
+    }
+    if {[dict get $cfg name] eq ""} {
+        error "name is required for cloud_session_repository"
+    }
+    return $cfg
+}
+
+proc ::copilot::types::make_cloud_session_options {args} {
+    set defaults [dict create         repository {}     ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown cloud_session_options key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return $cfg
 }
 
 # -- Validation helper --------------------------------------------------------

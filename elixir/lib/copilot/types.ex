@@ -148,6 +148,146 @@ defmodule Copilot.Types do
   end
 
   # ---------------------------------------------------------------------------
+  # Canvas / Cloud Session Types
+  # ---------------------------------------------------------------------------
+
+  defmodule CanvasAction do
+    @moduledoc "A single action exposed by a canvas."
+    @type t :: %__MODULE__{
+            name: String.t(),
+            description: String.t(),
+            input_schema: map() | nil
+          }
+    defstruct [:name, :description, :input_schema]
+
+    def to_map(%__MODULE__{} = action) do
+      m = %{"name" => action.name, "description" => action.description}
+      if action.input_schema, do: Map.put(m, "inputSchema", action.input_schema), else: m
+    end
+  end
+
+  defmodule CanvasDeclaration do
+    @moduledoc "Declarative metadata for a canvas provided by the SDK."
+    @type t :: %__MODULE__{
+            id: String.t(),
+            display_name: String.t(),
+            description: String.t(),
+            input_schema: map() | nil,
+            actions: [CanvasAction.t()] | nil
+          }
+    defstruct [:id, :display_name, :description, :input_schema, :actions]
+
+    def to_map(%__MODULE__{} = canvas) do
+      m = %{
+        "id" => canvas.id,
+        "displayName" => canvas.display_name,
+        "description" => canvas.description
+      }
+
+      m = if canvas.input_schema, do: Map.put(m, "inputSchema", canvas.input_schema), else: m
+
+      if canvas.actions do
+        Map.put(m, "actions", Enum.map(canvas.actions, &CanvasAction.to_map/1))
+      else
+        m
+      end
+    end
+  end
+
+  defmodule CanvasOpenResponse do
+    @moduledoc "Response returned by a canvas open handler."
+    @type t :: %__MODULE__{url: String.t() | nil, title: String.t() | nil, status: String.t() | nil}
+    defstruct [:url, :title, :status]
+
+    def to_map(%__MODULE__{} = response) do
+      %{}
+      |> maybe_put("url", response.url)
+      |> maybe_put("title", response.title)
+      |> maybe_put("status", response.status)
+    end
+  end
+
+  defmodule CanvasHostCapabilities do
+    @moduledoc "Canvas-related capabilities reported by the host."
+    @type t :: %__MODULE__{canvases: boolean()}
+    defstruct canvases: false
+
+    def to_map(%__MODULE__{} = capabilities), do: %{"canvases" => capabilities.canvases}
+  end
+
+  defmodule CanvasHostContext do
+    @moduledoc "Host context supplied to canvas callbacks."
+    @type t :: %__MODULE__{capabilities: CanvasHostCapabilities.t()}
+    defstruct capabilities: %CanvasHostCapabilities{}
+
+    def to_map(%__MODULE__{} = host), do: %{"capabilities" => CanvasHostCapabilities.to_map(host.capabilities)}
+  end
+
+  defmodule CanvasOpenContext do
+    @moduledoc "Context passed to a canvas open handler."
+    @type t :: %__MODULE__{
+            session_id: String.t(),
+            extension_id: String.t(),
+            canvas_id: String.t(),
+            instance_id: String.t(),
+            input: any(),
+            host: CanvasHostContext.t() | nil
+          }
+    defstruct [:session_id, :extension_id, :canvas_id, :instance_id, :input, :host]
+  end
+
+  defmodule CanvasActionContext do
+    @moduledoc "Context passed to a canvas action handler."
+    @type t :: %__MODULE__{
+            session_id: String.t(),
+            extension_id: String.t(),
+            canvas_id: String.t(),
+            instance_id: String.t(),
+            action_name: String.t(),
+            input: any(),
+            host: CanvasHostContext.t() | nil
+          }
+    defstruct [:session_id, :extension_id, :canvas_id, :instance_id, :action_name, :input, :host]
+  end
+
+  defmodule CanvasLifecycleContext do
+    @moduledoc "Lifecycle context for a canvas instance."
+    @type t :: %__MODULE__{
+            session_id: String.t(),
+            extension_id: String.t(),
+            canvas_id: String.t(),
+            instance_id: String.t(),
+            host: CanvasHostContext.t() | nil
+          }
+    defstruct [:session_id, :extension_id, :canvas_id, :instance_id, :host]
+  end
+
+  defmodule CloudSessionRepository do
+    @moduledoc "Repository metadata associated with a cloud session."
+    @type t :: %__MODULE__{owner: String.t(), name: String.t(), branch: String.t() | nil}
+    defstruct [:owner, :name, :branch]
+
+    def to_map(%__MODULE__{} = repository) do
+      %{"owner" => repository.owner, "name" => repository.name}
+      |> maybe_put("branch", repository.branch)
+    end
+  end
+
+  defmodule CloudSessionOptions do
+    @moduledoc "Options for creating a cloud session."
+    @type t :: %__MODULE__{repository: CloudSessionRepository.t() | nil}
+    defstruct [:repository]
+
+    def to_map(%__MODULE__{} = options) do
+      %{}
+      |> maybe_put("repository", if(options.repository, do: CloudSessionRepository.to_map(options.repository), else: nil))
+    end
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  # ---------------------------------------------------------------------------
   # System Message Configuration
   # ---------------------------------------------------------------------------
 
@@ -292,17 +432,17 @@ defmodule Copilot.Types do
   defmodule UserInputRequest do
     @moduledoc "Request for user input from the agent (enables ask_user tool)."
     @type t :: %__MODULE__{
-            question: String.t(),
+            question: String.t() | nil,
             choices: [String.t()] | nil,
-            allow_freeform: boolean()
+            allow_freeform: boolean() | nil
           }
-    defstruct [:question, :choices, allow_freeform: true]
+    defstruct [:question, :choices, :allow_freeform]
 
     def from_map(m) when is_map(m) do
       %__MODULE__{
         question: m["question"],
         choices: m["choices"],
-        allow_freeform: Map.get(m, "allowFreeform", true)
+        allow_freeform: Map.get(m, "allowFreeform")
       }
     end
   end

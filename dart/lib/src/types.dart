@@ -205,6 +205,285 @@ class Tool {
 }
 
 // ---------------------------------------------------------------------------
+// Cloud Session Types
+// ---------------------------------------------------------------------------
+
+/// GitHub repository metadata associated with a cloud session.
+class CloudSessionRepository {
+  final String owner;
+  final String name;
+  final String? branch;
+
+  const CloudSessionRepository({
+    required this.owner,
+    required this.name,
+    this.branch,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'owner': owner,
+        'name': name,
+        if (branch != null) 'branch': branch,
+      };
+
+  factory CloudSessionRepository.fromJson(Map<String, dynamic> json) {
+    return CloudSessionRepository(
+      owner: json['owner'] as String,
+      name: json['name'] as String,
+      branch: json['branch'] as String?,
+    );
+  }
+}
+
+/// Options for creating a remote session in the cloud.
+class CloudSessionOptions {
+  final CloudSessionRepository? repository;
+
+  const CloudSessionOptions({this.repository});
+
+  Map<String, dynamic> toJson() => {
+        if (repository != null) 'repository': repository!.toJson(),
+      };
+
+  factory CloudSessionOptions.fromJson(Map<String, dynamic> json) {
+    return CloudSessionOptions(
+      repository: json['repository'] == null
+          ? null
+          : CloudSessionRepository.fromJson(
+              json['repository'] as Map<String, dynamic>,
+            ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Canvas Types
+// ---------------------------------------------------------------------------
+
+/// A single agent-callable action contributed by a canvas.
+class CanvasAction {
+  final String name;
+  final String description;
+  final Map<String, dynamic>? inputSchema;
+
+  const CanvasAction({
+    required this.name,
+    required this.description,
+    this.inputSchema,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'description': description,
+        if (inputSchema != null) 'inputSchema': inputSchema,
+      };
+
+  factory CanvasAction.fromJson(Map<String, dynamic> json) {
+    return CanvasAction(
+      name: json['name'] as String,
+      description: json['description'] as String,
+      inputSchema: json['inputSchema'] as Map<String, dynamic>?,
+    );
+  }
+}
+
+/// Declarative metadata for a single canvas.
+class CanvasDeclaration {
+  final String id;
+  final String displayName;
+  final String description;
+  final Map<String, dynamic>? inputSchema;
+  final List<CanvasAction>? actions;
+
+  const CanvasDeclaration({
+    required this.id,
+    required this.displayName,
+    required this.description,
+    this.inputSchema,
+    this.actions,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'displayName': displayName,
+        'description': description,
+        if (inputSchema != null) 'inputSchema': inputSchema,
+        if (actions != null) 'actions': actions!.map((a) => a.toJson()).toList(),
+      };
+
+  factory CanvasDeclaration.fromJson(Map<String, dynamic> json) {
+    return CanvasDeclaration(
+      id: json['id'] as String,
+      displayName: json['displayName'] as String,
+      description: json['description'] as String,
+      inputSchema: json['inputSchema'] as Map<String, dynamic>?,
+      actions: (json['actions'] as List<dynamic>?)
+          ?.map((a) => CanvasAction.fromJson(a as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+/// Response returned from a canvas open handler.
+class CanvasOpenResponse {
+  final String? url;
+  final String? title;
+  final String? status;
+
+  const CanvasOpenResponse({this.url, this.title, this.status});
+
+  Map<String, dynamic> toJson() => {
+        if (url != null) 'url': url,
+        if (title != null) 'title': title,
+        if (status != null) 'status': status,
+      };
+
+  factory CanvasOpenResponse.fromJson(Map<String, dynamic> json) {
+    return CanvasOpenResponse(
+      url: json['url'] as String?,
+      title: json['title'] as String?,
+      status: json['status'] as String?,
+    );
+  }
+}
+
+/// Host capability details passed to canvas callbacks.
+class CanvasHostCapabilities {
+  final bool canvases;
+
+  const CanvasHostCapabilities({this.canvases = false});
+
+  Map<String, dynamic> toJson() => {
+        'canvases': canvases,
+      };
+
+  factory CanvasHostCapabilities.fromJson(Map<String, dynamic> json) {
+    return CanvasHostCapabilities(
+      canvases: json['canvases'] as bool? ?? false,
+    );
+  }
+}
+
+/// Host context passed to canvas callbacks.
+class CanvasHostContext {
+  final CanvasHostCapabilities capabilities;
+
+  const CanvasHostContext({
+    this.capabilities = const CanvasHostCapabilities(),
+  });
+
+  Map<String, dynamic> toJson() => {
+        'capabilities': capabilities.toJson(),
+      };
+
+  factory CanvasHostContext.fromJson(Map<String, dynamic> json) {
+    return CanvasHostContext(
+      capabilities: json['capabilities'] == null
+          ? const CanvasHostCapabilities()
+          : CanvasHostCapabilities.fromJson(
+              json['capabilities'] as Map<String, dynamic>,
+            ),
+    );
+  }
+}
+
+/// Context handed to a canvas open handler.
+class CanvasOpenContext {
+  final String sessionId;
+  final String extensionId;
+  final String canvasId;
+  final String instanceId;
+  final dynamic input;
+  final CanvasHostContext? host;
+
+  const CanvasOpenContext({
+    required this.sessionId,
+    required this.extensionId,
+    required this.canvasId,
+    required this.instanceId,
+    required this.input,
+    this.host,
+  });
+
+  factory CanvasOpenContext.fromJson(Map<String, dynamic> json) {
+    return CanvasOpenContext(
+      sessionId: json['sessionId'] as String,
+      extensionId: json['extensionId'] as String,
+      canvasId: json['canvasId'] as String,
+      instanceId: json['instanceId'] as String,
+      input: json['input'],
+      host: json['host'] == null
+          ? null
+          : CanvasHostContext.fromJson(json['host'] as Map<String, dynamic>),
+    );
+  }
+}
+
+/// Context handed to a canvas action handler.
+class CanvasActionContext {
+  final String sessionId;
+  final String extensionId;
+  final String canvasId;
+  final String instanceId;
+  final String actionName;
+  final dynamic input;
+  final CanvasHostContext? host;
+
+  const CanvasActionContext({
+    required this.sessionId,
+    required this.extensionId,
+    required this.canvasId,
+    required this.instanceId,
+    required this.actionName,
+    required this.input,
+    this.host,
+  });
+
+  factory CanvasActionContext.fromJson(Map<String, dynamic> json) {
+    return CanvasActionContext(
+      sessionId: json['sessionId'] as String,
+      extensionId: json['extensionId'] as String,
+      canvasId: json['canvasId'] as String,
+      instanceId: json['instanceId'] as String,
+      actionName: json['actionName'] as String,
+      input: json['input'],
+      host: json['host'] == null
+          ? null
+          : CanvasHostContext.fromJson(json['host'] as Map<String, dynamic>),
+    );
+  }
+}
+
+/// Context handed to a canvas lifecycle handler.
+class CanvasLifecycleContext {
+  final String sessionId;
+  final String extensionId;
+  final String canvasId;
+  final String instanceId;
+  final CanvasHostContext? host;
+
+  const CanvasLifecycleContext({
+    required this.sessionId,
+    required this.extensionId,
+    required this.canvasId,
+    required this.instanceId,
+    this.host,
+  });
+
+  factory CanvasLifecycleContext.fromJson(Map<String, dynamic> json) {
+    return CanvasLifecycleContext(
+      sessionId: json['sessionId'] as String,
+      extensionId: json['extensionId'] as String,
+      canvasId: json['canvasId'] as String,
+      instanceId: json['instanceId'] as String,
+      host: json['host'] == null
+          ? null
+          : CanvasHostContext.fromJson(json['host'] as Map<String, dynamic>),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // System Message Configuration
 // ---------------------------------------------------------------------------
 
@@ -349,21 +628,21 @@ typedef PermissionHandler = Future<PermissionRequestResult> Function(
 
 /// Request for user input from the agent (enables ask_user tool).
 class UserInputRequest {
-  final String question;
+  final String? question;
   final List<String>? choices;
-  final bool allowFreeform;
+  final bool? allowFreeform;
 
   const UserInputRequest({
-    required this.question,
+    this.question,
     this.choices,
-    this.allowFreeform = true,
+    this.allowFreeform,
   });
 
   factory UserInputRequest.fromJson(Map<String, dynamic> json) {
     return UserInputRequest(
-      question: json['question'] as String,
+      question: json['question'] as String?,
       choices: (json['choices'] as List<dynamic>?)?.cast<String>(),
-      allowFreeform: json['allowFreeform'] as bool? ?? true,
+      allowFreeform: json['allowFreeform'] as bool?,
     );
   }
 }

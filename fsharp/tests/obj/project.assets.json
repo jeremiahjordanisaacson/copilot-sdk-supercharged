@@ -2,7 +2,7 @@
   "version": 3,
   "targets": {
     "net8.0": {
-      "FSharp.Core/9.0.303": {
+      "FSharp.Core/10.0.107": {
         "type": "package",
         "compile": {
           "lib/netstandard2.1/FSharp.Core.dll": {
@@ -531,7 +531,7 @@
         "type": "project",
         "framework": ".NETCoreApp,Version=v8.0",
         "dependencies": {
-          "FSharp.Core": "9.0.303",
+          "FSharp.Core": "10.0.107",
           "System.Text.Json": "8.0.0"
         },
         "compile": {
@@ -544,15 +544,14 @@
     }
   },
   "libraries": {
-    "FSharp.Core/9.0.303": {
-      "sha512": "6JlV8aD8qQvcmfoe/PMOxCHXc0uX4lR23u0fAyQtnVQxYULLoTZgwgZHSnRcuUHOvS3wULFWcwdnP1iwslH60g==",
+    "FSharp.Core/10.0.107": {
+      "sha512": "9FGx5KgWja2QOla6D6rhmPPjb9Uo2CzJMT4M8LIDUPVCwYRdfYySZNXeRJV0yQ8ba43aJMZDY+Yw/GpfxyEX9Q==",
       "type": "package",
-      "path": "fsharp.core/9.0.303",
+      "path": "fsharp.core/10.0.107",
       "files": [
         ".nupkg.metadata",
-        ".signature.p7s",
         "Icon.png",
-        "fsharp.core.9.0.303.nupkg.sha512",
+        "fsharp.core.10.0.107.nupkg.sha512",
         "fsharp.core.nuspec",
         "lib/netstandard2.0/FSharp.Core.dll",
         "lib/netstandard2.0/FSharp.Core.xml",
@@ -1204,7 +1203,7 @@
   "projectFileDependencyGroups": {
     "net8.0": [
       "CopilotSDK.Supercharged.FSharp >= 0.1.0",
-      "FSharp.Core >= 9.0.303",
+      "FSharp.Core >= 10.0.107",
       "FsUnit.xUnit >= 6.*",
       "Microsoft.NET.Test.Sdk >= 17.*",
       "xunit >= 2.*",
@@ -1212,40 +1211,34 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\jeisaacs\\.nuget\\packages\\": {},
-    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
+    "/Users/home/.nuget/packages/": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\tests\\CopilotSDK.Supercharged.FSharp.Tests.fsproj",
+      "projectUniqueName": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj",
       "projectName": "CopilotSDK.Supercharged.FSharp.Tests",
-      "projectPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\tests\\CopilotSDK.Supercharged.FSharp.Tests.fsproj",
-      "packagesPath": "C:\\Users\\jeisaacs\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\tests\\obj\\",
+      "projectPath": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj",
+      "packagesPath": "/Users/home/.nuget/packages/",
+      "outputPath": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/tests/obj/",
       "projectStyle": "PackageReference",
-      "fallbackFolders": [
-        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-      ],
       "configFilePaths": [
-        "C:\\Users\\jeisaacs\\AppData\\Roaming\\NuGet\\NuGet.Config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        "/Users/home/.nuget/NuGet/NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net8.0"
       ],
       "sources": {
-        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
-        "C:\\Program Files\\dotnet\\sdk\\9.0.313\\FSharp\\library-packs": {},
+        "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/library-packs": {},
+        "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/sdk/10.0.107/FSharp/library-packs": {},
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
         "net8.0": {
           "targetAlias": "net8.0",
           "projectReferences": {
-            "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\src\\CopilotSDK.Supercharged.FSharp.fsproj": {
-              "projectPath": "C:\\Users\\jeisaacs\\OneDrive - Microsoft\\Documents\\Repos\\copilot-sdk-supercharged\\fsharp\\src\\CopilotSDK.Supercharged.FSharp.fsproj"
+            "/Users/home/Documents/copilot-sdk-supercharged/fsharp/src/CopilotSDK.Supercharged.FSharp.fsproj": {
+              "projectPath": "/Users/home/Documents/copilot-sdk-supercharged/fsharp/src/CopilotSDK.Supercharged.FSharp.fsproj"
             }
           }
         }
@@ -1255,7 +1248,7 @@
         "auditLevel": "low",
         "auditMode": "direct"
       },
-      "SdkAnalysisLevel": "9.0.300"
+      "SdkAnalysisLevel": "10.0.100"
     },
     "frameworks": {
       "net8.0": {
@@ -1264,7 +1257,7 @@
           "FSharp.Core": {
             "include": "Runtime, Compile, Build, Native, Analyzers, BuildTransitive",
             "target": "Package",
-            "version": "[9.0.303, )",
+            "version": "[10.0.107, )",
             "generatePathProperty": true
           },
           "FsUnit.xUnit": {
@@ -1299,12 +1292,22 @@
         ],
         "assetTargetFallback": true,
         "warn": true,
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.AspNetCore.App.Ref",
+            "version": "[8.0.26, 8.0.26]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Ref",
+            "version": "[8.0.26, 8.0.26]"
+          }
+        ],
         "frameworkReferences": {
           "Microsoft.NETCore.App": {
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.313/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "/opt/homebrew/Cellar/dotnet/10.0.107/libexec/sdk/10.0.107/PortableRuntimeIdentifierGraph.json"
       }
     }
   }

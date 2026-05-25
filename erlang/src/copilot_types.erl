@@ -197,9 +197,101 @@
     kind :: approved | denied
 }).
 
+-record(user_input_request, {
+    question        :: binary() | undefined,
+    choices         :: [binary()] | undefined,
+    allow_freeform  :: boolean() | undefined
+}).
+
 -record(user_input_response, {
     answer       :: binary(),
     was_freeform :: boolean()
+}).
+
+-record(cloud_session_repository, {
+    owner  :: binary(),
+    name   :: binary(),
+    branch :: binary() | undefined
+}).
+
+-record(cloud_session_options, {
+    repository :: #cloud_session_repository{} | undefined
+}).
+
+-record(section_override, {
+    action  :: binary(),
+    content :: binary() | undefined
+}).
+
+-record(system_message_append_config, {
+    mode    :: binary() | undefined,
+    content :: binary() | undefined
+}).
+
+-record(system_message_replace_config, {
+    mode    :: binary(),
+    content :: binary()
+}).
+
+-record(system_message_customize_config, {
+    mode     :: binary(),
+    sections :: map() | undefined,
+    content  :: binary() | undefined
+}).
+
+-record(canvas_action, {
+    name         :: binary(),
+    description  :: binary(),
+    input_schema :: map() | undefined
+}).
+
+-record(canvas_declaration, {
+    id           :: binary(),
+    display_name :: binary(),
+    description  :: binary(),
+    input_schema :: map() | undefined,
+    actions      :: [#canvas_action{}] | undefined
+}).
+
+-record(canvas_open_response, {
+    url    :: binary() | undefined,
+    title  :: binary() | undefined,
+    status :: binary() | undefined
+}).
+
+-record(canvas_host_capabilities, {
+    canvases :: boolean()
+}).
+
+-record(canvas_host_context, {
+    capabilities :: #canvas_host_capabilities{}
+}).
+
+-record(canvas_open_context, {
+    session_id   :: binary(),
+    extension_id :: binary(),
+    canvas_id    :: binary(),
+    instance_id  :: binary(),
+    input        :: term(),
+    host         :: #canvas_host_context{} | undefined
+}).
+
+-record(canvas_action_context, {
+    session_id   :: binary(),
+    extension_id :: binary(),
+    canvas_id    :: binary(),
+    instance_id  :: binary(),
+    action_name  :: binary(),
+    input        :: term(),
+    host         :: #canvas_host_context{} | undefined
+}).
+
+-record(canvas_lifecycle_context, {
+    session_id   :: binary(),
+    extension_id :: binary(),
+    canvas_id    :: binary(),
+    instance_id  :: binary(),
+    host         :: #canvas_host_context{} | undefined
 }).
 
 -record(image_options, {
@@ -217,7 +309,23 @@
     tool_result/0,
     tool_invocation/0,
     permission_request_result/0,
+    user_input_request/0,
     user_input_response/0,
+    cloud_session_repository/0,
+    cloud_session_options/0,
+    section_override/0,
+    system_message_append_config/0,
+    system_message_replace_config/0,
+    system_message_customize_config/0,
+    canvas_action/0,
+    canvas_declaration/0,
+    canvas_open_response/0,
+    canvas_host_capabilities/0,
+    canvas_host_context/0,
+    canvas_open_context/0,
+    canvas_action_context/0,
+    canvas_lifecycle_context/0,
+    response_format/0,
     image_options/0,
     connection_state/0,
     session_event_type/0,
@@ -245,7 +353,23 @@
 -type tool_result()              :: #tool_result{}.
 -type tool_invocation()          :: #tool_invocation{}.
 -type permission_request_result() :: #permission_request_result{}.
+-type user_input_request()       :: #user_input_request{}.
 -type user_input_response()      :: #user_input_response{}.
+-type cloud_session_repository() :: #cloud_session_repository{}.
+-type cloud_session_options()    :: #cloud_session_options{}.
+-type section_override()         :: #section_override{}.
+-type system_message_append_config() :: #system_message_append_config{}.
+-type system_message_replace_config() :: #system_message_replace_config{}.
+-type system_message_customize_config() :: #system_message_customize_config{}.
+-type canvas_action()            :: #canvas_action{}.
+-type canvas_declaration()       :: #canvas_declaration{}.
+-type canvas_open_response()     :: #canvas_open_response{}.
+-type canvas_host_capabilities() :: #canvas_host_capabilities{}.
+-type canvas_host_context()      :: #canvas_host_context{}.
+-type canvas_open_context()      :: #canvas_open_context{}.
+-type canvas_action_context()    :: #canvas_action_context{}.
+-type canvas_lifecycle_context() :: #canvas_lifecycle_context{}.
+-type response_format()         :: text | image | json_object.
 -type image_options()            :: #image_options{}.
 -type session_fs_config()        :: #session_fs_config{}.
 -type command_definition()       :: #command_definition{}.

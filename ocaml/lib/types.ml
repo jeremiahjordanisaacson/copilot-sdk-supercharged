@@ -169,6 +169,498 @@ let command_definition_to_yojson (c : command_definition) : Yojson.Safe.t =
     ]
 
 (* ========================================================================== *)
+(* Canvas / Cloud Session Types                                               *)
+(* ========================================================================== *)
+
+type canvas_action = {
+  canvas_action_name : string;
+  canvas_action_description : string;
+  canvas_action_input_schema : Yojson.Safe.t option;
+}
+
+let canvas_action_of_yojson (json : Yojson.Safe.t)
+    : (canvas_action, string) result =
+  try
+    Ok
+      { canvas_action_name = json |> member "name" |> to_string
+      ; canvas_action_description = json |> member "description" |> to_string
+      ; canvas_action_input_schema =
+          (match json |> member "inputSchema" with
+           | `Null -> None
+           | v -> Some v)
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let canvas_action_to_yojson (a : canvas_action) : Yojson.Safe.t =
+  let fields =
+    [ ("name", `String a.canvas_action_name)
+    ; ("description", `String a.canvas_action_description)
+    ]
+  in
+  let fields =
+    match a.canvas_action_input_schema with
+    | Some schema -> ("inputSchema", schema) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+type canvas_declaration = {
+  canvas_declaration_id : string;
+  canvas_declaration_display_name : string;
+  canvas_declaration_description : string;
+  canvas_declaration_input_schema : Yojson.Safe.t option;
+  canvas_declaration_actions : canvas_action list option;
+}
+
+let canvas_declaration_of_yojson (json : Yojson.Safe.t)
+    : (canvas_declaration, string) result =
+  try
+    Ok
+      { canvas_declaration_id = json |> member "id" |> to_string
+      ; canvas_declaration_display_name = json |> member "displayName" |> to_string
+      ; canvas_declaration_description = json |> member "description" |> to_string
+      ; canvas_declaration_input_schema =
+          (match json |> member "inputSchema" with
+           | `Null -> None
+           | v -> Some v)
+      ; canvas_declaration_actions =
+          (match json |> member "actions" with
+           | `Null -> None
+           | `List xs ->
+             Some
+               (List.filter_map
+                  (fun v -> match canvas_action_of_yojson v with Ok a -> Some a | Error _ -> None)
+                  xs)
+           | _ -> None)
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let canvas_declaration_to_yojson (c : canvas_declaration) : Yojson.Safe.t =
+  let fields =
+    [ ("id", `String c.canvas_declaration_id)
+    ; ("displayName", `String c.canvas_declaration_display_name)
+    ; ("description", `String c.canvas_declaration_description)
+    ]
+  in
+  let fields =
+    match c.canvas_declaration_input_schema with
+    | Some schema -> ("inputSchema", schema) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.canvas_declaration_actions with
+    | Some actions ->
+      ("actions", `List (List.map canvas_action_to_yojson actions)) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+type canvas_open_response = {
+  canvas_open_response_url : string option;
+  canvas_open_response_title : string option;
+  canvas_open_response_status : string option;
+}
+
+let canvas_open_response_of_yojson (json : Yojson.Safe.t)
+    : (canvas_open_response, string) result =
+  try
+    Ok
+      { canvas_open_response_url =
+          (match json |> member "url" with `Null -> None | v -> Some (to_string v))
+      ; canvas_open_response_title =
+          (match json |> member "title" with `Null -> None | v -> Some (to_string v))
+      ; canvas_open_response_status =
+          (match json |> member "status" with `Null -> None | v -> Some (to_string v))
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let canvas_open_response_to_yojson (r : canvas_open_response) : Yojson.Safe.t =
+  let fields = [] in
+  let fields = match r.canvas_open_response_url with Some v -> ("url", `String v) :: fields | None -> fields in
+  let fields = match r.canvas_open_response_title with Some v -> ("title", `String v) :: fields | None -> fields in
+  let fields = match r.canvas_open_response_status with Some v -> ("status", `String v) :: fields | None -> fields in
+  `Assoc fields
+
+type canvas_host_capabilities = {
+  canvas_host_capabilities_canvases : bool;
+}
+
+let canvas_host_capabilities_of_yojson (json : Yojson.Safe.t)
+    : (canvas_host_capabilities, string) result =
+  try
+    Ok
+      { canvas_host_capabilities_canvases =
+          (try json |> member "canvases" |> to_bool with _ -> false)
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let canvas_host_capabilities_to_yojson (c : canvas_host_capabilities) : Yojson.Safe.t =
+  `Assoc [ ("canvases", `Bool c.canvas_host_capabilities_canvases) ]
+
+type canvas_host_context = {
+  canvas_host_context_capabilities : canvas_host_capabilities;
+}
+
+let canvas_host_context_of_yojson (json : Yojson.Safe.t)
+    : (canvas_host_context, string) result =
+  try
+    match canvas_host_capabilities_of_yojson (json |> member "capabilities") with
+    | Ok capabilities -> Ok { canvas_host_context_capabilities = capabilities }
+    | Error err -> Error err
+  with exn -> Error (Printexc.to_string exn)
+
+let canvas_host_context_to_yojson (c : canvas_host_context) : Yojson.Safe.t =
+  `Assoc [ ("capabilities", canvas_host_capabilities_to_yojson c.canvas_host_context_capabilities) ]
+
+type canvas_open_context = {
+  canvas_open_context_session_id : string;
+  canvas_open_context_extension_id : string;
+  canvas_open_context_canvas_id : string;
+  canvas_open_context_instance_id : string;
+  canvas_open_context_input : Yojson.Safe.t;
+  canvas_open_context_host : canvas_host_context option;
+}
+
+let canvas_open_context_of_yojson (json : Yojson.Safe.t)
+    : (canvas_open_context, string) result =
+  try
+    Ok
+      { canvas_open_context_session_id = json |> member "sessionId" |> to_string
+      ; canvas_open_context_extension_id = json |> member "extensionId" |> to_string
+      ; canvas_open_context_canvas_id = json |> member "canvasId" |> to_string
+      ; canvas_open_context_instance_id = json |> member "instanceId" |> to_string
+      ; canvas_open_context_input = json |> member "input"
+      ; canvas_open_context_host =
+          (match json |> member "host" with
+           | `Null -> None
+           | v ->
+             (match canvas_host_context_of_yojson v with
+              | Ok host -> Some host
+              | Error _ -> None))
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let canvas_open_context_to_yojson (c : canvas_open_context) : Yojson.Safe.t =
+  let fields =
+    [ ("sessionId", `String c.canvas_open_context_session_id)
+    ; ("extensionId", `String c.canvas_open_context_extension_id)
+    ; ("canvasId", `String c.canvas_open_context_canvas_id)
+    ; ("instanceId", `String c.canvas_open_context_instance_id)
+    ; ("input", c.canvas_open_context_input)
+    ]
+  in
+  let fields =
+    match c.canvas_open_context_host with
+    | Some host -> ("host", canvas_host_context_to_yojson host) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+type canvas_action_context = {
+  canvas_action_context_session_id : string;
+  canvas_action_context_extension_id : string;
+  canvas_action_context_canvas_id : string;
+  canvas_action_context_instance_id : string;
+  canvas_action_context_action_name : string;
+  canvas_action_context_input : Yojson.Safe.t;
+  canvas_action_context_host : canvas_host_context option;
+}
+
+let canvas_action_context_of_yojson (json : Yojson.Safe.t)
+    : (canvas_action_context, string) result =
+  try
+    Ok
+      { canvas_action_context_session_id = json |> member "sessionId" |> to_string
+      ; canvas_action_context_extension_id = json |> member "extensionId" |> to_string
+      ; canvas_action_context_canvas_id = json |> member "canvasId" |> to_string
+      ; canvas_action_context_instance_id = json |> member "instanceId" |> to_string
+      ; canvas_action_context_action_name = json |> member "actionName" |> to_string
+      ; canvas_action_context_input = json |> member "input"
+      ; canvas_action_context_host =
+          (match json |> member "host" with
+           | `Null -> None
+           | v ->
+             (match canvas_host_context_of_yojson v with
+              | Ok host -> Some host
+              | Error _ -> None))
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let canvas_action_context_to_yojson (c : canvas_action_context) : Yojson.Safe.t =
+  let fields =
+    [ ("sessionId", `String c.canvas_action_context_session_id)
+    ; ("extensionId", `String c.canvas_action_context_extension_id)
+    ; ("canvasId", `String c.canvas_action_context_canvas_id)
+    ; ("instanceId", `String c.canvas_action_context_instance_id)
+    ; ("actionName", `String c.canvas_action_context_action_name)
+    ; ("input", c.canvas_action_context_input)
+    ]
+  in
+  let fields =
+    match c.canvas_action_context_host with
+    | Some host -> ("host", canvas_host_context_to_yojson host) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+type canvas_lifecycle_context = {
+  canvas_lifecycle_context_session_id : string;
+  canvas_lifecycle_context_extension_id : string;
+  canvas_lifecycle_context_canvas_id : string;
+  canvas_lifecycle_context_instance_id : string;
+  canvas_lifecycle_context_host : canvas_host_context option;
+}
+
+let canvas_lifecycle_context_of_yojson (json : Yojson.Safe.t)
+    : (canvas_lifecycle_context, string) result =
+  try
+    Ok
+      { canvas_lifecycle_context_session_id = json |> member "sessionId" |> to_string
+      ; canvas_lifecycle_context_extension_id = json |> member "extensionId" |> to_string
+      ; canvas_lifecycle_context_canvas_id = json |> member "canvasId" |> to_string
+      ; canvas_lifecycle_context_instance_id = json |> member "instanceId" |> to_string
+      ; canvas_lifecycle_context_host =
+          (match json |> member "host" with
+           | `Null -> None
+           | v ->
+             (match canvas_host_context_of_yojson v with
+              | Ok host -> Some host
+              | Error _ -> None))
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let canvas_lifecycle_context_to_yojson (c : canvas_lifecycle_context) : Yojson.Safe.t =
+  let fields =
+    [ ("sessionId", `String c.canvas_lifecycle_context_session_id)
+    ; ("extensionId", `String c.canvas_lifecycle_context_extension_id)
+    ; ("canvasId", `String c.canvas_lifecycle_context_canvas_id)
+    ; ("instanceId", `String c.canvas_lifecycle_context_instance_id)
+    ]
+  in
+  let fields =
+    match c.canvas_lifecycle_context_host with
+    | Some host -> ("host", canvas_host_context_to_yojson host) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+type cloud_session_repository = {
+  cloud_session_repository_owner : string;
+  cloud_session_repository_name : string;
+  cloud_session_repository_branch : string option;
+}
+
+let cloud_session_repository_of_yojson (json : Yojson.Safe.t)
+    : (cloud_session_repository, string) result =
+  try
+    Ok
+      { cloud_session_repository_owner = json |> member "owner" |> to_string
+      ; cloud_session_repository_name = json |> member "name" |> to_string
+      ; cloud_session_repository_branch =
+          (match json |> member "branch" with `Null -> None | v -> Some (to_string v))
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let cloud_session_repository_to_yojson (r : cloud_session_repository) : Yojson.Safe.t =
+  let fields =
+    [ ("owner", `String r.cloud_session_repository_owner)
+    ; ("name", `String r.cloud_session_repository_name)
+    ]
+  in
+  let fields =
+    match r.cloud_session_repository_branch with
+    | Some branch -> ("branch", `String branch) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+type cloud_session_options = {
+  cloud_session_options_repository : cloud_session_repository option;
+}
+
+let cloud_session_options_of_yojson (json : Yojson.Safe.t)
+    : (cloud_session_options, string) result =
+  try
+    Ok
+      { cloud_session_options_repository =
+          (match json |> member "repository" with
+           | `Null -> None
+           | v ->
+             (match cloud_session_repository_of_yojson v with
+              | Ok repo -> Some repo
+              | Error _ -> None))
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let cloud_session_options_to_yojson (o : cloud_session_options) : Yojson.Safe.t =
+  let fields = [] in
+  let fields =
+    match o.cloud_session_options_repository with
+    | Some repo -> ("repository", cloud_session_repository_to_yojson repo) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+(* ========================================================================== *)
+(* System Message / User Input / Image Types                                  *)
+(* ========================================================================== *)
+
+type section_override_action = SOAReplace | SOARemove | SOAAppend | SOAPrepend
+
+let section_override_action_to_string = function
+  | SOAReplace -> "replace"
+  | SOARemove -> "remove"
+  | SOAAppend -> "append"
+  | SOAPrepend -> "prepend"
+
+let section_override_action_of_string = function
+  | "replace" -> SOAReplace
+  | "remove" -> SOARemove
+  | "append" -> SOAAppend
+  | "prepend" -> SOAPrepend
+  | _ -> SOAReplace
+
+type section_override = {
+  section_override_action : section_override_action;
+  section_override_content : string option;
+}
+
+let section_override_of_yojson (json : Yojson.Safe.t)
+    : (section_override, string) result =
+  try
+    Ok
+      { section_override_action =
+          section_override_action_of_string (json |> member "action" |> to_string)
+      ; section_override_content =
+          (match json |> member "content" with `Null -> None | v -> Some (to_string v))
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let section_override_to_yojson (o : section_override) : Yojson.Safe.t =
+  let fields = [ ("action", `String (section_override_action_to_string o.section_override_action)) ] in
+  let fields =
+    match o.section_override_content with
+    | Some content -> ("content", `String content) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+type system_message_append_config = {
+  system_message_append_mode : string option;
+  system_message_append_content : string option;
+}
+
+let system_message_append_config_to_yojson (c : system_message_append_config) : Yojson.Safe.t =
+  let fields = [] in
+  let fields = match c.system_message_append_mode with Some v -> ("mode", `String v) :: fields | None -> fields in
+  let fields = match c.system_message_append_content with Some v -> ("content", `String v) :: fields | None -> fields in
+  `Assoc fields
+
+type system_message_replace_config = {
+  system_message_replace_mode : string;
+  system_message_replace_content : string;
+}
+
+let system_message_replace_config_to_yojson (c : system_message_replace_config) : Yojson.Safe.t =
+  `Assoc [ ("mode", `String c.system_message_replace_mode); ("content", `String c.system_message_replace_content) ]
+
+type system_message_customize_config = {
+  system_message_customize_mode : string;
+  system_message_customize_sections : (string * section_override) list option;
+  system_message_customize_content : string option;
+}
+
+let system_message_customize_config_to_yojson (c : system_message_customize_config) : Yojson.Safe.t =
+  let fields = [ ("mode", `String c.system_message_customize_mode) ] in
+  let fields =
+    match c.system_message_customize_sections with
+    | Some sections ->
+      ("sections", `Assoc (List.map (fun (k, v) -> (k, section_override_to_yojson v)) sections)) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.system_message_customize_content with
+    | Some content -> ("content", `String content) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+type user_input_request = {
+  user_input_question : string option;
+  user_input_choices : string list option;
+  user_input_allow_freeform : bool option;
+}
+
+let user_input_request_of_yojson (json : Yojson.Safe.t)
+    : (user_input_request, string) result =
+  try
+    Ok
+      { user_input_question =
+          (match json |> member "question" with `Null -> None | v -> Some (to_string v))
+      ; user_input_choices =
+          (match json |> member "choices" with
+           | `Null -> None
+           | `List xs -> Some (List.map to_string xs)
+           | _ -> None)
+      ; user_input_allow_freeform =
+          (match json |> member "allowFreeform" with `Null -> None | v -> Some (to_bool v))
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let user_input_request_to_yojson (r : user_input_request) : Yojson.Safe.t =
+  let fields = [] in
+  let fields = match r.user_input_question with Some v -> ("question", `String v) :: fields | None -> fields in
+  let fields = match r.user_input_choices with Some xs -> ("choices", `List (List.map (fun s -> `String s) xs)) :: fields | None -> fields in
+  let fields = match r.user_input_allow_freeform with Some v -> ("allowFreeform", `Bool v) :: fields | None -> fields in
+  `Assoc fields
+
+type user_input_response = {
+  user_input_answer : string;
+  user_input_was_freeform : bool;
+}
+
+let user_input_response_of_yojson (json : Yojson.Safe.t)
+    : (user_input_response, string) result =
+  try
+    Ok
+      { user_input_answer = json |> member "answer" |> to_string
+      ; user_input_was_freeform = json |> member "wasFreeform" |> to_bool
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let user_input_response_to_yojson (r : user_input_response) : Yojson.Safe.t =
+  `Assoc
+    [ ("answer", `String r.user_input_answer)
+    ; ("wasFreeform", `Bool r.user_input_was_freeform)
+    ]
+
+type image_options = {
+  image_options_size : string option;
+  image_options_quality : string option;
+  image_options_style : string option;
+}
+
+let image_options_of_yojson (json : Yojson.Safe.t)
+    : (image_options, string) result =
+  try
+    Ok
+      { image_options_size =
+          (match json |> member "size" with `Null -> None | v -> Some (to_string v))
+      ; image_options_quality =
+          (match json |> member "quality" with `Null -> None | v -> Some (to_string v))
+      ; image_options_style =
+          (match json |> member "style" with `Null -> None | v -> Some (to_string v))
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+let image_options_to_yojson (o : image_options) : Yojson.Safe.t =
+  let fields = [] in
+  let fields = match o.image_options_size with Some v -> ("size", `String v) :: fields | None -> fields in
+  let fields = match o.image_options_quality with Some v -> ("quality", `String v) :: fields | None -> fields in
+  let fields = match o.image_options_style with Some v -> ("style", `String v) :: fields | None -> fields in
+  `Assoc fields
+
+(* ========================================================================== *)
 (* Image Response Format                                                      *)
 (* ========================================================================== *)
 

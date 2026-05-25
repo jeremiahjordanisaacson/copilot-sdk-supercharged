@@ -495,7 +495,7 @@ typealias PermissionHandler = suspend (request: PermissionRequest, sessionId: St
  */
 @Serializable
 data class UserInputRequest(
-    val question: String,
+    val question: String? = null,
     val choices: List<String>? = null,
     val allowFreeform: Boolean? = null
 )
@@ -1066,4 +1066,141 @@ data class CopilotClientOptions(
      * Provider for trace context to include in outbound requests.
      */
     val onGetTraceContext: TraceContextProvider? = null
+)
+
+// ============================================================================
+// Canvas, Cloud Session, and Prompt Types
+// ============================================================================
+
+/**
+ * Declaration for a canvas exposed by an extension.
+ */
+@Serializable
+data class CanvasDeclaration(
+    val id: String,
+    val displayName: String,
+    val description: String,
+    val inputSchema: JsonObject? = null,
+    val actions: List<CanvasAction>? = null
+)
+
+/**
+ * Action exposed by a canvas.
+ */
+@Serializable
+data class CanvasAction(
+    val name: String,
+    val description: String,
+    val inputSchema: JsonObject? = null
+)
+
+/**
+ * Response returned when opening a canvas.
+ */
+@Serializable
+data class CanvasOpenResponse(
+    val url: String? = null,
+    val title: String? = null,
+    val status: String? = null
+)
+
+/**
+ * Host capabilities available to canvases.
+ */
+@Serializable
+data class CanvasHostCapabilities(
+    val canvases: Boolean = false
+)
+
+/**
+ * Host context available to canvases.
+ */
+@Serializable
+data class CanvasHostContext(
+    val capabilities: CanvasHostCapabilities
+)
+
+/**
+ * Context passed when opening a canvas.
+ */
+@Serializable
+data class CanvasOpenContext(
+    val sessionId: String,
+    val extensionId: String,
+    val canvasId: String,
+    val instanceId: String,
+    val input: JsonElement,
+    val host: CanvasHostContext? = null
+)
+
+/**
+ * Context passed when invoking a canvas action.
+ */
+@Serializable
+data class CanvasActionContext(
+    val sessionId: String,
+    val extensionId: String,
+    val canvasId: String,
+    val instanceId: String,
+    val actionName: String,
+    val input: JsonElement,
+    val host: CanvasHostContext? = null
+)
+
+/**
+ * Lifecycle context for a canvas instance.
+ */
+@Serializable
+data class CanvasLifecycleContext(
+    val sessionId: String,
+    val extensionId: String,
+    val canvasId: String,
+    val instanceId: String,
+    val host: CanvasHostContext? = null
+)
+
+/**
+ * Repository context for a cloud session.
+ */
+@Serializable
+data class CloudSessionRepository(
+    val owner: String,
+    val name: String,
+    val branch: String? = null
+)
+
+/**
+ * Options for creating a cloud session.
+ */
+@Serializable
+data class CloudSessionOptions(
+    val repository: CloudSessionRepository? = null
+)
+
+/**
+ * System message configuration in append mode.
+ */
+@Serializable
+data class SystemMessageAppendConfig(
+    val mode: String? = "append",
+    val content: String? = null
+)
+
+/**
+ * System message configuration in replace mode.
+ */
+@Serializable
+data class SystemMessageReplaceConfig(
+    val mode: String = "replace",
+    val content: String
+)
+
+/**
+ * System message configuration in customize mode.
+ */
+@Serializable
+data class SystemMessageCustomizeConfig(
+    val mode: String = "customize",
+    val sections: Map<String, SectionOverride>? = null,
+    val content: String? = null
 )

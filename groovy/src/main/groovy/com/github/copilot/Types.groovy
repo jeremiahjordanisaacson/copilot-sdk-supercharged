@@ -435,4 +435,123 @@ final class Types {
         boolean remoteSteerable
         String url
     }
+
+    /** Response format for image generation responses. */
+    enum ResponseFormat {
+        TEXT, IMAGE, JSON_OBJECT
+    }
+
+    /** Override operation for a single system prompt section. */
+    @ToString(includeNames = true)
+    static class SectionOverride {
+        String action
+        String content
+    }
+
+    /** System message configuration in append mode. */
+    @ToString(includeNames = true)
+    static class SystemMessageAppendConfig {
+        String mode = 'append'
+        String content
+    }
+
+    /** System message configuration in replace mode. */
+    @ToString(includeNames = true)
+    static class SystemMessageReplaceConfig {
+        String mode = 'replace'
+        String content
+    }
+
+    /** System message configuration in customize mode. */
+    @ToString(includeNames = true)
+    static class SystemMessageCustomizeConfig {
+        String mode = 'customize'
+        Map<String, SectionOverride> sections
+        String content
+    }
+
+    /** Declaration for a canvas exposed by an extension. */
+    @ToString(includeNames = true)
+    static class CanvasDeclaration {
+        String id
+        String displayName
+        String description
+        Map<String, Object> inputSchema
+        List<CanvasAction> actions
+    }
+
+    /** Action exposed by a canvas. */
+    @ToString(includeNames = true)
+    static class CanvasAction {
+        String name
+        String description
+        Map<String, Object> inputSchema
+    }
+
+    /** Response returned when opening a canvas. */
+    @ToString(includeNames = true)
+    static class CanvasOpenResponse {
+        String url
+        String title
+        String status
+    }
+
+    /** Host capabilities available to canvases. */
+    @ToString(includeNames = true)
+    static class CanvasHostCapabilities {
+        Boolean canvases = false
+    }
+
+    /** Host context available to canvases. */
+    @ToString(includeNames = true)
+    static class CanvasHostContext {
+        CanvasHostCapabilities capabilities
+    }
+
+    /** Context passed when opening a canvas. */
+    @ToString(includeNames = true)
+    static class CanvasOpenContext {
+        String sessionId
+        String extensionId
+        String canvasId
+        String instanceId
+        Object input
+        CanvasHostContext host
+    }
+
+    /** Context passed when invoking a canvas action. */
+    @ToString(includeNames = true)
+    static class CanvasActionContext {
+        String sessionId
+        String extensionId
+        String canvasId
+        String instanceId
+        String actionName
+        Object input
+        CanvasHostContext host
+    }
+
+    /** Lifecycle context for a canvas instance. */
+    @ToString(includeNames = true)
+    static class CanvasLifecycleContext {
+        String sessionId
+        String extensionId
+        String canvasId
+        String instanceId
+        CanvasHostContext host
+    }
+
+    /** Repository context for a cloud session. */
+    @ToString(includeNames = true)
+    static class CloudSessionRepository {
+        String owner
+        String name
+        String branch
+    }
+
+    /** Options for creating a cloud session. */
+    @ToString(includeNames = true)
+    static class CloudSessionOptions {
+        CloudSessionRepository repository
+    }
 }

@@ -111,6 +111,66 @@ type
     rawEvents*: seq[SessionEvent]
 
 # ---------------------------------------------------------------------------
+# Cloud session and canvas types
+# ---------------------------------------------------------------------------
+
+type
+  CloudSessionRepository* = object
+    owner*: string
+    name*: string
+    branch*: Option[string]
+
+  CloudSessionOptions* = object
+    repository*: Option[CloudSessionRepository]
+
+  CanvasAction* = object
+    name*: string
+    description*: string
+    inputSchema*: Option[JsonNode]
+
+  CanvasDeclaration* = object
+    id*: string
+    displayName*: string
+    description*: string
+    inputSchema*: Option[JsonNode]
+    actions*: Option[seq[CanvasAction]]
+
+  CanvasOpenResponse* = object
+    url*: Option[string]
+    title*: Option[string]
+    status*: Option[string]
+
+  CanvasHostCapabilities* = object
+    canvases*: bool
+
+  CanvasHostContext* = object
+    capabilities*: CanvasHostCapabilities
+
+  CanvasOpenContext* = object
+    sessionId*: string
+    extensionId*: string
+    canvasId*: string
+    instanceId*: string
+    input*: JsonNode
+    host*: Option[CanvasHostContext]
+
+  CanvasActionContext* = object
+    sessionId*: string
+    extensionId*: string
+    canvasId*: string
+    instanceId*: string
+    actionName*: string
+    input*: JsonNode
+    host*: Option[CanvasHostContext]
+
+  CanvasLifecycleContext* = object
+    sessionId*: string
+    extensionId*: string
+    canvasId*: string
+    instanceId*: string
+    host*: Option[CanvasHostContext]
+
+# ---------------------------------------------------------------------------
 # Session events
 # ---------------------------------------------------------------------------
 
@@ -184,11 +244,33 @@ type
 
   PermissionHandler* = proc(req: PermissionRequest): PermissionDecision {.closure.}
 
-  UserInputRequest* = object
-    id*: string
-    prompt*: string
+  SectionOverride* = object
+    action*: string
+    content*: Option[string]
 
-  UserInputHandler* = proc(req: UserInputRequest): string {.closure.}
+  SystemMessageAppendConfig* = object
+    mode*: Option[string]
+    content*: Option[string]
+
+  SystemMessageReplaceConfig* = object
+    mode*: string
+    content*: string
+
+  SystemMessageCustomizeConfig* = object
+    mode*: string
+    sections*: Option[Table[string, SectionOverride]]
+    content*: Option[string]
+
+  UserInputRequest* = object
+    question*: Option[string]
+    choices*: Option[seq[string]]
+    allowFreeform*: Option[bool]
+
+  UserInputResponse* = object
+    answer*: string
+    wasFreeform*: bool
+
+  UserInputHandler* = proc(req: UserInputRequest): UserInputResponse {.closure.}
 
   ElicitationRequest* = object
     id*: string
@@ -224,6 +306,16 @@ type
     supports*: ModelCapabilitiesSupports
     limits*: ModelCapabilitiesLimits
     defaultModel*: string
+
+  ResponseFormat* = enum
+    rfText = "text"
+    rfImage = "image"
+    rfJsonObject = "json_object"
+
+  ImageOptions* = object
+    size*: Option[string]
+    quality*: Option[string]
+    style*: Option[string]
 
 # ---------------------------------------------------------------------------
 # Slash Commands

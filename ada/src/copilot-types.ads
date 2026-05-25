@@ -103,6 +103,112 @@ package Copilot.Types is
        Remote                      => False,
        On_Get_Trace_Context        => null);
 
+   type Cloud_Session_Repository is record
+      Owner  : UString := Null_UString;
+      Name   : UString := Null_UString;
+      Branch : UString := Null_UString;
+   end record;
+
+   type Cloud_Session_Repository_Access is access all Cloud_Session_Repository;
+
+   type Cloud_Session_Options is record
+      Repository : Cloud_Session_Repository_Access := null;
+   end record;
+
+   type Section_Override is record
+      Action  : UString := Null_UString;
+      Content : UString := Null_UString;
+   end record;
+
+   type System_Message_Append_Config is record
+      Mode    : UString := Null_UString;
+      Content : UString := Null_UString;
+   end record;
+
+   type System_Message_Replace_Config is record
+      Mode    : UString := +"replace";
+      Content : UString := Null_UString;
+   end record;
+
+   type System_Message_Customize_Config is record
+      Mode          : UString := +"customize";
+      Sections_Json : UString := Null_UString;
+      Content       : UString := Null_UString;
+   end record;
+
+   type Response_Format_Kind is
+     (Response_Text,
+      Response_Image,
+      Response_Json_Object);
+
+   type Image_Options is record
+      Size    : UString := Null_UString;
+      Quality : UString := Null_UString;
+      Style   : UString := Null_UString;
+   end record;
+
+   type Canvas_Action is record
+      Name              : UString := Null_UString;
+      Description       : UString := Null_UString;
+      Input_Schema_Json : UString := Null_UString;
+   end record;
+
+   package Canvas_Action_Vectors is new Ada.Containers.Indefinite_Vectors
+     (Index_Type   => Positive,
+      Element_Type => Canvas_Action);
+   subtype Canvas_Action_List is Canvas_Action_Vectors.Vector;
+
+   type Canvas_Declaration is record
+      Id                : UString := Null_UString;
+      Display_Name      : UString := Null_UString;
+      Description       : UString := Null_UString;
+      Input_Schema_Json : UString := Null_UString;
+      Actions           : Canvas_Action_List := Canvas_Action_Vectors.Empty_Vector;
+   end record;
+
+   type Canvas_Open_Response is record
+      Url    : UString := Null_UString;
+      Title  : UString := Null_UString;
+      Status : UString := Null_UString;
+   end record;
+
+   type Canvas_Host_Capabilities is record
+      Canvases : Boolean := False;
+   end record;
+
+   type Canvas_Host_Context is record
+      Capabilities : Canvas_Host_Capabilities := (Canvases => False);
+   end record;
+
+   type Canvas_Host_Context_Access is access all Canvas_Host_Context;
+
+   type Canvas_Open_Context is record
+      Session_Id   : UString := Null_UString;
+      Extension_Id : UString := Null_UString;
+      Canvas_Id    : UString := Null_UString;
+      Instance_Id  : UString := Null_UString;
+      Input_Json   : UString := Null_UString;
+      Host         : Canvas_Host_Context_Access := null;
+   end record;
+
+   type Canvas_Action_Context is record
+      Session_Id   : UString := Null_UString;
+      Extension_Id : UString := Null_UString;
+      Canvas_Id    : UString := Null_UString;
+      Instance_Id  : UString := Null_UString;
+      Action_Name  : UString := Null_UString;
+      Input_Json   : UString := Null_UString;
+      Host         : Canvas_Host_Context_Access := null;
+   end record;
+
+   type Canvas_Lifecycle_Context is record
+      Session_Id   : UString := Null_UString;
+      Extension_Id : UString := Null_UString;
+      Canvas_Id    : UString := Null_UString;
+      Instance_Id  : UString := Null_UString;
+      Host         : Canvas_Host_Context_Access := null;
+   end record;
+
    --  -----------------------------------------------------------------------
    --  Session configuration
    --  -----------------------------------------------------------------------
@@ -320,13 +426,15 @@ package Copilot.Types is
    --  -----------------------------------------------------------------------
 
    type User_Input_Request is record
-      Question   : UString := Null_UString;
-      Session_Id : UString := Null_UString;
+      Question           : UString := Null_UString;
+      Choices_Json       : UString := Null_UString;
+      Allow_Freeform     : Boolean := False;
+      Allow_Freeform_Set : Boolean := False;
    end record;
 
    type User_Input_Response is record
-      Answer       : UString  := Null_UString;
-      Was_Freeform : Boolean  := True;
+      Answer       : UString := Null_UString;
+      Was_Freeform : Boolean := False;
    end record;
 
    type User_Input_Handler is access

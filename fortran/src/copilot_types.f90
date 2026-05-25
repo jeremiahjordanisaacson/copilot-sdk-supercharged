@@ -17,8 +17,16 @@ module copilot_types
   public :: session_fs_config, session_fs_entry
   public :: copilot_connection_state
   public :: mcp_server_config, command_definition, image_options
+  public :: cloud_session_repository, cloud_session_options
+  public :: section_override, system_message_append_config
+  public :: system_message_replace_config, system_message_customize_config
+  public :: canvas_action, canvas_declaration, canvas_open_response
+  public :: canvas_host_capabilities, canvas_host_context
+  public :: canvas_open_context, canvas_action_context, canvas_lifecycle_context
+  public :: user_input_request, user_input_response
   public :: COPILOT_STATE_DISCONNECTED, COPILOT_STATE_CONNECTING
   public :: COPILOT_STATE_CONNECTED, COPILOT_STATE_ERROR
+  public :: RESPONSE_FORMAT_TEXT, RESPONSE_FORMAT_IMAGE, RESPONSE_FORMAT_JSON_OBJECT
   public :: tool_callback_interface
   public :: exit_plan_mode_request, exit_plan_mode_response
   public :: exit_plan_mode_callback_interface
@@ -38,6 +46,10 @@ module copilot_types
   integer, parameter :: COPILOT_STATE_CONNECTING   = 1
   integer, parameter :: COPILOT_STATE_CONNECTED    = 2
   integer, parameter :: COPILOT_STATE_ERROR        = 3
+
+  character(len=*), parameter :: RESPONSE_FORMAT_TEXT = 'text'
+  character(len=*), parameter :: RESPONSE_FORMAT_IMAGE = 'image'
+  character(len=*), parameter :: RESPONSE_FORMAT_JSON_OBJECT = 'json_object'
 
   type :: copilot_connection_state
     integer :: value = COPILOT_STATE_DISCONNECTED
@@ -110,6 +122,95 @@ module copilot_types
     character(len=:), allocatable :: quality
     character(len=:), allocatable :: style
   end type image_options
+
+  ! --------------------------------------------------------------------------
+  ! Cloud session / system message / canvas types
+  ! --------------------------------------------------------------------------
+  type :: cloud_session_repository
+    character(len=:), allocatable :: owner
+    character(len=:), allocatable :: name
+    character(len=:), allocatable :: branch
+  end type cloud_session_repository
+
+  type :: cloud_session_options
+    type(cloud_session_repository), allocatable :: repository
+  end type cloud_session_options
+
+  type :: section_override
+    character(len=:), allocatable :: action
+    character(len=:), allocatable :: content
+  end type section_override
+
+  type :: system_message_append_config
+    character(len=:), allocatable :: mode
+    character(len=:), allocatable :: content
+  end type system_message_append_config
+
+  type :: system_message_replace_config
+    character(len=:), allocatable :: mode
+    character(len=:), allocatable :: content
+  end type system_message_replace_config
+
+  type :: system_message_customize_config
+    character(len=:), allocatable :: mode
+    character(len=:), allocatable :: sections_json
+    character(len=:), allocatable :: content
+  end type system_message_customize_config
+
+  type :: canvas_action
+    character(len=:), allocatable :: name
+    character(len=:), allocatable :: description
+    character(len=:), allocatable :: input_schema_json
+  end type canvas_action
+
+  type :: canvas_declaration
+    character(len=:), allocatable :: id
+    character(len=:), allocatable :: display_name
+    character(len=:), allocatable :: description
+    character(len=:), allocatable :: input_schema_json
+    type(canvas_action), allocatable :: actions(:)
+  end type canvas_declaration
+
+  type :: canvas_open_response
+    character(len=:), allocatable :: url
+    character(len=:), allocatable :: title
+    character(len=:), allocatable :: status
+  end type canvas_open_response
+
+  type :: canvas_host_capabilities
+    logical :: canvases = .false.
+  end type canvas_host_capabilities
+
+  type :: canvas_host_context
+    type(canvas_host_capabilities) :: capabilities
+  end type canvas_host_context
+
+  type :: canvas_open_context
+    character(len=:), allocatable :: session_id
+    character(len=:), allocatable :: extension_id
+    character(len=:), allocatable :: canvas_id
+    character(len=:), allocatable :: instance_id
+    character(len=:), allocatable :: input_json
+    type(canvas_host_context), allocatable :: host
+  end type canvas_open_context
+
+  type :: canvas_action_context
+    character(len=:), allocatable :: session_id
+    character(len=:), allocatable :: extension_id
+    character(len=:), allocatable :: canvas_id
+    character(len=:), allocatable :: instance_id
+    character(len=:), allocatable :: action_name
+    character(len=:), allocatable :: input_json
+    type(canvas_host_context), allocatable :: host
+  end type canvas_action_context
+
+  type :: canvas_lifecycle_context
+    character(len=:), allocatable :: session_id
+    character(len=:), allocatable :: extension_id
+    character(len=:), allocatable :: canvas_id
+    character(len=:), allocatable :: instance_id
+    type(canvas_host_context), allocatable :: host
+  end type canvas_lifecycle_context
 
   ! --------------------------------------------------------------------------
   ! Session configuration
@@ -224,6 +325,20 @@ module copilot_types
     logical :: granted = .false.
     character(len=:), allocatable :: reason
   end type permission_result
+
+  ! --------------------------------------------------------------------------
+  ! User input request / response
+  ! --------------------------------------------------------------------------
+  type :: user_input_request
+    character(len=:), allocatable :: question
+    character(len=:), allocatable :: choices_json
+    logical, allocatable :: allow_freeform
+  end type user_input_request
+
+  type :: user_input_response
+    character(len=:), allocatable :: answer
+    logical :: was_freeform = .false.
+  end type user_input_response
 
   ! --------------------------------------------------------------------------
   ! Elicitation request / result

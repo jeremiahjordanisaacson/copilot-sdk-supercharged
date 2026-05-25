@@ -214,6 +214,342 @@ UserInputResponse <- R6::R6Class(
 
 
 # ---------------------------------------------------------------------------
+# Canvas and Cloud Session Types
+# ---------------------------------------------------------------------------
+
+#' CanvasAction
+#'
+#' Agent-callable action exposed by a canvas.
+#'
+#' @field name Character. Action name.
+#' @field description Character. Action description.
+#' @field input_schema List or NULL. Optional input schema.
+#' @export
+CanvasAction <- R6::R6Class(
+  "CanvasAction",
+  public = list(
+    name = NULL,
+    description = NULL,
+    input_schema = NULL,
+
+    initialize = function(name, description, input_schema = NULL) {
+      self$name <- name
+      self$description <- description
+      self$input_schema <- input_schema
+    },
+
+    to_list = function() {
+      result <- list(name = self$name, description = self$description)
+      if (!is.null(self$input_schema)) result$inputSchema <- self$input_schema
+      result
+    }
+  )
+)
+
+#' CanvasDeclaration
+#'
+#' Declarative metadata for a canvas.
+#'
+#' @field id Character. Canvas identifier.
+#' @field display_name Character. Human-readable display name.
+#' @field description Character. Canvas description.
+#' @field input_schema List or NULL. Optional input schema.
+#' @field actions List of CanvasAction or NULL. Optional actions.
+#' @export
+CanvasDeclaration <- R6::R6Class(
+  "CanvasDeclaration",
+  public = list(
+    id = NULL,
+    display_name = NULL,
+    description = NULL,
+    input_schema = NULL,
+    actions = NULL,
+
+    initialize = function(id, display_name, description, input_schema = NULL, actions = NULL) {
+      self$id <- id
+      self$display_name <- display_name
+      self$description <- description
+      self$input_schema <- input_schema
+      self$actions <- actions
+    },
+
+    to_list = function() {
+      result <- list(id = self$id, displayName = self$display_name, description = self$description)
+      if (!is.null(self$input_schema)) result$inputSchema <- self$input_schema
+      if (!is.null(self$actions)) {
+        result$actions <- lapply(self$actions, function(action) {
+          if (inherits(action, "CanvasAction")) action$to_list() else action
+        })
+      }
+      result
+    }
+  )
+)
+
+#' CanvasOpenResponse
+#'
+#' Response returned from opening a canvas.
+#'
+#' @field url Character or NULL. Optional canvas URL.
+#' @field title Character or NULL. Optional title.
+#' @field status Character or NULL. Optional status text.
+#' @export
+CanvasOpenResponse <- R6::R6Class(
+  "CanvasOpenResponse",
+  public = list(
+    url = NULL,
+    title = NULL,
+    status = NULL,
+
+    initialize = function(url = NULL, title = NULL, status = NULL) {
+      self$url <- url
+      self$title <- title
+      self$status <- status
+    },
+
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$url)) result$url <- self$url
+      if (!is.null(self$title)) result$title <- self$title
+      if (!is.null(self$status)) result$status <- self$status
+      result
+    }
+  )
+)
+
+#' CanvasHostCapabilities
+#'
+#' Host capability details passed to canvas callbacks.
+#'
+#' @field canvases Logical. Whether the host supports canvases.
+#' @export
+CanvasHostCapabilities <- R6::R6Class(
+  "CanvasHostCapabilities",
+  public = list(
+    canvases = FALSE,
+
+    initialize = function(canvases = FALSE) {
+      self$canvases <- canvases
+    },
+
+    to_list = function() {
+      list(canvases = self$canvases)
+    }
+  )
+)
+
+#' CanvasHostContext
+#'
+#' Host context passed to canvas callbacks.
+#'
+#' @field capabilities CanvasHostCapabilities. Host capability details.
+#' @export
+CanvasHostContext <- R6::R6Class(
+  "CanvasHostContext",
+  public = list(
+    capabilities = NULL,
+
+    initialize = function(capabilities = CanvasHostCapabilities$new()) {
+      self$capabilities <- capabilities
+    },
+
+    to_list = function() {
+      list(capabilities = self$capabilities$to_list())
+    }
+  )
+)
+
+#' CanvasOpenContext
+#'
+#' Context provided when opening a canvas.
+#'
+#' @field session_id Character. Session ID.
+#' @field extension_id Character. Extension ID.
+#' @field canvas_id Character. Canvas ID.
+#' @field instance_id Character. Instance ID.
+#' @field input Any. Input payload.
+#' @field host CanvasHostContext or NULL. Optional host context.
+#' @export
+CanvasOpenContext <- R6::R6Class(
+  "CanvasOpenContext",
+  public = list(
+    session_id = NULL,
+    extension_id = NULL,
+    canvas_id = NULL,
+    instance_id = NULL,
+    input = NULL,
+    host = NULL,
+
+    initialize = function(session_id, extension_id, canvas_id, instance_id, input = NULL, host = NULL) {
+      self$session_id <- session_id
+      self$extension_id <- extension_id
+      self$canvas_id <- canvas_id
+      self$instance_id <- instance_id
+      self$input <- input
+      self$host <- host
+    },
+
+    to_list = function() {
+      result <- list(
+        sessionId = self$session_id,
+        extensionId = self$extension_id,
+        canvasId = self$canvas_id,
+        instanceId = self$instance_id,
+        input = self$input
+      )
+      if (!is.null(self$host)) result$host <- self$host$to_list()
+      result
+    }
+  )
+)
+
+#' CanvasActionContext
+#'
+#' Context provided when invoking a canvas action.
+#'
+#' @field session_id Character. Session ID.
+#' @field extension_id Character. Extension ID.
+#' @field canvas_id Character. Canvas ID.
+#' @field instance_id Character. Instance ID.
+#' @field action_name Character. Action name.
+#' @field input Any. Input payload.
+#' @field host CanvasHostContext or NULL. Optional host context.
+#' @export
+CanvasActionContext <- R6::R6Class(
+  "CanvasActionContext",
+  public = list(
+    session_id = NULL,
+    extension_id = NULL,
+    canvas_id = NULL,
+    instance_id = NULL,
+    action_name = NULL,
+    input = NULL,
+    host = NULL,
+
+    initialize = function(session_id, extension_id, canvas_id, instance_id, action_name, input = NULL, host = NULL) {
+      self$session_id <- session_id
+      self$extension_id <- extension_id
+      self$canvas_id <- canvas_id
+      self$instance_id <- instance_id
+      self$action_name <- action_name
+      self$input <- input
+      self$host <- host
+    },
+
+    to_list = function() {
+      result <- list(
+        sessionId = self$session_id,
+        extensionId = self$extension_id,
+        canvasId = self$canvas_id,
+        instanceId = self$instance_id,
+        actionName = self$action_name,
+        input = self$input
+      )
+      if (!is.null(self$host)) result$host <- self$host$to_list()
+      result
+    }
+  )
+)
+
+#' CanvasLifecycleContext
+#'
+#' Context provided for canvas lifecycle events.
+#'
+#' @field session_id Character. Session ID.
+#' @field extension_id Character. Extension ID.
+#' @field canvas_id Character. Canvas ID.
+#' @field instance_id Character. Instance ID.
+#' @field host CanvasHostContext or NULL. Optional host context.
+#' @export
+CanvasLifecycleContext <- R6::R6Class(
+  "CanvasLifecycleContext",
+  public = list(
+    session_id = NULL,
+    extension_id = NULL,
+    canvas_id = NULL,
+    instance_id = NULL,
+    host = NULL,
+
+    initialize = function(session_id, extension_id, canvas_id, instance_id, host = NULL) {
+      self$session_id <- session_id
+      self$extension_id <- extension_id
+      self$canvas_id <- canvas_id
+      self$instance_id <- instance_id
+      self$host <- host
+    },
+
+    to_list = function() {
+      result <- list(
+        sessionId = self$session_id,
+        extensionId = self$extension_id,
+        canvasId = self$canvas_id,
+        instanceId = self$instance_id
+      )
+      if (!is.null(self$host)) result$host <- self$host$to_list()
+      result
+    }
+  )
+)
+
+#' CloudSessionRepository
+#'
+#' GitHub repository metadata for a cloud session.
+#'
+#' @field owner Character. Repository owner.
+#' @field name Character. Repository name.
+#' @field branch Character or NULL. Optional branch.
+#' @export
+CloudSessionRepository <- R6::R6Class(
+  "CloudSessionRepository",
+  public = list(
+    owner = NULL,
+    name = NULL,
+    branch = NULL,
+
+    initialize = function(owner, name, branch = NULL) {
+      self$owner <- owner
+      self$name <- name
+      self$branch <- branch
+    },
+
+    to_list = function() {
+      result <- list(owner = self$owner, name = self$name)
+      if (!is.null(self$branch)) result$branch <- self$branch
+      result
+    }
+  )
+)
+
+#' CloudSessionOptions
+#'
+#' Options for creating a cloud session.
+#'
+#' @field repository CloudSessionRepository or NULL. Optional repository metadata.
+#' @export
+CloudSessionOptions <- R6::R6Class(
+  "CloudSessionOptions",
+  public = list(
+    repository = NULL,
+
+    initialize = function(repository = NULL) {
+      self$repository <- repository
+    },
+
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$repository)) {
+        result$repository <- if (inherits(self$repository, "CloudSessionRepository")) {
+          self$repository$to_list()
+        } else {
+          self$repository
+        }
+      }
+      result
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
 # PingResponse
 # ---------------------------------------------------------------------------
 
@@ -1200,6 +1536,37 @@ MessageOptions <- R6::R6Class(
 #' @export
 RESPONSE_FORMATS <- c("text", "image", "json_object")
 
+#' ImageOptions
+#'
+#' Image generation options.
+#'
+#' @field size Character or NULL. Image size.
+#' @field quality Character or NULL. Image quality.
+#' @field style Character or NULL. Image style.
+#' @export
+ImageOptions <- R6::R6Class(
+  "ImageOptions",
+  public = list(
+    size = NULL,
+    quality = NULL,
+    style = NULL,
+
+    initialize = function(size = NULL, quality = NULL, style = NULL) {
+      self$size <- size
+      self$quality <- quality
+      self$style <- style
+    },
+
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$size)) result$size <- self$size
+      if (!is.null(self$quality)) result$quality <- self$quality
+      if (!is.null(self$style)) result$style <- self$style
+      result
+    }
+  )
+)
+
 #' Create image options for image generation
 #'
 #' @param size Image size (e.g. "1024x1024")
@@ -1208,11 +1575,7 @@ RESPONSE_FORMATS <- c("text", "image", "json_object")
 #' @return A list of image options
 #' @export
 image_options <- function(size = NULL, quality = NULL, style = NULL) {
-  opts <- list()
-  if (!is.null(size)) opts$size <- size
-  if (!is.null(quality)) opts$quality <- quality
-  if (!is.null(style)) opts$style <- style
-  opts
+  ImageOptions$new(size = size, quality = quality, style = style)$to_list()
 }
 
 #' Parse assistant image data from JSON response
@@ -1618,6 +1981,89 @@ SectionOverride <- R6::R6Class(
   )
 )
 
+#' SystemMessageAppendConfig
+#'
+#' Append mode system message configuration.
+#'
+#' @field mode Character. Always "append".
+#' @field content Character or NULL. Optional appended content.
+#' @export
+SystemMessageAppendConfig <- R6::R6Class(
+  "SystemMessageAppendConfig",
+  public = list(
+    mode = "append",
+    content = NULL,
+
+    initialize = function(content = NULL) {
+      self$content <- content
+    },
+
+    to_list = function() {
+      result <- list(mode = "append")
+      if (!is.null(self$content)) result$content <- self$content
+      result
+    }
+  )
+)
+
+#' SystemMessageReplaceConfig
+#'
+#' Replace mode system message configuration.
+#'
+#' @field mode Character. Always "replace".
+#' @field content Character. Replacement system message content.
+#' @export
+SystemMessageReplaceConfig <- R6::R6Class(
+  "SystemMessageReplaceConfig",
+  public = list(
+    mode = "replace",
+    content = NULL,
+
+    initialize = function(content) {
+      self$content <- content
+    },
+
+    to_list = function() {
+      list(mode = "replace", content = self$content)
+    }
+  )
+)
+
+#' SystemMessageCustomizeConfig
+#'
+#' Customize mode system message configuration.
+#'
+#' @field mode Character. Always "customize".
+#' @field sections Named list of SectionOverride or NULL. Section overrides.
+#' @field content Character or NULL. Optional appended content.
+#' @export
+SystemMessageCustomizeConfig <- R6::R6Class(
+  "SystemMessageCustomizeConfig",
+  public = list(
+    mode = "customize",
+    sections = NULL,
+    content = NULL,
+
+    initialize = function(sections = NULL, content = NULL) {
+      self$sections <- sections
+      self$content <- content
+    },
+
+    to_list = function() {
+      result <- list(mode = "customize")
+      if (!is.null(self$sections)) {
+        sections_list <- list()
+        for (key in names(self$sections)) {
+          sections_list[[key]] <- self$sections[[key]]$to_list()
+        }
+        result$sections <- sections_list
+      }
+      if (!is.null(self$content)) result$content <- self$content
+      result
+    }
+  )
+)
+
 #' SystemMessageConfig
 #'
 #' System message configuration for session creation.
@@ -1880,7 +2326,7 @@ SessionConfig <- R6::R6Class(
       result <- list()
       if (!is.null(self$model)) result$model <- self$model
       if (!is.null(self$system_message)) {
-        if (inherits(self$system_message, "SystemMessageConfig")) {
+        if (inherits(self$system_message, c("SystemMessageConfig", "SystemMessageAppendConfig", "SystemMessageReplaceConfig", "SystemMessageCustomizeConfig"))) {
           result$systemMessage <- self$system_message$to_list()
         } else {
           result$systemMessage <- self$system_message

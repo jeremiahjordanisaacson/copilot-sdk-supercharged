@@ -75,6 +75,132 @@ module Copilot
     end
   end
 
+  # An action exposed by a canvas.
+  CanvasAction = Struct.new(:name, :description, :input_schema, keyword_init: true) do
+    def to_h
+      h = { name: name, description: description }
+      h[:inputSchema] = input_schema unless input_schema.nil?
+      h
+    end
+  end
+
+  # Declarative metadata for a canvas.
+  CanvasDeclaration = Struct.new(
+    :id, :display_name, :description, :input_schema, :actions,
+    keyword_init: true
+  ) do
+    def to_h
+      h = { id: id, displayName: display_name, description: description }
+      h[:inputSchema] = input_schema unless input_schema.nil?
+      h[:actions] = actions.map { |action| action.respond_to?(:to_h) ? action.to_h : action } unless actions.nil?
+      h
+    end
+  end
+
+  # Response returned when opening a canvas.
+  CanvasOpenResponse = Struct.new(:url, :title, :status, keyword_init: true) do
+    def to_h
+      h = {}
+      h[:url] = url if url
+      h[:title] = title if title
+      h[:status] = status if status
+      h
+    end
+  end
+
+  # Host capabilities passed to canvas callbacks.
+  CanvasHostCapabilities = Struct.new(:canvases, keyword_init: true) do
+    def self.from_hash(h)
+      h ||= {}
+      new(canvases: h.fetch("canvases", false))
+    end
+
+    def to_h
+      { canvases: !!canvases }
+    end
+  end
+
+  # Host context passed to canvas callbacks.
+  CanvasHostContext = Struct.new(:capabilities, keyword_init: true) do
+    def self.from_hash(h)
+      h ||= {}
+      new(capabilities: CanvasHostCapabilities.from_hash(h["capabilities"]))
+    end
+
+    def to_h
+      { capabilities: (capabilities || CanvasHostCapabilities.new(canvases: false)).to_h }
+    end
+  end
+
+  # Context provided when a canvas is opened.
+  CanvasOpenContext = Struct.new(
+    :session_id, :extension_id, :canvas_id, :instance_id, :input, :host,
+    keyword_init: true
+  ) do
+    def self.from_hash(h)
+      new(
+        session_id: h["sessionId"],
+        extension_id: h["extensionId"],
+        canvas_id: h["canvasId"],
+        instance_id: h["instanceId"],
+        input: h["input"],
+        host: h["host"] && CanvasHostContext.from_hash(h["host"])
+      )
+    end
+  end
+
+  # Context provided when a canvas action is invoked.
+  CanvasActionContext = Struct.new(
+    :session_id, :extension_id, :canvas_id, :instance_id, :action_name, :input, :host,
+    keyword_init: true
+  ) do
+    def self.from_hash(h)
+      new(
+        session_id: h["sessionId"],
+        extension_id: h["extensionId"],
+        canvas_id: h["canvasId"],
+        instance_id: h["instanceId"],
+        action_name: h["actionName"],
+        input: h["input"],
+        host: h["host"] && CanvasHostContext.from_hash(h["host"])
+      )
+    end
+  end
+
+  # Context provided for canvas lifecycle events.
+  CanvasLifecycleContext = Struct.new(
+    :session_id, :extension_id, :canvas_id, :instance_id, :host,
+    keyword_init: true
+  ) do
+    def self.from_hash(h)
+      new(
+        session_id: h["sessionId"],
+        extension_id: h["extensionId"],
+        canvas_id: h["canvasId"],
+        instance_id: h["instanceId"],
+        host: h["host"] && CanvasHostContext.from_hash(h["host"])
+      )
+    end
+  end
+
+  # GitHub repository metadata associated with a cloud session.
+  CloudSessionRepository = Struct.new(:owner, :name, :branch, keyword_init: true) do
+    def to_h
+      h = { owner: owner, name: name }
+      h[:branch] = branch if branch
+      h
+    end
+  end
+
+  # Cloud-session creation options.
+  CloudSessionOptions = Struct.new(:repository, keyword_init: true) do
+    def to_h
+      h = {}
+      h[:repository] = repository.respond_to?(:to_h) ? repository.to_h : repository if repository
+      h
+    end
+  end
+
   # System message in append mode (default).
   SystemMessageAppendConfig = Struct.new(:mode, :content, keyword_init: true) do
     def to_h
@@ -397,7 +523,13 @@ module Copilot
   )
 
   # Response format for message responses.
-  RESPONSE_FORMATS = %w[text image json_object].freeze
+  module ResponseFormat
+    TEXT = "text"
+    IMAGE = "image"
+    JSON_OBJECT = "json_object"
+  end
+
+  RESPONSE_FORMATS = [ResponseFormat::TEXT, ResponseFormat::IMAGE, ResponseFormat::JSON_OBJECT].freeze
 
   # Options for image generation.
   ImageOptions = Struct.new(:size, :quality, :style, keyword_init: true) do
@@ -742,6 +874,54 @@ module Copilot
     def rm(session_id, path, recursive: false) raise NotImplementedError end
     def rename(session_id, old_path, new_path) raise NotImplementedError end
   end
+
+  # --- Canvas Types ---
+
+  CanvasAction = Struct.new(:name, :description, :input_schema, keyword_init: true) do
+    def to_h
+      h = { name: name, description: description }
+      h[:inputSchema] = input_schema if input_schema
+      h
+    end
+  end
+
+  CanvasDeclaration = Struct.new(:id, :display_name, :description, :input_schema, :actions, keyword_init: true) do
+    def to_h
+      h = { id: id, displayName: display_name, description: description }
+      h[:inputSchema] = input_schema if input_schema
+      h[:actions] = actions&.map(&:to_h) if actions
+      h
+    end
+  end
+
+  CanvasOpenResponse = Struct.new(:url, :title, :status, keyword_init: true)
+  CanvasHostCapabilities = Struct.new(:canvases, keyword_init: true)
+  CanvasHostContext = Struct.new(:capabilities, keyword_init: true)
+  CanvasOpenContext = Struct.new(:session_id, :extension_id, :canvas_id, :instance_id, :input, :host, keyword_init: true)
+  CanvasActionContext = Struct.new(:session_id, :extension_id, :canvas_id, :instance_id, :action_name, :input, :host, keyword_init: true)
+  CanvasLifecycleContext = Struct.new(:session_id, :extension_id, :canvas_id, :instance_id, :host, keyword_init: true)
+
+  # --- Cloud Session Types ---
+
+  CloudSessionRepository = Struct.new(:owner, :name, :branch, keyword_init: true)
+  CloudSessionOptions = Struct.new(:repository, keyword_init: true)
+
+  # --- System Message Config Types ---
+
+  SystemMessageAppendConfig = Struct.new(:mode, :content, keyword_init: true)
+  SystemMessageReplaceConfig = Struct.new(:mode, :content, keyword_init: true)
+  SectionOverride = Struct.new(:action, :content, keyword_init: true)
+  SystemMessageCustomizeConfig = Struct.new(:mode, :sections, :content, keyword_init: true)
+
+  # --- User Input Types ---
+
+  UserInputRequest = Struct.new(:question, :choices, :allow_freeform, keyword_init: true)
+  UserInputResponse = Struct.new(:answer, :was_freeform, keyword_init: true)
+
+  # --- Image Generation Types ---
+
+  RESPONSE_FORMATS = %w[text image json_object].freeze
+  ImageOptions = Struct.new(:size, :quality, :style, keyword_init: true)
 
   # Client options.
   ClientOptions = Struct.new(

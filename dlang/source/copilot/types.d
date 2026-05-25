@@ -148,6 +148,124 @@ struct CommandDefinition
 }
 
 // ---------------------------------------------------------------------------
+// Cloud session / system message / canvas types
+// ---------------------------------------------------------------------------
+
+/// Repository metadata associated with a cloud session.
+struct CloudSessionRepository
+{
+    string owner;
+    string name;
+    Nullable!string branch;
+}
+
+/// Options for creating a cloud session.
+struct CloudSessionOptions
+{
+    Nullable!CloudSessionRepository repository;
+}
+
+/// Override operation for a single system prompt section.
+struct SectionOverride
+{
+    string action;
+    Nullable!string content;
+}
+
+/// Append-mode system message configuration.
+struct SystemMessageAppendConfig
+{
+    Nullable!string mode;
+    Nullable!string content;
+}
+
+/// Replace-mode system message configuration.
+struct SystemMessageReplaceConfig
+{
+    string mode = "replace";
+    string content;
+}
+
+/// Customize-mode system message configuration.
+struct SystemMessageCustomizeConfig
+{
+    string mode = "customize";
+    SectionOverride[string] sections;
+    Nullable!string content;
+}
+
+/// Metadata for an agent-callable canvas action.
+struct CanvasAction
+{
+    string name;
+    string description;
+    JSONValue inputSchema;
+}
+
+/// Declarative metadata for a canvas provided by the SDK.
+struct CanvasDeclaration
+{
+    string id;
+    string displayName;
+    string description;
+    JSONValue inputSchema;
+    CanvasAction[] actions;
+}
+
+/// Response returned by a canvas open handler.
+struct CanvasOpenResponse
+{
+    Nullable!string url;
+    Nullable!string title;
+    Nullable!string status;
+}
+
+/// Canvas-related capabilities reported by the host.
+struct CanvasHostCapabilities
+{
+    bool canvases = false;
+}
+
+/// Host context supplied alongside canvas callbacks.
+struct CanvasHostContext
+{
+    CanvasHostCapabilities capabilities;
+}
+
+/// Context passed to a canvas open handler.
+struct CanvasOpenContext
+{
+    string sessionId;
+    string extensionId;
+    string canvasId;
+    string instanceId;
+    JSONValue input;
+    Nullable!CanvasHostContext host;
+}
+
+/// Context passed to a canvas action handler.
+struct CanvasActionContext
+{
+    string sessionId;
+    string extensionId;
+    string canvasId;
+    string instanceId;
+    string actionName;
+    JSONValue input;
+    Nullable!CanvasHostContext host;
+}
+
+/// Lifecycle context for a canvas instance.
+struct CanvasLifecycleContext
+{
+    string sessionId;
+    string extensionId;
+    string canvasId;
+    string instanceId;
+    Nullable!CanvasHostContext host;
+}
+
+// ---------------------------------------------------------------------------
 // Image response format
 // ---------------------------------------------------------------------------
 
@@ -157,6 +275,31 @@ enum ImageResponseFormat : string
     text = "text",
     image = "image",
     jsonObject = "json_object",
+}
+
+alias ResponseFormat = ImageResponseFormat;
+
+/// Image generation options.
+struct ImageOptions
+{
+    Nullable!string size;
+    Nullable!string quality;
+    Nullable!string style;
+}
+
+/// Request for user input from the agent.
+struct UserInputRequest
+{
+    Nullable!string question;
+    Nullable!(string[]) choices;
+    Nullable!bool allowFreeform;
+}
+
+/// Response to a user input request.
+struct UserInputResponse
+{
+    string answer;
+    bool wasFreeform;
 }
 
 // ---------------------------------------------------------------------------

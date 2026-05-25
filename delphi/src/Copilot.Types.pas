@@ -29,11 +29,13 @@ type
   // User input handler callback
   TUserInputRequest = record
     Question: string;
-    SessionId: string;
+    Choices: TArray<string>;
+    AllowFreeform: Boolean;
+    HasAllowFreeform: Boolean;
   end;
   TUserInputResponse = record
     Answer: string;
-    Accepted: Boolean;
+    WasFreeform: Boolean;
   end;
   TUserInputHandler = reference to function(const Request: TUserInputRequest): TUserInputResponse;
 
@@ -123,13 +125,89 @@ type
     Action: TSectionOverrideAction;
     Content: string;
   end;
+  TSystemMessageAppendConfig = record
+    Mode: string;
+    Content: string;
+  end;
+  TSystemMessageReplaceConfig = record
+    Mode: string;
+    Content: string;
+  end;
+  TSystemMessageCustomizeConfig = record
+    Mode: string;
+    Sections: TDictionary<string, TSectionOverride>;
+    Content: string;
+  end;
   TSystemMessageConfig = record
     Mode: string; // 'default' or 'customize'
     Sections: TDictionary<string, TSectionOverride>;
   end;
 
+  // Cloud session types
+  TCloudSessionRepository = record
+    Owner: string;
+    Name: string;
+    Branch: string;
+  end;
+  TCloudSessionOptions = record
+    Repository: TCloudSessionRepository;
+    HasRepository: Boolean;
+  end;
+
+  // Canvas types
+  TCanvasAction = record
+    Name: string;
+    Description: string;
+    InputSchema: TJSONObject;
+  end;
+  TCanvasDeclaration = record
+    Id: string;
+    DisplayName: string;
+    Description: string;
+    InputSchema: TJSONObject;
+    Actions: TArray<TCanvasAction>;
+  end;
+  TCanvasOpenResponse = record
+    Url: string;
+    Title: string;
+    Status: string;
+  end;
+  TCanvasHostCapabilities = record
+    Canvases: Boolean;
+  end;
+  TCanvasHostContext = record
+    Capabilities: TCanvasHostCapabilities;
+  end;
+  TCanvasOpenContext = record
+    SessionId: string;
+    ExtensionId: string;
+    CanvasId: string;
+    InstanceId: string;
+    Input: TJSONValue;
+    Host: TCanvasHostContext;
+    HasHost: Boolean;
+  end;
+  TCanvasActionContext = record
+    SessionId: string;
+    ExtensionId: string;
+    CanvasId: string;
+    InstanceId: string;
+    ActionName: string;
+    Input: TJSONValue;
+    Host: TCanvasHostContext;
+    HasHost: Boolean;
+  end;
+  TCanvasLifecycleContext = record
+    SessionId: string;
+    ExtensionId: string;
+    CanvasId: string;
+    InstanceId: string;
+    Host: TCanvasHostContext;
+    HasHost: Boolean;
+  end;
+
   // Response format
-  TResponseFormat = (rfText, rfImage);
+  TResponseFormat = (rfText, rfImage, rfJsonObject);
 
   // Image options
   TImageOptions = record

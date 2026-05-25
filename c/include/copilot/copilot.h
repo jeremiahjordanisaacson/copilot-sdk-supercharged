@@ -146,6 +146,80 @@ typedef struct {
 } copilot_tool_t;
 
 /* ============================================================================
+ * Cloud session types
+ * ============================================================================ */
+
+typedef struct {
+    const char *owner;
+    const char *name;
+    const char *branch; /**< Optional branch (NULL if not set) */
+} copilot_cloud_session_repository_t;
+
+typedef struct {
+    const copilot_cloud_session_repository_t *repository; /**< Optional repository metadata */
+} copilot_cloud_session_options_t;
+
+/* ============================================================================
+ * Canvas types
+ * ============================================================================ */
+
+typedef struct {
+    const char *name;
+    const char *description;
+    const char *input_schema_json; /**< Optional JSON object string */
+} copilot_canvas_action_t;
+
+typedef struct {
+    const char *id;
+    const char *display_name;
+    const char *description;
+    const char *input_schema_json; /**< Optional JSON object string */
+    const copilot_canvas_action_t *actions; /**< Array of actions, or NULL */
+    size_t actions_count;
+} copilot_canvas_declaration_t;
+
+typedef struct {
+    const char *url;   /**< Optional URL */
+    const char *title; /**< Optional title */
+    const char *status; /**< Optional status */
+} copilot_canvas_open_response_t;
+
+typedef struct {
+    bool canvases; /**< Default: false */
+} copilot_canvas_host_capabilities_t;
+
+typedef struct {
+    copilot_canvas_host_capabilities_t capabilities;
+} copilot_canvas_host_context_t;
+
+typedef struct {
+    const char *session_id;
+    const char *extension_id;
+    const char *canvas_id;
+    const char *instance_id;
+    const char *input_json;
+    const copilot_canvas_host_context_t *host; /**< Optional */
+} copilot_canvas_open_context_t;
+
+typedef struct {
+    const char *session_id;
+    const char *extension_id;
+    const char *canvas_id;
+    const char *instance_id;
+    const char *action_name;
+    const char *input_json;
+    const copilot_canvas_host_context_t *host; /**< Optional */
+} copilot_canvas_action_context_t;
+
+typedef struct {
+    const char *session_id;
+    const char *extension_id;
+    const char *canvas_id;
+    const char *instance_id;
+    const copilot_canvas_host_context_t *host; /**< Optional */
+} copilot_canvas_lifecycle_context_t;
+
+/* ============================================================================
  * Session event types
  * ============================================================================ */
 
@@ -212,10 +286,11 @@ typedef copilot_error_t (*copilot_permission_handler_fn)(
  * ============================================================================ */
 
 typedef struct {
-    const char *question;
+    const char *question;       /**< Optional question text, or NULL */
     const char **choices;       /**< NULL-terminated array, or NULL if no choices */
     int choices_count;
-    bool allow_freeform;
+    bool allow_freeform;        /**< Value when has_allow_freeform is true */
+    bool has_allow_freeform;    /**< Whether allow_freeform was provided */
 } copilot_user_input_request_t;
 
 typedef struct {
@@ -282,6 +357,23 @@ typedef struct {
     const char *section;                    /**< Section identifier (use COPILOT_SECTION_* constants) */
     copilot_section_override_t override;    /**< The override to apply */
 } copilot_section_override_entry_t;
+
+typedef struct {
+    const char *mode;       /**< Optional mode literal "append"; NULL implies default append mode */
+    const char *content;    /**< Optional content to append */
+} copilot_system_message_append_config_t;
+
+typedef struct {
+    const char *mode;       /**< Required literal "replace" */
+    const char *content;    /**< Required replacement content */
+} copilot_system_message_replace_config_t;
+
+typedef struct {
+    const char *mode;       /**< Required literal "customize" */
+    const char *content;    /**< Optional additional content */
+    const copilot_section_override_entry_t *section_overrides; /**< Optional array of section overrides */
+    size_t section_overrides_count;
+} copilot_system_message_customize_config_t;
 
 typedef struct {
     const char *mode;       /**< "append" (default), "replace", or "customize" */

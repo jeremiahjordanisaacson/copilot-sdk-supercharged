@@ -182,14 +182,133 @@ type CommandDefinition =
       Description: string option }
 
 // ---------------------------------------------------------------------------
-// Response format / image options
+// Canvas / cloud session / system message types
 // ---------------------------------------------------------------------------
+
+/// Repository metadata associated with a cloud session.
+type CloudSessionRepository =
+    { Owner: string
+      Name: string
+      Branch: string option }
+
+/// Options for creating a cloud session.
+type CloudSessionOptions =
+    { Repository: CloudSessionRepository option }
+
+/// Override operation for a single system prompt section.
+type SectionOverride =
+    { Action: string
+      Content: string option }
+
+/// Append-mode system message configuration.
+type SystemMessageAppendConfig =
+    { Mode: string option
+      Content: string option }
+
+/// Replace-mode system message configuration.
+type SystemMessageReplaceConfig =
+    { Mode: string
+      Content: string }
+
+/// Customize-mode system message configuration.
+type SystemMessageCustomizeConfig =
+    { Mode: string
+      Sections: IDictionary<string, SectionOverride> option
+      Content: string option }
+
+/// Metadata for an agent-callable canvas action.
+type CanvasAction =
+    { Name: string
+      Description: string
+      [<JsonPropertyName("inputSchema")>]
+      InputSchema: IDictionary<string, obj> option }
+
+/// Declarative metadata for a canvas provided by the SDK.
+type CanvasDeclaration =
+    { Id: string
+      [<JsonPropertyName("displayName")>]
+      DisplayName: string
+      Description: string
+      [<JsonPropertyName("inputSchema")>]
+      InputSchema: IDictionary<string, obj> option
+      Actions: CanvasAction list option }
+
+/// Response returned by a canvas open handler.
+type CanvasOpenResponse =
+    { Url: string option
+      Title: string option
+      Status: string option }
+
+/// Canvas-related capabilities reported by the host.
+type CanvasHostCapabilities =
+    { Canvases: bool }
+
+/// Host context supplied alongside canvas callbacks.
+type CanvasHostContext =
+    { Capabilities: CanvasHostCapabilities }
+
+/// Context passed to a canvas open handler.
+type CanvasOpenContext =
+    { SessionId: string
+      ExtensionId: string
+      CanvasId: string
+      InstanceId: string
+      Input: JsonElement option
+      Host: CanvasHostContext option }
+
+/// Context passed to a canvas action handler.
+type CanvasActionContext =
+    { SessionId: string
+      ExtensionId: string
+      CanvasId: string
+      InstanceId: string
+      [<JsonPropertyName("actionName")>]
+      ActionName: string
+      Input: JsonElement option
+      Host: CanvasHostContext option }
+
+/// Lifecycle context for a canvas instance.
+type CanvasLifecycleContext =
+    { SessionId: string
+      ExtensionId: string
+      CanvasId: string
+      InstanceId: string
+      Host: CanvasHostContext option }
+
+// ---------------------------------------------------------------------------
+// Response format / image options / user input types
+// ---------------------------------------------------------------------------
+
+/// Response format for messages.
+type ResponseFormat =
+    | Text
+    | Image
+    | JsonObject
+
+module ResponseFormat =
+    let toWireString = function
+        | Text -> "text"
+        | Image -> "image"
+        | JsonObject -> "json_object"
 
 /// Image generation options.
 type ImageOptions =
     { Size: string option
       Quality: string option
       Style: string option }
+
+/// Request for user input from the agent.
+type UserInputRequest =
+    { Question: string option
+      Choices: string list option
+      [<JsonPropertyName("allowFreeform")>]
+      AllowFreeform: bool option }
+
+/// Response to a user input request.
+type UserInputResponse =
+    { Answer: string
+      [<JsonPropertyName("wasFreeform")>]
+      WasFreeform: bool }
 
 // ---------------------------------------------------------------------------
 // Attachments

@@ -123,6 +123,150 @@ pub:
 	error  string [json: 'error']
 }
 
+// CloudSessionRepository describes repository metadata for a cloud session.
+pub struct CloudSessionRepository {
+pub:
+owner  string  [json: 'owner']
+name   string  [json: 'name']
+branch ?string [json: 'branch']
+}
+
+// CloudSessionOptions configures remote cloud session creation.
+pub struct CloudSessionOptions {
+pub:
+repository ?CloudSessionRepository [json: 'repository']
+}
+
+// CanvasAction describes an agent-callable action contributed by a canvas.
+pub struct CanvasAction {
+pub:
+name         string               [json: 'name']
+description  string               [json: 'description']
+input_schema ?map[string]json.Any [json: 'inputSchema']
+}
+
+// CanvasDeclaration is the wire declaration for a canvas.
+pub struct CanvasDeclaration {
+pub:
+id           string               [json: 'id']
+display_name string               [json: 'displayName']
+description  string               [json: 'description']
+input_schema ?map[string]json.Any [json: 'inputSchema']
+actions      ?[]CanvasAction      [json: 'actions']
+}
+
+// CanvasOpenResponse is returned from a canvas open handler.
+pub struct CanvasOpenResponse {
+pub:
+url    ?string [json: 'url']
+title  ?string [json: 'title']
+status ?string [json: 'status']
+}
+
+// CanvasHostCapabilities describes host support for canvas rendering.
+pub struct CanvasHostCapabilities {
+pub:
+canvases bool [json: 'canvases']
+}
+
+// CanvasHostContext contains host capability details.
+pub struct CanvasHostContext {
+pub:
+capabilities CanvasHostCapabilities [json: 'capabilities']
+}
+
+// CanvasOpenContext is passed to a canvas open handler.
+pub struct CanvasOpenContext {
+pub:
+session_id   string             [json: 'sessionId']
+extension_id string             [json: 'extensionId']
+canvas_id    string             [json: 'canvasId']
+instance_id  string             [json: 'instanceId']
+input        ?json.Any          [json: 'input']
+host         ?CanvasHostContext [json: 'host']
+}
+
+// CanvasActionContext is passed to a canvas action handler.
+pub struct CanvasActionContext {
+pub:
+session_id   string             [json: 'sessionId']
+extension_id string             [json: 'extensionId']
+canvas_id    string             [json: 'canvasId']
+instance_id  string             [json: 'instanceId']
+action_name  string             [json: 'actionName']
+input        ?json.Any          [json: 'input']
+host         ?CanvasHostContext [json: 'host']
+}
+
+// CanvasLifecycleContext is passed to a canvas lifecycle handler.
+pub struct CanvasLifecycleContext {
+pub:
+session_id   string             [json: 'sessionId']
+extension_id string             [json: 'extensionId']
+canvas_id    string             [json: 'canvasId']
+instance_id  string             [json: 'instanceId']
+host         ?CanvasHostContext [json: 'host']
+}
+
+// SectionOverride defines a single system prompt section override.
+pub struct SectionOverride {
+pub:
+action  string  [json: 'action']
+content ?string [json: 'content']
+}
+
+// SystemMessageAppendConfig appends custom content after SDK-managed sections.
+pub struct SystemMessageAppendConfig {
+pub:
+mode    string  [json: 'mode'] = 'append'
+content ?string [json: 'content']
+}
+
+// SystemMessageReplaceConfig replaces the entire system message.
+pub struct SystemMessageReplaceConfig {
+pub:
+mode    string [json: 'mode'] = 'replace'
+content string [json: 'content']
+}
+
+// SystemMessageCustomizeConfig customizes individual prompt sections.
+pub struct SystemMessageCustomizeConfig {
+pub:
+mode     string                    [json: 'mode'] = 'customize'
+sections ?map[string]SectionOverride [json: 'sections']
+content  ?string                   [json: 'content']
+}
+
+// UserInputRequest asks the host for structured or freeform user input.
+pub struct UserInputRequest {
+pub:
+question       ?string   [json: 'question']
+choices        ?[]string [json: 'choices']
+allow_freeform ?bool     [json: 'allowFreeform']
+}
+
+// UserInputResponse is returned by the host after a user-input request.
+pub struct UserInputResponse {
+pub:
+answer        string [json: 'answer']
+was_freeform  bool   [json: 'wasFreeform']
+}
+
+// ResponseFormat selects the desired model response format.
+pub enum ResponseFormat {
+text
+image
+json_object
+}
+
+// ImageOptions configures image generation requests.
+pub struct ImageOptions {
+pub:
+size    ?string [json: 'size']
+quality ?string [json: 'quality']
+style   ?string [json: 'style']
+}
+
 // PermissionRequest is emitted when the model requests elevated permissions.
 pub struct PermissionRequest {
 pub:

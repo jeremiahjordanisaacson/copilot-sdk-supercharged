@@ -231,6 +231,209 @@ typedef NS_ENUM(NSInteger, CPRemoteSessionMode) {
 
 @end
 
+#pragma mark - Cloud Session
+
+/// GitHub repository metadata associated with a cloud session.
+@interface CPCloudSessionRepository : NSObject
+
+@property (nonatomic, copy) NSString *owner;
+@property (nonatomic, copy) NSString *name;
+@property (nonatomic, copy, nullable) NSString *branch;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+/// Options for creating a remote session in the cloud.
+@interface CPCloudSessionOptions : NSObject
+
+@property (nonatomic, strong, nullable) CPCloudSessionRepository *repository;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+#pragma mark - Canvas Types
+
+/// A single agent-callable action contributed by a canvas.
+@interface CPCanvasAction : NSObject
+
+@property (nonatomic, copy) NSString *name;
+@property (nonatomic, copy) NSString *actionDescription;
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *inputSchema;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+/// Declarative metadata for a single canvas.
+@interface CPCanvasDeclaration : NSObject
+
+@property (nonatomic, copy) NSString *canvasId;
+@property (nonatomic, copy) NSString *displayName;
+@property (nonatomic, copy) NSString *canvasDescription;
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *inputSchema;
+@property (nonatomic, copy, nullable) NSArray<CPCanvasAction *> *actions;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+/// Response returned from a canvas open handler.
+@interface CPCanvasOpenResponse : NSObject
+
+@property (nonatomic, copy, nullable) NSString *url;
+@property (nonatomic, copy, nullable) NSString *title;
+@property (nonatomic, copy, nullable) NSString *status;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+/// Host capability details passed to canvas callbacks.
+@interface CPCanvasHostCapabilities : NSObject
+
+@property (nonatomic, assign) BOOL canvases;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+
+@end
+
+/// Host context passed to canvas callbacks.
+@interface CPCanvasHostContext : NSObject
+
+@property (nonatomic, strong) CPCanvasHostCapabilities *capabilities;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+
+@end
+
+/// Context handed to a canvas open handler.
+@interface CPCanvasOpenContext : NSObject
+
+@property (nonatomic, copy) NSString *sessionId;
+@property (nonatomic, copy) NSString *extensionId;
+@property (nonatomic, copy) NSString *canvasId;
+@property (nonatomic, copy) NSString *instanceId;
+@property (nonatomic, strong) id input;
+@property (nonatomic, strong, nullable) CPCanvasHostContext *host;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+
+@end
+
+/// Context handed to a canvas action handler.
+@interface CPCanvasActionContext : NSObject
+
+@property (nonatomic, copy) NSString *sessionId;
+@property (nonatomic, copy) NSString *extensionId;
+@property (nonatomic, copy) NSString *canvasId;
+@property (nonatomic, copy) NSString *instanceId;
+@property (nonatomic, copy) NSString *actionName;
+@property (nonatomic, strong) id input;
+@property (nonatomic, strong, nullable) CPCanvasHostContext *host;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+
+@end
+
+/// Context handed to a canvas lifecycle handler.
+@interface CPCanvasLifecycleContext : NSObject
+
+@property (nonatomic, copy) NSString *sessionId;
+@property (nonatomic, copy) NSString *extensionId;
+@property (nonatomic, copy) NSString *canvasId;
+@property (nonatomic, copy) NSString *instanceId;
+@property (nonatomic, strong, nullable) CPCanvasHostContext *host;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+
+@end
+
+#pragma mark - System Message Configuration
+
+/// Override operation for a single system prompt section.
+@interface CPSectionOverride : NSObject
+
+@property (nonatomic, copy) NSString *action;
+@property (nonatomic, copy, nullable) NSString *content;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+/// System message in append mode (default).
+@interface CPSystemMessageAppendConfig : NSObject
+
+@property (nonatomic, copy, nullable) NSString *content;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+/// System message in replace mode.
+@interface CPSystemMessageReplaceConfig : NSObject
+
+@property (nonatomic, copy) NSString *content;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+/// System message in customize mode.
+@interface CPSystemMessageCustomizeConfig : NSObject
+
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, CPSectionOverride *> *sections;
+@property (nonatomic, copy, nullable) NSString *content;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+#pragma mark - User Input Types
+
+/// Request for user input from the agent.
+@interface CPUserInputRequest : NSObject
+
+@property (nonatomic, copy, nullable) NSString *question;
+@property (nonatomic, copy, nullable) NSArray<NSString *> *choices;
+@property (nonatomic, strong, nullable) NSNumber *allowFreeform;
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict;
+
+@end
+
+/// Response to a user input request.
+@interface CPUserInputResponse : NSObject
+
+@property (nonatomic, copy) NSString *answer;
+@property (nonatomic, assign) BOOL wasFreeform;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
+#pragma mark - Response Format
+
+/// Response format for message responses.
+typedef NS_ENUM(NSInteger, CPResponseFormat) {
+    CPResponseFormatText = 0,
+    CPResponseFormatImage,
+    CPResponseFormatJSONObject,
+};
+
+/// Options for image generation.
+@interface CPImageOptions : NSObject
+
+@property (nonatomic, copy, nullable) NSString *size;
+@property (nonatomic, copy, nullable) NSString *quality;
+@property (nonatomic, copy, nullable) NSString *style;
+
+- (NSDictionary<NSString *, id> *)toDictionary;
+
+@end
+
 #pragma mark - Session Event
 
 /// An event received from the session.

@@ -111,6 +111,180 @@ struct Tool {
 };
 
 // ============================================================================
+// Cloud Session Types
+// ============================================================================
+
+struct CloudSessionRepository {
+    std::string owner;
+    std::string name;
+    std::optional<std::string> branch;
+};
+
+inline void to_json(nlohmann::json& j, const CloudSessionRepository& r) {
+    j = {{"owner", r.owner}, {"name", r.name}};
+    if (r.branch) j["branch"] = *r.branch;
+}
+
+inline void from_json(const nlohmann::json& j, CloudSessionRepository& r) {
+    j.at("owner").get_to(r.owner);
+    j.at("name").get_to(r.name);
+    if (j.contains("branch")) r.branch = j["branch"].get<std::string>();
+}
+
+struct CloudSessionOptions {
+    std::optional<CloudSessionRepository> repository;
+};
+
+inline void to_json(nlohmann::json& j, const CloudSessionOptions& o) {
+    j = nlohmann::json::object();
+    if (o.repository) j["repository"] = *o.repository;
+}
+
+inline void from_json(const nlohmann::json& j, CloudSessionOptions& o) {
+    if (j.contains("repository")) o.repository = j["repository"].get<CloudSessionRepository>();
+}
+
+// ============================================================================
+// Canvas Types
+// ============================================================================
+
+struct CanvasAction {
+    std::string name;
+    std::string description;
+    std::optional<nlohmann::json> inputSchema;
+};
+
+inline void to_json(nlohmann::json& j, const CanvasAction& a) {
+    j = {{"name", a.name}, {"description", a.description}};
+    if (a.inputSchema) j["inputSchema"] = *a.inputSchema;
+}
+
+inline void from_json(const nlohmann::json& j, CanvasAction& a) {
+    j.at("name").get_to(a.name);
+    j.at("description").get_to(a.description);
+    if (j.contains("inputSchema")) a.inputSchema = j["inputSchema"];
+}
+
+struct CanvasDeclaration {
+    std::string id;
+    std::string displayName;
+    std::string description;
+    std::optional<nlohmann::json> inputSchema;
+    std::optional<std::vector<CanvasAction>> actions;
+};
+
+inline void to_json(nlohmann::json& j, const CanvasDeclaration& d) {
+    j = {{"id", d.id}, {"displayName", d.displayName}, {"description", d.description}};
+    if (d.inputSchema) j["inputSchema"] = *d.inputSchema;
+    if (d.actions) j["actions"] = *d.actions;
+}
+
+inline void from_json(const nlohmann::json& j, CanvasDeclaration& d) {
+    j.at("id").get_to(d.id);
+    j.at("displayName").get_to(d.displayName);
+    j.at("description").get_to(d.description);
+    if (j.contains("inputSchema")) d.inputSchema = j["inputSchema"];
+    if (j.contains("actions")) d.actions = j["actions"].get<std::vector<CanvasAction>>();
+}
+
+struct CanvasOpenResponse {
+    std::optional<std::string> url;
+    std::optional<std::string> title;
+    std::optional<std::string> status;
+};
+
+inline void to_json(nlohmann::json& j, const CanvasOpenResponse& r) {
+    j = nlohmann::json::object();
+    if (r.url) j["url"] = *r.url;
+    if (r.title) j["title"] = *r.title;
+    if (r.status) j["status"] = *r.status;
+}
+
+inline void from_json(const nlohmann::json& j, CanvasOpenResponse& r) {
+    if (j.contains("url")) r.url = j["url"].get<std::string>();
+    if (j.contains("title")) r.title = j["title"].get<std::string>();
+    if (j.contains("status")) r.status = j["status"].get<std::string>();
+}
+
+struct CanvasHostCapabilities {
+    bool canvases = false;
+};
+
+inline void to_json(nlohmann::json& j, const CanvasHostCapabilities& c) {
+    j = {{"canvases", c.canvases}};
+}
+
+inline void from_json(const nlohmann::json& j, CanvasHostCapabilities& c) {
+    if (j.contains("canvases")) j["canvases"].get_to(c.canvases);
+}
+
+struct CanvasHostContext {
+    CanvasHostCapabilities capabilities;
+};
+
+inline void to_json(nlohmann::json& j, const CanvasHostContext& c) {
+    j = {{"capabilities", c.capabilities}};
+}
+
+inline void from_json(const nlohmann::json& j, CanvasHostContext& c) {
+    if (j.contains("capabilities")) j["capabilities"].get_to(c.capabilities);
+}
+
+struct CanvasOpenContext {
+    std::string sessionId;
+    std::string extensionId;
+    std::string canvasId;
+    std::string instanceId;
+    nlohmann::json input;
+    std::optional<CanvasHostContext> host;
+};
+
+inline void from_json(const nlohmann::json& j, CanvasOpenContext& c) {
+    j.at("sessionId").get_to(c.sessionId);
+    j.at("extensionId").get_to(c.extensionId);
+    j.at("canvasId").get_to(c.canvasId);
+    j.at("instanceId").get_to(c.instanceId);
+    if (j.contains("input")) c.input = j["input"];
+    if (j.contains("host")) c.host = j["host"].get<CanvasHostContext>();
+}
+
+struct CanvasActionContext {
+    std::string sessionId;
+    std::string extensionId;
+    std::string canvasId;
+    std::string instanceId;
+    std::string actionName;
+    nlohmann::json input;
+    std::optional<CanvasHostContext> host;
+};
+
+inline void from_json(const nlohmann::json& j, CanvasActionContext& c) {
+    j.at("sessionId").get_to(c.sessionId);
+    j.at("extensionId").get_to(c.extensionId);
+    j.at("canvasId").get_to(c.canvasId);
+    j.at("instanceId").get_to(c.instanceId);
+    j.at("actionName").get_to(c.actionName);
+    if (j.contains("input")) c.input = j["input"];
+    if (j.contains("host")) c.host = j["host"].get<CanvasHostContext>();
+}
+
+struct CanvasLifecycleContext {
+    std::string sessionId;
+    std::string extensionId;
+    std::string canvasId;
+    std::string instanceId;
+    std::optional<CanvasHostContext> host;
+};
+
+inline void from_json(const nlohmann::json& j, CanvasLifecycleContext& c) {
+    j.at("sessionId").get_to(c.sessionId);
+    j.at("extensionId").get_to(c.extensionId);
+    j.at("canvasId").get_to(c.canvasId);
+    j.at("instanceId").get_to(c.instanceId);
+    if (j.contains("host")) c.host = j["host"].get<CanvasHostContext>();
+}
+
+// ============================================================================
 // System Message Configuration
 // ============================================================================
 
@@ -150,6 +324,38 @@ inline void to_json(nlohmann::json& j, const SectionOverride& o) {
 inline void from_json(const nlohmann::json& j, SectionOverride& o) {
     j.at("action").get_to(o.action);
     if (j.contains("content")) o.content = j["content"].get<std::string>();
+}
+
+struct SystemMessageAppendConfig {
+    std::optional<std::string> mode = std::string("append");
+    std::optional<std::string> content;
+};
+
+inline void to_json(nlohmann::json& j, const SystemMessageAppendConfig& c) {
+    j = nlohmann::json::object();
+    if (c.mode) j["mode"] = *c.mode;
+    if (c.content) j["content"] = *c.content;
+}
+
+struct SystemMessageReplaceConfig {
+    std::string mode = "replace";
+    std::string content;
+};
+
+inline void to_json(nlohmann::json& j, const SystemMessageReplaceConfig& c) {
+    j = {{"mode", c.mode}, {"content", c.content}};
+}
+
+struct SystemMessageCustomizeConfig {
+    std::string mode = "customize";
+    std::optional<std::map<std::string, SectionOverride>> sections;
+    std::optional<std::string> content;
+};
+
+inline void to_json(nlohmann::json& j, const SystemMessageCustomizeConfig& c) {
+    j = {{"mode", c.mode}};
+    if (c.sections) j["sections"] = *c.sections;
+    if (c.content) j["content"] = *c.content;
 }
 
 /// System message configuration for session creation.
@@ -337,13 +543,13 @@ using PermissionHandler = std::function<PermissionRequestResult(
 // ============================================================================
 
 struct UserInputRequest {
-    std::string question;
+    std::optional<std::string> question;
     std::optional<std::vector<std::string>> choices;
     std::optional<bool> allowFreeform;
 };
 
 inline void from_json(const nlohmann::json& j, UserInputRequest& r) {
-    j.at("question").get_to(r.question);
+    if (j.contains("question")) r.question = j["question"].get<std::string>();
     if (j.contains("choices")) r.choices = j["choices"].get<std::vector<std::string>>();
     if (j.contains("allowFreeform")) r.allowFreeform = j["allowFreeform"].get<bool>();
 }
@@ -832,22 +1038,22 @@ inline std::string responseFormatToString(ResponseFormat format) {
 
 /** Options for image generation. */
 struct ImageOptions {
-    std::string size;       // e.g. "1024x1024"
-    std::string quality;    // "hd" or "standard"
-    std::string style;      // "natural" or "vivid"
+    std::optional<std::string> size;       // e.g. "1024x1024"
+    std::optional<std::string> quality;    // "hd" or "standard"
+    std::optional<std::string> style;      // "natural" or "vivid"
 };
 
 inline void to_json(nlohmann::json& j, const ImageOptions& o) {
     j = nlohmann::json::object();
-    if (!o.size.empty()) j["size"] = o.size;
-    if (!o.quality.empty()) j["quality"] = o.quality;
-    if (!o.style.empty()) j["style"] = o.style;
+    if (o.size) j["size"] = *o.size;
+    if (o.quality) j["quality"] = *o.quality;
+    if (o.style) j["style"] = *o.style;
 }
 
 inline void from_json(const nlohmann::json& j, ImageOptions& o) {
-    if (j.contains("size")) j["size"].get_to(o.size);
-    if (j.contains("quality")) j["quality"].get_to(o.quality);
-    if (j.contains("style")) j["style"].get_to(o.style);
+    if (j.contains("size")) o.size = j["size"].get<std::string>();
+    if (j.contains("quality")) o.quality = j["quality"].get<std::string>();
+    if (j.contains("style")) o.style = j["style"].get<std::string>();
 }
 
 /** Image data from an assistant image response. */

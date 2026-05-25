@@ -128,15 +128,23 @@ proc handleServerRequest(client: CopilotClient; msg: JsonNode) =
     client.writeMessage(resp)
 
   of "userInput.request":
-    var answer = ""
+    var result = UserInputResponse(answer: "", wasFreeform: false)
     if not client.userInputHandler.isNil:
-      let req = UserInputRequest(
-        id: params{"id"}.getStr(),
-        prompt: params{"prompt"}.getStr(),
-      )
-      answer = client.userInputHandler(req)
+      var choices = none(seq[string])
+      if params.hasKey("choices"):
+        var values: seq[string] = @[]
+        for choice in params["choices"]:
+          values.add(choice.getStr())
+        choices = some(values)
 
-    let resp = buildResponse(id, %*{"response": answer})
+      let req = UserInputRequest(
+        question: if params.hasKey("question"): some(params{"question"}.getStr()) else: none(string),
+        choices: choices,
+        allowFreeform: if params.hasKey("allowFreeform"): some(params{"allowFreeform"}.getBool()) else: none(bool),
+      )
+      result = client.userInputHandler(req)
+
+    let resp = buildResponse(id, %*{"answer": result.answer, "wasFreeform": result.wasFreeform})
     client.writeMessage(resp)
 
   of "elicitation.request":

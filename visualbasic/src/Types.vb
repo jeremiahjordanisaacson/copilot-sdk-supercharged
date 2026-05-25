@@ -181,6 +181,198 @@ Namespace GitHub.Copilot.SDK
     End Class
 
     ' -----------------------------------------------------------------------
+    '  Cloud session / system message / canvas types
+    ' -----------------------------------------------------------------------
+
+    Public Class CloudSessionRepository
+
+        <JsonPropertyName("owner")>
+        Public Property Owner As String
+
+        <JsonPropertyName("name")>
+        Public Property Name As String
+
+        <JsonPropertyName("branch")>
+        Public Property Branch As String
+
+    End Class
+
+    Public Class CloudSessionOptions
+
+        <JsonPropertyName("repository")>
+        Public Property Repository As CloudSessionRepository
+
+    End Class
+
+    Public Class SectionOverride
+
+        <JsonPropertyName("action")>
+        Public Property Action As String
+
+        <JsonPropertyName("content")>
+        Public Property Content As String
+
+    End Class
+
+    Public Class SystemMessageAppendConfig
+
+        <JsonPropertyName("mode")>
+        Public Property Mode As String
+
+        <JsonPropertyName("content")>
+        Public Property Content As String
+
+    End Class
+
+    Public Class SystemMessageReplaceConfig
+
+        <JsonPropertyName("mode")>
+        Public Property Mode As String = "replace"
+
+        <JsonPropertyName("content")>
+        Public Property Content As String
+
+    End Class
+
+    Public Class SystemMessageCustomizeConfig
+
+        <JsonPropertyName("mode")>
+        Public Property Mode As String = "customize"
+
+        <JsonPropertyName("sections")>
+        Public Property Sections As Dictionary(Of String, SectionOverride)
+
+        <JsonPropertyName("content")>
+        Public Property Content As String
+
+    End Class
+
+    Public Class CanvasAction
+
+        <JsonPropertyName("name")>
+        Public Property Name As String
+
+        <JsonPropertyName("description")>
+        Public Property Description As String
+
+        <JsonPropertyName("inputSchema")>
+        Public Property InputSchema As Dictionary(Of String, Object)
+
+    End Class
+
+    Public Class CanvasDeclaration
+
+        <JsonPropertyName("id")>
+        Public Property Id As String
+
+        <JsonPropertyName("displayName")>
+        Public Property DisplayName As String
+
+        <JsonPropertyName("description")>
+        Public Property Description As String
+
+        <JsonPropertyName("inputSchema")>
+        Public Property InputSchema As Dictionary(Of String, Object)
+
+        <JsonPropertyName("actions")>
+        Public Property Actions As List(Of CanvasAction)
+
+    End Class
+
+    Public Class CanvasOpenResponse
+
+        <JsonPropertyName("url")>
+        Public Property Url As String
+
+        <JsonPropertyName("title")>
+        Public Property Title As String
+
+        <JsonPropertyName("status")>
+        Public Property Status As String
+
+    End Class
+
+    Public Class CanvasHostCapabilities
+
+        <JsonPropertyName("canvases")>
+        Public Property Canvases As Boolean = False
+
+    End Class
+
+    Public Class CanvasHostContext
+
+        <JsonPropertyName("capabilities")>
+        Public Property Capabilities As CanvasHostCapabilities
+
+    End Class
+
+    Public Class CanvasOpenContext
+
+        <JsonPropertyName("sessionId")>
+        Public Property SessionId As String
+
+        <JsonPropertyName("extensionId")>
+        Public Property ExtensionId As String
+
+        <JsonPropertyName("canvasId")>
+        Public Property CanvasId As String
+
+        <JsonPropertyName("instanceId")>
+        Public Property InstanceId As String
+
+        <JsonPropertyName("input")>
+        Public Property Input As Object
+
+        <JsonPropertyName("host")>
+        Public Property Host As CanvasHostContext
+
+    End Class
+
+    Public Class CanvasActionContext
+
+        <JsonPropertyName("sessionId")>
+        Public Property SessionId As String
+
+        <JsonPropertyName("extensionId")>
+        Public Property ExtensionId As String
+
+        <JsonPropertyName("canvasId")>
+        Public Property CanvasId As String
+
+        <JsonPropertyName("instanceId")>
+        Public Property InstanceId As String
+
+        <JsonPropertyName("actionName")>
+        Public Property ActionName As String
+
+        <JsonPropertyName("input")>
+        Public Property Input As Object
+
+        <JsonPropertyName("host")>
+        Public Property Host As CanvasHostContext
+
+    End Class
+
+    Public Class CanvasLifecycleContext
+
+        <JsonPropertyName("sessionId")>
+        Public Property SessionId As String
+
+        <JsonPropertyName("extensionId")>
+        Public Property ExtensionId As String
+
+        <JsonPropertyName("canvasId")>
+        Public Property CanvasId As String
+
+        <JsonPropertyName("instanceId")>
+        Public Property InstanceId As String
+
+        <JsonPropertyName("host")>
+        Public Property Host As CanvasHostContext
+
+    End Class
+
+    ' -----------------------------------------------------------------------
     '  Message types
     ' -----------------------------------------------------------------------
 
@@ -420,11 +612,27 @@ Namespace GitHub.Copilot.SDK
     ''' </summary>
     Public Class UserInputRequest
 
-        <JsonPropertyName("prompt")>
-        Public Property Prompt As String
+        <JsonPropertyName("question")>
+        Public Property Question As String
 
-        <JsonPropertyName("placeholder")>
-        Public Property Placeholder As String
+        <JsonPropertyName("choices")>
+        Public Property Choices As List(Of String)
+
+        <JsonPropertyName("allowFreeform")>
+        Public Property AllowFreeform As Boolean? = Nothing
+
+    End Class
+
+    ''' <summary>
+    ''' Response to a user-input request.
+    ''' </summary>
+    Public Class UserInputResponse
+
+        <JsonPropertyName("answer")>
+        Public Property Answer As String
+
+        <JsonPropertyName("wasFreeform")>
+        Public Property WasFreeform As Boolean
 
     End Class
 

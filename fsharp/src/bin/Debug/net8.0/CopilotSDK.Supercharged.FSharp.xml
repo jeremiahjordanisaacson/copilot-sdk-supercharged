@@ -22,6 +22,75 @@
  Information about an available model.
 </summary>
 </member>
+<member name="T:CopilotSDK.Supercharged.FSharp.RemoteEnableResult">
+<summary>
+ Experimental
+ Result of enabling remote mode.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.RemoteEnableRequest">
+<summary>
+ Experimental
+ Request to enable remote mode.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.RemoteSessionMode">
+<summary>
+ Experimental
+ Mode for remote sessions.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SkillsLoadDiagnostics">
+<summary>
+ Experimental
+ Diagnostics from loading skills.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ModelBilling">
+<summary>
+ Model billing information.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ModelBillingTokenPrices">
+<summary>
+ Token prices for model billing.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CommandsListRequest">
+<summary>
+ Request to list available commands.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CommandsInvokeRequest">
+<summary>
+ Request to invoke a command.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SlashCommandInfo">
+<summary>
+ Information about a slash command.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SlashCommandInput">
+<summary>
+ Input specification for a slash command.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ModelPickerPriceCategory">
+<summary>
+ Price category for the model picker.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SlashCommandKind">
+<summary>
+ Kind of a slash command.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SlashCommandInputCompletion">
+<summary>
+ Completion type for slash command input.
+</summary>
+</member>
 <member name="T:CopilotSDK.Supercharged.FSharp.SessionEventEnvelope">
 <summary>
  Envelope wrapping a session event with metadata.
@@ -117,6 +186,11 @@
  Directories to search for instruction files.
 </summary>
 </member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.OnExitPlanMode">
+<summary>
+ Handler for exit plan mode requests from the server.
+</summary>
+</member>
 <member name="P:CopilotSDK.Supercharged.FSharp.ResumeSessionConfig.Model">
 <summary>
  Model override for the resumed session.
@@ -145,6 +219,11 @@
 <member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.GitHubToken">
 <summary>
  Per-session GitHub token.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnExitPlanMode">
+<summary>
+ Handler for exit plan mode requests from the server.
 </summary>
 </member>
 <member name="P:CopilotSDK.Supercharged.FSharp.SessionConfig.OnElicitationRequest">
@@ -232,6 +311,61 @@
  Configuration for creating a new session.
 </summary>
 </member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ExitPlanModeHandler">
+<summary>
+ Handler for exit plan mode requests.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeResponse.Feedback">
+<summary>
+ Optional feedback provided by the user.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeResponse.SelectedAction">
+<summary>
+ Selected action, if the user chose one.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeResponse.Approved">
+<summary>
+ Whether the user approved exiting plan mode.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ExitPlanModeResponse">
+<summary>
+ Response to an exit plan mode request.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest.RecommendedAction">
+<summary>
+ The action recommended by the runtime.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest.Actions">
+<summary>
+ Available actions the user can select.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest.PlanContent">
+<summary>
+ Full plan content, when available.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest.Summary">
+<summary>
+ Summary of the plan or proposed next step.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest.SessionId">
+<summary>
+ The session ID.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest">
+<summary>
+ Request to exit plan mode from the server.
+</summary>
+</member>
 <member name="T:CopilotSDK.Supercharged.FSharp.ElicitationHandler">
 <summary>
  Handler for elicitation requests.
@@ -272,9 +406,94 @@
  File attachment for a message.
 </summary>
 </member>
+<member name="T:CopilotSDK.Supercharged.FSharp.UserInputResponse">
+<summary>
+ Response to a user input request.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.UserInputRequest">
+<summary>
+ Request for user input from the agent.
+</summary>
+</member>
 <member name="T:CopilotSDK.Supercharged.FSharp.ImageOptions">
 <summary>
  Image generation options.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.ResponseFormat">
+<summary>
+ Response format for messages.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CanvasLifecycleContext">
+<summary>
+ Lifecycle context for a canvas instance.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CanvasActionContext">
+<summary>
+ Context passed to a canvas action handler.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CanvasOpenContext">
+<summary>
+ Context passed to a canvas open handler.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CanvasHostContext">
+<summary>
+ Host context supplied alongside canvas callbacks.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CanvasHostCapabilities">
+<summary>
+ Canvas-related capabilities reported by the host.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CanvasOpenResponse">
+<summary>
+ Response returned by a canvas open handler.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CanvasDeclaration">
+<summary>
+ Declarative metadata for a canvas provided by the SDK.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CanvasAction">
+<summary>
+ Metadata for an agent-callable canvas action.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SystemMessageCustomizeConfig">
+<summary>
+ Customize-mode system message configuration.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SystemMessageReplaceConfig">
+<summary>
+ Replace-mode system message configuration.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SystemMessageAppendConfig">
+<summary>
+ Append-mode system message configuration.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.SectionOverride">
+<summary>
+ Override operation for a single system prompt section.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CloudSessionOptions">
+<summary>
+ Options for creating a cloud session.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.CloudSessionRepository">
+<summary>
+ Repository metadata associated with a cloud session.
 </summary>
 </member>
 <member name="T:CopilotSDK.Supercharged.FSharp.CommandDefinition">
@@ -290,6 +509,11 @@
 <member name="T:CopilotSDK.Supercharged.FSharp.MCPStdioServerConfig">
 <summary>
  Configuration for an MCP stdio (local) server.
+</summary>
+</member>
+<member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.OnGetTraceContext">
+<summary>
+ Callback to get W3C Trace Context for distributed tracing.
 </summary>
 </member>
 <member name="P:CopilotSDK.Supercharged.FSharp.CopilotClientOptions.TcpConnectionToken">
@@ -377,6 +601,16 @@
  Configuration options for creating a CopilotClient.
 </summary>
 </member>
+<member name="T:CopilotSDK.Supercharged.FSharp.TraceContextProvider">
+<summary>
+ Provider that returns a trace context.
+</summary>
+</member>
+<member name="T:CopilotSDK.Supercharged.FSharp.TraceContext">
+<summary>
+ OpenTelemetry-compatible trace context for RPC payloads.
+</summary>
+</member>
 <member name="P:CopilotSDK.Supercharged.FSharp.SessionFsConfig.Conventions">
 <summary>
  Path conventions (&quot;posix&quot; or &quot;windows&quot;).
@@ -442,9 +676,20 @@
  Send a JSON-RPC notification (no response expected).
 </summary>
 </member>
+<member name="M:CopilotSDK.Supercharged.FSharp.JsonRpcTransport.RemoveRequest(System.String)">
+<summary>
+ Remove a previously registered request handler.
+</summary>
+</member>
 <member name="M:CopilotSDK.Supercharged.FSharp.JsonRpcTransport.RemoveNotification(System.String)">
 <summary>
  Remove a previously registered notification handler.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.JsonRpcTransport.OnRequest(System.String,Microsoft.FSharp.Core.FSharpFunc{Microsoft.FSharp.Core.FSharpOption{System.Text.Json.JsonElement},Microsoft.FSharp.Control.FSharpAsync{System.Object}})">
+<summary>
+ Register a handler for a server-initiated request method.
+ The handler receives params and returns a result sent back as the JSON-RPC response.
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.JsonRpcTransport.OnNotification(System.String,Microsoft.FSharp.Core.FSharpFunc{Microsoft.FSharp.Core.FSharpOption{System.Text.Json.JsonElement},Microsoft.FSharp.Core.Unit})">
@@ -518,6 +763,11 @@
  Returns the final assistant message, or None if no message was received.
 </summary>
 </member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.RegisterTraceContextProvider(Microsoft.FSharp.Core.FSharpFunc{Microsoft.FSharp.Core.Unit,CopilotSDK.Supercharged.FSharp.TraceContext})">
+<summary>
+ Register a trace context provider for distributed tracing.
+</summary>
+</member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.RegisterTools(Microsoft.FSharp.Collections.FSharpList{CopilotSDK.Supercharged.FSharp.RegisteredTool})">
 <summary>
  Register multiple tools at once.
@@ -526,6 +776,11 @@
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.RegisterTool(CopilotSDK.Supercharged.FSharp.RegisteredTool)">
 <summary>
  Register a tool that the assistant can invoke during this session.
+</summary>
+</member>
+<member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.RegisterExitPlanModeHandler(Microsoft.FSharp.Core.FSharpFunc{CopilotSDK.Supercharged.FSharp.ExitPlanModeRequest,Microsoft.FSharp.Control.FSharpAsync{CopilotSDK.Supercharged.FSharp.ExitPlanModeResponse}})">
+<summary>
+ Register a handler for exit plan mode requests.
 </summary>
 </member>
 <member name="M:CopilotSDK.Supercharged.FSharp.CopilotSession.On(Microsoft.FSharp.Core.FSharpFunc{CopilotSDK.Supercharged.FSharp.SessionEvent,Microsoft.FSharp.Core.Unit})">
