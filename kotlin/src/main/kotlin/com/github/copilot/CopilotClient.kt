@@ -135,11 +135,15 @@ class CopilotClient(
 
             // Register session filesystem provider if configured
             options.sessionFs?.let { fs ->
-                rpcClient?.request("sessionFs.setProvider", buildJsonObject {
-                    put("initialCwd", fs.initialCwd)
-                    put("sessionStatePath", fs.sessionStatePath)
-                    put("conventions", fs.conventions)
-                })
+                try {
+                    rpcClient?.request("sessionFs.setProvider", buildJsonObject {
+                        put("initialCwd", fs.initialCwd)
+                        put("sessionStatePath", fs.sessionStatePath)
+                        put("conventions", fs.conventions)
+                    })
+                } catch (_: Exception) {
+                    // sessionFs provider may not be supported in all CLI versions
+                }
             }
 
             state = ConnectionState.CONNECTED
@@ -279,7 +283,7 @@ class CopilotClient(
                         add(buildJsonObject {
                             put("name", tool.name)
                             tool.description?.let { put("description", it) }
-                            tool.parameters?.let { put("parameters", json.encodeToJsonElement(it)) }
+                            tool.parameters?.let { put("parameters", anyToJsonElement(it)) }
                         })
                     }
                 })
@@ -299,7 +303,7 @@ class CopilotClient(
             config.disabledSkills?.let { put("disabledSkills", json.encodeToJsonElement(it)) }
             config.infiniteSessions?.let { put("infiniteSessions", json.encodeToJsonElement(InfiniteSessionConfig.serializer(), it)) }
             config.includeSubAgentStreamingEvents?.let { put("includeSubAgentStreamingEvents", JsonPrimitive(it)) }
-            config.modelCapabilities?.let { put("modelCapabilities", json.encodeToJsonElement(it)) }
+            config.modelCapabilities?.let { put("modelCapabilities", anyToJsonElement(it)) }
             config.enableConfigDiscovery?.let { put("enableConfigDiscovery", JsonPrimitive(it)) }
             config.gitHubToken?.let { put("gitHubToken", JsonPrimitive(it)) }
             config.commands?.let { put("commands", json.encodeToJsonElement(it)) }
@@ -521,7 +525,7 @@ class CopilotClient(
                         add(buildJsonObject {
                             put("name", tool.name)
                             tool.description?.let { put("description", it) }
-                            tool.parameters?.let { put("parameters", json.encodeToJsonElement(it)) }
+                            tool.parameters?.let { put("parameters", anyToJsonElement(it)) }
                         })
                     }
                 })
@@ -541,7 +545,7 @@ class CopilotClient(
             config.disabledSkills?.let { put("disabledSkills", json.encodeToJsonElement(it)) }
             config.infiniteSessions?.let { put("infiniteSessions", json.encodeToJsonElement(InfiniteSessionConfig.serializer(), it)) }
             config.includeSubAgentStreamingEvents?.let { put("includeSubAgentStreamingEvents", JsonPrimitive(it)) }
-            config.modelCapabilities?.let { put("modelCapabilities", json.encodeToJsonElement(it)) }
+            config.modelCapabilities?.let { put("modelCapabilities", anyToJsonElement(it)) }
             config.enableConfigDiscovery?.let { put("enableConfigDiscovery", JsonPrimitive(it)) }
             config.gitHubToken?.let { put("gitHubToken", JsonPrimitive(it)) }
             config.commands?.let { put("commands", json.encodeToJsonElement(it)) }
@@ -944,6 +948,40 @@ class CopilotClient(
             put("textResultForLlm", textResult)
             put("resultType", "success")
             put("toolTelemetry", JsonObject(emptyMap()))
+        }
+    }
+
+    companion object {
+        /**
+         * Recursively converts an arbitrary value to a [JsonElement].
+         * Handles Map, List, String, Number, Boolean, null, and nested combinations.
+         */
+        internal fun anyToJsonElement(value: Any?): JsonElement = when (value) {
+            null -> JsonNull
+            is JsonElement -> value
+            is String -> JsonPrimitive(value)
+            is Boolean -> JsonPrimitive(value)
+            is Int -> JsonPrimitive(value)
+            is Long -> JsonPrimitive(value)
+            is Float -> JsonPrimitive(value)
+            is Double -> JsonPrimitive(value)
+            is Number -> JsonPrimitive(value.toDouble())
+            is Map<*, *> -> buildJsonObject {
+                for ((k, v) in value) {
+                    put(k.toString(), anyToJsonElement(v))
+                }
+            }
+            is List<*> -> buildJsonArray {
+                for (item in value) {
+                    add(anyToJsonElement(item))
+                }
+            }
+            is Array<*> -> buildJsonArray {
+                for (item in value) {
+                    add(anyToJsonElement(item))
+                }
+            }
+            else -> JsonPrimitive(value.toString())
         }
     }
 }

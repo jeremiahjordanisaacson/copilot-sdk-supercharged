@@ -51,8 +51,8 @@ getCliPath = do
   where
     fallbackCliPath = do
       cwd <- getCurrentDirectory
-     -- cabal test runs from haskell/, so go up one level to repo root
-     let repoRoot = cwd </> ".."
+      -- cabal test runs from haskell/, so go up one level to repo root
+      let repoRoot = cwd </> ".."
           cliPath  = repoRoot </> "nodejs" </> "node_modules"
                      </> "@github" </> "copilot" </> "index.js"
       exists <- doesFileExist cliPath
