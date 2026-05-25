@@ -33,6 +33,7 @@ public class JsonRpcClient {
         return t;
     });
 
+    /** Functional interface for handling incoming JSON-RPC requests. */
     @FunctionalInterface
     public interface RequestHandler {
         /**

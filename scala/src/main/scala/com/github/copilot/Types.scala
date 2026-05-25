@@ -807,7 +807,7 @@ case class SessionHooks(
 /** Response from a ping request. */
 case class PingResponse(
   message: String,
-  timestamp: Long,
+  timestamp: String,
   protocolVersion: Option[Int] = None
 )
 

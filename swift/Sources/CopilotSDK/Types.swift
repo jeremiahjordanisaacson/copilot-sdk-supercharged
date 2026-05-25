@@ -1403,7 +1403,7 @@ public typealias SessionEventHandler = @Sendable (SessionEvent) -> Void
 /// Response from the server's ping method.
 public struct PingResponse: Codable, Sendable {
     public let message: String
-    public let timestamp: Int64
+    public let timestamp: String
     public let protocolVersion: Int?
 }
 

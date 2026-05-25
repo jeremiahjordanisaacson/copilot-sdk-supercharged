@@ -407,7 +407,7 @@ public final class Types {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class PingResponse {
         public String message;
-        public long timestamp;
+        public String timestamp;
         @JsonProperty("protocolVersion") public Integer protocolVersion;
     }
 

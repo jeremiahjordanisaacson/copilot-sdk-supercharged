@@ -1221,7 +1221,7 @@ class AzureProviderOptions {
 /// Response from a ping request.
 class PingResponse {
   final String message;
-  final int timestamp;
+  final String timestamp;
   final int? protocolVersion;
 
   const PingResponse({
@@ -1233,7 +1233,7 @@ class PingResponse {
   factory PingResponse.fromJson(Map<String, dynamic> json) {
     return PingResponse(
       message: json['message'] as String? ?? '',
-      timestamp: json['timestamp'] as int,
+      timestamp: json['timestamp']?.toString() ?? '',
       protocolVersion: json['protocolVersion'] as int?,
     );
   }

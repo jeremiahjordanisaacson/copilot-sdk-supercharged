@@ -252,22 +252,24 @@ let stop (t : t) : unit Lwt.t =
 let send_request (t : t) (method_ : string) (params : Yojson.Safe.t)
     : Yojson.Safe.t Lwt.t =
   if not t.running then
-    Lwt.fail (Process_exited "Client is not running");
-  let id = t.next_id in
-  t.next_id <- t.next_id + 1;
-  let promise, resolver = Lwt.wait () in
-  Hashtbl.add t.pending id resolver;
-  let msg =
-    `Assoc
-      [ ("jsonrpc", `String "2.0")
-      ; ("id", `Int id)
-      ; ("method", `String method_)
-      ; ("params", params)
-      ]
-  in
-  let open Lwt.Syntax in
-  let* () = write_message t.oc t.write_mutex msg in
-  promise
+    Lwt.fail (Process_exited "Client is not running")
+  else begin
+    let id = t.next_id in
+    t.next_id <- t.next_id + 1;
+    let promise, resolver = Lwt.wait () in
+    Hashtbl.add t.pending id resolver;
+    let msg =
+      `Assoc
+        [ ("jsonrpc", `String "2.0")
+        ; ("id", `Int id)
+        ; ("method", `String method_)
+        ; ("params", params)
+        ]
+    in
+    let open Lwt.Syntax in
+    let* () = write_message t.oc t.write_mutex msg in
+    promise
+  end
 
 let send_notification (t : t) (method_ : string) (params : Yojson.Safe.t)
     : unit Lwt.t =

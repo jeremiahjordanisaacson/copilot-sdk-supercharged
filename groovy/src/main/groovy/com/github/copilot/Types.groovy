@@ -115,7 +115,7 @@ final class Types {
     @ToString(includeNames = true)
     static class PingResponse {
         String message
-        long timestamp
+        String timestamp
         Integer protocolVersion
     }
 

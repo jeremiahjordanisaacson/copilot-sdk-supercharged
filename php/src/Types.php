@@ -1993,7 +1993,7 @@ class PingResponse
 {
     public function __construct(
         public readonly string $message,
-        public readonly int $timestamp,
+        public readonly string $timestamp,
         public readonly ?int $protocolVersion = null,
     ) {}
 
@@ -2001,7 +2001,7 @@ class PingResponse
     {
         return new self(
             message: $data['message'] ?? '',
-            timestamp: $data['timestamp'] ?? 0,
+            timestamp: (string)($data['timestamp'] ?? ''),
             protocolVersion: $data['protocolVersion'] ?? null,
         );
     }

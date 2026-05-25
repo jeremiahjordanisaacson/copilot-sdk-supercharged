@@ -1127,7 +1127,7 @@ struct MessageOptions {
 
 struct PingResponse {
     std::string message;
-    int64_t timestamp = 0;
+    std::string timestamp;
     std::optional<int> protocolVersion;
 };
 

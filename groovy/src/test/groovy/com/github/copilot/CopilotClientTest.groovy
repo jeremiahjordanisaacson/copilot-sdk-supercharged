@@ -69,14 +69,14 @@ class CopilotClientTest extends Specification {
         when:
         def ping = new PingResponse().with {
             message = 'pong'
-            timestamp = 12345L
+            timestamp = '2025-01-01T00:00:00Z'
             protocolVersion = 2
             it
         }
 
         then:
         ping.message == 'pong'
-        ping.timestamp == 12345L
+        ping.timestamp == '2025-01-01T00:00:00Z'
         ping.protocolVersion == 2
     }
 

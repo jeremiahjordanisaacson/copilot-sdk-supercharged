@@ -240,10 +240,10 @@ class CopilotE2ESpec extends Specification {
         when: "a ping is sent"
         Types.PingResponse pong = client.ping('hello')
 
-        then: "the response contains a message and a positive timestamp"
+        then: "the response contains a message and a non-empty timestamp"
         pong != null
         pong.message != null
-        pong.timestamp > 0
+        pong.timestamp != null && !pong.timestamp.isEmpty()
 
         cleanup:
         client?.stop()

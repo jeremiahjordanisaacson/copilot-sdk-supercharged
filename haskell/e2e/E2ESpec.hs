@@ -22,7 +22,7 @@ import           Test.Hspec
 
 import Copilot.Client
 import Copilot.DefineTool       (defineTool)
-import Copilot.Session          (sessionId, sendAndWait, onSessionEvent)
+import Copilot.Session          (CopilotSession, sessionId, sendAndWait, onSessionEvent)
 import Copilot.Types
 
 import CopilotE2E.TestHarness

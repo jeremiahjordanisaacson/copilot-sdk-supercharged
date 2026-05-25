@@ -163,6 +163,33 @@ object TestHarness:
     _caFilePath = None
   }
 
+  /** The directory containing test snapshot YAML files. */
+  def snapshotsDir: String =
+    resolveRepoRoot().resolve("test/snapshots").toString
+
+  /**
+   * Configures the proxy to use a specific snapshot file.
+   *
+   * Must be called before each test to tell the proxy which canned
+   * exchanges to replay.
+   */
+  def configure(filePath: String, workDir: String): Unit =
+    val url = proxyUrl
+    val conn = java.net.URI(s"$url/config").toURL.openConnection()
+      .asInstanceOf[java.net.HttpURLConnection]
+    conn.setRequestMethod("POST")
+    conn.setDoOutput(true)
+    conn.setRequestProperty("Content-Type", "application/json")
+    conn.setConnectTimeout(5000)
+    conn.setReadTimeout(5000)
+    val body = s"""{"filePath":"$filePath","workDir":"$workDir"}"""
+    conn.getOutputStream.write(body.getBytes("UTF-8"))
+    conn.getOutputStream.flush()
+    val code = conn.getResponseCode
+    conn.disconnect()
+    if code != 200 then
+      throw new RuntimeException(s"Proxy /config returned $code")
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------

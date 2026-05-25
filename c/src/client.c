@@ -1328,7 +1328,7 @@ copilot_error_t copilot_client_ping(
     out->message = msg && cJSON_IsString(msg) ? strdup(msg->valuestring) : strdup("");
 
     cJSON *ts = cJSON_GetObjectItem(result, "timestamp");
-    out->timestamp = ts && cJSON_IsNumber(ts) ? (int64_t)ts->valuedouble : 0;
+    out->timestamp = ts && cJSON_IsString(ts) ? strdup(ts->valuestring) : strdup("");
 
     cJSON *pv = cJSON_GetObjectItem(result, "protocolVersion");
     out->protocol_version = pv && cJSON_IsNumber(pv) ? pv->valueint : -1;
@@ -1342,6 +1342,8 @@ void copilot_ping_response_free(copilot_ping_response_t *response)
     if (!response) return;
     free(response->message);
     response->message = NULL;
+    free(response->timestamp);
+    response->timestamp = NULL;
 }
 
 copilot_error_t copilot_client_list_models(

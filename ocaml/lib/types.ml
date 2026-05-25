@@ -2,6 +2,8 @@
 
 (** Core types for the Copilot SDK. *)
 
+[@@@warning "-32"]
+
 open Yojson.Safe.Util
 
 (* ========================================================================== *)

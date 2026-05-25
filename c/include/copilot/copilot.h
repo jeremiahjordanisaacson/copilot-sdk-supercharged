@@ -878,7 +878,7 @@ void copilot_model_list_free(copilot_model_list_t *list);
 
 typedef struct {
     char *message;
-    int64_t timestamp;
+    char *timestamp;
     int protocol_version;      /**< -1 if not present */
 } copilot_ping_response_t;
 

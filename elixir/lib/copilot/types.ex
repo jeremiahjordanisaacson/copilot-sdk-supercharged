@@ -1003,7 +1003,7 @@ defmodule Copilot.Types do
     @moduledoc "Response from ping."
     @type t :: %__MODULE__{
             message: String.t(),
-            timestamp: integer(),
+            timestamp: String.t(),
             protocol_version: integer() | nil
           }
     defstruct [:message, :timestamp, :protocol_version]

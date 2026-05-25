@@ -84,6 +84,13 @@ class CopilotE2ESpec
     client = Some(c)
     c
 
+  private val defaultSnapshot = "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+
+  /** Configures the replay proxy with the given snapshot file name (without `.yaml`). */
+  private def configureSnapshot(name: String): Unit =
+    val filePath = s"${TestHarness.snapshotsDir}/session/$name.yaml"
+    TestHarness.configure(java.io.File(filePath).getAbsolutePath, workDir)
+
   // ---------------------------------------------------------------------------
   // Tests
   // ---------------------------------------------------------------------------
@@ -91,6 +98,7 @@ class CopilotE2ESpec
   behavior of "CopilotClient E2E"
 
   it should "create a session and disconnect" in {
+    configureSnapshot("should_create_session_with_custom_tool")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -101,6 +109,7 @@ class CopilotE2ESpec
   }
 
   it should "send a message and receive a response" in {
+    configureSnapshot(defaultSnapshot)
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -125,6 +134,7 @@ class CopilotE2ESpec
   }
 
   it should "configure a sessionFs provider" in {
+    configureSnapshot("should_create_session_with_custom_tool")
     val fsConfig = SessionFsConfig(
       initialCwd = System.getProperty("user.dir"),
       sessionStatePath = System.getProperty("java.io.tmpdir"),
@@ -144,6 +154,7 @@ class CopilotE2ESpec
   }
 
   it should "handle a multi-turn conversation" in {
+    configureSnapshot("should_have_stateful_conversation")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -167,6 +178,7 @@ class CopilotE2ESpec
   }
 
   it should "resume a session by ID" in {
+    configureSnapshot("should_resume_a_session_using_a_new_client")
     val c1 = makeClient()
     Await.result(c1.start(), timeout)
 
@@ -191,6 +203,7 @@ class CopilotE2ESpec
   }
 
   it should "list multiple sessions" in {
+    configureSnapshot("should_list_sessions")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -210,6 +223,7 @@ class CopilotE2ESpec
   }
 
   it should "get session metadata" in {
+    configureSnapshot("should_get_session_metadata")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -222,6 +236,7 @@ class CopilotE2ESpec
   }
 
   it should "delete a session" in {
+    configureSnapshot("should_delete_session")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -238,6 +253,7 @@ class CopilotE2ESpec
   }
 
   it should "list available models" in {
+    configureSnapshot("should_create_session_with_custom_tool")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -254,6 +270,7 @@ class CopilotE2ESpec
   }
 
   it should "ping the server" in {
+    configureSnapshot("should_create_session_with_custom_tool")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -265,6 +282,7 @@ class CopilotE2ESpec
   }
 
   it should "get auth status" in {
+    configureSnapshot("should_create_session_with_custom_tool")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -277,6 +295,7 @@ class CopilotE2ESpec
   }
 
   it should "track client lifecycle states" in {
+    configureSnapshot("should_create_session_with_custom_tool")
     val c = makeClient()
 
     // Before start, should be disconnected
@@ -290,6 +309,7 @@ class CopilotE2ESpec
   }
 
   it should "set and get foreground session ID" in {
+    configureSnapshot("should_create_session_with_custom_tool")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -306,6 +326,7 @@ class CopilotE2ESpec
   }
 
   it should "invoke a registered tool" in {
+    configureSnapshot("should_create_session_with_custom_tool")
     val toolCalled = new java.util.concurrent.atomic.AtomicBoolean(false)
 
     val tool = DefineTool(
@@ -359,6 +380,7 @@ class CopilotE2ESpec
   }
 
   it should "receive streaming delta events" in {
+    configureSnapshot(defaultSnapshot)
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -389,6 +411,7 @@ class CopilotE2ESpec
   }
 
   it should "create a session with a system message in append mode" in {
+    configureSnapshot("should_create_a_session_with_appended_systemmessage_config")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -411,6 +434,7 @@ class CopilotE2ESpec
   }
 
   it should "create a session with sessionFs and send a message" in {
+    configureSnapshot(defaultSnapshot)
     val fsConfig = SessionFsConfig(
       initialCwd = System.getProperty("user.dir"),
       sessionStatePath = System.getProperty("java.io.tmpdir"),
@@ -433,6 +457,7 @@ class CopilotE2ESpec
   }
 
   it should "create a session with MCP servers config" in {
+    configureSnapshot("should_create_session_with_custom_tool")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -455,6 +480,7 @@ class CopilotE2ESpec
   }
 
   it should "create a session with skill directories" in {
+    configureSnapshot("should_create_session_with_custom_tool")
     val c = makeClient()
     Await.result(c.start(), timeout)
 
@@ -471,6 +497,7 @@ class CopilotE2ESpec
   }
 
   it should "handle compaction events on long conversations" in {
+    configureSnapshot(defaultSnapshot)
     val c = makeClient()
     Await.result(c.start(), timeout)
 
