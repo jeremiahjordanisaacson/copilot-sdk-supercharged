@@ -534,7 +534,83 @@ gh issue create --title "🚨 Rollback: upstream sync reverted" --body "Rolled b
 
 ---
 
-## Troubleshooting
+## Known SDK-Specific Gotchas (Updated 2026-05-25)
+
+These are hard-won lessons from past maintenance cycles. **Consult this before debugging failures.**
+
+### Type Mapping: PingResponse.timestamp
+- **CANONICAL TYPE**: `string` (ISO 8601 format like `"2025-01-01T00:00:00Z"`)
+- **NOT a number** — the upstream TypeScript definition at `nodejs/src/generated/rpc.ts` shows `timestamp: string`
+- SDKs that incorrectly used `Long`, `int64_t`, `Int64`, `int` will fail during `client.start()` → `ping()` → deserialization
+- Dynamic-typed SDKs (Ruby, Lua, Perl, Julia, Clojure) handle it automatically
+- Python has a dual parser that handles both int and string — leave it as-is
+- Go uses `time.Time` which handles ISO 8601 — correct
+- **Always check new generated types against the TypeScript source for field types**
+
+### Julia: Method Overwriting During Precompilation
+- `CopilotClient(opts::T=default)` (inner constructor with default) + `CopilotClient(; kwargs...)` (outer) both create zero-arg method
+- **Fix**: Inner constructor must NOT have default arg: `CopilotClient(opts::CopilotClientOptions)` then keep outer keyword constructor
+
+### Lua: Coroutine Yield in Test Frameworks
+- `busted` test framework wraps each test in a coroutine
+- `coroutine.running()` sees busted's coroutine and tries to yield, causing "attempt to yield from outside a coroutine"
+- **Fix**: Use an `_in_sdk_coroutine` flag instead of checking `coroutine.running()`
+
+### C: POSIX Version for ETIMEDOUT
+- `_POSIX_C_SOURCE 199309L` doesn't define `ETIMEDOUT` — need `200112L` (POSIX.1-2001)
+
+### Groovy: Gradle 9.x Breaking Change
+- Gradle 9.5+ removed top-level `sourceCompatibility`/`targetCompatibility`
+- **Fix**: Wrap in `java { sourceCompatibility = JavaVersion.VERSION_17 }` block
+
+### Scala: E2E Test Snapshot Configuration
+- The replay proxy requires a POST to `/config` with `{filePath, workDir}` before each test
+- Without this, tests timeout because the proxy doesn't know which snapshot to replay
+- Other SDKs (Python, Ruby, Kotlin, Java) all have this — check Scala has it too
+
+### Haskell: ScopedTypeVariables Extension
+- If E2E test harness uses `\(_ :: SomeException) -> pure ()`, needs `{-# LANGUAGE ScopedTypeVariables #-}`
+- **Fix**: Use a named helper function `ignoreException :: SomeException -> IO ()` instead
+
+### OCaml: Lwt.fail Control Flow
+- `Lwt.fail exn; <code>` does NOT prevent `<code>` from running — semicolons chain expressions
+- **Fix**: Use `else begin ... end` to properly branch
+
+### Perl: Types::Standard Module
+- Provided by `Type::Tiny` distribution on CPAN
+- `cpanm --installdeps --notest .` may silently fail
+- **Fix**: Add explicit `cpanm --notest Type::Tiny` before `--installdeps`
+
+### E2E Model Name
+- **ALL E2E snapshots use `claude-sonnet-4.5` model ONLY** — no other model name works
+- Any SDK using `gpt-4` in E2E tests will get "Model not available" errors
+- Check: `grep -rn 'gpt-4\|gpt_4' <sdk>/e2e/`
+
+### Version Sync
+- **ALL SDK versions must match** — run `bash scripts/verify-version-sync.sh` before every release
+- The canonical version is in `python/pyproject.toml`
+- Registries to verify after release: PyPI, npm, RubyGems, crates.io, NuGet, Hex.pm, LuaRocks, CPAN, Packagist, Maven Central, Clojars, pub.dev
+
+### CI Environment
+- **NEVER run `npm test` or `npm ci` in `nodejs/` or `test/harness/`** on macOS — Keychain popups
+- Use `npm run typecheck` for Node validation
+- Swift E2E tests run on macOS runners only
+- Java uses `mvn verify` (not `mvn test -q`)
+- Solidity needs Foundry (`forge`) — not on standard ubuntu-latest
+- PHP CI needs `COMPOSER_TOKEN` secret for private package auth
+
+### Publish Workflow Gotchas
+- npm: Token needs "bypass 2fa" enabled — user must regenerate at npmjs.com
+- Attestation steps must run AFTER build/package steps
+- Some publish workflows trigger on tag push only — if tag was already created, delete and re-push:
+  ```bash
+  git tag -d v$VERSION && git push origin :refs/tags/v$VERSION
+  git tag v$VERSION && git push origin v$VERSION
+  ```
+
+---
+
+## Troubleshooting Quick Reference
 
 | Symptom | Fix |
 |---|---|
@@ -544,15 +620,20 @@ gh issue create --title "🚨 Rollback: upstream sync reverted" --body "Rolled b
 | Agent claims it updated files but didn't | Always verify with grep. Fix manually. |
 | CI fails on Windows only | Usually path separators or shell=True issues. Check the workflow. |
 | npm token expired | User must regenerate at npmjs.com/settings/jeremiahisaacson/tokens |
-| `git fetch upstream` fails | Check network. Verify remote: `git remote -v`. Re-add if needed: `git remote add upstream https://github.com/github/copilot-sdk.git` |
-| `npm ci` fails with "lock file out of sync" | `cd <dir> && npm install` to regenerate lock, then `npm ci` to verify. Commit the new lock file. |
-| Workflow YAML parse error (workflow file issue) | Use `run: \|` block scalar for complex commands. Validate: `node -e "require('yaml').parse(require('fs').readFileSync('file','utf8'))"` |
-| `cd: No such file or directory` in workflow | Check if `working-directory` is already set in job defaults — remove redundant `cd` |
-| Dependabot alerts | `cd <dir> && npm audit fix`. Check ALL package dirs. Must be 0 vulnerabilities. |
-| TypeScript build fails with TS5107/TS5110 | Update tsconfig: `module: "Node16"`, `moduleResolution: "node16"`, add `rootDir: "./src"` |
-| Additional SDKs didn't trigger | Path filters may skip — manually trigger: `gh workflow run "additional-sdk-tests.yml"` |
-| Publish workflow attestation fails | Attestation step runs BEFORE build step. Move it AFTER the build/package step. |
-| npm publish 403 "Two-factor authentication required" | npm token needs "bypass 2fa" enabled. User must regenerate at npmjs.com. |
-| PyPI still shows old version after release | Check `pypi-publish.yml` ran successfully. Verify with `curl https://pypi.org/pypi/copilot-sdk-supercharged/json`. |
-| Elixir version not updated by sed | Elixir uses `@version "X.X.X"` module attribute, NOT `version: "X.X.X"` in project(). Use `sed 's/@version ".*"/@version "NEW"/'` |
-| CI shows green locally but red on GitHub | Old run showing. Check the specific commit SHA matches HEAD. Old failures from previous commits don't count. |
+| `git fetch upstream` fails | Check network. Verify remote: `git remote -v`. Re-add if needed. |
+| `npm ci` fails with "lock file out of sync" | `cd <dir> && npm install` to regenerate lock, then `npm ci` to verify. |
+| Workflow YAML parse error | Use `run: \|` block scalar for complex commands. |
+| `cd: No such file or directory` in workflow | Check if `working-directory` is already set — remove redundant `cd` |
+| Dependabot alerts | `cd <dir> && npm audit fix`. Check ALL package dirs. |
+| TypeScript build fails with TS5107/TS5110 | Update tsconfig: `module: "Node16"`, `moduleResolution: "node16"` |
+| Additional SDKs didn't trigger | Path filters may skip — manually trigger: `gh workflow run` |
+| npm publish 403 "2FA required" | Token needs "bypass 2fa" enabled. User must regenerate. |
+| PyPI still shows old version | Check `pypi-publish.yml` ran. Verify with curl. |
+| Elixir version not updated | Uses `@version "X.X.X"` module attribute, NOT `version:` in project(). |
+| CI shows green locally but red on GitHub | Check commit SHA matches HEAD. Old failures don't count. |
+| PingResponse deserialization fails | Timestamp is `string` (ISO 8601), NOT numeric. Check all typed SDKs. |
+| Julia precompile error | Inner constructor must NOT have default arg that conflicts with outer. |
+| Lua "yield from outside coroutine" | Use `_in_sdk_coroutine` flag, not `coroutine.running()`. |
+| C `ETIMEDOUT` undefined | Need `_POSIX_C_SOURCE 200112L`, not 199309L. |
+| Gradle 9.x sourceCompatibility | Wrap in `java { }` block — top-level removed in Gradle 9. |
+

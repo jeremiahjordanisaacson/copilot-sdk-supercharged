@@ -37,13 +37,13 @@ jobs:
       - name: Build package
         run: mix hex.build
 
+      - name: Publish to Hex
+        run: mix hex.publish --yes
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: elixir/copilot_sdk_supercharged-*.tar
         continue-on-error: true
-
-      - name: Publish to Hex
-        run: mix hex.publish --yes
-        env:
-          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}

@@ -36,12 +36,6 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           VERSION=$VERSION clojure -T:build jar
 
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: clojure/target/*.jar
-        continue-on-error: true
-
       - name: Deploy to Clojars
         run: |
           VERSION=${GITHUB_REF_NAME#v}
@@ -49,3 +43,9 @@ jobs:
         env:
           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: clojure/target/*.jar
+        continue-on-error: true
