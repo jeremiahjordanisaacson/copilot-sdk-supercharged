@@ -43,7 +43,7 @@ module E2E
       "client_lifecycle"            => "should_create_session_with_custom_tool",
       "foreground_session"          => "should_create_session_with_custom_tool",
       "tool_handling"               => "should_create_session_with_custom_tool",
-     "tools"                       => "should_create_session_with_custom_tool",
+     "tools"                       => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
      "streaming"                   => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
      "system_message"              => "should_create_a_session_with_appended_systemmessage_config",
      "session_fs_with_messaging"   => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",

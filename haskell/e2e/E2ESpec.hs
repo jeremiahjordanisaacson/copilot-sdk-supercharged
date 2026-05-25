@@ -390,18 +390,18 @@ spec = do
 
         toolCalledRef <- newIORef False
 
-        let echoTool = defineTool "echo_test" (Just "Echo tool for testing")
+        let secretTool = defineTool "get_secret_number" (Just "Get a secret number for a given key")
               (Just $ object
                 [ "type" .= ("object" :: T.Text)
                 , "properties" .= object
-                    [ "message" .= object [ "type" .= ("string" :: T.Text) ] ]
-                , "required" .= (["message"] :: [T.Text])
+                    [ "key" .= object [ "type" .= ("string" :: T.Text), "description" .= ("The key to look up" :: T.Text) ] ]
+                , "required" .= (["key"] :: [T.Text])
                 ])
               (\args _inv -> do
                 writeIORef toolCalledRef True
-                pure $ ToolResultText "echo response")
+                pure $ ToolResultText "54321")
 
-        let cfg = defaultSessionConfig { scTools = [echoTool] }
+        let cfg = defaultSessionConfig { scTools = [secretTool] }
 
         session <- createSession client cfg
 

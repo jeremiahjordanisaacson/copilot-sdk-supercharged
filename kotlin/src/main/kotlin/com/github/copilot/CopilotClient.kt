@@ -74,6 +74,38 @@ class CopilotClient(
 
     companion object {
         private val PORT_PATTERN = Pattern.compile("listening on port (\\d+)", Pattern.CASE_INSENSITIVE)
+
+        /**
+         * Recursively converts an arbitrary value to a [JsonElement].
+         * Handles Map, List, String, Number, Boolean, null, and nested combinations.
+         */
+        internal fun anyToJsonElement(value: Any?): JsonElement = when (value) {
+            null -> JsonNull
+            is JsonElement -> value
+            is String -> JsonPrimitive(value)
+            is Boolean -> JsonPrimitive(value)
+            is Int -> JsonPrimitive(value)
+            is Long -> JsonPrimitive(value)
+            is Float -> JsonPrimitive(value)
+            is Double -> JsonPrimitive(value)
+            is Number -> JsonPrimitive(value.toDouble())
+            is Map<*, *> -> buildJsonObject {
+                for ((k, v) in value) {
+                    put(k.toString(), anyToJsonElement(v))
+                }
+            }
+            is List<*> -> buildJsonArray {
+                for (item in value) {
+                    add(anyToJsonElement(item))
+                }
+            }
+            is Array<*> -> buildJsonArray {
+                for (item in value) {
+                    add(anyToJsonElement(item))
+                }
+            }
+            else -> JsonPrimitive(value.toString())
+        }
     }
 
     init {
@@ -951,37 +983,4 @@ class CopilotClient(
         }
     }
 
-    companion object {
-        /**
-         * Recursively converts an arbitrary value to a [JsonElement].
-         * Handles Map, List, String, Number, Boolean, null, and nested combinations.
-         */
-        internal fun anyToJsonElement(value: Any?): JsonElement = when (value) {
-            null -> JsonNull
-            is JsonElement -> value
-            is String -> JsonPrimitive(value)
-            is Boolean -> JsonPrimitive(value)
-            is Int -> JsonPrimitive(value)
-            is Long -> JsonPrimitive(value)
-            is Float -> JsonPrimitive(value)
-            is Double -> JsonPrimitive(value)
-            is Number -> JsonPrimitive(value.toDouble())
-            is Map<*, *> -> buildJsonObject {
-                for ((k, v) in value) {
-                    put(k.toString(), anyToJsonElement(v))
-                }
-            }
-            is List<*> -> buildJsonArray {
-                for (item in value) {
-                    add(anyToJsonElement(item))
-                }
-            }
-            is Array<*> -> buildJsonArray {
-                for (item in value) {
-                    add(anyToJsonElement(item))
-                }
-            }
-            else -> JsonPrimitive(value.toString())
-        }
-    }
 }
