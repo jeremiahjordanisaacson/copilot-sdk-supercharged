@@ -467,8 +467,32 @@ curl -sf "https://api.nuget.org/v3-flatcontainer/copilotsdk.supercharged/index.j
 curl -sf https://hex.pm/api/packages/copilot_sdk_supercharged | \
   python3 -c "import sys,json; r=json.load(sys.stdin)['releases']; print('Hex:', r[0]['version'] if r else '?')"
 
+# Maven Central
+curl -sf "https://search.maven.org/solrsearch/select?q=a:copilot-sdk-java+g:com.github&rows=1&wt=json" | \
+  python3 -c "import sys,json; d=json.load(sys.stdin)['response']['docs']; print('Maven:', d[0]['latestVersion'] if d else '?')"
+
+# Clojars
+curl -sf "https://clojars.org/api/artifacts/com.github/copilot-sdk-supercharged" | \
+  python3 -c "import sys,json; print('Clojars:', json.load(sys.stdin)['latest_version'])"
+
+# pub.dev
+curl -sf "https://pub.dev/api/packages/copilot_sdk_supercharged" | \
+  python3 -c "import sys,json; print('pub.dev:', json.load(sys.stdin)['latest']['version'])"
+
+# CPAN
+curl -sf "https://fastapi.metacpan.org/release/Copilot-SDK-Supercharged" | \
+  python3 -c "import sys,json; print('CPAN:', json.load(sys.stdin)['version'])"
+
+# LuaRocks
+curl -sf "https://luarocks.org/api/1/rocks/copilot-sdk-supercharged" 2>/dev/null | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); v=list(d.keys()); print('LuaRocks:', v[0] if v else '?')" 2>/dev/null || echo "LuaRocks: check manually"
+
+# Packagist
+curl -sf "https://repo.packagist.org/p2/copilot-sdk-supercharged/copilot-sdk-supercharged.json" | \
+  python3 -c "import sys,json; p=json.load(sys.stdin)['packages']['copilot-sdk-supercharged/copilot-sdk-supercharged']; print('Packagist:', p[0]['version'])"
+
 # If ANY registry shows the OLD version, the publish workflow failed.
-# Fix and re-trigger: gh workflow run "<workflow>.yml" --ref "v$VERSION"
+# Fix and re-trigger: git tag -f v$VERSION && git push origin v$VERSION --force
 ```
 
 ### Step 6f: Post Discussion Announcement
@@ -601,12 +625,27 @@ These are hard-won lessons from past maintenance cycles. **Consult this before d
 
 ### Publish Workflow Gotchas
 - npm: Token needs "bypass 2fa" enabled — user must regenerate at npmjs.com
-- Attestation steps must run AFTER build/package steps
-- Some publish workflows trigger on tag push only — if tag was already created, delete and re-push:
+- Attestation steps (`actions/attest-build-provenance@v2`) must run AFTER build/package steps — add `continue-on-error: true`
+- Rust: `cargo publish` with bundled-cli feature requires `--no-default-features` — build.rs panics looking for missing bundled_cli_version.txt
+- npm lockfile: After upstream merges, use `npm install --ignore-scripts` instead of `npm ci` (lockfile may be out of sync)
+- Maven Central: The artifact name in the publish workflow MUST match `<artifactId>` in `pom.xml` (currently `copilot-sdk-java`)
+- Dart/pub.dev: Must have LICENSE file in dart/ directory, CHANGELOG.md must mention current version, `dart analyze` warnings block publish
+- pub.dev first publish: "Only users are allowed to upload new packages" — requires manual first upload
+- NuGet: NUGET_API_KEY secret expires — if 403, regenerate at nuget.org/account/apikeys
+- crates.io: Must accept ownership invitation before publishing
+- CRAN: Use `error_on = "error"` in `devtools::check_built()` to pass on warnings
+- Hex.pm: Use `mix hex.publish --yes --replace` to allow re-publishing same version
+- Force-push tag to re-trigger publish workflows:
   ```bash
-  git tag -d v$VERSION && git push origin :refs/tags/v$VERSION
-  git tag v$VERSION && git push origin v$VERSION
+  git tag -f v$VERSION && git push origin v$VERSION --force
   ```
+- Already-published registries: PyPI returns 400, RubyGems says "repush not allowed", Hex.pm says "use --replace", Clojars says "redeploying non-snapshots is not allowed" — all expected
+
+### GitHub Actions Queue Management
+- Free tier has limited concurrent runners — publish workflows can block test queue for 30+ minutes
+- Cancel old/duplicate runs to free queue: `gh run cancel <id>`
+- Hackage (Haskell) builds take 20+ minutes — cancel if blocking other runs
+- After force-pushing tags, cancel superseded older publish runs immediately
 
 ---
 
@@ -628,6 +667,15 @@ These are hard-won lessons from past maintenance cycles. **Consult this before d
 | TypeScript build fails with TS5107/TS5110 | Update tsconfig: `module: "Node16"`, `moduleResolution: "node16"` |
 | Additional SDKs didn't trigger | Path filters may skip — manually trigger: `gh workflow run` |
 | npm publish 403 "2FA required" | Token needs "bypass 2fa" enabled. User must regenerate. |
+| NuGet 403 "API key invalid" | NUGET_API_KEY expired. Regenerate at nuget.org/account/apikeys. |
+| crates.io 403 "not an owner" | Accept ownership invitation at crates.io/me/pending-invites. |
+| pub.dev "Only users allowed" | First publish must be done manually by a user, not CI. |
+| Maven "cp: cannot stat" | Artifact name in workflow doesn't match pom.xml artifactId. |
+| Rust cargo publish panics | Add `--no-default-features` to skip bundled-cli feature. |
+| Dart pub.dev "missing LICENSE" | Copy LICENSE from repo root to dart/ directory. |
+| CRAN "check found WARNINGs" | Use `error_on = "error"` in devtools::check_built(). |
+| Hex.pm "already exists" | Add `--replace` flag: `mix hex.publish --yes --replace`. |
+| Tests stuck in "queued" 30+ min | Cancel old runs. Check Actions minutes limit. Free tier = 2000 min/month. |
 | PyPI still shows old version | Check `pypi-publish.yml` ran. Verify with curl. |
 | Elixir version not updated | Uses `@version "X.X.X"` module attribute, NOT `version:` in project(). |
 | CI shows green locally but red on GitHub | Check commit SHA matches HEAD. Old failures don't count. |
