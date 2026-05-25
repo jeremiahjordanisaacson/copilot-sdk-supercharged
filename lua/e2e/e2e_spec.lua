@@ -9,32 +9,28 @@ local CopilotClient = require("copilot.client")
 local CapiProxy     = require("e2e.testharness.proxy")
 
 -- ---------------------------------------------------------------------------
--- Helpers
--- ---------------------------------------------------------------------------
-
---- Build a CopilotClient configured to talk through the replay proxy.
--- Passes the proxy URL via env so the CLI subprocess uses the proxy.
--- @param extra_opts table|nil  Additional options merged into client config
--- @return CopilotClient
-local function make_client(extra_opts)
-    local opts = {
-        logLevel = "info",
-        env = { COPILOT_API_URL = proxy and proxy:url() or "" },
-    }
-    if extra_opts then
-        for k, v in pairs(extra_opts) do
-            opts[k] = v
-        end
-    end
-    return CopilotClient.new(opts)
-end
-
--- ---------------------------------------------------------------------------
 -- Test suite
 -- ---------------------------------------------------------------------------
 
 describe("Lua SDK E2E", function()
     local proxy
+
+    --- Build a CopilotClient configured to talk through the replay proxy.
+    -- Passes the proxy URL via env so the CLI subprocess uses the proxy.
+    -- @param extra_opts table|nil  Additional options merged into client config
+    -- @return CopilotClient
+    local function make_client(extra_opts)
+        local opts = {
+            logLevel = "info",
+            env = { COPILOT_API_URL = proxy and proxy:url() or "" },
+        }
+        if extra_opts then
+            for k, v in pairs(extra_opts) do
+                opts[k] = v
+            end
+        end
+        return CopilotClient.new(opts)
+    end
 
     -- Start the replay proxy once for the whole suite
     setup(function()

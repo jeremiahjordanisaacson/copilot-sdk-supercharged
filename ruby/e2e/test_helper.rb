@@ -24,6 +24,33 @@ module E2E
       attr_accessor :harness, :work_dir, :home_dir
     end
 
+    # Default snapshot used when no test-specific snapshot exists.
+    DEFAULT_SNAPSHOT = "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+
+    # Map test method names to actual snapshot file names in test/snapshots/session/.
+    SNAPSHOT_MAP = {
+      "session_create_disconnect"   => "should_create_session_with_custom_tool",
+      "send_message"                => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
+      "session_fs_config"           => "should_create_session_with_custom_tool",
+      "multi_turn_conversation"     => "should_have_stateful_conversation",
+      "session_resume"              => "should_resume_a_session_using_a_new_client",
+      "session_list"                => "should_list_sessions",
+      "session_metadata"            => "should_get_session_metadata",
+      "session_delete"              => "should_delete_session",
+      "list_models"                 => "should_create_session_with_custom_tool",
+      "ping"                        => "should_create_session_with_custom_tool",
+      "auth_status"                 => "should_create_session_with_custom_tool",
+      "client_lifecycle"            => "should_create_session_with_custom_tool",
+      "foreground_session"          => "should_create_session_with_custom_tool",
+      "tool_handling"               => "should_create_session_with_custom_tool",
+      "streaming"                   => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
+      "system_message"              => "should_create_a_session_with_appended_systemmessage_config",
+      "session_fs_with_messaging"   => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
+      "mcp_server_config"           => "should_create_session_with_custom_tool",
+      "skill_directories"           => "should_create_session_with_custom_tool",
+      "compaction"                  => "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message",
+    }.freeze
+
     def setup
       unless self.class.harness
         self.class.harness = TestHarness.new
@@ -33,11 +60,18 @@ module E2E
         self.class.home_dir = Dir.mktmpdir("copilot-e2e-home-")
       end
 
-      # Configure proxy for this test
+      # Configure proxy for this test — look up the correct snapshot name
       test_name = name.sub(/^test_/, "")
-      snapshot_path = File.join(
-        TestHarness.snapshots_dir, "session", "#{test_name}.yaml"
-      )
+      snapshot_name = SNAPSHOT_MAP.fetch(test_name, nil)
+
+      # Fall back to exact test name, then default snapshot
+      snapshot_path = if snapshot_name
+                        File.join(TestHarness.snapshots_dir, "session", "#{snapshot_name}.yaml")
+                      else
+                        candidate = File.join(TestHarness.snapshots_dir, "session", "#{test_name}.yaml")
+                        File.exist?(candidate) ? candidate : File.join(TestHarness.snapshots_dir, "session", "#{DEFAULT_SNAPSHOT}.yaml")
+                      end
+
       self.class.harness.configure(
         File.expand_path(snapshot_path),
         File.expand_path(self.class.work_dir)

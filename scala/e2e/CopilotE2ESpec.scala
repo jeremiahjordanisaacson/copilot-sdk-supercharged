@@ -22,6 +22,8 @@ import scala.concurrent.duration.*
  *  - Node.js ≥ 18 with `npx` on PATH
  *  - `npm ci` has been run in `test/harness/`
  */
+import java.nio.file.Files
+
 class CopilotE2ESpec
     extends AnyFlatSpec
     with Matchers
@@ -35,6 +37,9 @@ class CopilotE2ESpec
   // Client reference reset per-test
   private var client: Option[CopilotClient] = None
 
+  // Isolated work directory for test runs
+  private var workDir: String = _
+
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
@@ -42,11 +47,15 @@ class CopilotE2ESpec
   override def beforeAll(): Unit =
     super.beforeAll()
     TestHarness.start()
+    workDir = Files.createTempDirectory("copilot-scala-e2e-").toFile.getAbsolutePath
     info(s"Proxy running at ${TestHarness.proxyUrl}")
 
   override def afterAll(): Unit =
     try TestHarness.stop()
-    finally super.afterAll()
+    finally
+      try new java.io.File(workDir).delete()
+      catch case _: Exception => ()
+      super.afterAll()
 
   override def afterEach(): Unit =
     // Ensure every test cleans up its client
@@ -61,12 +70,14 @@ class CopilotE2ESpec
   // Helpers
   // ---------------------------------------------------------------------------
 
-  /** Creates a [[CopilotClient]] pre-configured to talk to the test proxy. */
+  /** Creates a [[CopilotClient]] pre-configured to talk through the test proxy. */
   private def makeClient(
     sessionFs: Option[SessionFsConfig] = None
   ): CopilotClient =
     val opts = CopilotClientOptions(
-      cliUrl = Some(TestHarness.cliUrl),
+      cliPath = Some(TestHarness.cliPath),
+      cwd = Some(workDir),
+      env = Some(TestHarness.testEnv(workDir)),
       sessionFs = sessionFs,
     )
     val c = CopilotClient(opts)

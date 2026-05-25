@@ -26,20 +26,29 @@ class CopilotE2ESpec extends Specification {
     TestHarness harness = new TestHarness()
 
     @Shared
-    String cliUrl
+    String cliPath
+
+    @Shared
+    Map<String, String> testEnv
+
+    @Shared
+    String workDir
 
     def setupSpec() {
         harness.startProxy()
-        cliUrl = harness.cliUrl
+        cliPath = harness.getCliPath()
+        workDir = java.nio.file.Files.createTempDirectory('copilot-groovy-e2e-').toFile().absolutePath
+        testEnv = harness.getTestEnv(workDir)
     }
 
     def cleanupSpec() {
         harness.stopProxy()
+        try { new File(workDir).deleteDir() } catch (Exception ignored) {}
     }
 
     def "should create a session and disconnect"() {
         given: "a client connected to the replay proxy"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
 
         when: "the client starts and creates a session"
         client.start()
@@ -57,7 +66,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should send a message and receive response"() {
         given: "a connected client with an active session"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(model: 'gpt-4')
 
@@ -84,7 +93,9 @@ class CopilotE2ESpec extends Specification {
 
         when: "a client is created with sessionFs config and started"
         CopilotClient client = new CopilotClient(
-            cliUrl: cliUrl,
+            cliPath: cliPath,
+            cwd: workDir,
+            env: testEnv,
             sessionFs: fsConfig
         )
         client.start()
@@ -102,7 +113,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should handle multi-turn conversation"() {
         given: "a connected client with an active session"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(model: 'gpt-4')
 
@@ -125,7 +136,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should resume session by ID"() {
         given: "a session created on one client"
-        CopilotClient client1 = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client1 = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client1.start()
         CopilotSession original = client1.createSession(model: 'gpt-4')
         String savedId = original.sessionId
@@ -133,7 +144,7 @@ class CopilotE2ESpec extends Specification {
         when: "we stop the first client and resume the session on a second client"
         original.destroy()
         client1.stop()
-        CopilotClient client2 = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client2 = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client2.start()
         CopilotSession resumed = client2.resumeSession(savedId, model: 'gpt-4')
 
@@ -148,7 +159,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should list sessions"() {
         given: "a client with two active sessions"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession s1 = client.createSession(model: 'gpt-4')
         CopilotSession s2 = client.createSession(model: 'gpt-4')
@@ -170,7 +181,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should get session metadata"() {
         given: "a connected client with an active session"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(model: 'gpt-4')
 
@@ -188,7 +199,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should delete session"() {
         given: "a connected client with an active session"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(model: 'gpt-4')
         String deletedId = session.sessionId
@@ -206,7 +217,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should list models"() {
         given: "a connected client"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
 
         when: "listing available models"
@@ -223,7 +234,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should ping"() {
         given: "a connected client"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
 
         when: "a ping is sent"
@@ -240,7 +251,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should get auth status"() {
         given: "a connected client"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
 
         when: "auth status is queried"
@@ -256,7 +267,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should track client lifecycle"() {
         given: "a new client"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
 
         expect: "the client starts in DISCONNECTED state"
         client.state == Types.ConnectionState.DISCONNECTED
@@ -276,7 +287,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should manage foreground session"() {
         given: "a connected client with a session"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(model: 'gpt-4')
 
@@ -308,7 +319,7 @@ class CopilotE2ESpec extends Specification {
             }
             .build()
 
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(
             model: 'gpt-4',
@@ -329,7 +340,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should support streaming"() {
         given: "a client with a streaming session"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(model: 'gpt-4', streaming: true)
 
@@ -354,7 +365,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should configure system message"() {
         given: "a session with a system message"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(
             model: 'gpt-4',
@@ -385,7 +396,9 @@ class CopilotE2ESpec extends Specification {
             'Use tabs for indentation'
         )
         CopilotClient client = new CopilotClient(
-            cliUrl: cliUrl,
+            cliPath: cliPath,
+            cwd: workDir,
+            env: testEnv,
             sessionFs: fsConfig
         )
         client.start()
@@ -414,7 +427,7 @@ class CopilotE2ESpec extends Specification {
             }
         ]
 
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(
             model: 'gpt-4',
@@ -434,7 +447,7 @@ class CopilotE2ESpec extends Specification {
         given: "skill directory paths"
         List<String> skillDirs = ['/workspace/skills', '/workspace/custom-skills']
 
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(
             model: 'gpt-4',
@@ -452,7 +465,7 @@ class CopilotE2ESpec extends Specification {
 
     def "should handle compaction"() {
         given: "a session with infinite sessions enabled and a compaction event collector"
-        CopilotClient client = new CopilotClient(cliUrl: cliUrl)
+        CopilotClient client = new CopilotClient(cliPath: cliPath, cwd: workDir, env: testEnv)
         client.start()
         CopilotSession session = client.createSession(
             model: 'gpt-4',

@@ -16,22 +16,51 @@ object TestHarness:
 
   @volatile private var process: Option[Process] = None
   @volatile private var _proxyUrl: Option[String] = None
+  @volatile private var _connectProxyUrl: Option[String] = None
+  @volatile private var _caFilePath: Option[String] = None
 
   /** The full proxy URL (e.g. `http://localhost:12345`), available after [[start]]. */
   def proxyUrl: String =
-    _proxyUrl.getOrElse(throw new IllegalStateException("TestHarness not started"))
-
-  /**
-   * Extracts the `host:port` portion from the proxy URL.
-   *
-   * The [[CopilotClient]] `cliUrl` option expects a value like `localhost:12345`
-   * (without the `http://` scheme), so this helper strips the scheme prefix.
-   */
-  def cliUrl: String =
-    proxyUrl.replaceFirst("^https?://", "")
+   _proxyUrl.getOrElse(throw new IllegalStateException("TestHarness not started"))
 
   /** `true` when the proxy process is running and the URL has been parsed. */
   def isRunning: Boolean = _proxyUrl.isDefined && process.exists(_.isAlive)
+
+  /** Resolve the CLI executable path. */
+  def cliPath: String =
+   val envPath = Option(System.getenv("COPILOT_CLI_PATH")).filter(_.nonEmpty)
+   envPath.filter(p => java.io.File(p).exists()).getOrElse {
+     val repoRoot = resolveRepoRoot()
+     val nodeCliPath = repoRoot.resolve("nodejs/node_modules/@github/copilot/index.js")
+     if nodeCliPath.toFile.exists() then nodeCliPath.toString
+     else "copilot"
+   }
+
+  /** Environment variables that route the CLI through the proxy. */
+  def testEnv(workDir: String): Map[String, String] =
+   val base = scala.collection.mutable.Map[String, String](
+     "COPILOT_API_URL" -> proxyUrl,
+     "COPILOT_HOME" -> workDir,
+     "XDG_CONFIG_HOME" -> workDir,
+     "XDG_STATE_HOME" -> workDir,
+     "GH_TOKEN" -> Option(System.getenv("GH_TOKEN")).getOrElse("fake-test-token"),
+     "GITHUB_TOKEN" -> Option(System.getenv("GITHUB_TOKEN")).getOrElse("fake-test-token"),
+   )
+   _connectProxyUrl.foreach { url =>
+     base ++= Seq(
+       "HTTP_PROXY" -> url, "HTTPS_PROXY" -> url,
+       "http_proxy" -> url, "https_proxy" -> url,
+       "NO_PROXY" -> "127.0.0.1,localhost,::1",
+       "no_proxy" -> "127.0.0.1,localhost,::1",
+     )
+   }
+   _caFilePath.foreach { path =>
+     base ++= Seq(
+       "NODE_EXTRA_CA_CERTS" -> path,
+       "SSL_CERT_FILE" -> path,
+     )
+   }
+   base.toMap
 
   // ---------------------------------------------------------------------------
   // Lifecycle
@@ -88,6 +117,19 @@ object TestHarness:
       case _ =>
         proc.destroyForcibly()
         throw new RuntimeException(s"Unexpected proxy output (expected 'Listening: http://...'): $line")
+
+    // Parse connect proxy metadata JSON from the same line
+    val MetadataPattern: Regex = """(\{.*\})\s*$""".r
+    MetadataPattern.findFirstMatchIn(line).foreach { m =>
+      try
+        val jsonStr = m.group(1)
+        import io.circe.parser.parse
+        parse(jsonStr).foreach { json =>
+          _connectProxyUrl = json.hcursor.get[String]("connectProxyUrl").toOption
+          _caFilePath = json.hcursor.get[String]("caFilePath").toOption
+        }
+      catch case _: Exception => () // non-fatal
+    }
   }
 
   /**
@@ -117,27 +159,28 @@ object TestHarness:
 
     process = None
     _proxyUrl = None
+    _connectProxyUrl = None
+    _caFilePath = None
   }
 
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
 
-  /** Resolves the absolute path to `test/harness/server.ts` relative to the Scala e2e dir. */
-  private def resolveServerPath(): Path =
-    // This file lives at  scala/e2e/TestHarness.scala
-    // The server lives at test/harness/server.ts
-    // From scala/e2e/ → ../../test/harness/server.ts
-    val e2eDir = Paths.get(System.getProperty("user.dir"))
-    // When sbt runs tests the cwd is the project root (scala/), so we go up once.
-    // Try both relative resolutions and pick whichever exists.
+  /** Resolves the repo root by walking up from cwd. */
+  private def resolveRepoRoot(): Path =
+    val cwd = Paths.get(System.getProperty("user.dir"))
     val candidates = Seq(
-      e2eDir.resolve("../test/harness/server.ts").normalize(),  // cwd = scala/
-      e2eDir.resolve("../../test/harness/server.ts").normalize(), // cwd = scala/e2e/
-      e2eDir.resolve("test/harness/server.ts").normalize(),      // cwd = repo root
+      cwd.resolve("..").normalize(),    // cwd = scala/
+      cwd.resolve("../..").normalize(), // cwd = scala/e2e/
+      cwd,                              // cwd = repo root
     )
-    candidates.find(_.toFile.exists()).getOrElse(
+    candidates.find(p => p.resolve("test/harness/server.ts").toFile.exists()).getOrElse(
       throw new RuntimeException(
-        s"Cannot find test/harness/server.ts. Tried: ${candidates.mkString(", ")}. cwd=${e2eDir}"
+        s"Cannot find repo root (test/harness/server.ts). Tried: ${candidates.mkString(", ")}. cwd=$cwd"
       )
     )
+
+  /** Resolves the absolute path to `test/harness/server.ts`. */
+  private def resolveServerPath(): Path =
+    resolveRepoRoot().resolve("test/harness/server.ts")

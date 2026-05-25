@@ -298,7 +298,7 @@ final class SessionE2ETests: XCTestCase {
         do {
             let resumed = try await client2.resumeSession(
                 savedSessionId,
-                config: SessionConfig(model: "gpt-4")
+                config: ResumeSessionConfig(model: "gpt-4")
             )
             let resumedId = await resumed.sessionId
             XCTAssertEqual(resumedId, savedSessionId, "Resumed session ID should match original")
@@ -396,7 +396,7 @@ final class SessionE2ETests: XCTestCase {
             try await client.deleteSession(sessionId)
 
             let sessions = try await client.listSessions()
-            let found = sessions.contains { $0.id == sessionId }
+            let found = sessions.contains { $0.sessionId == sessionId }
             XCTAssertFalse(found, "Deleted session should not appear in session list")
         }
 

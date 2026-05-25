@@ -15,7 +15,7 @@ using Test
 
 # ── Bootstrap: load the test harness and the SDK ────────────────────────────
 include(joinpath(@__DIR__, "testharness", "proxy.jl"))
-using .TestHarness: start_proxy, stop_proxy, cli_url_from_proxy
+using .TestHarness: start_proxy, stop_proxy, cli_path_from_repo, proxy_test_env
 
 # Add the parent julia/ dir to LOAD_PATH so `using CopilotSDK` resolves
 push!(LOAD_PATH, joinpath(@__DIR__, ".."))
@@ -23,7 +23,9 @@ using CopilotSDK
 
 # ── Shared setup / teardown ─────────────────────────────────────────────────
 proxy_url = start_proxy()
-cli_url   = cli_url_from_proxy(proxy_url)
+cli_path  = cli_path_from_repo()
+work_dir  = mktempdir("copilot-julia-e2e-")
+test_env  = proxy_test_env(work_dir)
 
 # Ensure the proxy is torn down no matter what
 atexit() do
@@ -35,7 +37,7 @@ end
 @testset "Julia SDK E2E" begin
 
     @testset "Session create and disconnect" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         session = create_session(client, SessionConfig(model="gpt-4"))
@@ -48,7 +50,7 @@ end
     end
 
     @testset "Send message and receive response" begin
-        client = CopilotClient(cli_url=cli_url)
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         # Collect assistant messages via event handler
@@ -85,7 +87,9 @@ end
         )
 
         client = CopilotClient(CopilotClientOptions(
-            cli_url=cli_url,
+            cli_path=cli_path,
+            cwd=work_dir,
+            env=test_env,
             session_fs=fs_config,
         ))
 
@@ -105,7 +109,7 @@ end
 
     # ── Test 4: Multi-turn conversation ──────────────────────────────────────
     @testset "Multi-turn conversation" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         messages = String[]
@@ -141,7 +145,7 @@ end
 
     # ── Test 5: Session resume ───────────────────────────────────────────────
     @testset "Session resume by ID" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         session = create_session(client, SessionConfig(model="gpt-4"))
@@ -152,7 +156,7 @@ end
         stop!(client)
 
         # New client, resume by the captured session ID
-        client2 = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client2 = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client2)
 
         try
@@ -170,7 +174,7 @@ end
 
     # ── Test 6: Session list ─────────────────────────────────────────────────
     @testset "Session list" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         s1 = create_session(client, SessionConfig(model="gpt-4"))
@@ -192,7 +196,7 @@ end
 
     # ── Test 7: Session metadata ─────────────────────────────────────────────
     @testset "Session metadata" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         session = create_session(client, SessionConfig(model="gpt-4"))
@@ -211,7 +215,7 @@ end
 
     # ── Test 8: Session delete ───────────────────────────────────────────────
     @testset "Session delete" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         session = create_session(client, SessionConfig(model="gpt-4"))
@@ -233,7 +237,7 @@ end
 
     # ── Test 9: Model list ───────────────────────────────────────────────────
     @testset "Model list" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         try
@@ -251,7 +255,7 @@ end
 
     # ── Test 10: Ping ────────────────────────────────────────────────────────
     @testset "Ping" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         try
@@ -266,7 +270,7 @@ end
 
     # ── Test 11: Auth status ─────────────────────────────────────────────────
     @testset "Auth status" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         try
@@ -281,7 +285,7 @@ end
 
     # ── Test 12: Client lifecycle states ─────────────────────────────────────
     @testset "Client lifecycle states" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         @test client.state == DISCONNECTED
 
         start!(client)
@@ -293,7 +297,7 @@ end
 
     # ── Test 13: Foreground session ──────────────────────────────────────────
     @testset "Foreground session" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         session = create_session(client, SessionConfig(model="gpt-4"))
@@ -333,7 +337,7 @@ end
         @test my_tool isa Tool
         @test my_tool.name == "get_weather"
 
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         config = SessionConfig(
@@ -363,7 +367,7 @@ end
 
     # ── Test 15: Streaming events ────────────────────────────────────────────
     @testset "Streaming events" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         deltas   = String[]
@@ -402,7 +406,7 @@ end
 
     # ── Test 16: System message configuration ────────────────────────────────
     @testset "System message configuration" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         messages = String[]
@@ -441,7 +445,9 @@ end
         )
 
         client = CopilotClient(CopilotClientOptions(
-            cli_url=cli_url,
+            cli_path=cli_path,
+            cwd=work_dir,
+            env=test_env,
             session_fs=fs_config,
         ))
         start!(client)
@@ -475,7 +481,7 @@ end
 
     # ── Test 18: MCP server configuration ────────────────────────────────────
     @testset "MCP server configuration" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         mcp_servers = Dict{String, McpServerConfig}(
@@ -509,7 +515,7 @@ end
 
     # ── Test 19: Skill directories configuration ─────────────────────────────
     @testset "Skill directories configuration" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         config = SessionConfig(
@@ -536,7 +542,7 @@ end
 
     # ── Test 20: Compaction events ───────────────────────────────────────────
     @testset "Compaction events" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         compaction_starts   = Ref(0)

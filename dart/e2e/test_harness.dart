@@ -12,6 +12,8 @@ import 'dart:io';
 class TestHarness {
   Process? _process;
   String? _proxyUrl;
+  String? _connectProxyUrl;
+  String? _caFilePath;
   late final String _repoRoot;
 
   TestHarness() {
@@ -61,7 +63,7 @@ class TestHarness {
       },
     );
 
-    // Parse "Listening: http://..."
+    // Parse "Listening: http://..." from the line
     final match = RegExp(r'Listening:\s*(http://\S+)').firstMatch(firstLine);
     if (match == null) {
       _process?.kill();
@@ -69,6 +71,20 @@ class TestHarness {
     }
 
     _proxyUrl = match.group(1)!;
+
+    // Parse connect proxy metadata JSON from the same line
+    final metaMatch = RegExp(r'\{.*\}\s*$').firstMatch(firstLine);
+    if (metaMatch != null) {
+      try {
+        final meta =
+            jsonDecode(metaMatch.group(0)!) as Map<String, dynamic>;
+        _connectProxyUrl = meta['connectProxyUrl'] as String?;
+        _caFilePath = meta['caFilePath'] as String?;
+      } catch (_) {
+        // Non-fatal — tests can still work without connect proxy metadata
+      }
+    }
+
     print('TestHarness: proxy started at $_proxyUrl');
     return _proxyUrl!;
   }
@@ -147,6 +163,50 @@ class TestHarness {
       return '$_repoRoot\\${posixRelativePath.replaceAll('/', '\\')}';
     }
     return '$_repoRoot/$posixRelativePath';
+  }
+
+  /// Resolve the path to the Copilot CLI executable.
+  String getCliPath() {
+    final envPath = Platform.environment['COPILOT_CLI_PATH'];
+    if (envPath != null && envPath.isNotEmpty && File(envPath).existsSync()) {
+      return File(envPath).absolute.path;
+    }
+
+    final nodeCli = File('$_repoRoot${Platform.pathSeparator}nodejs'
+        '${Platform.pathSeparator}node_modules${Platform.pathSeparator}'
+        '@github${Platform.pathSeparator}copilot'
+        '${Platform.pathSeparator}index.js');
+    if (nodeCli.existsSync()) {
+      return nodeCli.absolute.path;
+    }
+
+    return 'copilot';
+  }
+
+  /// Environment variables for the CLI process, routing traffic through the proxy.
+  Map<String, String> getTestEnv(String workDir) {
+    final env = Map<String, String>.from(Platform.environment);
+    env['COPILOT_API_URL'] = _proxyUrl ?? '';
+    env['COPILOT_HOME'] = workDir;
+    env['XDG_CONFIG_HOME'] = workDir;
+    env['XDG_STATE_HOME'] = workDir;
+    env['GH_TOKEN'] = env['GH_TOKEN'] ?? 'fake-test-token';
+    env['GITHUB_TOKEN'] = env['GITHUB_TOKEN'] ?? 'fake-test-token';
+
+    if (_connectProxyUrl != null && _connectProxyUrl!.isNotEmpty) {
+      env['HTTP_PROXY'] = _connectProxyUrl!;
+      env['HTTPS_PROXY'] = _connectProxyUrl!;
+      env['http_proxy'] = _connectProxyUrl!;
+      env['https_proxy'] = _connectProxyUrl!;
+      env['NO_PROXY'] = '127.0.0.1,localhost,::1';
+      env['no_proxy'] = '127.0.0.1,localhost,::1';
+    }
+    if (_caFilePath != null && _caFilePath!.isNotEmpty) {
+      env['NODE_EXTRA_CA_CERTS'] = _caFilePath!;
+      env['SSL_CERT_FILE'] = _caFilePath!;
+    }
+
+    return env;
   }
 
   /// Compute the repository root.

@@ -14,20 +14,38 @@ import 'test_harness.dart';
 
 void main() {
   late TestHarness harness;
+  late String workDir;
 
   setUpAll(() async {
     harness = TestHarness();
     await harness.start();
+    // Create an isolated work directory
+    workDir = Directory.systemTemp
+        .createTempSync('copilot-dart-e2e-')
+        .path;
   });
 
   tearDownAll(() async {
     await harness.stop();
+    try {
+      Directory(workDir).deleteSync(recursive: true);
+    } catch (_) {}
   });
 
   /// Helper to configure the proxy for a specific test snapshot.
   Future<void> configureForTest(String snapshotRelPath) async {
     final snapshot = harness.snapshotPathPosix(snapshotRelPath);
-    await harness.configure(snapshot, harness.repoRoot);
+    await harness.configure(snapshot, workDir);
+  }
+
+  /// Helper to create a CopilotClient routed through the replay proxy.
+  CopilotClient makeClient({SessionFsConfig? sessionFs}) {
+    return CopilotClient(CopilotClientOptions(
+      cliPath: harness.getCliPath(),
+      cwd: workDir,
+      env: harness.getTestEnv(workDir),
+      sessionFs: sessionFs,
+    ));
   }
 
   // --------------------------------------------------------------------------
@@ -38,10 +56,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/should_create_session_with_custom_tool.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -67,10 +82,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -121,8 +133,9 @@ void main() {
     );
 
     final options = CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
+      cliPath: harness.getCliPath(),
+      cwd: workDir,
+      env: harness.getTestEnv(workDir),
       sessionFs: fsConfig,
     );
 
@@ -159,10 +172,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -203,10 +213,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client1 = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client1 = makeClient();
 
     late String savedSessionId;
 
@@ -224,10 +231,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client2 = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client2 = makeClient();
 
     try {
       await client2.start();
@@ -251,10 +255,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -286,10 +287,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -317,10 +315,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -350,10 +345,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -375,10 +367,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -400,10 +389,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -426,10 +412,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -449,10 +432,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -481,10 +461,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -528,10 +505,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -574,10 +548,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -617,8 +588,9 @@ void main() {
     );
 
     final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
+      cliPath: harness.getCliPath(),
+      cwd: workDir,
+      env: harness.getTestEnv(workDir),
       sessionFs: fsConfig,
     ));
 
@@ -645,10 +617,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -681,10 +650,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();
@@ -714,10 +680,7 @@ void main() {
     await configureForTest(
         'test/snapshots/session/sendandwait_blocks_until_session_idle_and_returns_final_assistant_message.yaml');
 
-    final client = CopilotClient(CopilotClientOptions(
-      cwd: harness.repoRoot,
-      cliUrl: harness.proxyUrl!,
-    ));
+    final client = makeClient();
 
     try {
       await client.start();

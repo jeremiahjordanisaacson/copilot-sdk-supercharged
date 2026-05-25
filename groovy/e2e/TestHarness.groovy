@@ -15,9 +15,12 @@ import java.util.regex.Pattern
  */
 class TestHarness {
     private static final Pattern URL_PATTERN = Pattern.compile(/Listening: (http:\/\/[^\s]+)/)
+    private static final Pattern METADATA_PATTERN = Pattern.compile(/(\{.*\})\s*$/)
 
     private Process process
     private String proxyUrl
+    private String connectProxyUrl
+    private String caFilePath
 
     /**
      * Starts the replay proxy and returns the URL it is listening on.
@@ -35,6 +38,11 @@ class TestHarness {
             // Fall back to locating via project structure
             String basePath = System.getProperty('user.dir') ?: '.'
             serverScript = new File(basePath, '../../test/harness/server.ts').canonicalFile
+        }
+        if (!serverScript.exists()) {
+            // Try from groovy/ dir (Gradle project root)
+            String basePath = System.getProperty('user.dir') ?: '.'
+            serverScript = new File(basePath, '../test/harness/server.ts').canonicalFile
         }
         File workingDir = serverScript.parentFile
 
@@ -72,19 +80,67 @@ class TestHarness {
         }
 
         proxyUrl = matcher.group(1)
+
+        // Parse connect proxy metadata JSON from the same line
+        Matcher metaMatcher = METADATA_PATTERN.matcher(line.trim())
+        if (metaMatcher.find()) {
+            try {
+                def json = new groovy.json.JsonSlurper().parseText(metaMatcher.group(1))
+                connectProxyUrl = json.connectProxyUrl
+                caFilePath = json.caFilePath
+            } catch (Exception ignored) {
+                // Non-fatal — tests can still work without connect proxy metadata
+            }
+        }
+
         proxyUrl
     }
 
     /**
-     * Extracts the {@code host:port} portion from the proxy URL,
-     * suitable for passing as {@code cliUrl} to the SDK client.
-     *
-     * @return host:port string, e.g. {@code localhost:12345}
+     * Resolves the CLI executable path.
      */
-    String getCliUrl() {
-        if (!proxyUrl) throw new IllegalStateException('Proxy not started')
-        URI uri = new URI(proxyUrl)
-        "${uri.host}:${uri.port}"
+    String getCliPath() {
+        String envPath = System.getenv('COPILOT_CLI_PATH')
+        if (envPath && new File(envPath).exists()) {
+            return new File(envPath).absolutePath
+        }
+
+        File repoRoot = findRepoRoot()
+        File nodeCliPath = new File(repoRoot, 'nodejs/node_modules/@github/copilot/index.js')
+        if (nodeCliPath.exists()) {
+            return nodeCliPath.absolutePath
+        }
+
+        return 'copilot'
+    }
+
+    /**
+     * Returns environment variables that route CLI traffic through the proxy.
+     */
+    Map<String, String> getTestEnv(String workDir) {
+        Map<String, String> env = [:]
+        env.putAll(System.getenv())
+        env['COPILOT_API_URL'] = proxyUrl ?: ''
+        env['COPILOT_HOME'] = workDir
+        env['XDG_CONFIG_HOME'] = workDir
+        env['XDG_STATE_HOME'] = workDir
+        env['GH_TOKEN'] = System.getenv('GH_TOKEN') ?: 'fake-test-token'
+        env['GITHUB_TOKEN'] = System.getenv('GITHUB_TOKEN') ?: 'fake-test-token'
+
+        if (connectProxyUrl) {
+            env['HTTP_PROXY'] = connectProxyUrl
+            env['HTTPS_PROXY'] = connectProxyUrl
+            env['http_proxy'] = connectProxyUrl
+            env['https_proxy'] = connectProxyUrl
+            env['NO_PROXY'] = '127.0.0.1,localhost,::1'
+            env['no_proxy'] = '127.0.0.1,localhost,::1'
+        }
+        if (caFilePath) {
+            env['NODE_EXTRA_CA_CERTS'] = caFilePath
+            env['SSL_CERT_FILE'] = caFilePath
+        }
+
+        env
     }
 
     /**
@@ -115,5 +171,20 @@ class TestHarness {
 
         process = null
         proxyUrl = null
+        connectProxyUrl = null
+        caFilePath = null
+    }
+
+    /**
+     * Find the repo root by walking up from the current directory.
+     */
+    private static File findRepoRoot() {
+        File dir = new File(System.getProperty('user.dir') ?: '.').canonicalFile
+        for (int i = 0; i < 10; i++) {
+            if (new File(dir, 'test/harness/server.ts').exists()) return dir
+            dir = dir.parentFile
+            if (!dir) break
+        }
+        return new File(System.getProperty('user.dir') ?: '.').canonicalFile
     }
 }
