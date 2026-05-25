@@ -205,6 +205,9 @@ defmodule Copilot.Types do
       |> maybe_put("title", response.title)
       |> maybe_put("status", response.status)
     end
+
+    defp maybe_put(map, _key, nil), do: map
+    defp maybe_put(map, key, value), do: Map.put(map, key, value)
   end
 
   defmodule CanvasHostCapabilities do
@@ -268,8 +271,8 @@ defmodule Copilot.Types do
     defstruct [:owner, :name, :branch]
 
     def to_map(%__MODULE__{} = repository) do
-      %{"owner" => repository.owner, "name" => repository.name}
-      |> maybe_put("branch", repository.branch)
+      result = %{"owner" => repository.owner, "name" => repository.name}
+      if repository.branch, do: Map.put(result, "branch", repository.branch), else: result
     end
   end
 
@@ -279,13 +282,9 @@ defmodule Copilot.Types do
     defstruct [:repository]
 
     def to_map(%__MODULE__{} = options) do
-      %{}
-      |> maybe_put("repository", if(options.repository, do: CloudSessionRepository.to_map(options.repository), else: nil))
+      if options.repository, do: %{"repository" => CloudSessionRepository.to_map(options.repository)}, else: %{}
     end
   end
-
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   # ---------------------------------------------------------------------------
   # System Message Configuration
