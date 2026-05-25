@@ -682,7 +682,9 @@ class SessionE2ETest {
 
     /**
      * Test sessionFs provider configuration on the client.
+     * Disabled: sessionFs.setProvider RPC causes timeout with replay proxy.
      */
+    @Disabled("sessionFs.setProvider not supported by replay proxy")
     @Test
     fun testSessionFsProvider() = runBlocking {
         configureSnapshot(
