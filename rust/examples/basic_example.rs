@@ -64,8 +64,7 @@ async fn main() -> Result<(), Error> {
 
     let config = SessionConfig::default()
         .with_tools(vec![weather_tool])
-        .with_request_permission(false)
-        .with_request_user_input(false);
+        .with_skip_permission(true);
 
     let session = client.create_session(config).await?;
     println!("\nSession created: {}", session.id());
