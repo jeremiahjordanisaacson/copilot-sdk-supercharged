@@ -79,24 +79,26 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
-## What's New in v2.0.0
+## What's New in v2.3.0
 
-Synced with upstream `github/copilot-sdk` v0.3.0 (public preview) and ported all features to all 40 SDKs:
+Synced with upstream `github/copilot-sdk` v0.4.0 (73 upstream commits) and ported all features to all 40 SDKs:
 
-- **Per-session GitHub authentication** – Scope auth tokens per session for multi-tenant apps
-- **Session idle timeout** – Auto-cleanup inactive sessions with configurable timeout
-- **SessionFs** – Session-scoped filesystem provider with 10 I/O operations
+- **@github/copilot 1.0.47** – Latest session types with experimental schema support
+- **Codegen identifier sanitization** – Fixed identifier generation for edge-case property names
+- **z-prefixed Go generated files** – Go codegen outputs `z_`-prefixed files for clarity
+- **Experimental schema types** – Support for experimental/beta schema types in codegen
+- **Normalized skill context snapshots** – Consistent test snapshot formatting across SDKs
+- **Derive Default on Rust types** – All generated Rust types now implement `Default`
+- **PingResponse.timestamp** – Consistent `String` type across all 40 SDKs
+- **SessionFs improvements** – Session-scoped filesystem with 10 I/O operations
+- **Per-session GitHub auth** – Scope auth tokens per session for multi-tenant apps
 - **Commands & UI Elicitation** – Register slash commands and interactive prompts/dialogs
 - **System prompt customization** – Fine-grained control with append/replace/customize modes
 - **Per-agent skills** – Preload skill content into agent context at startup
 - **Per-agent tool visibility** – `excludedTools` to control tool access per agent
 - **Runtime request headers** – Custom HTTP headers per message turn
-- **Model capabilities override** – Deep-merge overrides for model feature flags
-- **Config discovery** – Auto-detect MCP servers and skill directories from workspace
-- **Sub-agent streaming events** – Control streaming event forwarding from sub-agents
-- **session.getMetadata()** – Retrieve session metadata via RPC
-- **MCP server config refactoring** – Separate stdio/HTTP server config types
 - **Image generation** – Response format and image options across all SDKs
+- **40 SDK CI** – Full E2E test coverage for Node.js, Python, Go, .NET, Rust, Java, and 34 additional SDKs
 
 ## Getting Started
 
