@@ -88,6 +88,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22.x"
+          registry-url: "https://registry.npmjs.org"
       - name: Update npm for OIDC support
         run: npm i -g "npm@11.6.3"
       - run: npm install --ignore-scripts
@@ -107,6 +108,8 @@ jobs:
       - name: Publish to npm
         if: github.ref == 'refs/heads/main' || github.event.inputs.dist-tag == 'unstable'
         run: npm publish --tag ${{ github.event.inputs.dist-tag }} --access public --registry https://registry.npmjs.org
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-dotnet:
     name: Publish .NET SDK
