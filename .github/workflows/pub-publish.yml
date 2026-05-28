@@ -38,7 +38,7 @@ jobs:
           dart pub publish --force
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         continue-on-error: true
         with:
           subject-path: dart/pubspec.yaml

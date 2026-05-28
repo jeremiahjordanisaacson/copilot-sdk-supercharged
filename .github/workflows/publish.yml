@@ -43,7 +43,7 @@ jobs:
         working-directory: ./nodejs
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: "22.x"
       - run: npm install --ignore-scripts
@@ -85,7 +85,7 @@ jobs:
         working-directory: ./nodejs
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: "22.x"
           registry-url: "https://registry.npmjs.org"
@@ -181,7 +181,7 @@ jobs:
       - name: Package (dry run)
         run: cargo publish --dry-run --allow-dirty
       - name: Upload artifact
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: rust-package
           path: rust/target/package/*.crate
@@ -204,7 +204,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: "22.x"
       - name: Set up uv

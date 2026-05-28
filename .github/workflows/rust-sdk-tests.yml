@@ -155,7 +155,7 @@ jobs:
       # archives drop out when the pinned version bumps, keeping the
       # cache bounded.
       - name: Cache bundled CLI tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ./rust/.bundled-cli-cache
           key: bundled-cli-${{ matrix.os }}-${{ steps.cli-version.outputs.version }}
