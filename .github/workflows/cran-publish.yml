@@ -43,7 +43,7 @@ jobs:
         run: R CMD check copilot.sdk.supercharged_*.tar.gz --as-cran --no-manual
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: r/copilot.sdk.supercharged_*.tar.gz
 
