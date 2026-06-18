@@ -103,24 +103,24 @@
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>2.21.3</version>
+            <version>2.22.0</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-annotations</artifactId>
-            <version>2.21</version>
+            <version>2.22</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jsr310</artifactId>
-            <version>2.21.3</version>
+            <version>2.22.0</version>
         </dependency>
 
         <!-- SpotBugs annotations for suppressing warnings -->
         <dependency>
             <groupId>com.github.spotbugs</groupId>
             <artifactId>spotbugs-annotations</artifactId>
-            <version>4.9.8</version>
+            <version>4.10.2</version>
             <scope>provided</scope>
         </dependency>
 
@@ -155,7 +155,7 @@
                 <plugin>
                     <groupId>com.github.spotbugs</groupId>
                     <artifactId>spotbugs-maven-plugin</artifactId>
-                    <version>4.9.8.3</version>
+                    <version>4.10.2.0</version>
                     <configuration>
                         <excludeFilterFile>config/spotbugs/spotbugs-exclude.xml</excludeFilterFile>
                     </configuration>
@@ -310,7 +310,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.5</version>
+                <version>3.5.6</version>
                 <configuration>
                     <runOrder>alphabetical</runOrder>
                     <!-- Inject JaCoCo agent + any JDK-version-specific flags -->
@@ -414,7 +414,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.14</version>
+                <version>0.8.15</version>
                 <executions>
                     <!-- Instrument bytecode before E2ETestContext runs tests with CapiProxy -->
                     <execution>
@@ -482,7 +482,7 @@
             <plugin>
                 <groupId>org.sonatype.central</groupId>
                 <artifactId>central-publishing-maven-plugin</artifactId>
-                <version>0.10.0</version>
+                <version>0.11.0</version>
                 <extensions>true</extensions>
                 <configuration>
                     <publishingServerId>central</publishingServerId>
