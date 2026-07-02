@@ -18,7 +18,7 @@ jobs:
         working-directory: java
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -76,7 +76,7 @@ jobs:
             -F "bundle=@bundle.jar"
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         continue-on-error: true
         with:
           subject-path: java/bundle.jar

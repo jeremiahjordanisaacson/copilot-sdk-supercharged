@@ -18,7 +18,7 @@ jobs:
         working-directory: perl
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Perl
         uses: shogo82148/actions-setup-perl@v1
@@ -37,7 +37,7 @@ jobs:
           make dist
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: perl/GitHub-Copilot-*.tar.gz
 
