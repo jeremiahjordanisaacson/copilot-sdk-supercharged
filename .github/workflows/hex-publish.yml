@@ -18,7 +18,7 @@ jobs:
         working-directory: elixir
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Elixir
         uses: erlef/setup-beam@v1
@@ -43,7 +43,7 @@ jobs:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: elixir/copilot_sdk_supercharged-*.tar
         continue-on-error: true

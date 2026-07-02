@@ -44,8 +44,8 @@ jobs:
         shell: bash
         working-directory: ./nodejs
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           cache: "npm"
           cache-dependency-path: "./nodejs/package-lock.json"

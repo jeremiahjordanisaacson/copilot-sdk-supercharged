@@ -101,8 +101,8 @@ jobs:
       run:
         working-directory: java
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -110,7 +110,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
           cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -123,8 +123,8 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -142,8 +142,8 @@ jobs:
       run:
         working-directory: ruby
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -165,8 +165,8 @@ jobs:
       run:
         working-directory: php
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -187,8 +187,8 @@ jobs:
       run:
         working-directory: kotlin
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -196,11 +196,11 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
           cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: gradle test
 
   dart:
@@ -210,8 +210,8 @@ jobs:
       run:
         working-directory: dart
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -231,8 +231,8 @@ jobs:
       run:
         working-directory: scala
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -240,7 +240,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
           cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -254,8 +254,8 @@ jobs:
       run:
         working-directory: elixir
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -277,8 +277,8 @@ jobs:
       run:
         working-directory: crystal
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -297,8 +297,8 @@ jobs:
       run:
         working-directory: julia
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -306,7 +306,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
           cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
       - run: julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
@@ -318,8 +318,8 @@ jobs:
       run:
         working-directory: nim
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -334,8 +334,8 @@ jobs:
     name: "Test: Lua SDK"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -343,8 +343,8 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
           cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
-      - uses: leafo/gh-actions-lua@v10
-      - uses: leafo/gh-actions-luarocks@v4
+      - uses: leafo/gh-actions-lua@v13
+      - uses: leafo/gh-actions-luarocks@v6
       - run: |
           cd lua
           luarocks install lua-cjson
@@ -356,8 +356,8 @@ jobs:
     name: "Test: C++ SDK"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -375,8 +375,8 @@ jobs:
     name: "Test: C SDK"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -397,8 +397,8 @@ jobs:
       run:
         working-directory: swift
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -415,8 +415,8 @@ jobs:
       run:
         working-directory: haskell
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -438,8 +438,8 @@ jobs:
       run:
         working-directory: fsharp
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -447,7 +447,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
           cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0'
       - run: dotnet test tests/CopilotSDK.Supercharged.FSharp.Tests.fsproj
@@ -459,8 +459,8 @@ jobs:
       run:
         working-directory: visualbasic
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -468,7 +468,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
           cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0'
       - run: dotnet test
@@ -480,8 +480,8 @@ jobs:
       run:
         working-directory: fortran
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -489,7 +489,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
           cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
-      - uses: fortran-lang/setup-fpm@v5
+      - uses: fortran-lang/setup-fpm@v10
         with:
           github-token: ${{ github.token }}
           fpm-version: 'v0.10.1'
@@ -502,8 +502,8 @@ jobs:
       run:
         working-directory: zig
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -523,8 +523,8 @@ jobs:
       run:
         working-directory: objc
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -546,8 +546,8 @@ jobs:
       run:
         working-directory: perl
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -573,8 +573,8 @@ jobs:
       run:
         working-directory: r
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -596,8 +596,8 @@ jobs:
       run:
         working-directory: groovy
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -605,11 +605,11 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
           cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: gradle test
 
   clojure:
@@ -619,8 +619,8 @@ jobs:
       run:
         working-directory: clojure
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -628,7 +628,7 @@ jobs:
           cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
           cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
-      - uses: DeLaGuardo/setup-clojure@12.5
+      - uses: DeLaGuardo/setup-clojure@13.5
         with:
           cli: latest
       - run: clojure -X:test
@@ -640,8 +640,8 @@ jobs:
       run:
         working-directory: erlang
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -662,8 +662,8 @@ jobs:
       run:
         working-directory: dlang
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -681,8 +681,8 @@ jobs:
       run:
         working-directory: ocaml
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -703,8 +703,8 @@ jobs:
       run:
         working-directory: tcl
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -723,8 +723,8 @@ jobs:
       run:
         working-directory: shell
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -744,8 +744,8 @@ jobs:
       run:
         working-directory: solidity
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - run: cd ../nodejs && npm install --ignore-scripts && npx tsx esbuild-copilotsdk-nodejs.ts
@@ -758,8 +758,8 @@ jobs:
     name: "Test: V SDK"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -776,8 +776,8 @@ jobs:
     name: "Test: Ada SDK"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -793,8 +793,8 @@ jobs:
     name: "Test: COBOL SDK"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -810,8 +810,8 @@ jobs:
     name: "Test: Delphi SDK"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
@@ -828,8 +828,8 @@ jobs:
     name: "Test: MATLAB SDK"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: '22'
       - name: Install SDK and test harness
