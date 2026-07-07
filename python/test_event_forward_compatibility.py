@@ -12,17 +12,18 @@ from uuid import uuid4
 
 import pytest
 
-from copilot.generated.session_events import (
+from copilot.session_events import (
+    AttachmentGitHubReferenceType,
     Data,
     ElicitationCompletedAction,
     ElicitationRequestedMode,
     ElicitationRequestedSchema,
-    PermissionRequest,
+    PermissionPromptRequestMemory,
+    PermissionRequestMemory,
     PermissionRequestMemoryAction,
     SessionEventType,
     SessionTaskCompleteData,
     UserMessageAgentMode,
-    UserMessageAttachmentGithubReferenceType,
     session_event_from_dict,
     session_event_to_dict,
 )
@@ -114,7 +115,7 @@ class TestEventForwardCompatibility:
         assert ElicitationCompletedAction.ACCEPT.value == "accept"
         assert UserMessageAgentMode.INTERACTIVE.value == "interactive"
         assert ElicitationRequestedMode.FORM.value == "form"
-        assert UserMessageAttachmentGithubReferenceType.PR.value == "pr"
+        assert AttachmentGitHubReferenceType.PR.value == "pr"
 
         schema = ElicitationRequestedSchema(
             properties={"answer": {"type": "string"}}, type="object"
@@ -137,10 +138,86 @@ class TestEventForwardCompatibility:
         constructed = Data(arguments={"tool_call_id": "call-1"})
         assert constructed.to_dict() == {"arguments": {"tool_call_id": "call-1"}}
 
-    def test_schema_defaults_are_applied_for_missing_optional_fields(self):
-        """Generated event models should honor primitive schema defaults during parsing."""
-        request = PermissionRequest.from_dict({"kind": "memory", "fact": "remember this"})
-        assert request.action == PermissionRequestMemoryAction.STORE
+    def test_data_shim_preserves_abbreviation_json_keys_on_round_trip(self):
+        """Data.from_dict(x).to_dict() should preserve JSON keys with abbreviations.
 
+        Regression test for github/copilot-sdk#1138: keys like userURL, sessionID,
+        and OAuthToken were rewritten on round-trip because _compat_to_json_key could
+        not reconstruct the original camelCase abbreviation casing.
+        """
+        for key in ["userURL", "sessionID", "XMLPayload", "serverIP", "OAuthToken"]:
+            incoming = {key: 42}
+            assert Data.from_dict(incoming).to_dict() == incoming
+
+    def test_data_shim_preserves_colliding_json_keys_on_round_trip(self):
+        """Data.from_dict(x).to_dict() should preserve keys with the same Python name."""
+        colliding_keys = {"userURL": 42, "userUrl": 43}
+        assert Data.from_dict(colliding_keys).to_dict() == colliding_keys
+
+    def test_missing_optional_fields_remain_none_after_parsing(self):
+        """Generated event models should leave missing optional fields as None.
+
+        Regression test for github/copilot-sdk issues #1139, #1140, and #1141:
+        the Python codegen previously baked JSON Schema `default` values into
+        ``obj.get(key, default)`` for optional fields, so ``from_dict()`` returned
+        the schema default instead of ``None`` and broke ``from_dict(to_dict(x))``
+        round-trips for instances where the field was ``None``.
+        """
+        from copilot.generated.session_events import (
+            _load_PermissionPromptRequest,
+            _load_PermissionRequest,
+        )
+
+        # #1141: PermissionRequest.action defaults to None when missing.
+        request = _load_PermissionRequest({"kind": "memory", "fact": "remember this"})
+        assert isinstance(request, PermissionRequestMemory)
+        assert request.action is None
+        assert PermissionRequestMemoryAction.STORE.value == "store"  # sanity
+
+        # #1140: PermissionPromptRequest.action defaults to None when missing.
+        prompt_request = _load_PermissionPromptRequest({"kind": "memory", "fact": "remember this"})
+        assert isinstance(prompt_request, PermissionPromptRequestMemory)
+        assert prompt_request.action is None
+
+        # #1139: SessionTaskCompleteData.summary defaults to None when missing.
         task_complete = SessionTaskCompleteData.from_dict({"success": True})
-        assert task_complete.summary == ""
+        assert task_complete.summary is None
+
+        # Explicit JSON null should also map to None.
+        task_complete_null = SessionTaskCompleteData.from_dict({"success": True, "summary": None})
+        assert task_complete_null.summary is None
+
+    def test_optional_fields_round_trip_none(self):
+        """``from_dict(to_dict(x))`` should equal ``x`` when optional fields are None.
+
+        Regression test for github/copilot-sdk issues #1139, #1140, and #1141.
+        """
+        # #1139: SessionTaskCompleteData round-trip with summary=None.
+        task = SessionTaskCompleteData(success=None, summary=None)
+        assert SessionTaskCompleteData.from_dict(task.to_dict()) == task
+
+        # #1140: PermissionPromptRequestMemory round-trip with action=None.
+        prompt = PermissionPromptRequestMemory(fact="test-fact")
+        assert prompt.action is None
+        assert "action" not in prompt.to_dict()
+        assert PermissionPromptRequestMemory.from_dict(prompt.to_dict()) == prompt
+
+        # #1141: PermissionRequestMemory round-trip with action=None.
+        permission = PermissionRequestMemory(fact="test-fact")
+        assert permission.action is None
+        assert "action" not in permission.to_dict()
+        assert PermissionRequestMemory.from_dict(permission.to_dict()) == permission
+
+        # PermissionRequest is now a discriminated union; the dispatch loader
+        # should round-trip via the correct variant class.
+        from copilot.generated.session_events import _load_PermissionRequest
+
+        round_tripped = _load_PermissionRequest(permission.to_dict())
+        assert isinstance(round_tripped, PermissionRequestMemory)
+        assert round_tripped == permission
+        # PermissionPromptRequest likewise.
+        from copilot.generated.session_events import _load_PermissionPromptRequest
+
+        round_tripped_prompt = _load_PermissionPromptRequest(prompt.to_dict())
+        assert isinstance(round_tripped_prompt, PermissionPromptRequestMemory)
+        assert round_tripped_prompt == prompt

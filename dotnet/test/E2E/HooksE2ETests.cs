@@ -2,11 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.SDK.Test.Harness;
+using GitHub.Copilot.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.SDK.Test.E2E;
+namespace GitHub.Copilot.Test.E2E;
 
 public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "hooks", output)
 {
@@ -30,7 +30,7 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
         });
 
         // Create a file for the model to read
-        await File.WriteAllTextAsync(Path.Combine(Ctx.WorkDir, "hello.txt"), "Hello from the test!");
+        await File.WriteAllTextAsync(Path.Join(Ctx.WorkDir, "hello.txt"), "Hello from the test!");
 
         await session.SendAsync(new MessageOptions
         {
@@ -66,7 +66,7 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
         });
 
         // Create a file for the model to read
-        await File.WriteAllTextAsync(Path.Combine(Ctx.WorkDir, "world.txt"), "World from the test!");
+        await File.WriteAllTextAsync(Path.Join(Ctx.WorkDir, "world.txt"), "World from the test!");
 
         await session.SendAsync(new MessageOptions
         {
@@ -107,7 +107,7 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
             }
         });
 
-        await File.WriteAllTextAsync(Path.Combine(Ctx.WorkDir, "both.txt"), "Testing both hooks!");
+        await File.WriteAllTextAsync(Path.Join(Ctx.WorkDir, "both.txt"), "Testing both hooks!");
 
         await session.SendAsync(new MessageOptions
         {
@@ -147,7 +147,7 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
 
         // Create a file
         var originalContent = "Original content that should not be modified";
-        await File.WriteAllTextAsync(Path.Combine(Ctx.WorkDir, "protected.txt"), originalContent);
+        await File.WriteAllTextAsync(Path.Join(Ctx.WorkDir, "protected.txt"), originalContent);
 
         await session.SendAsync(new MessageOptions
         {

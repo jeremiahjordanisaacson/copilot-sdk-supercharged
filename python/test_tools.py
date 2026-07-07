@@ -221,6 +221,22 @@ class TestDefineTool:
         )
         assert result.text_result_for_llm == "HELLO"
 
+    def test_function_style_can_create_declaration_only_tool(self):
+        class Params(BaseModel):
+            value: str = Field(description="Value to look up")
+
+        tool = define_tool(
+            "my_tool",
+            description="My tool",
+            params_type=Params,
+        )
+
+        assert tool.name == "my_tool"
+        assert tool.description == "My tool"
+        assert tool.handler is None
+        assert tool.parameters is not None
+        assert tool.parameters["properties"]["value"]["description"] == "Value to look up"
+
     def test_function_style_requires_name(self):
         class Params(BaseModel):
             value: str
@@ -373,7 +389,33 @@ class TestConvertMcpCallToolResult:
         assert result.binary_results_for_llm is not None
         assert len(result.binary_results_for_llm) == 1
         assert result.binary_results_for_llm[0].data == "blobdata"
+        assert result.binary_results_for_llm[0].mime_type == "image/png"
         assert result.binary_results_for_llm[0].description == "file:///img.png"
+
+    def test_resource_blob_defaults_missing_or_empty_mime_type(self):
+        result = convert_mcp_call_tool_result(
+            {
+                "content": [
+                    {
+                        "type": "resource",
+                        "resource": {"uri": "file:///data.bin", "blob": "binarydata"},
+                    },
+                    {
+                        "type": "resource",
+                        "resource": {
+                            "uri": "file:///empty-mime.bin",
+                            "blob": "binarydata2",
+                            "mimeType": "",
+                        },
+                    },
+                ],
+            }
+        )
+
+        assert result.binary_results_for_llm is not None
+        assert len(result.binary_results_for_llm) == 2
+        assert result.binary_results_for_llm[0].mime_type == "application/octet-stream"
+        assert result.binary_results_for_llm[1].mime_type == "application/octet-stream"
 
     def test_empty_content_array(self):
         result = convert_mcp_call_tool_result({"content": []})

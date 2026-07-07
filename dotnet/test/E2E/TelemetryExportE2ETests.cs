@@ -2,13 +2,13 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.SDK.Test.Harness;
+using GitHub.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.SDK.Test.E2E;
+namespace GitHub.Copilot.Test.E2E;
 
 public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "telemetry", output)
@@ -24,6 +24,7 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
 
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
+            Connection = RuntimeConnection.ForStdio(),
             Telemetry = new TelemetryConfig
             {
                 FilePath = telemetryPath,
@@ -47,10 +48,7 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
         await session.DisposeAsync();
         await client.StopAsync();
 
-        var entries = await ReadTelemetryEntriesAsync(
-            telemetryPath,
-            entries => entries.Any(entry => GetTypeName(entry) == "span" &&
-                GetStringAttribute(entry, "gen_ai.operation.name") == "invoke_agent"));
+        var entries = await ReadTelemetryEntriesAsync(telemetryPath);
         var spans = entries.Where(entry => GetTypeName(entry) == "span").ToList();
 
         Assert.NotEmpty(spans);
@@ -89,46 +87,23 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
         static string EchoTelemetryMarker(string value) => value;
     }
 
-    private static async Task<IReadOnlyList<JsonElement>> ReadTelemetryEntriesAsync(
-        string path,
-        Func<IReadOnlyList<JsonElement>, bool> isComplete)
+    private static async Task<IReadOnlyList<JsonElement>> ReadTelemetryEntriesAsync(string path)
     {
-        IReadOnlyList<JsonElement> entries = [];
-        await TestHelper.WaitForConditionAsync(
-            async () =>
+        var entries = new List<JsonElement>();
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var reader = new StreamReader(stream);
+        while (await reader.ReadLineAsync() is { } line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
             {
-                entries = await ReadTelemetryEntriesOnceAsync(path);
-                return entries.Count > 0 && isComplete(entries);
-            },
-            timeout: TimeSpan.FromSeconds(30),
-            timeoutMessage: $"Timed out waiting for telemetry records in '{path}'.",
-            transientExceptionFilter: exception => TestHelper.IsTransientFileSystemException(exception) || exception is JsonException);
+                continue;
+            }
+
+            using var document = JsonDocument.Parse(line);
+            entries.Add(document.RootElement.Clone());
+        }
 
         return entries;
-
-        static async Task<IReadOnlyList<JsonElement>> ReadTelemetryEntriesOnceAsync(string path)
-        {
-            if (!File.Exists(path) || new FileInfo(path).Length == 0)
-            {
-                return [];
-            }
-
-            var entries = new List<JsonElement>();
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var reader = new StreamReader(stream);
-            while (await reader.ReadLineAsync() is { } line)
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-
-                using var document = JsonDocument.Parse(line);
-                entries.Add(document.RootElement.Clone());
-            }
-
-            return entries;
-        }
     }
 
     private static string? GetTraceId(JsonElement entry) => GetStringProperty(entry, "traceId");

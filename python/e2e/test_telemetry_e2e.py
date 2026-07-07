@@ -13,7 +13,6 @@ and W3C trace context propagation via ``copilot._telemetry``.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import uuid
@@ -22,9 +21,8 @@ from typing import Any
 
 import pytest
 
-from copilot import CopilotClient
+from copilot import CopilotClient, RuntimeConnection, TelemetryConfig
 from copilot._telemetry import get_trace_context, trace_context
-from copilot.client import SubprocessConfig, TelemetryConfig
 from copilot.session import PermissionHandler
 from copilot.tools import Tool, ToolInvocation, ToolResult
 
@@ -46,22 +44,14 @@ def _is_root_span(entry: dict[str, Any]) -> bool:
     return parent in ("", "0000000000000000")
 
 
-async def _read_telemetry_entries(
-    path: Path, complete: Any, *, timeout: float = 30.0
-) -> list[dict[str, Any]]:
-    deadline = asyncio.get_event_loop().time() + timeout
-    while asyncio.get_event_loop().time() < deadline:
-        if path.exists() and path.stat().st_size > 0:
-            entries: list[dict[str, Any]] = []
-            for line in path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                entries.append(json.loads(line))
-            if entries and complete(entries):
-                return entries
-        await asyncio.sleep(0.1)
-    raise TimeoutError(f"Timed out waiting for telemetry records in '{path}'.")
+def _read_telemetry_entries(path: Path) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        entries.append(json.loads(line))
+    return entries
 
 
 class TestTelemetryExport:
@@ -82,18 +72,16 @@ class TestTelemetryExport:
             "fake-token-for-e2e-tests" if os.environ.get("GITHUB_ACTIONS") == "true" else None
         )
         client = CopilotClient(
-            SubprocessConfig(
-                cli_path=ctx.cli_path,
-                cwd=ctx.work_dir,
-                env=ctx.get_env(),
-                github_token=github_token,
-                telemetry=TelemetryConfig(
-                    file_path=str(telemetry_path),
-                    exporter_type="file",
-                    source_name=source_name,
-                    capture_content=True,
-                ),
-            )
+            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
+            working_directory=ctx.work_dir,
+            env=ctx.get_env(),
+            github_token=github_token,
+            telemetry=TelemetryConfig(
+                file_path=str(telemetry_path),
+                exporter_type="file",
+                source_name=source_name,
+                capture_content=True,
+            ),
         )
 
         try:
@@ -122,14 +110,7 @@ class TestTelemetryExport:
         finally:
             await client.stop()
 
-        entries = await _read_telemetry_entries(
-            telemetry_path,
-            lambda items: any(
-                item.get("type") == "span"
-                and _string_attribute(item, "gen_ai.operation.name") == "invoke_agent"
-                for item in items
-            ),
-        )
+        entries = _read_telemetry_entries(telemetry_path)
         spans = [item for item in entries if item.get("type") == "span"]
         assert spans
 
@@ -189,6 +170,7 @@ class TestTelemetryConfig:
         # constructor leaves every field unset (equivalent to C#'s null defaults).
         cfg: TelemetryConfig = TelemetryConfig()
         assert cfg.get("otlp_endpoint") is None
+        assert cfg.get("otlp_protocol") is None
         assert cfg.get("file_path") is None
         assert cfg.get("exporter_type") is None
         assert cfg.get("source_name") is None
@@ -197,28 +179,18 @@ class TestTelemetryConfig:
     async def test_can_set_all_properties(self):
         cfg: TelemetryConfig = TelemetryConfig(
             otlp_endpoint="http://localhost:4318",
+            otlp_protocol="http/protobuf",
             file_path="/tmp/traces.json",
             exporter_type="otlp-http",
             source_name="my-app",
             capture_content=True,
         )
         assert cfg["otlp_endpoint"] == "http://localhost:4318"
+        assert cfg["otlp_protocol"] == "http/protobuf"
         assert cfg["file_path"] == "/tmp/traces.json"
         assert cfg["exporter_type"] == "otlp-http"
         assert cfg["source_name"] == "my-app"
         assert cfg["capture_content"] is True
-
-
-class TestSubprocessConfigTelemetry:
-    """Mirrors CopilotClientOptions_Telemetry_DefaultsToNull."""
-
-    async def test_telemetry_defaults_to_none(self):
-        config = SubprocessConfig()
-        assert config.telemetry is None
-
-    # NOTE: CopilotClientOptions_Clone_CopiesTelemetry from the C# baseline has
-    # no Python equivalent: SubprocessConfig is a plain dataclass with no
-    # Clone() method, so there is nothing meaningful to test.
 
 
 class TestTelemetryHelpers:

@@ -702,6 +702,6 @@ const session = await client.createSession({
 
 ## See Also
 
-- [Hooks Overview](./index.md)
+- [Hooks Overview](./README.md)
 - [Session Lifecycle Hooks](./session-lifecycle.md)
 - [Debugging Guide](../troubleshooting/debugging.md)

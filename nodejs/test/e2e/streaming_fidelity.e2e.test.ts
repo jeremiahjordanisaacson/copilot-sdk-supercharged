@@ -83,7 +83,7 @@ describe("Streaming Fidelity", async () => {
         // Resume using a new client
         const newClient = new CopilotClient({
             env,
-            gitHubToken: isCI ? "fake-token-for-e2e-tests" : undefined,
+            gitHubToken: isCI ? "fake-token-for-e2e-tests" : process.env.GITHUB_TOKEN,
         });
         onTestFinished(() => newClient.forceStop());
         const session2 = await newClient.resumeSession(session.sessionId, {
@@ -122,7 +122,7 @@ describe("Streaming Fidelity", async () => {
         // Resume using a new client with streaming DISABLED
         const newClient = new CopilotClient({
             env,
-            gitHubToken: isCI ? "fake-token-for-e2e-tests" : undefined,
+            gitHubToken: isCI ? "fake-token-for-e2e-tests" : process.env.GITHUB_TOKEN,
         });
         onTestFinished(() => newClient.forceStop());
         const session2 = await newClient.resumeSession(session.sessionId, {
@@ -168,7 +168,7 @@ describe("Streaming Fidelity", async () => {
         expect(lastAssistant.data.content).toContain("255");
 
         // Verify the session was created with reasoning effort via getMessages
-        const messages = await session.getMessages();
+        const messages = await session.getEvents();
         const startEvent = messages.find((m) => m.type === "session.start");
         expect(startEvent).toBeDefined();
         expect(startEvent!.data.reasoningEffort).toBe("high");

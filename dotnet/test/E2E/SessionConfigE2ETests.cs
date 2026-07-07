@@ -1,15 +1,15 @@
-/*---------------------------------------------------------------------------------------------
+﻿/*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using System.Linq;
+using GitHub.Copilot.Rpc;
+using GitHub.Copilot.Test.Harness;
+using System.Text;
 using System.Text.Json;
-using GitHub.Copilot.SDK.Rpc;
-using GitHub.Copilot.SDK.Test.Harness;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.SDK.Test.E2E;
+namespace GitHub.Copilot.Test.E2E;
 
 public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "session_config", output)
@@ -113,7 +113,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
         Assert.Equal(requestedSessionId, session.SessionId);
 
-        var messages = await session.GetMessagesAsync();
+        var messages = await session.GetEventsAsync();
         var startEvent = Assert.IsType<SessionStartEvent>(messages[0]);
         Assert.Equal(requestedSessionId, startEvent.Data.SessionId);
 
@@ -132,7 +132,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             ReasoningEffort = "high",
         });
 
-        var startEvent = Assert.Single((await session.GetMessagesAsync()).OfType<SessionStartEvent>());
+        var startEvent = Assert.Single((await session.GetEventsAsync()).OfType<SessionStartEvent>());
         Assert.Equal(reasoningModelId, startEvent.Data.SelectedModel);
         Assert.Equal("high", startEvent.Data.ReasoningEffort);
 
@@ -154,7 +154,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             ReasoningEffort = effort,
         });
 
-        var startEvent = Assert.Single((await session.GetMessagesAsync()).OfType<SessionStartEvent>());
+        var startEvent = Assert.Single((await session.GetEventsAsync()).OfType<SessionStartEvent>());
         Assert.Equal(reasoningModelId, startEvent.Data.SelectedModel);
         Assert.Equal(effort, startEvent.Data.ReasoningEffort);
 
@@ -173,7 +173,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             ReasoningEffort = "high",
         });
 
-        var resumeEvent = Assert.Single((await resumedSession.GetMessagesAsync()).OfType<SessionResumeEvent>());
+        var resumeEvent = Assert.Single((await resumedSession.GetEventsAsync()).OfType<SessionResumeEvent>());
         Assert.Equal(reasoningModelId, resumeEvent.Data.SelectedModel);
         Assert.Equal("high", resumeEvent.Data.ReasoningEffort);
 
@@ -236,6 +236,62 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         AssertHeaderContains(exchange.RequestHeaders, ProviderHeaderName, "resume-provider-header");
 
         await session2.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Should_Forward_Provider_Wire_Model()
+    {
+        // Verifies that ProviderConfig.WireModel overrides the model name sent to
+        // the provider API, while SessionConfig.Model still drives runtime
+        // configuration lookup (capabilities, prompts, reasoning behavior).
+        // MaxOutputTokens is also set here to confirm the SDK accepts it without
+        // serialization errors; the CLI does not echo it as `max_tokens` on the
+        // OpenAI-style wire request, so we don't assert on it directly (see unit
+        // tests for serialization coverage).
+        var session = await CreateSessionAsync(new SessionConfig
+        {
+            Model = "claude-sonnet-4.5",
+            Provider = new ProviderConfig
+            {
+                Type = "openai",
+                BaseUrl = Ctx.ProxyUrl,
+                ApiKey = "test-provider-key",
+                WireModel = "test-wire-model",
+                MaxOutputTokens = 1024,
+            },
+        });
+
+        await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
+
+        var exchange = Assert.Single(await Ctx.GetExchangesAsync());
+        Assert.Equal("test-wire-model", exchange.Request.Model);
+
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Should_Use_Provider_Model_Id_As_Wire_Model()
+    {
+        // ProviderConfig.ModelId drives both the runtime resolved model AND the wire model
+        // when WireModel is not specified. Here SessionConfig.Model is intentionally omitted
+        // so that ModelId is the only model source.
+        var session = await CreateSessionAsync(new SessionConfig
+        {
+            Provider = new ProviderConfig
+            {
+                Type = "openai",
+                BaseUrl = Ctx.ProxyUrl,
+                ApiKey = "test-provider-key",
+                ModelId = "claude-sonnet-4.5",
+            },
+        });
+
+        await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
+
+        var exchange = Assert.Single(await Ctx.GetExchangesAsync());
+        Assert.Equal("claude-sonnet-4.5", exchange.Request.Model);
+
+        await session.DisposeAsync();
     }
 
     [Fact]
@@ -380,12 +436,209 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             AvailableTools = ["view"],
         });
 
-        await session2.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
+        try
+        {
+            var exchange = Assert.Single(await SendAndWaitForExchangesAsync(
+                session2,
+                new MessageOptions { Prompt = "What is 1+1?" }));
+            Assert.Equal(["view"], GetToolNames(exchange));
+        }
+        finally
+        {
+            await session2.DisposeAsync();
+        }
+    }
 
-        var exchange = Assert.Single(await Ctx.GetExchangesAsync());
-        Assert.Equal(["view"], GetToolNames(exchange));
+    [Fact]
+    public async Task Should_Apply_Session_Limits_On_Create()
+    {
+        var session = await CreateSessionAsync(new SessionConfig
+        {
+            SessionLimits = new SessionLimitsConfig
+            {
+                MaxAiCredits = 30,
+            },
+        });
 
-        await session2.DisposeAsync();
+        try
+        {
+            var exchange = await SendAndGetNextExchangeAsync(
+                session,
+                "Acknowledge the current session limits.");
+
+            AssertSessionLimitsStatus(exchange, "30 AI credits");
+        }
+        finally
+        {
+            await session.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Should_Apply_Session_Limits_On_Resume()
+    {
+        var session1 = await CreateSessionAsync();
+        var session2 = await ResumeSessionAsync(session1.SessionId, new ResumeSessionConfig
+        {
+            SessionLimits = new SessionLimitsConfig
+            {
+                MaxAiCredits = 30,
+            },
+        });
+
+        try
+        {
+            var exchange = await SendAndGetNextExchangeAsync(
+                session2,
+                "Acknowledge the current session limits.");
+
+            AssertSessionLimitsStatus(exchange, "30 AI credits");
+        }
+        finally
+        {
+            await session2.DisposeAsync();
+            await session1.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Should_Apply_Excluded_Built_In_Agents_On_Create()
+    {
+        const string excludedAgent = "explore";
+        const string prompt = "What is 1+1?";
+
+        var baselineSession = await CreateSessionAsync();
+        try
+        {
+            var baselineExchange = await SendAndGetNextExchangeAsync(baselineSession, prompt);
+            Assert.Contains(excludedAgent, GetTaskAgentTypes(baselineExchange));
+        }
+        finally
+        {
+            await baselineSession.DisposeAsync();
+        }
+
+        var excludedSession = await CreateSessionAsync(new SessionConfig
+        {
+            ExcludedBuiltInAgents = [excludedAgent],
+        });
+
+        try
+        {
+            var excludedExchange = await SendAndGetNextExchangeAsync(excludedSession, prompt);
+            var agentTypes = GetTaskAgentTypes(excludedExchange);
+
+            Assert.NotEmpty(agentTypes);
+            Assert.DoesNotContain(excludedAgent, agentTypes);
+        }
+        finally
+        {
+            await excludedSession.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Should_Apply_Excluded_Built_In_Agents_On_Resume()
+    {
+        const string excludedAgent = "explore";
+
+        var session1 = await CreateSessionAsync();
+        var session2 = await ResumeSessionAsync(session1.SessionId, new ResumeSessionConfig
+        {
+            ExcludedBuiltInAgents = [excludedAgent],
+        });
+
+        try
+        {
+            var exchange = await SendAndGetNextExchangeAsync(session2, "What is 1+1?");
+            var agentTypes = GetTaskAgentTypes(exchange);
+
+            Assert.NotEmpty(agentTypes);
+            Assert.DoesNotContain(excludedAgent, agentTypes);
+        }
+        finally
+        {
+            await session2.DisposeAsync();
+            await session1.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Should_Enable_Citations_For_Anthropic_File_Attachments_On_Create()
+    {
+        var handler = new RecordingRequestHandler();
+        await using var client = CreateClientWithRequestHandler(handler);
+        await client.StartAsync();
+
+        var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            Model = "claude-sonnet-4.5",
+            EnableCitations = true,
+            Provider = CreateAnthropicProvider(),
+        });
+
+        try
+        {
+            await session.SendAndWaitAsync(new MessageOptions
+            {
+                Prompt = "Summarize the attached PDF with citations enabled.",
+                Attachments = [CreatePdfAttachment()],
+            });
+
+            AssertAnthropicDocumentCitationsEnabled(Assert.Single(handler.InferenceRequests).Body);
+        }
+        finally
+        {
+            await session.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Should_Enable_Citations_For_Anthropic_File_Attachments_On_Resume()
+    {
+        const string connectionToken = "citation-resume-token";
+        var handler = new RecordingRequestHandler();
+        await using var client = CreateClientWithRequestHandler(
+            handler,
+            RuntimeConnection.ForTcp(connectionToken: connectionToken));
+        await client.StartAsync();
+
+        var session1 = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+        });
+        var sessionId = session1.SessionId;
+        var port = client.RuntimePort
+            ?? throw new InvalidOperationException("The handler-backed E2E client must use TCP transport to support multi-client resume.");
+        await using var resumeClient = Ctx.CreateClient(options: new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForUri($"localhost:{port}", connectionToken: connectionToken),
+        });
+
+        var session2 = await resumeClient.ResumeSessionAsync(sessionId, new ResumeSessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            Model = "claude-sonnet-4.5",
+            EnableCitations = true,
+            Provider = CreateAnthropicProvider(),
+        });
+
+        try
+        {
+            await session2.SendAndWaitAsync(new MessageOptions
+            {
+                Prompt = "Summarize the attached PDF with citations enabled.",
+                Attachments = [CreatePdfAttachment()],
+            });
+
+            AssertAnthropicDocumentCitationsEnabled(Assert.Single(handler.InferenceRequests).Body);
+        }
+        finally
+        {
+            await session2.DisposeAsync();
+            await session1.DisposeAsync();
+        }
     }
 
     [Fact]
@@ -432,7 +685,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             Prompt = "What color is this pixel? Reply in one word.",
             Attachments =
             [
-                new UserMessageAttachmentBlob
+                new AttachmentBlob
                 {
                     Data = pngBase64,
                     MimeType = "image/png",
@@ -457,7 +710,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             Prompt = "Summarize the attached file",
             Attachments =
             [
-                new UserMessageAttachmentFile
+                new AttachmentFile
                 {
                     Path = attachedPath,
                     DisplayName = "attached.txt",
@@ -480,6 +733,95 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
                 part.TryGetProperty("type", out var typeProp) &&
                 typeProp.ValueKind == JsonValueKind.String &&
                 typeProp.GetString() == "image_url"));
+    }
+
+    private CopilotClient CreateClientWithRequestHandler(
+        CopilotRequestHandler handler,
+        RuntimeConnection? connection = null)
+    {
+        return Ctx.CreateClient(options: new CopilotClientOptions
+        {
+            Connection = connection ?? RuntimeConnection.ForStdio(),
+            RequestHandler = handler,
+        });
+    }
+
+    private async Task<ParsedHttpExchange> SendAndGetNextExchangeAsync(CopilotSession session, string prompt)
+    {
+        var existingCount = (await Ctx.GetExchangesAsync()).Count;
+        var exchanges = await SendAndWaitForExchangesAsync(
+            session,
+            new MessageOptions { Prompt = prompt },
+            minimumCount: existingCount + 1);
+        return exchanges[existingCount];
+    }
+
+    private static void AssertSessionLimitsStatus(ParsedHttpExchange exchange, string expectedRemaining)
+    {
+        var message = exchange.Request.Messages.SingleOrDefault(m =>
+            m.Role == "user"
+            && m.StringContent?.Contains("<session_limits_status>", StringComparison.Ordinal) == true);
+
+        Assert.NotNull(message);
+        Assert.Contains($"Remaining session limits: {expectedRemaining}.", message!.StringContent);
+        Assert.Contains(
+            "Be frugal; avoid optional exploration and unnecessary tool calls.",
+            message.StringContent);
+    }
+
+    private static IReadOnlyList<string> GetTaskAgentTypes(ParsedHttpExchange exchange)
+    {
+        var taskTool = Assert.Single(
+            exchange.Request.Tools ?? [],
+            tool => string.Equals(tool.Function.Name, "task", StringComparison.Ordinal));
+        var parameters = taskTool.Function.Parameters;
+
+        Assert.NotNull(parameters);
+        var enumValues = parameters!.Value
+            .GetProperty("properties")
+            .GetProperty("agent_type")
+            .GetProperty("enum");
+
+        return [.. enumValues.EnumerateArray().Select(value => value.GetString()).OfType<string>()];
+    }
+
+    private static AttachmentBlob CreatePdfAttachment()
+    {
+        const string pdfText = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
+
+        return new AttachmentBlob
+        {
+            Data = Convert.ToBase64String(Encoding.ASCII.GetBytes(pdfText)),
+            DisplayName = "citation-source.pdf",
+            MimeType = "application/pdf",
+        };
+    }
+
+    private static ProviderConfig CreateAnthropicProvider()
+    {
+        return new ProviderConfig
+        {
+            Type = "anthropic",
+            BaseUrl = "https://anthropic-citations.invalid/v1",
+            ApiKey = "test-provider-key",
+            ModelId = "claude-sonnet-4.5",
+            WireModel = "claude-sonnet-4.5",
+        };
+    }
+
+    private static void AssertAnthropicDocumentCitationsEnabled(string requestBody)
+    {
+        using var document = JsonDocument.Parse(requestBody);
+        var documentBlocks = document.RootElement
+            .GetProperty("messages")
+            .EnumerateArray()
+            .SelectMany(message => message.GetProperty("content").EnumerateArray())
+            .Where(block => block.GetProperty("type").GetString() == "document")
+            .ToList();
+
+        var documentBlock = Assert.Single(documentBlocks);
+        Assert.Equal("citation-source.pdf", documentBlock.GetProperty("title").GetString());
+        Assert.True(documentBlock.GetProperty("citations").GetProperty("enabled").GetBoolean());
     }
 
     private ProviderConfig CreateProxyProvider(string headerValue)

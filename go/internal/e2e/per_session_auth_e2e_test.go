@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"strings"
 	"testing"
 
 	copilot "github.com/github/copilot-sdk/go"
@@ -46,7 +47,7 @@ func TestPerSessionAuthE2E(t *testing.T) {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
-		authStatus, err := session.RPC.Auth.GetStatus(t.Context())
+		authStatus, err := session.RPC.GitHubAuth.GetStatus(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to get auth status: %v", err)
 		}
@@ -78,12 +79,12 @@ func TestPerSessionAuthE2E(t *testing.T) {
 			t.Fatalf("Failed to create session B: %v", err)
 		}
 
-		statusA, err := sessionA.RPC.Auth.GetStatus(t.Context())
+		statusA, err := sessionA.RPC.GitHubAuth.GetStatus(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to get auth status for session A: %v", err)
 		}
 
-		statusB, err := sessionB.RPC.Auth.GetStatus(t.Context())
+		statusB, err := sessionB.RPC.GitHubAuth.GetStatus(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to get auth status for session B: %v", err)
 		}
@@ -99,14 +100,22 @@ func TestPerSessionAuthE2E(t *testing.T) {
 	t.Run("should be unauthenticated without token", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+		noTokenClient := copilot.NewClient(&copilot.ClientOptions{
+			Connection:       copilot.StdioConnection{Path: ctx.CLIPath},
+			WorkingDirectory: ctx.WorkDir,
+			Env:              withoutAuthEnv(append(ctx.Env(), "COPILOT_DEBUG_GITHUB_API_URL="+ctx.ProxyURL)),
+			UseLoggedInUser:  copilot.Bool(false),
+		})
+		t.Cleanup(func() { noTokenClient.ForceStop() })
+
+		session, err := noTokenClient.CreateSession(t.Context(), &copilot.SessionConfig{
 			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
-		authStatus, err := session.RPC.Auth.GetStatus(t.Context())
+		authStatus, err := session.RPC.GitHubAuth.GetStatus(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to get auth status: %v", err)
 		}
@@ -131,4 +140,17 @@ func TestPerSessionAuthE2E(t *testing.T) {
 		}
 		t.Logf("Got expected error: %v", err)
 	})
+}
+
+func withoutAuthEnv(env []string) []string {
+	filtered := make([]string, 0, len(env)+3)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "COPILOT_SDK_AUTH_TOKEN=") ||
+			strings.HasPrefix(entry, "GH_TOKEN=") ||
+			strings.HasPrefix(entry, "GITHUB_TOKEN=") {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return append(filtered, "COPILOT_SDK_AUTH_TOKEN=", "GH_TOKEN=", "GITHUB_TOKEN=")
 }

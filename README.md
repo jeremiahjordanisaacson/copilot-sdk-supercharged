@@ -152,7 +152,7 @@ The SDK supports multiple authentication methods:
 - **Environment variables** - `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`
 - **BYOK** - Use your own API keys (no GitHub auth required)
 
-See the **[Authentication documentation](./docs/auth/index.md)** for details on each method.
+See the **[Authentication documentation](./docs/auth/README.md)** for details on each method.
 
 ### Do I need to install the Copilot CLI separately?
 
@@ -194,11 +194,11 @@ Please use the [GitHub Issues](https://github.com/jeremiahjordanisaacson/copilot
 
 ## Quick Links
 
-- **[Documentation](./docs/index.md)** – Full documentation index
+- **[Documentation](./docs/README.md)** – Full documentation index
 - **[Getting Started](./docs/getting-started.md)** – Tutorial to get up and running
-- **[Setup Guides](./docs/setup/index.md)** – Architecture, deployment, and scaling
-- **[Authentication](./docs/auth/index.md)** – GitHub OAuth, BYOK, and more
-- **[Features](./docs/features/index.md)** – Hooks, custom agents, MCP, skills, and more
+- **[Setup Guides](./docs/setup/README.md)** – Architecture, deployment, and scaling
+- **[Authentication](./docs/auth/README.md)** – GitHub OAuth, BYOK, and more
+- **[Features](./docs/features/README.md)** – Hooks, custom agents, MCP, skills, and more
 - **[Architecture](./MULTI_LANGUAGE_SDKS.md)** – How all 40 SDKs work under the hood
 - **[Troubleshooting](./docs/troubleshooting/debugging.md)** – Common issues and solutions
 - **[Cookbook](https://github.com/github/awesome-copilot/blob/main/cookbook/copilot-sdk)** – Practical recipes for common tasks across all languages

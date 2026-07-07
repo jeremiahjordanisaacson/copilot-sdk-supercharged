@@ -9,15 +9,23 @@ import { basename, dirname, join, resolve } from "path";
 import { rimraf } from "rimraf";
 import { fileURLToPath } from "url";
 import { afterAll, afterEach, beforeEach, onTestFailed, TestContext } from "vitest";
-import { CopilotClient, CopilotClientOptions } from "../../../src";
+import { CopilotClient, CopilotClientOptions, RuntimeConnection } from "../../../src";
 import { CapiProxy } from "./CapiProxy";
-import { retry, formatError } from "./sdkTestHelper";
+import { formatError, retry } from "./sdkTestHelper";
 
 export const isCI = process.env.GITHUB_ACTIONS === "true";
+export const DEFAULT_GITHUB_TOKEN = "fake-token-for-e2e-tests";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const SNAPSHOTS_DIR = resolve(__dirname, "../../../../test/snapshots");
+
+function getCliPathForTests(): string | undefined {
+    if (process.env.COPILOT_CLI_PATH) {
+        return process.env.COPILOT_CLI_PATH;
+    }
+    return undefined;
+}
 
 export async function createSdkTestContext({
     logLevel,
@@ -35,12 +43,34 @@ export async function createSdkTestContext({
 
     const openAiEndpoint = new CapiProxy();
     const proxyUrl = await openAiEndpoint.start();
+    await openAiEndpoint.setCopilotUserByToken(DEFAULT_GITHUB_TOKEN, {
+        login: "e2e-test-user",
+        copilot_plan: "individual_pro",
+        is_mcp_enabled: true,
+        endpoints: {
+            api: proxyUrl,
+            telemetry: "https://localhost:1/telemetry",
+        },
+        analytics_tracking_id: "e2e-test-tracking-id",
+    });
+    const authTokenToUse = isCI
+        ? DEFAULT_GITHUB_TOKEN
+        : (process.env.GITHUB_TOKEN ?? DEFAULT_GITHUB_TOKEN);
+
     const env = {
         ...process.env,
         ...openAiEndpoint.getProxyEnv(),
         COPILOT_API_URL: proxyUrl,
+        // Route GitHub API calls (e.g. the MCP registry policy check) to the
+        // replay proxy so MCP enablement stays hermetic. Without this the CLI
+        // reaches the real api.github.com, which is slow/unreachable on macOS
+        // CI runners and makes MCP servers time out before reaching connected.
+        COPILOT_DEBUG_GITHUB_API_URL: proxyUrl,
         COPILOT_HOME: copilotHomeDir,
+        COPILOT_SDK_AUTH_TOKEN: "",
         GH_CONFIG_DIR: homeDir,
+        GH_TOKEN: "",
+        GITHUB_TOKEN: "",
 
         // TODO: I'm not convinced the SDK should default to using whatever config you happen to have in your homedir.
         // The SDK config should be independent of the regular CLI app. Likewise it shouldn't mix sessions from the
@@ -48,20 +78,49 @@ export async function createSdkTestContext({
         XDG_CONFIG_HOME: homeDir,
         XDG_STATE_HOME: homeDir,
     };
-    if (isCI) {
-        env.GH_TOKEN = "fake-token-for-e2e-tests";
-        env.GITHUB_TOKEN = "fake-token-for-e2e-tests";
+
+    const userConn = copilotClientOptions?.connection;
+    const cliPath = getCliPathForTests();
+    let connection: RuntimeConnection;
+    if (userConn) {
+        // Caller supplied a RuntimeConnection — merge in the harness-managed
+        // CLI path (and stay on the same transport variant). Strip `kind`
+        // before forwarding to the factory opts since the factories don't
+        // accept it in their argument shape.
+        if (userConn.kind === "tcp") {
+            const { kind: _k, ...tcp } = userConn;
+            connection = RuntimeConnection.forTcp({
+                ...tcp,
+                path: tcp.path ?? cliPath,
+            });
+        } else if (userConn.kind === "stdio") {
+            const { kind: _k, ...stdio } = userConn;
+            connection = RuntimeConnection.forStdio({
+                ...stdio,
+                path: stdio.path ?? cliPath,
+            });
+        } else {
+            connection = userConn;
+        }
+    } else {
+        connection =
+            useStdio === false
+                ? RuntimeConnection.forTcp({ path: cliPath })
+                : RuntimeConnection.forStdio({ path: cliPath });
     }
 
+    const {
+        connection: _ignoredConnection,
+        env: userEnv,
+        ...remainingClientOptions
+    } = copilotClientOptions ?? {};
     const copilotClient = new CopilotClient({
-        cwd: workDir,
-        env,
+        workingDirectory: workDir,
+        env: { ...env, ...userEnv },
         logLevel: logLevel || "error",
-        cliPath: process.env.COPILOT_CLI_PATH,
-        // Use fake token in CI to allow cached responses without real auth
-        gitHubToken: isCI ? "fake-token-for-e2e-tests" : undefined,
-        useStdio: useStdio,
-        ...copilotClientOptions,
+        connection,
+        gitHubToken: authTokenToUse,
+        ...remainingClientOptions,
     });
 
     const harness = { homeDir, workDir, openAiEndpoint, copilotClient, env };

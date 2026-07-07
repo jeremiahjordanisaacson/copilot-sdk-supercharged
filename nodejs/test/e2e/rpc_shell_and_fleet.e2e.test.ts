@@ -50,7 +50,7 @@ describe("Shell and fleet RPC", async () => {
         // session message list is the simplest way to wait for a satisfying state.
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
-            const messages = await session.getMessages();
+            const messages = await session.getEvents();
             if (predicate(messages)) {
                 return messages;
             }
@@ -85,7 +85,9 @@ describe("Shell and fleet RPC", async () => {
                 ? `powershell -NoLogo -NoProfile -Command "Start-Sleep -Seconds 30"`
                 : "sleep 30";
 
-        const execResult = await session.rpc.shell.exec({ command });
+        // On Windows, terminating the shell wrapper can briefly leave grandchildren alive.
+        // Keep this command outside the fixture workspace so cleanup is not blocked by cwd handles.
+        const execResult = await session.rpc.shell.exec({ command, cwd: os.tmpdir() });
         expect(execResult.processId).toBeTruthy();
 
         const killResult = await session.rpc.shell.kill({ processId: execResult.processId });

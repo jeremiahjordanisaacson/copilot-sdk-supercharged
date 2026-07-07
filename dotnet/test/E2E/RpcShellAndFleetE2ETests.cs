@@ -1,14 +1,13 @@
-/*---------------------------------------------------------------------------------------------
+﻿/*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.SDK.Rpc;
-using GitHub.Copilot.SDK.Test.Harness;
+using GitHub.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.SDK.Test.E2E;
+namespace GitHub.Copilot.Test.E2E;
 
 public class RpcShellAndFleetE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "rpc_shell_and_fleet", output)
@@ -34,7 +33,9 @@ public class RpcShellAndFleetE2ETests(E2ETestFixture fixture, ITestOutputHelper 
             ? "powershell -NoLogo -NoProfile -Command \"Start-Sleep -Seconds 30\""
             : "sleep 30";
 
-        var execResult = await session.Rpc.Shell.ExecAsync(command);
+        // On Windows, terminating the shell wrapper can briefly leave grandchildren alive.
+        // Keep this command outside the fixture workspace so that cleanup is not blocked by cwd handles.
+        var execResult = await session.Rpc.Shell.ExecAsync(command, cwd: Path.GetTempPath());
         Assert.False(string.IsNullOrWhiteSpace(execResult.ProcessId));
 
         var killResult = await session.Rpc.Shell.KillAsync(execResult.ProcessId);
@@ -117,7 +118,7 @@ public class RpcShellAndFleetE2ETests(E2ETestFixture fixture, ITestOutputHelper 
         await TestHelper.WaitForConditionAsync(
             async () =>
             {
-                messages = (await session.GetMessagesAsync()).ToList();
+                messages = (await session.GetEventsAsync()).ToList();
                 return predicate(messages);
             },
             timeout: TimeSpan.FromSeconds(120),

@@ -3,6 +3,9 @@
  * Generated from: session-events.schema.json
  */
 
+/**
+ * Union of all session event variants emitted by the Copilot CLI runtime.
+ */
 export type SessionEvent =
   | StartEvent
   | ResumeEvent
@@ -10,16 +13,24 @@ export type SessionEvent =
   | ErrorEvent
   | IdleEvent
   | TitleChangedEvent
+  | ScheduleCreatedEvent
+  | ScheduleCancelledEvent
+  | ScheduleRearmedEvent
+  | AutopilotObjectiveChangedEvent
   | InfoEvent
   | WarningEvent
   | ModelChangeEvent
   | ModeChangedEvent
+  | SessionLimitsChangedEvent
+  | PermissionsChangedEvent
   | PlanChangedEvent
+  | TodosChangedEvent
   | WorkspaceFileChangedEvent
   | HandoffEvent
   | TruncationEvent
   | SnapshotRewindEvent
   | ShutdownEvent
+  | UsageCheckpointEvent
   | ContextChangedEvent
   | UsageInfoEvent
   | CompactionStartEvent
@@ -36,6 +47,7 @@ export type SessionEvent =
   | AssistantMessageStartEvent
   | AssistantMessageDeltaEvent
   | AssistantTurnEndEvent
+  | AssistantIdleEvent
   | AssistantUsageEvent
   | ModelCallFailureEvent
   | AbortEvent
@@ -52,6 +64,8 @@ export type SessionEvent =
   | SubagentDeselectedEvent
   | HookStartEvent
   | HookEndEvent
+  | HookProgressEvent
+  | BinaryAssetEvent
   | SystemMessageEvent
   | SystemNotificationEvent
   | PermissionRequestedEvent
@@ -64,6 +78,9 @@ export type SessionEvent =
   | SamplingCompletedEvent
   | McpOauthRequiredEvent
   | McpOauthCompletedEvent
+  | McpHeadersRefreshRequiredEvent
+  | McpHeadersRefreshCompletedEvent
+  | CustomNotificationEvent
   | ExternalToolRequestedEvent
   | ExternalToolCompletedEvent
   | CommandQueuedEvent
@@ -71,6 +88,8 @@ export type SessionEvent =
   | CommandCompletedEvent
   | AutoModeSwitchRequestedEvent
   | AutoModeSwitchCompletedEvent
+  | SessionLimitsExhaustedRequestedEvent
+  | SessionLimitsExhaustedCompletedEvent
   | CommandsChangedEvent
   | CapabilitiesChangedEvent
   | ExitPlanModeRequestedEvent
@@ -81,58 +100,285 @@ export type SessionEvent =
   | CustomAgentsUpdatedEvent
   | McpServersLoadedEvent
   | McpServerStatusChangedEvent
-  | ExtensionsLoadedEvent;
+  | ExtensionsLoadedEvent
+  | CanvasOpenedEvent
+  | CanvasRegistryChangedEvent
+  | CanvasClosedEvent
+  | CanvasUnavailableEvent
+  | CanvasRecordedEvent
+  | CanvasRemovedEvent
+  | ExtensionsAttachmentsPushedEvent
+  | McpAppToolCallCompleteEvent;
 /**
  * Hosting platform type of the repository (github or ado)
  */
-export type WorkingDirectoryContextHostType = "github" | "ado";
+export type WorkingDirectoryContextHostType =
+  /** Repository is hosted on GitHub. */
+  | "github"
+  /** Repository is hosted on Azure DevOps. */
+  | "ado";
+/**
+ * Allowed values for the `ContextTier` enumeration.
+ */
+export type ContextTier =
+  /** Default context tier with standard context window size. */
+  | "default"
+  /** Extended context tier with a larger context window. */
+  | "long_context";
+/**
+ * Reasoning summary mode used for model calls, if applicable (e.g. "none", "concise", "detailed")
+ */
+export type ReasoningSummary =
+  /** Do not request reasoning summaries from the model. */
+  | "none"
+  /** Request a concise summary of the model's reasoning. */
+  | "concise"
+  /** Request a detailed summary of the model's reasoning. */
+  | "detailed";
+/**
+ * The type of operation performed on the autopilot objective state file
+ */
+export type AutopilotObjectiveChangedOperation =
+  /** Autopilot objective state file was created for a new objective. */
+  | "create"
+  /** Autopilot objective state file was updated for an existing objective. */
+  | "update"
+  /** Autopilot objective state file was deleted or cleared. */
+  | "delete";
+/**
+ * Current autopilot objective status, if one exists
+ */
+export type AutopilotObjectiveChangedStatus =
+  /** Objective is active and can drive autopilot continuations. */
+  | "active"
+  /** Objective is paused and will not drive autopilot continuations. */
+  | "paused"
+  /** Legacy objective state indicating the previous continuation cap was reached. */
+  | "cap_reached"
+  /** Objective was completed by the agent. */
+  | "completed";
+/**
+ * The session mode the agent is operating in
+ */
+export type SessionMode =
+  /** The agent is responding interactively to the user. */
+  | "interactive"
+  /** The agent is preparing a plan before making changes. */
+  | "plan"
+  /** The agent is working autonomously toward task completion. */
+  | "autopilot";
+/**
+ * Allow-all mode for the session.
+ */
+/** @experimental */
+export type PermissionAllowAllMode =
+  /** Permission requests follow the normal approval flow. */
+  | "off"
+  /** Tool, path, and URL permission requests are automatically approved. */
+  | "on"
+  /** Permission requests follow the normal approval flow with an LLM advisory recommendation attached; clients may choose to auto-approve requests the judge evaluated as acceptable. */
+  | "auto";
 /**
  * The type of operation performed on the plan file
  */
-export type PlanChangedOperation = "create" | "update" | "delete";
+export type PlanChangedOperation =
+  /** The plan file was created. */
+  | "create"
+  /** The plan file was updated. */
+  | "update"
+  /** The plan file was deleted. */
+  | "delete";
 /**
  * Whether the file was newly created or updated
  */
-export type WorkspaceFileChangedOperation = "create" | "update";
+export type WorkspaceFileChangedOperation =
+  /** The workspace file was created. */
+  | "create"
+  /** The workspace file was updated. */
+  | "update";
 /**
  * Origin type of the session being handed off
  */
-export type HandoffSourceType = "remote" | "local";
+export type HandoffSourceType =
+  /** The handoff originated from a remote session. */
+  | "remote"
+  /** The handoff originated from a local session. */
+  | "local";
 /**
  * Whether the session ended normally ("routine") or due to a crash/fatal error ("error")
  */
-export type ShutdownType = "routine" | "error";
+export type ShutdownType =
+  /** The session ended normally. */
+  | "routine"
+  /** The session ended because of a crash or fatal error. */
+  | "error";
 /**
  * The agent mode that was active when this message was sent
  */
-export type UserMessageAgentMode = "interactive" | "plan" | "autopilot" | "shell";
+export type UserMessageAgentMode =
+  /** The agent is responding interactively to the user. */
+  | "interactive"
+  /** The agent is preparing a plan before making changes. */
+  | "plan"
+  /** The agent is working autonomously toward task completion. */
+  | "autopilot"
+  /** The agent is in shell-focused UI mode. */
+  | "shell";
 /**
- * A user message attachment — a file, directory, code selection, blob, or GitHub reference
+ * A user message attachment — a file, directory, code selection, blob, GitHub reference, GitHub-anchored pointer, or extension-supplied context payload
  */
-export type UserMessageAttachment =
-  | UserMessageAttachmentFile
-  | UserMessageAttachmentDirectory
-  | UserMessageAttachmentSelection
-  | UserMessageAttachmentGithubReference
-  | UserMessageAttachmentBlob;
+export type Attachment =
+  | AttachmentFile
+  | AttachmentDirectory
+  | AttachmentSelection
+  | AttachmentGitHubReference
+  | AttachmentGitHubCommit
+  | AttachmentGitHubRelease
+  | AttachmentGitHubActionsJob
+  | AttachmentGitHubRepository
+  | AttachmentGitHubFileDiff
+  | AttachmentGitHubTreeComparison
+  | AttachmentGitHubUrl
+  | AttachmentGitHubFile
+  | AttachmentGitHubSnippet
+  | AttachmentBlob
+  | AttachmentExtensionContext;
+/**
+ * Why the binary data is absent: it exceeded the inline size limit, or its asset was unavailable
+ */
+export type OmittedBinaryOmittedReason =
+  /** Bytes exceeded the session's inline size limit. */
+  | "too_large"
+  /** The referenced binary asset could not be found (e.g. a truncated log). */
+  | "asset_unavailable";
 /**
  * Type of GitHub reference
  */
-export type UserMessageAttachmentGithubReferenceType = "issue" | "pr" | "discussion";
+export type AttachmentGitHubReferenceType =
+  /** GitHub issue reference. */
+  | "issue"
+  /** GitHub pull request reference. */
+  | "pr"
+  /** GitHub discussion reference. */
+  | "discussion";
+/**
+ * How this user message was delivered to the agentic loop, relative to whether the loop was already running. This is the timing axis only; the message's origin (human vs. system/command/schedule/skill/etc.) is carried separately by `source`. A system-injected message has a delivery too — e.g. a background-task notification waking an idle agent is `idle`, the same mechanism as a human starting a fresh turn.
+ */
+export type UserMessageDelivery =
+  /** Delivered while the loop was idle; starts its own run immediately (a human's fresh turn, or a system notification waking an idle agent). */
+  | "idle"
+  /** Injected into the current in-flight run while the agent was busy (immediate mode). */
+  | "steering"
+  /** Enqueued while the agent was busy; processed as its own run afterward. */
+  | "queued";
+/**
+ * The system that produced a citation.
+ */
+/** @experimental */
+export type CitationProvider =
+  /** Citation produced by an Anthropic (Claude) model response. */
+  | "anthropic"
+  /** Citation produced by an OpenAI model response. */
+  | "openai"
+  /** Citation synthesized client-side by the runtime from tool output. */
+  | "client";
+/**
+ * Location within a cited source (character, page, or content-block range) that supports a span.
+ */
+/** @experimental */
+export type CitationLocation = CitationLocationChar | CitationLocationPage | CitationLocationBlock;
 /**
  * Tool call type: "function" for standard tool calls, "custom" for grammar-based tool calls. Defaults to "function" when absent.
  */
-export type AssistantMessageToolRequestType = "function" | "custom";
+export type AssistantMessageToolRequestType =
+  /** Standard function-style tool call. */
+  | "function"
+  /** Custom grammar-based tool call. */
+  | "custom";
+/**
+ * API endpoint used for this model call, matching CAPI supported_endpoints vocabulary
+ */
+export type AssistantUsageApiEndpoint =
+  /** Chat Completions API endpoint. */
+  | "/chat/completions"
+  /** Anthropic Messages API endpoint. */
+  | "/v1/messages"
+  /** Responses API endpoint. */
+  | "/responses"
+  /** WebSocket Responses API endpoint. */
+  | "ws:/responses";
+/**
+ * For HTTP 400 failures only: whether the response carried a structured CAPI error envelope (structured_error, a deterministic validation failure) or no error body (bodyless, the transient gateway/proxy signature). Absent for non-400 failures.
+ */
+export type ModelCallFailureBadRequestKind =
+  /** The 400 response carried no error body (transient gateway/proxy signature). */
+  | "bodyless"
+  /** The 400 response carried a structured CAPI error envelope (deterministic validation failure). */
+  | "structured_error";
 /**
  * Where the failed model call originated
  */
-export type ModelCallFailureSource = "top_level" | "subagent" | "mcp_sampling";
+export type ModelCallFailureSource =
+  /** Model call from the top-level agent. */
+  | "top_level"
+  /** Model call from a sub-agent. */
+  | "subagent"
+  /** Model call from MCP sampling. */
+  | "mcp_sampling";
+/**
+ * Finite reason code describing why the current turn was aborted
+ */
+export type AbortReason =
+  /** The local user requested the abort, for example by pressing Ctrl+C in the CLI. */
+  | "user_initiated"
+  /** A remote command requested the abort. */
+  | "remote_command"
+  /** An MCP server delivered a user.abort notification. */
+  | "user_abort";
+/**
+ * Allowed values for the `ToolExecutionStartToolDescriptionMetaUIVisibility` enumeration.
+ */
+export type ToolExecutionStartToolDescriptionMetaUIVisibility =
+  /** Tool is callable by the model (LLM tool surface) */
+  | "model"
+  /** Tool is callable by the MCP App view (iframe) via session.mcp.apps.callTool */
+  | "app";
+/**
+ * A model-facing binary result as persisted: full inline data, a size-omitted marker, or a deduplicated asset reference
+ */
+/** @experimental */
+export type PersistedBinaryResult = PersistedBinaryImage | OmittedBinaryResult | BinaryAssetReference;
+/**
+ * Binary result type discriminator. Use "image" for images and "resource" for other binary data.
+ */
+export type PersistedBinaryImageType =
+  /** Binary image data. */
+  | "image"
+  /** Other binary resource data. */
+  | "resource";
+/**
+ * Binary result type discriminator. Use "image" for images and "resource" for other binary data.
+ */
+export type OmittedBinaryType =
+  /** Binary image data. */
+  | "image"
+  /** Other binary resource data. */
+  | "resource";
+/**
+ * Binary result type discriminator. Use "image" for images and "resource" for other binary data.
+ */
+export type BinaryAssetReferenceType =
+  /** Binary image data. */
+  | "image"
+  /** Other binary resource data. */
+  | "resource";
 /**
  * A content block within a tool result, which may be text, terminal output, image, audio, or a resource
  */
 export type ToolExecutionCompleteContent =
   | ToolExecutionCompleteContentText
   | ToolExecutionCompleteContentTerminal
+  | ToolExecutionCompleteContentShellExit
   | ToolExecutionCompleteContentImage
   | ToolExecutionCompleteContentAudio
   | ToolExecutionCompleteContentResourceLink
@@ -140,15 +386,49 @@ export type ToolExecutionCompleteContent =
 /**
  * Theme variant this icon is intended for
  */
-export type ToolExecutionCompleteContentResourceLinkIconTheme = "light" | "dark";
+export type ToolExecutionCompleteContentResourceLinkIconTheme =
+  /** Icon intended for light themes. */
+  | "light"
+  /** Icon intended for dark themes. */
+  | "dark";
 /**
  * The embedded resource contents, either text or base64-encoded binary
  */
 export type ToolExecutionCompleteContentResourceDetails = EmbeddedTextResourceContents | EmbeddedBlobResourceContents;
 /**
+ * Allowed values for the `ToolExecutionCompleteToolDescriptionMetaUIVisibility` enumeration.
+ */
+export type ToolExecutionCompleteToolDescriptionMetaUIVisibility =
+  /** Tool is callable by the model (LLM tool surface) */
+  | "model"
+  /** Tool is callable by the MCP App view (iframe) via session.mcp.apps.callTool */
+  | "app";
+/**
+ * What triggered the skill invocation: `user-invoked` (explicit user action, such as via a slash command or UI affordance), `agent-invoked` (agent requested the skill), or `context-load` (loaded as part of another context, such as preloading skills configured on a custom agent or subagent)
+ */
+export type SkillInvokedTrigger =
+  /** Skill invocation requested explicitly by the user, such as via a slash command or UI affordance. */
+  | "user-invoked"
+  /** Skill invocation requested by the agent. */
+  | "agent-invoked"
+  /** Skill content loaded as part of another context, such as a configured custom agent or subagent. */
+  | "context-load";
+/**
+ * Binary asset type discriminator. Use "image" for images and "resource" otherwise.
+ */
+export type BinaryAssetType =
+  /** Binary image data. */
+  | "image"
+  /** Other binary resource data. */
+  | "resource";
+/**
  * Message role: "system" for system prompts, "developer" for developer-injected instructions
  */
-export type SystemMessageRole = "system" | "developer";
+export type SystemMessageRole =
+  /** System prompt message. */
+  | "system"
+  /** Developer instruction message. */
+  | "developer";
 /**
  * Structured metadata identifying what triggered this notification
  */
@@ -162,7 +442,11 @@ export type SystemNotification =
 /**
  * Whether the agent completed successfully or failed
  */
-export type SystemNotificationAgentCompletedStatus = "completed" | "failed";
+export type SystemNotificationAgentCompletedStatus =
+  /** The agent completed successfully. */
+  | "completed"
+  /** The agent failed. */
+  | "failed";
 /**
  * Details of the permission being requested
  */
@@ -174,15 +458,25 @@ export type PermissionRequest =
   | PermissionRequestUrl
   | PermissionRequestMemory
   | PermissionRequestCustomTool
-  | PermissionRequestHook;
+  | PermissionRequestHook
+  | PermissionRequestExtensionManagement
+  | PermissionRequestExtensionPermissionAccess;
 /**
  * Whether this is a store or vote memory operation
  */
-export type PermissionRequestMemoryAction = "store" | "vote";
+export type PermissionRequestMemoryAction =
+  /** Store a new memory. */
+  | "store"
+  /** Vote on an existing memory. */
+  | "vote";
 /**
  * Vote direction (vote only)
  */
-export type PermissionRequestMemoryDirection = "upvote" | "downvote";
+export type PermissionRequestMemoryDirection =
+  /** Vote that the memory is useful or accurate. */
+  | "upvote"
+  /** Vote that the memory is incorrect or outdated. */
+  | "downvote";
 /**
  * Derived user-facing permission prompt details for UI consumers
  */
@@ -195,19 +489,32 @@ export type PermissionPromptRequest =
   | PermissionPromptRequestMemory
   | PermissionPromptRequestCustomTool
   | PermissionPromptRequestPath
-  | PermissionPromptRequestHook;
+  | PermissionPromptRequestHook
+  | PermissionPromptRequestExtensionManagement
+  | PermissionPromptRequestExtensionPermissionAccess;
 /**
- * Whether this is a store or vote memory operation
+ * Outcome of the auto-approval safety judge for a permission request. Present only when auto mode is enabled; its absence means the judge did not evaluate the request (auto mode was off).
  */
-export type PermissionPromptRequestMemoryAction = "store" | "vote";
-/**
- * Vote direction (vote only)
- */
-export type PermissionPromptRequestMemoryDirection = "upvote" | "downvote";
+/** @experimental */
+export type AutoApprovalRecommendation =
+  /** The judge evaluated the request and recommends automatically approving it. */
+  | "approve"
+  /** The judge evaluated the request and does not recommend auto-approving it; explicit approval is required. Whether that means prompting, denying, or something else is the consumer's decision. */
+  | "requireApproval"
+  /** Auto mode is enabled, but this request category is never auto-approvable (for example, sandbox-bypass requests), so the judge was not consulted. */
+  | "excluded"
+  /** The judge was consulted but did not return a usable recommendation, so the request requires explicit approval. */
+  | "error";
 /**
  * Underlying permission kind that needs path approval
  */
-export type PermissionPromptRequestPathAccessKind = "read" | "shell" | "write";
+export type PermissionPromptRequestPathAccessKind =
+  /** Read access to a filesystem path. */
+  | "read"
+  /** Shell command access involving a filesystem path. */
+  | "shell"
+  /** Write access to a filesystem path. */
+  | "write";
 /**
  * The result of the permission request
  */
@@ -230,45 +537,187 @@ export type UserToolSessionApproval =
   | UserToolSessionApprovalWrite
   | UserToolSessionApprovalMcp
   | UserToolSessionApprovalMemory
-  | UserToolSessionApprovalCustomTool;
+  | UserToolSessionApprovalCustomTool
+  | UserToolSessionApprovalExtensionManagement
+  | UserToolSessionApprovalExtensionPermissionAccess;
 /**
  * Elicitation mode; "form" for structured input, "url" for browser-based. Defaults to "form" when absent.
  */
-export type ElicitationRequestedMode = "form" | "url";
+export type ElicitationRequestedMode =
+  /** Structured form-based elicitation. */
+  | "form"
+  /** Browser URL-based elicitation. */
+  | "url";
 /**
  * The user action: "accept" (submitted form), "decline" (explicitly refused), or "cancel" (dismissed)
  */
-export type ElicitationCompletedAction = "accept" | "decline" | "cancel";
-export type ElicitationCompletedContent = string | number | boolean | string[];
+export type ElicitationCompletedAction =
+  /** The user submitted the requested form. */
+  | "accept"
+  /** The user explicitly declined the request. */
+  | "decline"
+  /** The user dismissed the request. */
+  | "cancel";
+/**
+ * Reason the runtime is requesting host-provided MCP OAuth credentials
+ */
+export type McpOauthRequestReason =
+  /** Initial credentials are required before connecting to the MCP server. */
+  | "initial"
+  /** The current host-provided credential was rejected and a replacement is requested. */
+  | "refresh"
+  /** The server requires a new host authorization flow before continuing. */
+  | "reauth"
+  /** The server requires a credential with additional scope or audience. */
+  | "upscope";
+/**
+ * How the pending MCP OAuth request was completed
+ */
+export type McpOauthCompletionOutcome =
+  /** The request completed with a token-backed OAuth provider. */
+  | "token"
+  /** The request completed without an OAuth provider. */
+  | "cancelled";
+/**
+ * Why dynamic headers are being requested.
+ */
+export type McpHeadersRefreshRequiredReason =
+  /** The transport is making its first dynamic header request for this server. */
+  | "startup"
+  /** The previously cached dynamic headers expired. */
+  | "ttl-expired"
+  /** The server returned 401 and stale dynamic headers were invalidated. */
+  | "auth-failed";
+/**
+ * How the pending MCP headers refresh request resolved.
+ */
+export type McpHeadersRefreshCompletedOutcome =
+  /** The host supplied dynamic headers. */
+  | "headers"
+  /** The host responded with no dynamic headers. */
+  | "none"
+  /** No response arrived within the bounded window. */
+  | "timeout";
+/**
+ * The user's auto-mode-switch choice
+ */
+export type AutoModeSwitchResponse =
+  /** Switch models for this request. */
+  | "yes"
+  /** Switch models now and keep using the replacement automatically. */
+  | "yes_always"
+  /** Do not switch models. */
+  | "no";
+/**
+ * User action selected for an exhausted session limit.
+ */
+export type SessionLimitsExhaustedResponseAction =
+  /** Increase the current max by an exact AI Credits amount. */
+  | "add"
+  /** Set a new absolute max AI Credits value. */
+  | "set"
+  /** Remove the current session limit. */
+  | "unset"
+  /** Leave the limit unchanged and cancel the blocked model request. */
+  | "cancel";
+/**
+ * Exit plan mode action
+ */
+export type ExitPlanModeAction =
+  /** Exit plan mode without starting implementation. */
+  | "exit_only"
+  /** Exit plan mode and continue in interactive mode. */
+  | "interactive"
+  /** Exit plan mode and continue autonomously. */
+  | "autopilot"
+  /** Exit plan mode and continue with parallel autonomous workers. */
+  | "autopilot_fleet";
+/**
+ * Source location type (e.g., project, personal-copilot, plugin, builtin)
+ */
+export type SkillSource =
+  /** Skill defined in the current project's skill directories. */
+  | "project"
+  /** Skill discovered from a parent directory in the current workspace tree. */
+  | "inherited"
+  /** Skill defined in the user's Copilot skill directory. */
+  | "personal-copilot"
+  /** Skill defined in the user's personal agents skill directory. */
+  | "personal-agents"
+  /** Skill provided by an installed plugin. */
+  | "plugin"
+  /** Skill loaded from a configured custom skill directory. */
+  | "custom"
+  /** Skill bundled with the runtime. */
+  | "builtin";
+/**
+ * Configuration source: user, workspace, plugin, or builtin
+ */
+export type McpServerSource =
+  /** Server configured in the user's global MCP configuration. */
+  | "user"
+  /** Server configured by the current workspace. */
+  | "workspace"
+  /** Server contributed by an installed plugin. */
+  | "plugin"
+  /** Server bundled with the runtime. */
+  | "builtin";
 /**
  * Connection status: connected, failed, needs-auth, pending, disabled, or not_configured
  */
-export type McpServersLoadedServerStatus =
+export type McpServerStatus =
+  /** The server is connected and available. */
   | "connected"
+  /** The server failed to connect or initialize. */
   | "failed"
+  /** The server requires authentication before it can connect. */
   | "needs-auth"
+  /** The server connection is still being established. */
   | "pending"
+  /** The server is configured but disabled. */
   | "disabled"
+  /** The server is not configured for this session. */
   | "not_configured";
 /**
- * New connection status: connected, failed, needs-auth, pending, disabled, or not_configured
+ * Transport mechanism: stdio, http, sse (deprecated), or memory (in-process MCP server)
  */
-export type McpServerStatusChangedStatus =
-  | "connected"
-  | "failed"
-  | "needs-auth"
-  | "pending"
-  | "disabled"
-  | "not_configured";
+export type McpServerTransport =
+  /** Server communicates over stdio with a local child process. */
+  | "stdio"
+  /** Server communicates over streamable HTTP. */
+  | "http"
+  /** Server communicates over Server-Sent Events (deprecated). */
+  | "sse"
+  /** Server is backed by an in-memory runtime implementation. */
+  | "memory";
 /**
  * Discovery source
  */
-export type ExtensionsLoadedExtensionSource = "project" | "user";
+export type ExtensionsLoadedExtensionSource =
+  /** Extension discovered from the current project. */
+  | "project"
+  /** Extension discovered from the user's extension directory. */
+  | "user"
+  /** Extension contributed by an installed plugin. */
+  | "plugin"
+  /** Extension discovered from the current session's state directory. */
+  | "session";
 /**
  * Current status: running, disabled, failed, or starting
  */
-export type ExtensionsLoadedExtensionStatus = "running" | "disabled" | "failed" | "starting";
+export type ExtensionsLoadedExtensionStatus =
+  /** The extension process is running. */
+  | "running"
+  /** The extension is installed but disabled. */
+  | "disabled"
+  /** The extension failed to start or crashed. */
+  | "failed"
+  /** The extension process is starting. */
+  | "starting";
 
+/**
+ * Session event "session.start". Session initialization metadata including context and configuration
+ */
 export interface StartEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -291,6 +740,9 @@ export interface StartEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.start".
+   */
   type: "session.start";
 }
 /**
@@ -303,19 +755,28 @@ export interface StartData {
   alreadyInUse?: boolean;
   context?: WorkingDirectoryContext;
   /**
+   * Context tier selected at session creation time for models with tiered context pricing; null when no tier is selected (e.g., non-tiered model)
+   */
+  contextTier?: ContextTier | null;
+  /**
    * Version string of the Copilot application
    */
   copilotVersion: string;
+  /**
+   * When set, identifies a parent session whose context this session continues — e.g., a detached headless rem-agent run launched on the parent's interactive shutdown. Telemetry from this session is reported under the parent's session_id.
+   */
+  detachedFromSpawningParentSessionId?: string;
   /**
    * Identifier of the software producing the events (e.g., "copilot-agent")
    */
   producer: string;
   /**
-   * Reasoning effort level used for model calls, if applicable (e.g. "low", "medium", "high", "xhigh")
+   * Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
    */
   reasoningEffort?: string;
+  reasoningSummary?: ReasoningSummary;
   /**
-   * Whether this session supports remote steering via Mission Control
+   * Whether this session supports remote steering via GitHub
    */
   remoteSteerable?: boolean;
   /**
@@ -326,6 +787,7 @@ export interface StartData {
    * Unique identifier for the session
    */
   sessionId: string;
+  sessionLimits?: SessionLimitsConfig;
   /**
    * ISO 8601 timestamp when the session was created
    */
@@ -369,6 +831,18 @@ export interface WorkingDirectoryContext {
    */
   repositoryHost?: string;
 }
+/**
+ * Optional session limits.
+ */
+export interface SessionLimitsConfig {
+  /**
+   * Maximum AI Credits allowed across the session's current accounting window.
+   */
+  maxAiCredits?: number;
+}
+/**
+ * Session event "session.resume". Session resume metadata including current context and event count
+ */
 export interface ResumeEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -391,6 +865,9 @@ export interface ResumeEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.resume".
+   */
   type: "session.resume";
 }
 /**
@@ -403,6 +880,10 @@ export interface ResumeData {
   alreadyInUse?: boolean;
   context?: WorkingDirectoryContext;
   /**
+   * Context tier currently selected at resume time; null when no tier is active
+   */
+  contextTier?: ContextTier | null;
+  /**
    * When true, tool calls and permission requests left in flight by the previous session lifetime remain pending after resume and the agentic loop awaits their results. User sends are queued behind the pending work until all such requests reach a terminal state. When false (the default), any such tool calls and permission requests are immediately marked as interrupted on resume.
    */
   continuePendingWork?: boolean;
@@ -411,11 +892,16 @@ export interface ResumeData {
    */
   eventCount: number;
   /**
-   * Reasoning effort level used for model calls, if applicable (e.g. "low", "medium", "high", "xhigh")
+   * On-disk byte size of the session's persisted events.jsonl file at resume time; omitted when the file does not exist or cannot be stat'd
+   */
+  eventsFileSizeBytes?: number;
+  /**
+   * Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
    */
   reasoningEffort?: string;
+  reasoningSummary?: ReasoningSummary;
   /**
-   * Whether this session supports remote steering via Mission Control
+   * Whether this session supports remote steering via GitHub
    */
   remoteSteerable?: boolean;
   /**
@@ -427,10 +913,17 @@ export interface ResumeData {
    */
   selectedModel?: string;
   /**
+   * Session limits currently configured at resume time; null when no limits are active
+   */
+  sessionLimits?: SessionLimitsConfig | null;
+  /**
    * True when this resume attached to a session that the runtime already had running in-memory (for example, an extension joining a session another client was actively driving). False (or omitted) for cold resumes — the runtime had to reconstitute the session from its persisted event log.
    */
   sessionWasActive?: boolean;
 }
+/**
+ * Session event "session.remote_steerable_changed". Notifies that the session's remote steering capability has changed
+ */
 export interface RemoteSteerableChangedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -453,17 +946,23 @@ export interface RemoteSteerableChangedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.remote_steerable_changed".
+   */
   type: "session.remote_steerable_changed";
 }
 /**
- * Notifies Mission Control that the session's remote steering capability has changed
+ * Notifies that the session's remote steering capability has changed
  */
 export interface RemoteSteerableChangedData {
   /**
-   * Whether this session now supports remote steering via Mission Control
+   * Whether this session now supports remote steering via GitHub
    */
   remoteSteerable: boolean;
 }
+/**
+ * Session event "session.error". Error details for timeline display including message and optional diagnostic information
+ */
 export interface ErrorEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -486,6 +985,9 @@ export interface ErrorEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.error".
+   */
   type: "session.error";
 }
 /**
@@ -497,7 +999,7 @@ export interface ErrorData {
    */
   eligibleForAutoSwitch?: boolean;
   /**
-   * Fine-grained error code from the upstream provider, when available. For `errorType: "rate_limit"`, this is one of the `RateLimitErrorCode` values (e.g., `"user_weekly_rate_limited"`, `"user_global_rate_limited"`, `"rate_limited"`, `"user_model_rate_limited"`, `"integration_rate_limited"`).
+   * Fine-grained error code from the upstream provider, when available. For `errorType: "rate_limit"`, this is one of the `RateLimitErrorCode` values (e.g., `"user_weekly_rate_limited"`, `"user_global_rate_limited"`, `"rate_limited"`, `"user_model_rate_limited"`, `"integration_rate_limited"`). For `errorType: "quota"`, this is the CAPI quota error code (e.g., `"quota_exceeded"`, `"session_quota_exceeded"`, `"billing_not_configured"`).
    */
   errorCode?: string;
   /**
@@ -513,6 +1015,10 @@ export interface ErrorData {
    */
   providerCallId?: string;
   /**
+   * Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
+   */
+  serviceRequestId?: string;
+  /**
    * Error stack trace, when available
    */
   stack?: string;
@@ -525,12 +1031,18 @@ export interface ErrorData {
    */
   url?: string;
 }
+/**
+ * Session event "session.idle". Payload indicating the session is idle with no background agents or attached shell commands in flight
+ */
 export interface IdleEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: IdleData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -544,10 +1056,13 @@ export interface IdleEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.idle".
+   */
   type: "session.idle";
 }
 /**
- * Payload indicating the session is idle with no background agents in flight
+ * Payload indicating the session is idle with no background agents or attached shell commands in flight
  */
 export interface IdleData {
   /**
@@ -555,12 +1070,18 @@ export interface IdleData {
    */
   aborted?: boolean;
 }
+/**
+ * Session event "session.title_changed". Session title change payload containing the new display title
+ */
 export interface TitleChangedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: TitleChangedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -574,6 +1095,9 @@ export interface TitleChangedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.title_changed".
+   */
   type: "session.title_changed";
 }
 /**
@@ -585,6 +1109,203 @@ export interface TitleChangedData {
    */
   title: string;
 }
+/**
+ * Session event "session.schedule_created". Scheduled prompt registered via /every or /after
+ */
+export interface ScheduleCreatedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: ScheduleCreatedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.schedule_created".
+   */
+  type: "session.schedule_created";
+}
+/**
+ * Scheduled prompt registered via /every or /after
+ */
+export interface ScheduleCreatedData {
+  /**
+   * Absolute fire time (epoch milliseconds) for a one-shot calendar schedule
+   */
+  at?: number;
+  /**
+   * 5-field cron expression for a recurring calendar schedule, evaluated in `tz`
+   */
+  cron?: string;
+  /**
+   * Optional user-facing label shown in the timeline instead of the actual prompt (e.g. `/skill-name args` when the prompt is a skill invocation expansion)
+   */
+  displayPrompt?: string;
+  /**
+   * Sequential id assigned to the scheduled prompt within the session
+   */
+  id: number;
+  /**
+   * Interval between ticks in milliseconds (relative-interval schedules)
+   */
+  intervalMs?: number;
+  /**
+   * Prompt text that gets enqueued on every tick
+   */
+  prompt: string;
+  /**
+   * Whether the schedule re-arms after each tick (`/every`) or fires once (`/after`)
+   */
+  recurring?: boolean;
+  /**
+   * True for a self-paced (`dynamic`) schedule: no fixed cadence; the model arms each next run via the `manage_schedule` `wakeup` action. `nextRunAt` is model-controlled rather than auto-computed.
+   */
+  selfPaced?: boolean;
+  /**
+   * IANA timezone the `cron` expression is evaluated in
+   */
+  tz?: string;
+}
+/**
+ * Session event "session.schedule_cancelled". Scheduled prompt cancelled from the schedule manager dialog
+ */
+export interface ScheduleCancelledEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: ScheduleCancelledData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.schedule_cancelled".
+   */
+  type: "session.schedule_cancelled";
+}
+/**
+ * Scheduled prompt cancelled from the schedule manager dialog
+ */
+export interface ScheduleCancelledData {
+  /**
+   * Id of the scheduled prompt that was cancelled
+   */
+  id: number;
+}
+/**
+ * Session event "session.schedule_rearmed". Self-paced schedule re-armed for its next run
+ */
+export interface ScheduleRearmedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: ScheduleRearmedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.schedule_rearmed".
+   */
+  type: "session.schedule_rearmed";
+}
+/**
+ * Self-paced schedule re-armed for its next run
+ */
+export interface ScheduleRearmedData {
+  /**
+   * Id of the self-paced schedule that was re-armed
+   */
+  id: number;
+  /**
+   * Absolute time (epoch milliseconds) the model armed the next run to fire
+   */
+  nextRunAt: number;
+}
+/**
+ * Session event "session.autopilot_objective_changed". Autopilot objective state file operation details indicating what changed
+ */
+export interface AutopilotObjectiveChangedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: AutopilotObjectiveChangedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.autopilot_objective_changed".
+   */
+  type: "session.autopilot_objective_changed";
+}
+/**
+ * Autopilot objective state file operation details indicating what changed
+ */
+export interface AutopilotObjectiveChangedData {
+  /**
+   * Current autopilot objective id, if one exists
+   */
+  id?: number;
+  operation: AutopilotObjectiveChangedOperation;
+  status?: AutopilotObjectiveChangedStatus;
+}
+/**
+ * Session event "session.info". Informational message for timeline display with categorization
+ */
 export interface InfoEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -607,6 +1328,9 @@ export interface InfoEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.info".
+   */
   type: "session.info";
 }
 /**
@@ -630,6 +1354,9 @@ export interface InfoData {
    */
   url?: string;
 }
+/**
+ * Session event "session.warning". Warning message for timeline display with categorization
+ */
 export interface WarningEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -652,6 +1379,9 @@ export interface WarningEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.warning".
+   */
   type: "session.warning";
 }
 /**
@@ -671,6 +1401,9 @@ export interface WarningData {
    */
   warningType: string;
 }
+/**
+ * Session event "session.model_change". Model change details including previous and new model identifiers
+ */
 export interface ModelChangeEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -693,6 +1426,9 @@ export interface ModelChangeEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.model_change".
+   */
   type: "session.model_change";
 }
 /**
@@ -703,6 +1439,10 @@ export interface ModelChangeData {
    * Reason the change happened, when not user-initiated. Currently `"rate_limit_auto_switch"` for changes triggered by the auto-mode-switch rate-limit recovery path. UI clients can use this to render contextual copy.
    */
   cause?: string;
+  /**
+   * Context tier after the model change; null explicitly clears a previously selected tier
+   */
+  contextTier?: ContextTier | null;
   /**
    * Newly selected model identifier
    */
@@ -715,11 +1455,16 @@ export interface ModelChangeData {
    * Reasoning effort level before the model change, if applicable
    */
   previousReasoningEffort?: string;
+  previousReasoningSummary?: ReasoningSummary;
   /**
    * Reasoning effort level after the model change, if applicable
    */
-  reasoningEffort?: string;
+  reasoningEffort?: string | null;
+  reasoningSummary?: ReasoningSummary;
 }
+/**
+ * Session event "session.mode_changed". Agent mode change details including previous and new modes
+ */
 export interface ModeChangedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -742,21 +1487,115 @@ export interface ModeChangedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.mode_changed".
+   */
   type: "session.mode_changed";
 }
 /**
  * Agent mode change details including previous and new modes
  */
 export interface ModeChangedData {
-  /**
-   * Agent mode after the change (e.g., "interactive", "plan", "autopilot")
-   */
-  newMode: string;
-  /**
-   * Agent mode before the change (e.g., "interactive", "plan", "autopilot")
-   */
-  previousMode: string;
+  newMode: SessionMode;
+  previousMode: SessionMode;
 }
+/**
+ * Session event "session.session_limits_changed". Session limits update details. Null clears the limits.
+ */
+export interface SessionLimitsChangedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: SessionLimitsChangedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.session_limits_changed".
+   */
+  type: "session.session_limits_changed";
+}
+/**
+ * Session limits update details. Null clears the limits.
+ */
+export interface SessionLimitsChangedData {
+  /**
+   * Current session limits, or null when no limits are active
+   */
+  sessionLimits: SessionLimitsConfig | null;
+}
+/**
+ * Session event "session.permissions_changed". Permissions change details carrying the aggregate allow-all transition.
+ */
+export interface PermissionsChangedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: PermissionsChangedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.permissions_changed".
+   */
+  type: "session.permissions_changed";
+}
+/**
+ * Permissions change details carrying the aggregate allow-all transition.
+ */
+export interface PermissionsChangedData {
+  /**
+   * Allow-all mode after the change
+   *
+   * @experimental
+   */
+  allowAllPermissionMode?: PermissionAllowAllMode;
+  /**
+   * Aggregate allow-all flag after the change
+   */
+  allowAllPermissions: boolean;
+  /**
+   * Allow-all mode before the change
+   *
+   * @experimental
+   */
+  previousAllowAllPermissionMode?: PermissionAllowAllMode;
+  /**
+   * Aggregate allow-all flag before the change
+   */
+  previousAllowAllPermissions: boolean;
+}
+/**
+ * Session event "session.plan_changed". Plan file operation details indicating what changed
+ */
 export interface PlanChangedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -779,6 +1618,9 @@ export interface PlanChangedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.plan_changed".
+   */
   type: "session.plan_changed";
 }
 /**
@@ -787,6 +1629,43 @@ export interface PlanChangedEvent {
 export interface PlanChangedData {
   operation: PlanChangedOperation;
 }
+/**
+ * Session event "session.todos_changed". Signal-only event: the agent's todos or todo_deps table was written to. No payload — clients should call session.plan.readSqlTodosWithDependencies() to fetch the current state. Events arrive in order; clients can debounce on arrival if needed.
+ */
+export interface TodosChangedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: TodosChangedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.todos_changed".
+   */
+  type: "session.todos_changed";
+}
+/**
+ * Signal-only event: the agent's todos or todo_deps table was written to. No payload — clients should call session.plan.readSqlTodosWithDependencies() to fetch the current state. Events arrive in order; clients can debounce on arrival if needed.
+ */
+export interface TodosChangedData {}
+/**
+ * Session event "session.workspace_file_changed". Workspace file change details including path and operation type
+ */
 export interface WorkspaceFileChangedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -809,6 +1688,9 @@ export interface WorkspaceFileChangedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.workspace_file_changed".
+   */
   type: "session.workspace_file_changed";
 }
 /**
@@ -821,6 +1703,9 @@ export interface WorkspaceFileChangedData {
    */
   path: string;
 }
+/**
+ * Session event "session.handoff". Session handoff metadata including source, context, and repository information
+ */
 export interface HandoffEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -843,6 +1728,9 @@ export interface HandoffEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.handoff".
+   */
   type: "session.handoff";
 }
 /**
@@ -889,6 +1777,9 @@ export interface HandoffRepository {
    */
   owner: string;
 }
+/**
+ * Session event "session.truncation". Conversation truncation statistics including token counts and removed content metrics
+ */
 export interface TruncationEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -911,6 +1802,9 @@ export interface TruncationEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.truncation".
+   */
   type: "session.truncation";
 }
 /**
@@ -950,12 +1844,18 @@ export interface TruncationData {
    */
   tokensRemovedDuringTruncation: number;
 }
+/**
+ * Session event "session.snapshot_rewind". Session rewind details including target event and count of removed events
+ */
 export interface SnapshotRewindEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: SnapshotRewindData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -969,6 +1869,9 @@ export interface SnapshotRewindEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.snapshot_rewind".
+   */
   type: "session.snapshot_rewind";
 }
 /**
@@ -984,6 +1887,9 @@ export interface SnapshotRewindData {
    */
   upToEventId: string;
 }
+/**
+ * Session event "session.shutdown". Session termination metrics including usage statistics, code changes, and shutdown reason
+ */
 export interface ShutdownEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -1006,6 +1912,9 @@ export interface ShutdownEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.shutdown".
+   */
   type: "session.shutdown";
 }
 /**
@@ -1030,10 +1939,14 @@ export interface ShutdownData {
    */
   errorReason?: string;
   /**
+   * On-disk byte size of the session's persisted events.jsonl file at shutdown time; omitted when the file does not exist or cannot be stat'd
+   */
+  eventsFileSizeBytes?: number;
+  /**
    * Per-model usage breakdown, keyed by model identifier
    */
   modelMetrics: {
-    [k: string]: ShutdownModelMetric;
+    [k: string]: ShutdownModelMetric | undefined;
   };
   /**
    * Unix timestamp (milliseconds) when the session started
@@ -1048,7 +1961,7 @@ export interface ShutdownData {
    * Session-wide per-token-type accumulated token counts
    */
   tokenDetails?: {
-    [k: string]: ShutdownTokenDetail;
+    [k: string]: ShutdownTokenDetail | undefined;
   };
   /**
    * Tool definitions token count at shutdown
@@ -1060,12 +1973,16 @@ export interface ShutdownData {
   totalApiDurationMs: number;
   /**
    * Session-wide accumulated nano-AI units cost
+   *
+   * @experimental
    */
   totalNanoAiu?: number;
   /**
    * Total number of premium API requests used during the session
+   *
+   * @internal
    */
-  totalPremiumRequests: number;
+  totalPremiumRequests?: number;
 }
 /**
  * Aggregate code change metrics for the session
@@ -1084,16 +2001,21 @@ export interface ShutdownCodeChanges {
    */
   linesRemoved: number;
 }
+/**
+ * Per-model shutdown metrics with request counts, token usage, nano-AI units, and token details.
+ */
 export interface ShutdownModelMetric {
   requests: ShutdownModelMetricRequests;
   /**
    * Token count details per type
    */
   tokenDetails?: {
-    [k: string]: ShutdownModelMetricTokenDetail;
+    [k: string]: ShutdownModelMetricTokenDetail | undefined;
   };
   /**
    * Accumulated nano-AI units cost for this model
+   *
+   * @experimental
    */
   totalNanoAiu?: number;
   usage: ShutdownModelMetricUsage;
@@ -1104,13 +2026,20 @@ export interface ShutdownModelMetric {
 export interface ShutdownModelMetricRequests {
   /**
    * Cumulative cost multiplier for requests to this model
+   *
+   * @experimental
    */
-  cost: number;
+  cost?: number;
   /**
    * Total number of API requests made to this model
+   *
+   * @experimental
    */
-  count: number;
+  count?: number;
 }
+/**
+ * A token-type entry in a shutdown model metric, storing the accumulated token count.
+ */
 export interface ShutdownModelMetricTokenDetail {
   /**
    * Accumulated token count for this token type
@@ -1142,12 +2071,63 @@ export interface ShutdownModelMetricUsage {
    */
   reasoningTokens?: number;
 }
+/**
+ * A session-wide shutdown token-type entry storing the accumulated token count.
+ */
 export interface ShutdownTokenDetail {
   /**
    * Accumulated token count for this token type
    */
   tokenCount: number;
 }
+/**
+ * Session event "session.usage_checkpoint". Durable session usage checkpoint for reconstructing aggregate accounting on resume
+ */
+export interface UsageCheckpointEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: UsageCheckpointData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.usage_checkpoint".
+   */
+  type: "session.usage_checkpoint";
+}
+/**
+ * Durable session usage checkpoint for reconstructing aggregate accounting on resume
+ */
+export interface UsageCheckpointData {
+  /**
+   * Session-wide accumulated nano-AI units cost at checkpoint time
+   */
+  totalNanoAiu: number;
+  /**
+   * Total number of premium API requests used at checkpoint time
+   *
+   * @internal
+   */
+  totalPremiumRequests?: number;
+}
+/**
+ * Session event "session.context_changed". Updated working directory and git context after the change
+ */
 export interface ContextChangedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -1170,14 +2150,23 @@ export interface ContextChangedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.context_changed".
+   */
   type: "session.context_changed";
 }
+/**
+ * Session event "session.usage_info". Current context window usage statistics including token and message counts
+ */
 export interface UsageInfoEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: UsageInfoData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -1191,6 +2180,9 @@ export interface UsageInfoEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.usage_info".
+   */
   type: "session.usage_info";
 }
 /**
@@ -1226,6 +2218,9 @@ export interface UsageInfoData {
    */
   toolDefinitionsTokens?: number;
 }
+/**
+ * Session event "session.compaction_start". Context window breakdown at the start of LLM-powered conversation compaction
+ */
 export interface CompactionStartEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -1248,6 +2243,9 @@ export interface CompactionStartEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.compaction_start".
+   */
   type: "session.compaction_start";
 }
 /**
@@ -1259,6 +2257,10 @@ export interface CompactionStartData {
    */
   conversationTokens?: number;
   /**
+   * Model identifier used for compaction, when known
+   */
+  model?: string;
+  /**
    * Token count from system message(s) at compaction start
    */
   systemTokens?: number;
@@ -1267,6 +2269,9 @@ export interface CompactionStartData {
    */
   toolDefinitionsTokens?: number;
 }
+/**
+ * Session event "session.compaction_complete". Conversation compaction results including success status, metrics, and optional error details
+ */
 export interface CompactionCompleteEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -1289,6 +2294,9 @@ export interface CompactionCompleteEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.compaction_complete".
+   */
   type: "session.compaction_complete";
 }
 /**
@@ -1308,6 +2316,10 @@ export interface CompactionCompleteData {
    * Token count from non-system messages (user, assistant, tool) after compaction
    */
   conversationTokens?: number;
+  /**
+   * User-supplied focus instructions provided to a manual `/compact` invocation. Omitted for automatic compaction and for manual compaction with no focus text.
+   */
+  customInstructions?: string;
   /**
    * Error message if compaction failed
    */
@@ -1332,6 +2344,14 @@ export interface CompactionCompleteData {
    * GitHub request tracing ID (x-github-request-id header) for the compaction LLM call
    */
   requestId?: string;
+  /**
+   * Copilot service request ID (x-copilot-service-request-id header) for the compaction LLM call
+   */
+  serviceRequestId?: string;
+  /**
+   * For failed compaction only: the HTTP status code of the compaction LLM call failure, when it carried one. Absent for successful compaction and for failures without an HTTP status (e.g. an empty model response or a transport error).
+   */
+  statusCode?: number;
   /**
    * Whether compaction completed successfully
    */
@@ -1365,6 +2385,11 @@ export interface CompactionCompleteCompactionTokensUsed {
    * Tokens written to prompt cache in the compaction LLM call
    */
   cacheWriteTokens?: number;
+  /**
+   * Per-request cost and usage data from the CAPI copilot_usage response field
+   *
+   * @internal
+   */
   copilotUsage?: CompactionCompleteCompactionTokensUsedCopilotUsage;
   /**
    * Duration of the compaction LLM call in milliseconds
@@ -1386,11 +2411,14 @@ export interface CompactionCompleteCompactionTokensUsed {
 /**
  * Per-request cost and usage data from the CAPI copilot_usage response field
  */
+/** @internal */
 export interface CompactionCompleteCompactionTokensUsedCopilotUsage {
   /**
    * Itemized token usage breakdown
+   *
+   * @internal
    */
-  tokenDetails: CompactionCompleteCompactionTokensUsedCopilotUsageTokenDetail[];
+  tokenDetails?: CompactionCompleteCompactionTokensUsedCopilotUsageTokenDetail[];
   /**
    * Total cost in nano-AI units for this request
    */
@@ -1417,6 +2445,9 @@ export interface CompactionCompleteCompactionTokensUsedCopilotUsageTokenDetail {
    */
   tokenType: string;
 }
+/**
+ * Session event "session.task_complete". Task completion notification with summary from the agent
+ */
 export interface TaskCompleteEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -1439,6 +2470,9 @@ export interface TaskCompleteEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.task_complete".
+   */
   type: "session.task_complete";
 }
 /**
@@ -1454,6 +2488,9 @@ export interface TaskCompleteData {
    */
   summary?: string;
 }
+/**
+ * Session event "user.message". Payload of `user.message` with displayed and model-transformed content, attachments, source/delivery metadata, mode, and telemetry IDs.
+ */
 export interface UserMessageEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -1476,24 +2513,35 @@ export interface UserMessageEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "user.message".
+   */
   type: "user.message";
 }
+/**
+ * Payload of `user.message` with displayed and model-transformed content, attachments, source/delivery metadata, mode, and telemetry IDs.
+ */
 export interface UserMessageData {
   agentMode?: UserMessageAgentMode;
   /**
    * Files, selections, or GitHub references attached to the message
    */
-  attachments?: UserMessageAttachment[];
+  attachments?: Attachment[];
   /**
    * The user's message text as displayed in the timeline
    */
   content: string;
+  delivery?: UserMessageDelivery;
   /**
    * CAPI interaction ID for correlating this user message with its turn
    */
   interactionId?: string;
   /**
-   * Path-backed native document attachments that stayed on the tagged_files path flow because native upload would exceed the request size limit
+   * True when this user message was auto-injected by autopilot's continuation loop rather than typed by the user; used to distinguish autopilot-driven turns in telemetry.
+   */
+  isAutopilotContinuation?: boolean;
+  /**
+   * Path-backed native document attachments that stayed on the tagged_files path flow because native upload could not read them or would exceed the request size limit
    */
   nativeDocumentPathFallbackPaths?: string[];
   /**
@@ -1516,16 +2564,33 @@ export interface UserMessageData {
 /**
  * File attachment
  */
-export interface UserMessageAttachmentFile {
+export interface AttachmentFile {
+  /**
+   * Internal: content-addressed id of the session.binary_asset event holding this attachment's model-facing bytes (e.g. "sha256:..."). Absent externally.
+   */
+  assetId?: string;
+  /**
+   * Internal: decoded byte length of the attachment's model-facing bytes. Absent externally.
+   */
+  byteLength?: number;
   /**
    * User-facing display name for the attachment
    */
   displayName: string;
-  lineRange?: UserMessageAttachmentFileLineRange;
+  lineRange?: AttachmentFileLineRange;
+  /**
+   * Internal: MIME type of the file's model-facing bytes (post-resize for images). Set when the file's bytes are interned to an asset. Absent externally.
+   */
+  mimeType?: string;
+  omittedReason?: OmittedBinaryOmittedReason;
   /**
    * Absolute file path
    */
   path: string;
+  /**
+   * Frozen rendered line this attachment contributed to the <tagged_files> prompt block (e.g. "* /path (123 lines)"). Captured at send time so resumed history reproduces the exact text the model saw, independent of later filesystem changes. Present only for attachments routed to <tagged_files> (mutually exclusive with assetId, which marks bytes sent natively).
+   */
+  taggedFilesEntry?: string;
   /**
    * Attachment type discriminator
    */
@@ -1534,7 +2599,7 @@ export interface UserMessageAttachmentFile {
 /**
  * Optional line range to scope the attachment to a specific section of the file
  */
-export interface UserMessageAttachmentFileLineRange {
+export interface AttachmentFileLineRange {
   /**
    * End line number (1-based, inclusive)
    */
@@ -1547,7 +2612,7 @@ export interface UserMessageAttachmentFileLineRange {
 /**
  * Directory attachment
  */
-export interface UserMessageAttachmentDirectory {
+export interface AttachmentDirectory {
   /**
    * User-facing display name for the attachment
    */
@@ -1557,6 +2622,10 @@ export interface UserMessageAttachmentDirectory {
    */
   path: string;
   /**
+   * Frozen rendered line this attachment contributed to the <tagged_files> prompt block (e.g. "* /path (12 items)"). Captured at send time so resumed history reproduces the exact text the model saw, independent of later filesystem changes.
+   */
+  taggedFilesEntry?: string;
+  /**
    * Attachment type discriminator
    */
   type: "directory";
@@ -1564,7 +2633,7 @@ export interface UserMessageAttachmentDirectory {
 /**
  * Code selection attachment from an editor
  */
-export interface UserMessageAttachmentSelection {
+export interface AttachmentSelection {
   /**
    * User-facing display name for the selection
    */
@@ -1573,7 +2642,7 @@ export interface UserMessageAttachmentSelection {
    * Absolute path to the file containing the selection
    */
   filePath: string;
-  selection: UserMessageAttachmentSelectionDetails;
+  selection: AttachmentSelectionDetails;
   /**
    * The selected text content
    */
@@ -1586,14 +2655,14 @@ export interface UserMessageAttachmentSelection {
 /**
  * Position range of the selection within the file
  */
-export interface UserMessageAttachmentSelectionDetails {
-  end: UserMessageAttachmentSelectionDetailsEnd;
-  start: UserMessageAttachmentSelectionDetailsStart;
+export interface AttachmentSelectionDetails {
+  end: AttachmentSelectionDetailsEnd;
+  start: AttachmentSelectionDetailsStart;
 }
 /**
  * End position of the selection
  */
-export interface UserMessageAttachmentSelectionDetailsEnd {
+export interface AttachmentSelectionDetailsEnd {
   /**
    * End character offset within the line (0-based)
    */
@@ -1606,7 +2675,7 @@ export interface UserMessageAttachmentSelectionDetailsEnd {
 /**
  * Start position of the selection
  */
-export interface UserMessageAttachmentSelectionDetailsStart {
+export interface AttachmentSelectionDetailsStart {
   /**
    * Start character offset within the line (0-based)
    */
@@ -1619,12 +2688,12 @@ export interface UserMessageAttachmentSelectionDetailsStart {
 /**
  * GitHub issue, pull request, or discussion reference
  */
-export interface UserMessageAttachmentGithubReference {
+export interface AttachmentGitHubReference {
   /**
    * Issue, pull request, or discussion number
    */
   number: number;
-  referenceType: UserMessageAttachmentGithubReferenceType;
+  referenceType: AttachmentGitHubReferenceType;
   /**
    * Current state of the referenced item (e.g., open, closed, merged)
    */
@@ -1643,13 +2712,246 @@ export interface UserMessageAttachmentGithubReference {
   url: string;
 }
 /**
+ * Pointer to a GitHub commit.
+ */
+export interface AttachmentGitHubCommit {
+  /**
+   * First line of the commit message
+   */
+  message: string;
+  /**
+   * Full commit SHA
+   */
+  oid: string;
+  repo: GitHubRepoRef;
+  /**
+   * Attachment type discriminator
+   */
+  type: "github_commit";
+  /**
+   * URL to the commit on GitHub
+   */
+  url: string;
+}
+/**
+ * Pointer to a GitHub repository.
+ */
+export interface GitHubRepoRef {
+  /**
+   * Numeric GitHub repository id
+   */
+  id?: number;
+  /**
+   * Repository name (without owner)
+   */
+  name: string;
+  /**
+   * Repository owner login (user or organization)
+   */
+  owner: string;
+}
+/**
+ * Pointer to a GitHub release.
+ */
+export interface AttachmentGitHubRelease {
+  /**
+   * Human-readable release name
+   */
+  name: string;
+  repo: GitHubRepoRef;
+  /**
+   * Git tag the release is anchored to
+   */
+  tagName: string;
+  /**
+   * Attachment type discriminator
+   */
+  type: "github_release";
+  /**
+   * URL to the release on GitHub
+   */
+  url: string;
+}
+/**
+ * Pointer to a GitHub Actions job.
+ */
+export interface AttachmentGitHubActionsJob {
+  /**
+   * Terminal conclusion of the job when finished (e.g., success, failure, cancelled). Absent for in-progress jobs.
+   */
+  conclusion?: string;
+  /**
+   * Job id within the workflow run
+   */
+  jobId: number;
+  /**
+   * Display name of the job
+   */
+  jobName: string;
+  repo: GitHubRepoRef;
+  /**
+   * Attachment type discriminator
+   */
+  type: "github_actions_job";
+  /**
+   * URL to the job on GitHub
+   */
+  url: string;
+  /**
+   * Display name of the workflow the job ran in
+   */
+  workflowName: string;
+}
+/**
+ * Pointer to a GitHub repository.
+ */
+export interface AttachmentGitHubRepository {
+  /**
+   * Short description of the repository
+   */
+  description?: string;
+  /**
+   * Git ref this attachment is anchored at (branch, tag, or commit). When absent the default branch is implied.
+   */
+  ref?: string;
+  repo: GitHubRepoRef;
+  /**
+   * Attachment type discriminator
+   */
+  type: "github_repository";
+  /**
+   * URL to the repository on GitHub
+   */
+  url: string;
+}
+/**
+ * Pointer to a single-file diff. At least one of `head` and `base` must be present.
+ */
+export interface AttachmentGitHubFileDiff {
+  base?: AttachmentGitHubFileDiffSide;
+  head?: AttachmentGitHubFileDiffSide;
+  /**
+   * Attachment type discriminator
+   */
+  type: "github_file_diff";
+  /**
+   * URL to the diff on GitHub (e.g., a commit, compare, or PR-file URL)
+   */
+  url: string;
+}
+/**
+ * One side of a file diff (head or base)
+ */
+export interface AttachmentGitHubFileDiffSide {
+  /**
+   * Repository-relative path to the file
+   */
+  path: string;
+  /**
+   * Git ref (branch, tag, or commit SHA) the file is read at
+   */
+  ref: string;
+  repo: GitHubRepoRef;
+}
+/**
+ * Pointer to a comparison between two git revisions.
+ */
+export interface AttachmentGitHubTreeComparison {
+  base: AttachmentGitHubTreeComparisonSide;
+  head: AttachmentGitHubTreeComparisonSide;
+  /**
+   * Attachment type discriminator
+   */
+  type: "github_tree_comparison";
+  /**
+   * URL to the comparison on GitHub
+   */
+  url: string;
+}
+/**
+ * One side of a tree comparison (head or base)
+ */
+export interface AttachmentGitHubTreeComparisonSide {
+  repo: GitHubRepoRef;
+  /**
+   * Git revision (branch, tag, or commit SHA)
+   */
+  revision: string;
+}
+/**
+ * Generic GitHub URL reference.
+ */
+export interface AttachmentGitHubUrl {
+  /**
+   * Attachment type discriminator
+   */
+  type: "github_url";
+  /**
+   * URL to the GitHub resource
+   */
+  url: string;
+}
+/**
+ * Pointer to a file in a GitHub repository at a specific ref.
+ */
+export interface AttachmentGitHubFile {
+  /**
+   * Repository-relative path to the file
+   */
+  path: string;
+  /**
+   * Git ref the file is read at (branch, tag, or commit SHA)
+   */
+  ref: string;
+  repo: GitHubRepoRef;
+  /**
+   * Attachment type discriminator
+   */
+  type: "github_file";
+  /**
+   * URL to the file on GitHub
+   */
+  url: string;
+}
+/**
+ * Pointer to a line range inside a file in a GitHub repository.
+ */
+export interface AttachmentGitHubSnippet {
+  lineRange: AttachmentFileLineRange;
+  /**
+   * Repository-relative path to the file
+   */
+  path: string;
+  /**
+   * Git ref the file is read at (branch, tag, or commit SHA)
+   */
+  ref: string;
+  repo: GitHubRepoRef;
+  /**
+   * Attachment type discriminator
+   */
+  type: "github_snippet";
+  /**
+   * URL to the snippet on GitHub (with line anchor)
+   */
+  url: string;
+}
+/**
  * Blob attachment with inline base64-encoded data
  */
-export interface UserMessageAttachmentBlob {
+export interface AttachmentBlob {
   /**
-   * Base64-encoded content
+   * Internal: content-addressed id of the session.binary_asset event holding this attachment's model-facing bytes (e.g. "sha256:..."). Absent externally.
    */
-  data: string;
+  assetId?: string;
+  /**
+   * Internal: decoded byte length of the attachment's model-facing bytes. Absent externally.
+   */
+  byteLength?: number;
+  /**
+   * Base64-encoded content. Present on input and for external consumers; replaced by an internal `assetId` reference in persisted events when interned to a content-addressed asset.
+   */
+  data?: string;
   /**
    * User-facing display name for the attachment
    */
@@ -1658,17 +2960,59 @@ export interface UserMessageAttachmentBlob {
    * MIME type of the inline data
    */
   mimeType: string;
+  omittedReason?: OmittedBinaryOmittedReason;
   /**
    * Attachment type discriminator
    */
   type: "blob";
 }
+/**
+ * Structured context contributed by an extension. Composer pills displayed in the host are forwarded back through session.send.attachments, then rendered into the model prompt as an <extension_context> XML block.
+ */
+export interface AttachmentExtensionContext {
+  /**
+   * Provider-local canvas identifier when the push was bound to a canvas instance
+   */
+  canvasId?: string;
+  /**
+   * ISO 8601 timestamp captured by the runtime when the push was accepted
+   */
+  capturedAt: string;
+  /**
+   * Owning extension identifier. Runtime-derived from the caller's connection when produced via session.extensions.sendAttachmentsToMessage; preserved verbatim on subsequent transports.
+   */
+  extensionId: string;
+  /**
+   * Open canvas instance identifier when the push was bound to a canvas instance
+   */
+  instanceId?: string;
+  /**
+   * Caller-supplied JSON payload
+   */
+  payload?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * Human-readable composer pill label
+   */
+  title: string;
+  /**
+   * Attachment type discriminator
+   */
+  type: "extension_context";
+}
+/**
+ * Session event "pending_messages.modified". Empty payload; the event signals that the pending message queue has changed
+ */
 export interface PendingMessagesModifiedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: PendingMessagesModifiedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -1682,12 +3026,18 @@ export interface PendingMessagesModifiedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "pending_messages.modified".
+   */
   type: "pending_messages.modified";
 }
 /**
  * Empty payload; the event signals that the pending message queue has changed
  */
 export interface PendingMessagesModifiedData {}
+/**
+ * Session event "assistant.turn_start". Turn initialization metadata including identifier and interaction tracking
+ */
 export interface AssistantTurnStartEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -1710,6 +3060,9 @@ export interface AssistantTurnStartEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.turn_start".
+   */
   type: "assistant.turn_start";
 }
 /**
@@ -1721,16 +3074,26 @@ export interface AssistantTurnStartData {
    */
   interactionId?: string;
   /**
+   * Model identifier used for this turn, when known
+   */
+  model?: string;
+  /**
    * Identifier for this turn within the agentic loop, typically a stringified turn number
    */
   turnId: string;
 }
+/**
+ * Session event "assistant.intent". Agent intent description for current activity or plan
+ */
 export interface AssistantIntentEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: AssistantIntentData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -1744,6 +3107,9 @@ export interface AssistantIntentEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.intent".
+   */
   type: "assistant.intent";
 }
 /**
@@ -1755,6 +3121,9 @@ export interface AssistantIntentData {
    */
   intent: string;
 }
+/**
+ * Session event "assistant.reasoning". Assistant reasoning content for timeline display with complete thinking text
+ */
 export interface AssistantReasoningEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -1777,6 +3146,9 @@ export interface AssistantReasoningEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.reasoning".
+   */
   type: "assistant.reasoning";
 }
 /**
@@ -1792,12 +3164,18 @@ export interface AssistantReasoningData {
    */
   reasoningId: string;
 }
+/**
+ * Session event "assistant.reasoning_delta". Streaming reasoning delta for incremental extended thinking updates
+ */
 export interface AssistantReasoningDeltaEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: AssistantReasoningDeltaData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -1811,6 +3189,9 @@ export interface AssistantReasoningDeltaEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.reasoning_delta".
+   */
   type: "assistant.reasoning_delta";
 }
 /**
@@ -1826,12 +3207,18 @@ export interface AssistantReasoningDeltaData {
    */
   reasoningId: string;
 }
+/**
+ * Session event "assistant.streaming_delta". Streaming response progress with cumulative byte count
+ */
 export interface AssistantStreamingDeltaEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: AssistantStreamingDeltaData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -1845,6 +3232,9 @@ export interface AssistantStreamingDeltaEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.streaming_delta".
+   */
   type: "assistant.streaming_delta";
 }
 /**
@@ -1856,6 +3246,9 @@ export interface AssistantStreamingDeltaData {
    */
   totalResponseSizeBytes: number;
 }
+/**
+ * Session event "assistant.message". Assistant response containing text content, optional tool requests, and interaction metadata
+ */
 export interface AssistantMessageEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -1878,12 +3271,25 @@ export interface AssistantMessageEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.message".
+   */
   type: "assistant.message";
 }
 /**
  * Assistant response containing text content, optional tool requests, and interaction metadata
  */
 export interface AssistantMessageData {
+  /**
+   * Provider's completion / response identifier; shared across all chunks of a single API call. Used to group multi-chunk assistant utterances.
+   */
+  apiCallId?: string;
+  /**
+   * Provider-agnostic citations linking spans of this message's content to the sources that support them. Experimental; only populated when citation emission is enabled.
+   *
+   * @experimental
+   */
+  citations?: Citations;
   /**
    * The assistant's text response content
    */
@@ -1900,6 +3306,10 @@ export interface AssistantMessageData {
    * Unique identifier for this assistant message
    */
   messageId: string;
+  /**
+   * Model that produced this assistant message, if known
+   */
+  model?: string;
   /**
    * Actual output token count from the API response (completion_tokens), used for accurate token accounting
    */
@@ -1922,9 +3332,18 @@ export interface AssistantMessageData {
    */
   reasoningText?: string;
   /**
+   * OpenAI-compatible wire field the provider used for reasoning (e.g. reasoning_content/reasoning). Populated only when non-canonical, so the dialect round-trips across turns.
+   */
+  reasoningWireField?: string;
+  /**
    * GitHub request tracing ID (x-github-request-id header) for correlating with server-side logs
    */
   requestId?: string;
+  serverTools?: AssistantMessageServerTools;
+  /**
+   * Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
+   */
+  serviceRequestId?: string;
   /**
    * Tool invocations requested by the assistant in this message
    */
@@ -1935,6 +3354,149 @@ export interface AssistantMessageData {
   turnId?: string;
 }
 /**
+ * Provider-agnostic citations linking spans of the assistant's response to their supporting sources.
+ */
+/** @experimental */
+export interface Citations {
+  /**
+   * Deduplicated set of sources referenced by the citation spans.
+   */
+  sources: CitationSource[];
+  /**
+   * Spans of generated text annotated with the sources that support them.
+   */
+  spans: CitationSpan[];
+}
+/**
+ * A source that backs one or more cited spans in the assistant's response.
+ */
+/** @experimental */
+export interface CitationSource {
+  /**
+   * Stable, turn-scoped identifier for this source, referenced by CitationReference.sourceId.
+   */
+  id: string;
+  /**
+   * File path relative to the agent's workspace root, when the source is a file.
+   */
+  path?: string;
+  provider: CitationProvider;
+  /**
+   * Human-readable title of the source.
+   */
+  title?: string;
+  /**
+   * URL of the source, when it is a web resource.
+   */
+  url?: string;
+}
+/**
+ * A contiguous span of generated assistant text and the source references that support it.
+ */
+/** @experimental */
+export interface CitationSpan {
+  /**
+   * End offset of the cited span within the final assistant message content (UTF-16 code units, zero-based, exclusive).
+   */
+  endIndex: number;
+  /**
+   * The sources that support this span of generated text.
+   */
+  references: CitationReference[];
+  /**
+   * Start offset of the cited span within the final assistant message content (UTF-16 code units, zero-based, inclusive).
+   */
+  startIndex: number;
+}
+/**
+ * A single citation occurrence linking a span of generated text to a supporting source.
+ */
+/** @experimental */
+export interface CitationReference {
+  /**
+   * The exact text from the source that supports the cited span, when provided by the model.
+   */
+  citedText?: string;
+  location?: CitationLocation;
+  /**
+   * Provider-native citation correlation data (e.g. Anthropic search_result_index / document_index), passed through opaquely for debugging and forward compatibility.
+   */
+  providerMetadata?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * Identifier of the CitationSource this reference points to (CitationSource.id).
+   */
+  sourceId: string;
+}
+/**
+ * A character range within the source's text content.
+ */
+/** @experimental */
+export interface CitationLocationChar {
+  /**
+   * End character offset within the source text (zero-based, exclusive).
+   */
+  endIndex: number;
+  /**
+   * Start character offset within the source text (zero-based, inclusive).
+   */
+  startIndex: number;
+  /**
+   * Citation location type discriminator
+   */
+  type: "char";
+}
+/**
+ * A page range within a paginated source document.
+ */
+/** @experimental */
+export interface CitationLocationPage {
+  /**
+   * Last page number of the cited range (inclusive).
+   */
+  endPage: number;
+  /**
+   * First page number of the cited range.
+   */
+  startPage: number;
+  /**
+   * Citation location type discriminator
+   */
+  type: "page";
+}
+/**
+ * A content-block range within a structured source document.
+ */
+/** @experimental */
+export interface CitationLocationBlock {
+  /**
+   * Index of the last content block of the cited range (zero-based, exclusive).
+   */
+  endBlock: number;
+  /**
+   * Index of the first content block of the cited range (zero-based, inclusive).
+   */
+  startBlock: number;
+  /**
+   * Citation location type discriminator
+   */
+  type: "block";
+}
+/**
+ * Neutral provider-tagged server-side tool-use payload (tool search, advisor) for verbatim round-tripping
+ */
+/** @experimental */
+export interface AssistantMessageServerTools {
+  advisorModel?: string;
+  functionCallNamespaces?: {
+    [k: string]: string | undefined;
+  };
+  items?: unknown[];
+  provider: string;
+  rawContentBlocks?: unknown[];
+}
+/**
  * A tool invocation request from the assistant
  */
 export interface AssistantMessageToolRequest {
@@ -1942,7 +3504,7 @@ export interface AssistantMessageToolRequest {
    * Arguments to pass to the tool, format depends on the tool
    */
   arguments?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
   /**
    * Resolved intention summary describing what this specific call does
@@ -1952,6 +3514,10 @@ export interface AssistantMessageToolRequest {
    * Name of the MCP server hosting this tool, when the tool is an MCP tool
    */
   mcpServerName?: string;
+  /**
+   * Original tool name on the MCP server, when the tool is an MCP tool
+   */
+  mcpToolName?: string;
   /**
    * Name of the tool being invoked
    */
@@ -1966,12 +3532,18 @@ export interface AssistantMessageToolRequest {
   toolTitle?: string;
   type?: AssistantMessageToolRequestType;
 }
+/**
+ * Session event "assistant.message_start". Streaming assistant message start metadata
+ */
 export interface AssistantMessageStartEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: AssistantMessageStartData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -1985,6 +3557,9 @@ export interface AssistantMessageStartEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.message_start".
+   */
   type: "assistant.message_start";
 }
 /**
@@ -2000,12 +3575,18 @@ export interface AssistantMessageStartData {
    */
   phase?: string;
 }
+/**
+ * Session event "assistant.message_delta". Streaming assistant message delta for incremental response updates
+ */
 export interface AssistantMessageDeltaEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: AssistantMessageDeltaData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -2019,6 +3600,9 @@ export interface AssistantMessageDeltaEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.message_delta".
+   */
   type: "assistant.message_delta";
 }
 /**
@@ -2039,6 +3623,9 @@ export interface AssistantMessageDeltaData {
    */
   parentToolCallId?: string;
 }
+/**
+ * Session event "assistant.turn_end". Turn completion metadata including the turn identifier
+ */
 export interface AssistantTurnEndEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -2061,6 +3648,9 @@ export interface AssistantTurnEndEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.turn_end".
+   */
   type: "assistant.turn_end";
 }
 /**
@@ -2068,16 +3658,26 @@ export interface AssistantTurnEndEvent {
  */
 export interface AssistantTurnEndData {
   /**
+   * Model identifier used for this turn, when known
+   */
+  model?: string;
+  /**
    * Identifier of the turn that has ended, matching the corresponding assistant.turn_start event
    */
   turnId: string;
 }
-export interface AssistantUsageEvent {
+/**
+ * Session event "assistant.idle". Payload emitted whenever the main agent's processing loop goes idle, including while related background work (running agents or in-flight attached shell commands) is still pending and the session-level idle event is therefore deferred
+ */
+export interface AssistantIdleEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
-  data: AssistantUsageData;
+  data: AssistantIdleData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -2091,6 +3691,48 @@ export interface AssistantUsageEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.idle".
+   */
+  type: "assistant.idle";
+}
+/**
+ * Payload emitted whenever the main agent's processing loop goes idle, including while related background work (running agents or in-flight attached shell commands) is still pending and the session-level idle event is therefore deferred
+ */
+export interface AssistantIdleData {
+  /**
+   * True when the preceding agentic loop was cancelled via abort signal
+   */
+  aborted?: boolean;
+}
+/**
+ * Session event "assistant.usage". LLM API call usage metrics including tokens, costs, quotas, and billing information
+ */
+export interface AssistantUsageEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: AssistantUsageData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.usage".
+   */
   type: "assistant.usage";
 }
 /**
@@ -2101,6 +3743,7 @@ export interface AssistantUsageData {
    * Completion ID from the model provider (e.g., chatcmpl-abc123)
    */
   apiCallId?: string;
+  apiEndpoint?: AssistantUsageApiEndpoint;
   /**
    * Number of tokens read from prompt cache
    */
@@ -2109,15 +3752,25 @@ export interface AssistantUsageData {
    * Number of tokens written to prompt cache
    */
   cacheWriteTokens?: number;
+  /**
+   * Whether the model response was blocked or truncated by content filtering (finish_reason === 'content_filter'). For Anthropic models this corresponds to a 'refusal' stop reason.
+   */
+  contentFilterTriggered?: boolean;
   copilotUsage?: AssistantUsageCopilotUsage;
   /**
    * Model multiplier cost for billing purposes
+   *
+   * @experimental
    */
   cost?: number;
   /**
    * Duration of the API call in milliseconds
    */
   duration?: number;
+  /**
+   * Finish reason reported by the model for this API call (e.g. "stop", "length", "tool_calls", "content_filter"). Normalized to OpenAI vocabulary; for Anthropic models a "refusal" stop reason maps to "content_filter".
+   */
+  finishReason?: string;
   /**
    * What initiated this API call (e.g., "sub-agent", "mcp-sampling"); absent for user-initiated calls
    */
@@ -2149,12 +3802,14 @@ export interface AssistantUsageData {
   providerCallId?: string;
   /**
    * Per-quota resource usage snapshots, keyed by quota identifier
+   *
+   * @internal
    */
   quotaSnapshots?: {
-    [k: string]: AssistantUsageQuotaSnapshot;
+    [k: string]: AssistantUsageQuotaSnapshot | undefined;
   };
   /**
-   * Reasoning effort level used for model calls, if applicable (e.g. "low", "medium", "high", "xhigh")
+   * Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
    */
   reasoningEffort?: string;
   /**
@@ -2162,9 +3817,13 @@ export interface AssistantUsageData {
    */
   reasoningTokens?: number;
   /**
+   * Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
+   */
+  serviceRequestId?: string;
+  /**
    * Time to first token in milliseconds. Only available for streaming requests
    */
-  ttftMs?: number;
+  timeToFirstTokenMs?: number;
 }
 /**
  * Per-request cost and usage data from the CAPI copilot_usage response field
@@ -2172,8 +3831,10 @@ export interface AssistantUsageData {
 export interface AssistantUsageCopilotUsage {
   /**
    * Itemized token usage breakdown
+   *
+   * @internal
    */
-  tokenDetails: AssistantUsageCopilotUsageTokenDetail[];
+  tokenDetails?: AssistantUsageCopilotUsageTokenDetail[];
   /**
    * Total cost in nano-AI units for this request
    */
@@ -2200,46 +3861,90 @@ export interface AssistantUsageCopilotUsageTokenDetail {
    */
   tokenType: string;
 }
+/**
+ * Internal per-quota snapshot for assistant usage, including entitlement, consumed requests, overage, reset date, and remaining quota.
+ */
+/** @internal */
 export interface AssistantUsageQuotaSnapshot {
   /**
    * Total requests allowed by the entitlement
+   *
+   * @internal
    */
   entitlementRequests: number;
   /**
+   * Whether the user currently has quota available for use
+   *
+   * @internal
+   */
+  hasQuota?: boolean;
+  /**
    * Whether the user has an unlimited usage entitlement
+   *
+   * @internal
    */
   isUnlimitedEntitlement: boolean;
   /**
-   * Number of requests over the entitlement limit
+   * Number of additional usage requests made this period
+   *
+   * @internal
    */
   overage: number;
   /**
-   * Whether overage is allowed when quota is exhausted
+   * Whether additional usage is allowed when quota is exhausted
+   *
+   * @internal
    */
   overageAllowedWithExhaustedQuota: boolean;
   /**
-   * Percentage of quota remaining (0.0 to 1.0)
+   * Pay-as-you-go additional-usage budget cap in AI credits (1 credit = $0.01); present only when CAPI emits a finite value
+   *
+   * @internal
+   */
+  overageEntitlement?: number;
+  /**
+   * Percentage of quota remaining (0 to 100)
+   *
+   * @internal
    */
   remainingPercentage: number;
   /**
    * Date when the quota resets
+   *
+   * @internal
    */
   resetDate?: string;
   /**
+   * Whether this snapshot uses token-based billing (AI-credits allocation)
+   *
+   * @internal
+   */
+  tokenBasedBilling?: boolean;
+  /**
    * Whether usage is still permitted after quota exhaustion
+   *
+   * @internal
    */
   usageAllowedWithExhaustedQuota: boolean;
   /**
    * Number of requests already consumed
+   *
+   * @internal
    */
   usedRequests: number;
 }
+/**
+ * Session event "model.call_failure". Failed LLM API call metadata for telemetry
+ */
 export interface ModelCallFailureEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: ModelCallFailureData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -2253,6 +3958,9 @@ export interface ModelCallFailureEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "model.call_failure".
+   */
   type: "model.call_failure";
 }
 /**
@@ -2263,14 +3971,23 @@ export interface ModelCallFailureData {
    * Completion ID from the model provider (e.g., chatcmpl-abc123)
    */
   apiCallId?: string;
+  badRequestKind?: ModelCallFailureBadRequestKind;
   /**
    * Duration of the failed API call in milliseconds
    */
   durationMs?: number;
   /**
+   * For HTTP 400 failures only: the `code` from the CAPI error envelope (e.g. 'model_max_prompt_tokens_exceeded') identifying which deterministic validation failure occurred. Raw server-controlled string, emitted only through restricted telemetry. Absent for bodyless or non-400 failures.
+   */
+  errorCode?: string;
+  /**
    * Raw provider/runtime error message for restricted telemetry
    */
   errorMessage?: string;
+  /**
+   * For HTTP 400 failures only: the `type` from the CAPI error envelope (e.g. 'websocket_error'), a coarser companion to errorCode for envelopes that carry no code. Raw server-controlled string, emitted only through restricted telemetry. Absent for bodyless or non-400 failures.
+   */
+  errorType?: string;
   /**
    * What initiated this API call (e.g., "sub-agent", "mcp-sampling"); absent for user-initiated calls
    */
@@ -2283,12 +4000,61 @@ export interface ModelCallFailureData {
    * GitHub request tracing ID (x-github-request-id header) for server-side log correlation
    */
   providerCallId?: string;
+  /**
+   * Per-quota usage snapshots parsed from the failed response's quota headers, keyed by quota identifier. Present when the error response carried quota headers (e.g. a 402 once the additional spend limit is reached) so the UI can refresh the quota display on failure.
+   *
+   * @internal
+   */
+  quotaSnapshots?: {
+    [k: string]: AssistantUsageQuotaSnapshot | undefined;
+  };
+  requestFingerprint?: ModelCallFailureRequestFingerprint;
+  /**
+   * Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
+   */
+  serviceRequestId?: string;
   source: ModelCallFailureSource;
   /**
    * HTTP status code from the failed request
    */
   statusCode?: number;
 }
+/**
+ * Content-free structural summary of the failing request for diagnosing malformed 4xx calls
+ */
+export interface ModelCallFailureRequestFingerprint {
+  /**
+   * Total number of image content parts
+   */
+  imagePartCount: number;
+  /**
+   * Image parts whose media type cannot be determined (rejected by strict providers)
+   */
+  imagePartsMissingMediaType: number;
+  /**
+   * Role of the final message in the request
+   */
+  lastMessageRole?: string;
+  /**
+   * Total number of messages in the request
+   */
+  messageCount: number;
+  /**
+   * Tool calls whose name is missing or empty (rejected by strict providers)
+   */
+  namelessToolCallCount: number;
+  /**
+   * Total number of tool calls across assistant messages
+   */
+  toolCallCount: number;
+  /**
+   * Number of "tool" result messages in the request
+   */
+  toolResultMessageCount: number;
+}
+/**
+ * Session event "abort". Turn abort information including the reason for termination
+ */
 export interface AbortEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -2311,17 +4077,20 @@ export interface AbortEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "abort".
+   */
   type: "abort";
 }
 /**
  * Turn abort information including the reason for termination
  */
 export interface AbortData {
-  /**
-   * Reason the current turn was aborted (e.g., "user initiated")
-   */
-  reason: string;
+  reason: AbortReason;
 }
+/**
+ * Session event "tool.user_requested". User-initiated tool invocation request with tool name and arguments
+ */
 export interface ToolUserRequestedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -2344,6 +4113,9 @@ export interface ToolUserRequestedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "tool.user_requested".
+   */
   type: "tool.user_requested";
 }
 /**
@@ -2354,7 +4126,7 @@ export interface ToolUserRequestedData {
    * Arguments for the tool invocation
    */
   arguments?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
   /**
    * Unique identifier for this tool call
@@ -2365,6 +4137,9 @@ export interface ToolUserRequestedData {
    */
   toolName: string;
 }
+/**
+ * Session event "tool.execution_start". Tool execution startup details including MCP server information when applicable
+ */
 export interface ToolExecutionStartEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -2387,6 +4162,9 @@ export interface ToolExecutionStartEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "tool.execution_start".
+   */
   type: "tool.execution_start";
 }
 /**
@@ -2397,8 +4175,12 @@ export interface ToolExecutionStartData {
    * Arguments passed to the tool
    */
   arguments?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
+  /**
+   * When true, the tool output should be displayed expanded (verbatim) in the CLI timeline
+   */
+  displayVerbatim?: boolean;
   /**
    * Name of the MCP server hosting this tool, when the tool is an MCP tool
    */
@@ -2408,14 +4190,20 @@ export interface ToolExecutionStartData {
    */
   mcpToolName?: string;
   /**
+   * Model identifier that generated this tool call
+   */
+  model?: string;
+  /**
    * @deprecated
    * Tool call ID of the parent tool invocation when this event originates from a sub-agent
    */
   parentToolCallId?: string;
+  shellToolInfo?: ToolExecutionStartShellToolInfo;
   /**
    * Unique identifier for this tool call
    */
   toolCallId: string;
+  toolDescription?: ToolExecutionStartToolDescription;
   /**
    * Name of the tool being executed
    */
@@ -2425,12 +4213,64 @@ export interface ToolExecutionStartData {
    */
   turnId?: string;
 }
+/**
+ * Shell-aware path hints for a shell tool's command, captured at start time so consumers can snapshot a file's pre-image before the tool runs.
+ */
+export interface ToolExecutionStartShellToolInfo {
+  /**
+   * Whether the command includes a file write redirection (e.g., > or >>).
+   */
+  hasWriteFileRedirection: boolean;
+  /**
+   * File paths the command may read or write, derived from the command at start time. Produced by the same shell-aware extractor as PermissionRequestShell.possiblePaths, so it is present even when the command is auto-approved and no permission request fires.
+   */
+  possiblePaths: string[];
+}
+/**
+ * Tool definition metadata, present for MCP tools with MCP Apps support
+ */
+export interface ToolExecutionStartToolDescription {
+  _meta?: ToolExecutionStartToolDescriptionMeta;
+  /**
+   * Tool description
+   */
+  description?: string;
+  /**
+   * Tool name
+   */
+  name: string;
+}
+/**
+ * MCP Apps metadata for UI resource association
+ */
+export interface ToolExecutionStartToolDescriptionMeta {
+  ui?: ToolExecutionStartToolDescriptionMetaUI;
+}
+/**
+ * MCP Apps tool `_meta.ui` resource URI and visibility captured on `tool.execution_start`.
+ */
+export interface ToolExecutionStartToolDescriptionMetaUI {
+  /**
+   * URI of the UI resource
+   */
+  resourceUri?: string;
+  /**
+   * Who can access this tool
+   */
+  visibility?: ToolExecutionStartToolDescriptionMetaUIVisibility[];
+}
+/**
+ * Session event "tool.execution_partial_result". Streaming tool execution output for incremental result display
+ */
 export interface ToolExecutionPartialResultEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: ToolExecutionPartialData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -2444,6 +4284,9 @@ export interface ToolExecutionPartialResultEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "tool.execution_partial_result".
+   */
   type: "tool.execution_partial_result";
 }
 /**
@@ -2459,12 +4302,18 @@ export interface ToolExecutionPartialData {
    */
   toolCallId: string;
 }
+/**
+ * Session event "tool.execution_progress". Tool execution progress notification with status message
+ */
 export interface ToolExecutionProgressEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: ToolExecutionProgressData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -2478,6 +4327,9 @@ export interface ToolExecutionProgressEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "tool.execution_progress".
+   */
   type: "tool.execution_progress";
 }
 /**
@@ -2493,6 +4345,9 @@ export interface ToolExecutionProgressData {
    */
   toolCallId: string;
 }
+/**
+ * Session event "tool.execution_complete". Tool execution completion results including success status, detailed output, and error information
+ */
 export interface ToolExecutionCompleteEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -2515,6 +4370,9 @@ export interface ToolExecutionCompleteEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "tool.execution_complete".
+   */
   type: "tool.execution_complete";
 }
 /**
@@ -2541,6 +4399,10 @@ export interface ToolExecutionCompleteData {
   parentToolCallId?: string;
   result?: ToolExecutionCompleteResult;
   /**
+   * Whether this tool execution ran inside a sandbox container
+   */
+  sandboxed?: boolean;
+  /**
    * Whether the tool execution completed successfully
    */
   success: boolean;
@@ -2548,11 +4410,12 @@ export interface ToolExecutionCompleteData {
    * Unique identifier for the completed tool call
    */
   toolCallId: string;
+  toolDescription?: ToolExecutionCompleteToolDescription;
   /**
    * Tool-specific telemetry data (e.g., CodeQL check counts, grep match counts)
    */
   toolTelemetry?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
   /**
    * Identifier for the agent loop turn this tool was invoked in, matching the corresponding assistant.turn_start event
@@ -2577,6 +4440,18 @@ export interface ToolExecutionCompleteError {
  */
 export interface ToolExecutionCompleteResult {
   /**
+   * Model-facing binary results (base64 inline or size-omitted markers) sent to the LLM for this tool call
+   *
+   * @experimental
+   */
+  binaryResultsForLlm?: PersistedBinaryResult[];
+  /**
+   * Provider-neutral source material this tool makes available to the model as citable content. Persisted so it survives session resume. Experimental.
+   *
+   * @experimental
+   */
+  citableSources?: CitableSource[];
+  /**
    * Concise tool result text sent to the LLM for chat completion, potentially truncated for token efficiency
    */
   content: string;
@@ -2588,6 +4463,118 @@ export interface ToolExecutionCompleteResult {
    * Full detailed tool result for UI/timeline display, preserving complete content such as diffs. Falls back to content when absent.
    */
   detailedContent?: string;
+  /**
+   * Structured content (arbitrary JSON) returned verbatim by the MCP tool
+   */
+  structuredContent?: {
+    [k: string]: unknown | undefined;
+  };
+  uiResource?: ToolExecutionCompleteUIResource;
+}
+/**
+ * Binary result returned by a tool for the model
+ */
+export interface PersistedBinaryImage {
+  /**
+   * Base64-encoded binary data
+   */
+  data: string;
+  /**
+   * Human-readable description of the binary data
+   */
+  description?: string;
+  /**
+   * Optional metadata from the producing tool.
+   */
+  metadata?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * MIME type of the binary data
+   */
+  mimeType: string;
+  type: PersistedBinaryImageType;
+}
+/**
+ * A binary result whose data was omitted from persistence due to the inline size limit
+ */
+/** @experimental */
+export interface OmittedBinaryResult {
+  /**
+   * Decoded byte length of the omitted binary data
+   */
+  byteLength: number;
+  /**
+   * Human-readable description of the binary data
+   */
+  description?: string;
+  /**
+   * Optional metadata from the producing tool.
+   */
+  metadata?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * MIME type of the omitted binary data
+   */
+  mimeType: string;
+  omittedReason: OmittedBinaryOmittedReason;
+  type: OmittedBinaryType;
+}
+/**
+ * A reference to binary data persisted once on a session.binary_asset event and shared by id
+ */
+/** @experimental */
+export interface BinaryAssetReference {
+  /**
+   * Content-addressed id of the session.binary_asset event that holds this binary's bytes (e.g. "sha256:...").
+   */
+  assetId: string;
+  /**
+   * Decoded byte length of the referenced binary data
+   */
+  byteLength: number;
+  /**
+   * Human-readable description of the binary data
+   */
+  description?: string;
+  /**
+   * Optional metadata from the producing tool.
+   */
+  metadata?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * MIME type of the referenced binary data
+   */
+  mimeType: string;
+  type: BinaryAssetReferenceType;
+}
+/**
+ * A source supplied by a tool that should be made available to the model as citable content.
+ */
+/** @experimental */
+export interface CitableSource {
+  /**
+   * The source text made available to the model as citable content.
+   */
+  content: string;
+  /**
+   * Stable identifier for this source within the tool result. Used for deduplication and may be used by future provider integrations to correlate response citations back to the originating source.
+   */
+  id: string;
+  /**
+   * File path relative to the agent's workspace root, when the source is a file.
+   */
+  path?: string;
+  /**
+   * Human-readable title of the source.
+   */
+  title?: string;
+  /**
+   * URL of the source, when it is a web resource.
+   */
+  url?: string;
 }
 /**
  * Plain text content block
@@ -2603,7 +4590,8 @@ export interface ToolExecutionCompleteContentText {
   type: "text";
 }
 /**
- * Terminal/shell output content block with optional exit code and working directory
+ * @deprecated
+ * Deprecated for shell command exit metadata. Use ToolExecutionCompleteContentShellExit instead.
  */
 export interface ToolExecutionCompleteContentTerminal {
   /**
@@ -2622,6 +4610,35 @@ export interface ToolExecutionCompleteContentTerminal {
    * Content block type discriminator
    */
   type: "terminal";
+}
+/**
+ * Shell command exit metadata with optional output preview
+ */
+export interface ToolExecutionCompleteContentShellExit {
+  /**
+   * Working directory where the shell command was executed
+   */
+  cwd?: string;
+  /**
+   * Exit code from the completed shell command
+   */
+  exitCode: number;
+  /**
+   * Output associated with this shell command, if available. May be partial, truncated, or a preview; not guaranteed to be full output.
+   */
+  outputPreview?: string;
+  /**
+   * Whether outputPreview is known to be incomplete or truncated
+   */
+  outputTruncated?: boolean;
+  /**
+   * Shell id, as assigned by Copilot runtime
+   */
+  shellId: string;
+  /**
+   * Content block type discriminator
+   */
+  type: "shell_exit";
 }
 /**
  * Image content block with base64-encoded data
@@ -2722,6 +4739,9 @@ export interface ToolExecutionCompleteContentResource {
    */
   type: "resource";
 }
+/**
+ * Embedded text resource contents identified by a URI, with an optional MIME type and a text payload.
+ */
 export interface EmbeddedTextResourceContents {
   /**
    * MIME type of the text content
@@ -2736,6 +4756,9 @@ export interface EmbeddedTextResourceContents {
    */
   uri: string;
 }
+/**
+ * Embedded binary resource contents identified by a URI, with an optional MIME type and a base64-encoded blob.
+ */
 export interface EmbeddedBlobResourceContents {
   /**
    * Base64-encoded binary content of the resource
@@ -2750,6 +4773,113 @@ export interface EmbeddedBlobResourceContents {
    */
   uri: string;
 }
+/**
+ * MCP Apps UI resource content for rendering in a sandboxed iframe
+ */
+export interface ToolExecutionCompleteUIResource {
+  _meta?: ToolExecutionCompleteUIResourceMeta;
+  /**
+   * Base64-encoded HTML content
+   */
+  blob?: string;
+  /**
+   * MIME type of the content
+   */
+  mimeType: string;
+  /**
+   * HTML content as a string
+   */
+  text?: string;
+  /**
+   * The ui:// URI of the resource
+   */
+  uri: string;
+}
+/**
+ * Resource-level UI metadata (CSP, permissions, visual preferences)
+ */
+export interface ToolExecutionCompleteUIResourceMeta {
+  ui?: ToolExecutionCompleteUIResourceMetaUI;
+}
+/**
+ * MCP Apps UI resource metadata for a completed tool result, including CSP, permissions, domain, and border preference.
+ */
+export interface ToolExecutionCompleteUIResourceMetaUI {
+  csp?: ToolExecutionCompleteUIResourceMetaUICsp;
+  domain?: string;
+  permissions?: ToolExecutionCompleteUIResourceMetaUIPermissions;
+  prefersBorder?: boolean;
+}
+/**
+ * CSP domain allowlists for an MCP Apps UI resource, including connect, resource, frame, and base URI domains.
+ */
+export interface ToolExecutionCompleteUIResourceMetaUICsp {
+  baseUriDomains?: string[];
+  connectDomains?: string[];
+  frameDomains?: string[];
+  resourceDomains?: string[];
+}
+/**
+ * Browser permission metadata for an MCP Apps UI resource, including camera, microphone, geolocation, and clipboard-write.
+ */
+export interface ToolExecutionCompleteUIResourceMetaUIPermissions {
+  camera?: ToolExecutionCompleteUIResourceMetaUIPermissionsCamera;
+  clipboardWrite?: ToolExecutionCompleteUIResourceMetaUIPermissionsClipboardWrite;
+  geolocation?: ToolExecutionCompleteUIResourceMetaUIPermissionsGeolocation;
+  microphone?: ToolExecutionCompleteUIResourceMetaUIPermissionsMicrophone;
+}
+/**
+ * Marker object for camera permission on an MCP Apps UI resource.
+ */
+export interface ToolExecutionCompleteUIResourceMetaUIPermissionsCamera {}
+/**
+ * Marker object for clipboard-write permission on an MCP Apps UI resource.
+ */
+export interface ToolExecutionCompleteUIResourceMetaUIPermissionsClipboardWrite {}
+/**
+ * Marker object for geolocation permission on an MCP Apps UI resource.
+ */
+export interface ToolExecutionCompleteUIResourceMetaUIPermissionsGeolocation {}
+/**
+ * Marker object for microphone permission on an MCP Apps UI resource.
+ */
+export interface ToolExecutionCompleteUIResourceMetaUIPermissionsMicrophone {}
+/**
+ * Tool definition metadata, present for MCP tools with MCP Apps support
+ */
+export interface ToolExecutionCompleteToolDescription {
+  _meta?: ToolExecutionCompleteToolDescriptionMeta;
+  /**
+   * Tool description
+   */
+  description?: string;
+  /**
+   * Tool name
+   */
+  name: string;
+}
+/**
+ * MCP Apps metadata for UI resource association
+ */
+export interface ToolExecutionCompleteToolDescriptionMeta {
+  ui?: ToolExecutionCompleteToolDescriptionMetaUI;
+}
+/**
+ * MCP Apps tool `_meta.ui` resource URI and visibility captured on `tool.execution_complete`.
+ */
+export interface ToolExecutionCompleteToolDescriptionMetaUI {
+  /**
+   * URI of the UI resource
+   */
+  resourceUri?: string;
+  /**
+   * Who can access this tool
+   */
+  visibility?: ToolExecutionCompleteToolDescriptionMetaUIVisibility[];
+}
+/**
+ * Session event "skill.invoked". Skill invocation details including content, allowed tools, and plugin metadata
+ */
 export interface SkillInvokedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -2772,6 +4902,9 @@ export interface SkillInvokedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "skill.invoked".
+   */
   type: "skill.invoked";
 }
 /**
@@ -2791,6 +4924,10 @@ export interface SkillInvokedData {
    */
   description?: string;
   /**
+   * Model identifier active when the skill was invoked, when known
+   */
+  model?: string;
+  /**
    * Name of the invoked skill
    */
   name: string;
@@ -2806,7 +4943,15 @@ export interface SkillInvokedData {
    * Version of the plugin this skill originated from, when applicable
    */
   pluginVersion?: string;
+  /**
+   * Source identifier for where the skill was discovered. Known values include: project (workspace skill), inherited (parent-directory skill), personal-copilot (~/.copilot/skills), personal-agents (~/.agents/skills), custom (configured directory), plugin (installed plugin), builtin (bundled runtime skill), and remote (org/enterprise skill)
+   */
+  source?: string;
+  trigger?: SkillInvokedTrigger;
 }
+/**
+ * Session event "subagent.started". Sub-agent startup details including parent tool call and agent information
+ */
 export interface SubagentStartedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -2829,6 +4974,9 @@ export interface SubagentStartedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "subagent.started".
+   */
   type: "subagent.started";
 }
 /**
@@ -2848,10 +4996,17 @@ export interface SubagentStartedData {
    */
   agentName: string;
   /**
+   * Model the sub-agent will run with, when known at start.
+   */
+  model?: string;
+  /**
    * Tool call ID of the parent tool invocation that spawned this sub-agent
    */
   toolCallId: string;
 }
+/**
+ * Session event "subagent.completed". Sub-agent completion details for successful execution
+ */
 export interface SubagentCompletedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -2874,6 +5029,9 @@ export interface SubagentCompletedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "subagent.completed".
+   */
   type: "subagent.completed";
 }
 /**
@@ -2909,6 +5067,9 @@ export interface SubagentCompletedData {
    */
   totalToolCalls?: number;
 }
+/**
+ * Session event "subagent.failed". Sub-agent failure details including error message and agent information
+ */
 export interface SubagentFailedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -2931,6 +5092,9 @@ export interface SubagentFailedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "subagent.failed".
+   */
   type: "subagent.failed";
 }
 /**
@@ -2954,7 +5118,7 @@ export interface SubagentFailedData {
    */
   error: string;
   /**
-   * Model used by the sub-agent (if any model calls succeeded before failure)
+   * Model selected for the sub-agent, when known
    */
   model?: string;
   /**
@@ -2970,6 +5134,9 @@ export interface SubagentFailedData {
    */
   totalToolCalls?: number;
 }
+/**
+ * Session event "subagent.selected". Custom agent selection details including name and available tools
+ */
 export interface SubagentSelectedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -2992,6 +5159,9 @@ export interface SubagentSelectedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "subagent.selected".
+   */
   type: "subagent.selected";
 }
 /**
@@ -3011,6 +5181,9 @@ export interface SubagentSelectedData {
    */
   tools: string[] | null;
 }
+/**
+ * Session event "subagent.deselected". Empty payload; the event signals that the custom agent was deselected, returning to the default agent
+ */
 export interface SubagentDeselectedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -3033,12 +5206,18 @@ export interface SubagentDeselectedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "subagent.deselected".
+   */
   type: "subagent.deselected";
 }
 /**
  * Empty payload; the event signals that the custom agent was deselected, returning to the default agent
  */
 export interface SubagentDeselectedData {}
+/**
+ * Session event "hook.start". Hook invocation start details including type and input data
+ */
 export interface HookStartEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -3061,6 +5240,9 @@ export interface HookStartEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "hook.start".
+   */
   type: "hook.start";
 }
 /**
@@ -3079,9 +5261,12 @@ export interface HookStartData {
    * Input data passed to the hook
    */
   input?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
 }
+/**
+ * Session event "hook.end". Hook invocation completion details including output, success status, and error information
+ */
 export interface HookEndEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -3104,6 +5289,9 @@ export interface HookEndEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "hook.end".
+   */
   type: "hook.end";
 }
 /**
@@ -3123,7 +5311,7 @@ export interface HookEndData {
    * Output data produced by the hook
    */
   output?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
   /**
    * Whether the hook completed successfully
@@ -3139,10 +5327,123 @@ export interface HookEndError {
    */
   message: string;
   /**
+   * Source label of the hook that errored (e.g. the plugin it was loaded from), when known
+   */
+  source?: string;
+  /**
    * Error stack trace, when available
    */
   stack?: string;
 }
+/**
+ * Session event "hook.progress". Ephemeral progress update from a running hook process
+ */
+export interface HookProgressEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: HookProgressData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "hook.progress".
+   */
+  type: "hook.progress";
+}
+/**
+ * Ephemeral progress update from a running hook process
+ */
+export interface HookProgressData {
+  /**
+   * Human-readable progress message from the hook process
+   */
+  message: string;
+  /**
+   * When true, this status message replaces the previous temporary one instead of accumulating
+   */
+  temporary?: boolean;
+}
+/**
+ * Session event "session.binary_asset". Canonical bytes for a content-addressed binary asset shared by reference across events
+ */
+/** @experimental */
+export interface BinaryAssetEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: BinaryAssetData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.binary_asset".
+   */
+  type: "session.binary_asset";
+}
+/**
+ * Canonical bytes for a content-addressed binary asset shared by reference across events
+ */
+export interface BinaryAssetData {
+  /**
+   * Content-addressed id for this binary asset (e.g. "sha256:...").
+   */
+  assetId: string;
+  /**
+   * Decoded byte length of the binary asset
+   */
+  byteLength: number;
+  /**
+   * Base64-encoded binary data
+   */
+  data: string;
+  /**
+   * Human-readable description of the binary data
+   */
+  description?: string;
+  /**
+   * Optional metadata from the producing tool.
+   */
+  metadata?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * MIME type of the binary asset
+   */
+  mimeType: string;
+  type: BinaryAssetType;
+}
+/**
+ * Session event "system.message". System/developer instruction content with role and optional template metadata
+ */
 export interface SystemMessageEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -3165,6 +5466,9 @@ export interface SystemMessageEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "system.message".
+   */
   type: "system.message";
 }
 /**
@@ -3194,9 +5498,12 @@ export interface SystemMessageMetadata {
    * Template variables used when constructing the prompt
    */
   variables?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
 }
+/**
+ * Session event "system.notification". System-generated notification for runtime events like background task completion
+ */
 export interface SystemNotificationEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -3219,6 +5526,9 @@ export interface SystemNotificationEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "system.notification".
+   */
   type: "system.notification";
 }
 /**
@@ -3231,6 +5541,9 @@ export interface SystemNotificationData {
   content: string;
   kind: SystemNotification;
 }
+/**
+ * System notification metadata for a background agent that completed or failed, including agent ID, type, status, description, and prompt.
+ */
 export interface SystemNotificationAgentCompleted {
   /**
    * Unique identifier of the background agent
@@ -3249,8 +5562,14 @@ export interface SystemNotificationAgentCompleted {
    */
   prompt?: string;
   status: SystemNotificationAgentCompletedStatus;
+  /**
+   * Type discriminator. Always "agent_completed".
+   */
   type: "agent_completed";
 }
+/**
+ * System notification metadata for a background agent that became idle, including agent ID, type, and description.
+ */
 export interface SystemNotificationAgentIdle {
   /**
    * Unique identifier of the background agent
@@ -3264,8 +5583,14 @@ export interface SystemNotificationAgentIdle {
    * Human-readable description of the agent task
    */
   description?: string;
+  /**
+   * Type discriminator. Always "agent_idle".
+   */
   type: "agent_idle";
 }
+/**
+ * System notification metadata for a new inbox message, including entry ID, sender details, and summary.
+ */
 export interface SystemNotificationNewInboxMessage {
   /**
    * Unique identifier of the inbox entry
@@ -3283,8 +5608,14 @@ export interface SystemNotificationNewInboxMessage {
    * Short summary shown before the agent decides whether to read the inbox
    */
   summary: string;
+  /**
+   * Type discriminator. Always "new_inbox_message".
+   */
   type: "new_inbox_message";
 }
+/**
+ * System notification metadata for a shell session that completed, including shell ID, optional exit code, and description.
+ */
 export interface SystemNotificationShellCompleted {
   /**
    * Human-readable description of the command
@@ -3298,8 +5629,14 @@ export interface SystemNotificationShellCompleted {
    * Unique identifier of the shell session
    */
   shellId: string;
+  /**
+   * Type discriminator. Always "shell_completed".
+   */
   type: "shell_completed";
 }
+/**
+ * System notification metadata for a detached shell session that completed, including shell ID and description.
+ */
 export interface SystemNotificationShellDetachedCompleted {
   /**
    * Human-readable description of the command
@@ -3309,8 +5646,14 @@ export interface SystemNotificationShellDetachedCompleted {
    * Unique identifier of the detached shell session
    */
   shellId: string;
+  /**
+   * Type discriminator. Always "shell_detached_completed".
+   */
   type: "shell_detached_completed";
 }
+/**
+ * System notification metadata for an instruction file discovered during tool access, including source, trigger file, and tool.
+ */
 export interface SystemNotificationInstructionDiscovered {
   /**
    * Human-readable label for the timeline (e.g., 'AGENTS.md from packages/billing/')
@@ -3328,8 +5671,14 @@ export interface SystemNotificationInstructionDiscovered {
    * Tool command that triggered discovery (currently always 'view')
    */
   triggerTool: string;
+  /**
+   * Type discriminator. Always "instruction_discovered".
+   */
   type: "instruction_discovered";
 }
+/**
+ * Session event "permission.requested". Permission request notification requiring client approval with request details
+ */
 export interface PermissionRequestedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -3352,6 +5701,9 @@ export interface PermissionRequestedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "permission.requested".
+   */
   type: "permission.requested";
 }
 /**
@@ -3406,6 +5758,14 @@ export interface PermissionRequestShell {
    */
   possibleUrls: PermissionRequestShellPossibleUrl[];
   /**
+   * True when the model has requested to run this command outside the sandbox (it set requestSandboxBypass: true and the host opted in via sandbox.allowBypass). This is a request, not a grant: the command runs unsandboxed only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
+   */
+  requestSandboxBypass?: boolean;
+  /**
+   * Model-provided justification for the sandbox-bypass request. Only meaningful when requestSandboxBypass is true.
+   */
+  requestSandboxBypassReason?: string;
+  /**
    * Tool call ID that triggered this permission request
    */
   toolCallId?: string;
@@ -3414,6 +5774,9 @@ export interface PermissionRequestShell {
    */
   warning?: string;
 }
+/**
+ * A parsed command identifier in a shell permission request, including whether it is read-only.
+ */
 export interface PermissionRequestShellCommand {
   /**
    * Command identifier (e.g., executable name)
@@ -3424,6 +5787,9 @@ export interface PermissionRequestShellCommand {
    */
   readOnly: boolean;
 }
+/**
+ * A URL that may be accessed by a command in a shell permission request.
+ */
 export interface PermissionRequestShellPossibleUrl {
   /**
    * URL that may be accessed by the command
@@ -3480,6 +5846,14 @@ export interface PermissionRequestRead {
    */
   path: string;
   /**
+   * True when the model has requested to run this search outside the sandbox (it set requestSandboxBypass: true and the host opted in via sandbox.allowBypass). This is a request, not a grant: the search runs unsandboxed only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
+   */
+  requestSandboxBypass?: boolean;
+  /**
+   * Model-provided justification for the sandbox-bypass request. Only meaningful when requestSandboxBypass is true.
+   */
+  requestSandboxBypassReason?: string;
+  /**
    * Tool call ID that triggered this permission request
    */
   toolCallId?: string;
@@ -3492,7 +5866,7 @@ export interface PermissionRequestMcp {
    * Arguments to pass to the MCP tool
    */
   args?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
   /**
    * Permission kind discriminator
@@ -3579,7 +5953,7 @@ export interface PermissionRequestCustomTool {
    * Arguments to pass to the custom tool
    */
   args?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
   /**
    * Permission kind discriminator
@@ -3614,7 +5988,7 @@ export interface PermissionRequestHook {
    * Arguments of the tool call being gated
    */
   toolArgs?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
   /**
    * Tool call ID that triggered this permission request
@@ -3626,9 +6000,57 @@ export interface PermissionRequestHook {
   toolName: string;
 }
 /**
+ * Extension management permission request
+ */
+export interface PermissionRequestExtensionManagement {
+  /**
+   * Name of the extension being managed
+   */
+  extensionName?: string;
+  /**
+   * Permission kind discriminator
+   */
+  kind: "extension-management";
+  /**
+   * The extension management operation (scaffold, reload)
+   */
+  operation: string;
+  /**
+   * Tool call ID that triggered this permission request
+   */
+  toolCallId?: string;
+}
+/**
+ * Extension permission access request
+ */
+export interface PermissionRequestExtensionPermissionAccess {
+  /**
+   * Capabilities the extension is requesting
+   */
+  capabilities: string[];
+  /**
+   * Name of the extension requesting permission access
+   */
+  extensionName: string;
+  /**
+   * Permission kind discriminator
+   */
+  kind: "extension-permission-access";
+  /**
+   * Tool call ID that triggered this permission request
+   */
+  toolCallId?: string;
+}
+/**
  * Shell command permission prompt
  */
 export interface PermissionPromptRequestCommands {
+  /**
+   * Auto-approval judge information for this request; present only when auto mode is enabled.
+   *
+   * @experimental
+   */
+  autoApproval?: PermissionAutoApproval;
   /**
    * Whether the UI can offer session-wide approval for this command pattern
    */
@@ -3659,9 +6081,26 @@ export interface PermissionPromptRequestCommands {
   warning?: string;
 }
 /**
+ * Auto-approval judge information attached to a permission request. Present (non-null) only when the session's allow-all mode is "auto"; its absence means auto mode was off and the judge did not evaluate the request. The `recommendation` conveys the judge's disposition for this request.
+ */
+/** @experimental */
+export interface PermissionAutoApproval {
+  /**
+   * Human-readable reason for the judge's recommendation, when available.
+   */
+  reason?: string;
+  recommendation: AutoApprovalRecommendation;
+}
+/**
  * File write permission prompt
  */
 export interface PermissionPromptRequestWrite {
+  /**
+   * Auto-approval judge information for this request; present only when auto mode is enabled.
+   *
+   * @experimental
+   */
+  autoApproval?: PermissionAutoApproval;
   /**
    * Whether the UI can offer session-wide approval for file write operations
    */
@@ -3696,6 +6135,12 @@ export interface PermissionPromptRequestWrite {
  */
 export interface PermissionPromptRequestRead {
   /**
+   * Auto-approval judge information for this request; present only when auto mode is enabled.
+   *
+   * @experimental
+   */
+  autoApproval?: PermissionAutoApproval;
+  /**
    * Human-readable description of why the file is being read
    */
   intention: string;
@@ -3716,7 +6161,18 @@ export interface PermissionPromptRequestRead {
  * MCP tool invocation permission prompt
  */
 export interface PermissionPromptRequestMcp {
-  args?: unknown;
+  /**
+   * Arguments to pass to the MCP tool
+   */
+  args?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * Auto-approval judge information for this request; present only when auto mode is enabled.
+   *
+   * @experimental
+   */
+  autoApproval?: PermissionAutoApproval;
   /**
    * Prompt kind discriminator
    */
@@ -3743,6 +6199,12 @@ export interface PermissionPromptRequestMcp {
  */
 export interface PermissionPromptRequestUrl {
   /**
+   * Auto-approval judge information for this request; present only when auto mode is enabled.
+   *
+   * @experimental
+   */
+  autoApproval?: PermissionAutoApproval;
+  /**
    * Human-readable description of why the URL is being accessed
    */
   intention: string;
@@ -3763,12 +6225,18 @@ export interface PermissionPromptRequestUrl {
  * Memory operation permission prompt
  */
 export interface PermissionPromptRequestMemory {
-  action?: PermissionPromptRequestMemoryAction;
+  action?: PermissionRequestMemoryAction;
+  /**
+   * Auto-approval judge information for this request; present only when auto mode is enabled.
+   *
+   * @experimental
+   */
+  autoApproval?: PermissionAutoApproval;
   /**
    * Source references for the stored fact (store only)
    */
   citations?: string;
-  direction?: PermissionPromptRequestMemoryDirection;
+  direction?: PermissionRequestMemoryDirection;
   /**
    * The fact being stored or voted on
    */
@@ -3798,8 +6266,14 @@ export interface PermissionPromptRequestCustomTool {
    * Arguments to pass to the custom tool
    */
   args?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
+  /**
+   * Auto-approval judge information for this request; present only when auto mode is enabled.
+   *
+   * @experimental
+   */
+  autoApproval?: PermissionAutoApproval;
   /**
    * Prompt kind discriminator
    */
@@ -3823,6 +6297,12 @@ export interface PermissionPromptRequestCustomTool {
 export interface PermissionPromptRequestPath {
   accessKind: PermissionPromptRequestPathAccessKind;
   /**
+   * Auto-approval judge information for this request; present only when auto mode is enabled.
+   *
+   * @experimental
+   */
+  autoApproval?: PermissionAutoApproval;
+  /**
    * Prompt kind discriminator
    */
   kind: "path";
@@ -3840,6 +6320,12 @@ export interface PermissionPromptRequestPath {
  */
 export interface PermissionPromptRequestHook {
   /**
+   * Auto-approval judge information for this request; present only when auto mode is enabled.
+   *
+   * @experimental
+   */
+  autoApproval?: PermissionAutoApproval;
+  /**
    * Optional message from the hook explaining why confirmation is needed
    */
   hookMessage?: string;
@@ -3851,7 +6337,7 @@ export interface PermissionPromptRequestHook {
    * Arguments of the tool call being gated
    */
   toolArgs?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
   /**
    * Tool call ID that triggered this permission request
@@ -3862,6 +6348,63 @@ export interface PermissionPromptRequestHook {
    */
   toolName: string;
 }
+/**
+ * Extension management permission prompt
+ */
+export interface PermissionPromptRequestExtensionManagement {
+  /**
+   * Auto-approval judge information for this request; present only when auto mode is enabled.
+   *
+   * @experimental
+   */
+  autoApproval?: PermissionAutoApproval;
+  /**
+   * Name of the extension being managed
+   */
+  extensionName?: string;
+  /**
+   * Prompt kind discriminator
+   */
+  kind: "extension-management";
+  /**
+   * The extension management operation (scaffold, reload)
+   */
+  operation: string;
+  /**
+   * Tool call ID that triggered this permission request
+   */
+  toolCallId?: string;
+}
+/**
+ * Extension permission access prompt
+ */
+export interface PermissionPromptRequestExtensionPermissionAccess {
+  /**
+   * Auto-approval judge information for this request; present only when auto mode is enabled.
+   *
+   * @experimental
+   */
+  autoApproval?: PermissionAutoApproval;
+  /**
+   * Capabilities the extension is requesting
+   */
+  capabilities: string[];
+  /**
+   * Name of the extension requesting permission access
+   */
+  extensionName: string;
+  /**
+   * Prompt kind discriminator
+   */
+  kind: "extension-permission-access";
+  /**
+   * Tool call ID that triggered this permission request
+   */
+  toolCallId?: string;
+}
+/**
+ * Session event "permission.completed". Permission request completion notification signaling UI dismissal
+ */
 export interface PermissionCompletedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -3884,6 +6427,9 @@ export interface PermissionCompletedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "permission.completed".
+   */
   type: "permission.completed";
 }
 /**
@@ -3900,12 +6446,18 @@ export interface PermissionCompletedData {
    */
   toolCallId?: string;
 }
+/**
+ * Permission response variant indicating the request was approved without persisting an approval rule.
+ */
 export interface PermissionApproved {
   /**
    * The permission request was approved
    */
   kind: "approved";
 }
+/**
+ * Permission response variant that approves a request and remembers the provided approval for the rest of the session.
+ */
 export interface PermissionApprovedForSession {
   approval: UserToolSessionApproval;
   /**
@@ -3913,6 +6465,9 @@ export interface PermissionApprovedForSession {
    */
   kind: "approved-for-session";
 }
+/**
+ * Session-scoped tool-approval rule for specific shell command identifiers.
+ */
 export interface UserToolSessionApprovalCommands {
   /**
    * Command identifiers approved by the user
@@ -3923,18 +6478,27 @@ export interface UserToolSessionApprovalCommands {
    */
   kind: "commands";
 }
+/**
+ * Session-scoped tool-approval rule for read-only filesystem operations.
+ */
 export interface UserToolSessionApprovalRead {
   /**
    * Read approval kind
    */
   kind: "read";
 }
+/**
+ * Session-scoped tool-approval rule for filesystem write operations.
+ */
 export interface UserToolSessionApprovalWrite {
   /**
    * Write approval kind
    */
   kind: "write";
 }
+/**
+ * Session-scoped tool-approval rule for an MCP server tool, or all tools on the server when `toolName` is null.
+ */
 export interface UserToolSessionApprovalMcp {
   /**
    * MCP tool approval kind
@@ -3949,12 +6513,18 @@ export interface UserToolSessionApprovalMcp {
    */
   toolName: string | null;
 }
+/**
+ * Session-scoped tool-approval rule for writes to long-term memory.
+ */
 export interface UserToolSessionApprovalMemory {
   /**
    * Memory approval kind
    */
   kind: "memory";
 }
+/**
+ * Session-scoped tool-approval rule for a custom tool, keyed by tool name.
+ */
 export interface UserToolSessionApprovalCustomTool {
   /**
    * Custom tool approval kind
@@ -3965,6 +6535,35 @@ export interface UserToolSessionApprovalCustomTool {
    */
   toolName: string;
 }
+/**
+ * Session-scoped tool-approval rule for extension-management operations, optionally narrowed by operation.
+ */
+export interface UserToolSessionApprovalExtensionManagement {
+  /**
+   * Extension management approval kind
+   */
+  kind: "extension-management";
+  /**
+   * Optional operation identifier
+   */
+  operation?: string;
+}
+/**
+ * Session-scoped tool-approval rule for an extension's permission-gated capability access, keyed by extension name.
+ */
+export interface UserToolSessionApprovalExtensionPermissionAccess {
+  /**
+   * Extension name
+   */
+  extensionName: string;
+  /**
+   * Extension permission access approval kind
+   */
+  kind: "extension-permission-access";
+}
+/**
+ * Permission response variant that approves a request and persists the provided approval to a project location key.
+ */
 export interface PermissionApprovedForLocation {
   approval: UserToolSessionApproval;
   /**
@@ -3976,6 +6575,9 @@ export interface PermissionApprovedForLocation {
    */
   locationKey: string;
 }
+/**
+ * Permission response variant indicating the request was cancelled before use, with an optional reason.
+ */
 export interface PermissionCancelled {
   /**
    * The permission request was cancelled before a response was used
@@ -3986,6 +6588,9 @@ export interface PermissionCancelled {
    */
   reason?: string;
 }
+/**
+ * Permission response variant denied because matching approval rules explicitly blocked the request.
+ */
 export interface PermissionDeniedByRules {
   /**
    * Denied because approval rules explicitly blocked it
@@ -3996,9 +6601,12 @@ export interface PermissionDeniedByRules {
    */
   rules: PermissionRule[];
 }
+/**
+ * A permission approval or denial rule matched against a tool request, identified by a rule kind with an optional argument value.
+ */
 export interface PermissionRule {
   /**
-   * Optional rule argument matched against the request
+   * Argument value matched against the request, or null when the rule kind has no argument (e.g. 'read', 'write', 'memory').
    */
   argument: string | null;
   /**
@@ -4006,12 +6614,18 @@ export interface PermissionRule {
    */
   kind: string;
 }
+/**
+ * Permission response variant denied because no approval rule matched and user confirmation was unavailable.
+ */
 export interface PermissionDeniedNoApprovalRuleAndCouldNotRequestFromUser {
   /**
    * Denied because no approval rule matched and user confirmation was unavailable
    */
   kind: "denied-no-approval-rule-and-could-not-request-from-user";
 }
+/**
+ * Permission response variant denied in an interactive user prompt, with optional feedback and force-reject flag.
+ */
 export interface PermissionDeniedInteractivelyByUser {
   /**
    * Optional feedback from the user explaining the denial
@@ -4026,6 +6640,9 @@ export interface PermissionDeniedInteractivelyByUser {
    */
   kind: "denied-interactively-by-user";
 }
+/**
+ * Permission response variant denying a path under content exclusion policy, with the path and message.
+ */
 export interface PermissionDeniedByContentExclusionPolicy {
   /**
    * Denied by the organization's content exclusion policy
@@ -4040,6 +6657,9 @@ export interface PermissionDeniedByContentExclusionPolicy {
    */
   path: string;
 }
+/**
+ * Permission response variant denied by a permission-request hook, with optional message and interrupt flag.
+ */
 export interface PermissionDeniedByPermissionRequestHook {
   /**
    * Whether to interrupt the current agent turn
@@ -4054,12 +6674,18 @@ export interface PermissionDeniedByPermissionRequestHook {
    */
   message?: string;
 }
+/**
+ * Session event "user_input.requested". User input request notification with question and optional predefined choices
+ */
 export interface UserInputRequestedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: UserInputRequestedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4073,6 +6699,9 @@ export interface UserInputRequestedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "user_input.requested".
+   */
   type: "user_input.requested";
 }
 /**
@@ -4100,12 +6729,18 @@ export interface UserInputRequestedData {
    */
   toolCallId?: string;
 }
+/**
+ * Session event "user_input.completed". User input request completion with the user's response
+ */
 export interface UserInputCompletedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: UserInputCompletedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4119,6 +6754,9 @@ export interface UserInputCompletedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "user_input.completed".
+   */
   type: "user_input.completed";
 }
 /**
@@ -4138,12 +6776,18 @@ export interface UserInputCompletedData {
    */
   wasFreeform?: boolean;
 }
+/**
+ * Session event "elicitation.requested". Elicitation request; may be form-based (structured input) or URL-based (browser redirect)
+ */
 export interface ElicitationRequestedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: ElicitationRequestedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4157,6 +6801,9 @@ export interface ElicitationRequestedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "elicitation.requested".
+   */
   type: "elicitation.requested";
 }
 /**
@@ -4185,7 +6832,6 @@ export interface ElicitationRequestedData {
    * URL to open in the user's browser (url mode only)
    */
   url?: string;
-  [k: string]: unknown;
 }
 /**
  * JSON Schema describing the form fields to present to the user (form mode only)
@@ -4195,7 +6841,7 @@ export interface ElicitationRequestedSchema {
    * Form field definitions, keyed by field name
    */
   properties: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
   /**
    * List of required field names
@@ -4206,12 +6852,18 @@ export interface ElicitationRequestedSchema {
    */
   type: "object";
 }
+/**
+ * Session event "elicitation.completed". Elicitation request completion with the user's response
+ */
 export interface ElicitationCompletedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: ElicitationCompletedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4225,6 +6877,9 @@ export interface ElicitationCompletedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "elicitation.completed".
+   */
   type: "elicitation.completed";
 }
 /**
@@ -4236,19 +6891,31 @@ export interface ElicitationCompletedData {
    * The submitted form data when action is 'accept'; keys match the requested schema fields
    */
   content?: {
-    [k: string]: ElicitationCompletedContent;
+    [k: string]: ElicitationCompletedContent | undefined;
   };
   /**
    * Request ID of the resolved elicitation request; clients should dismiss any UI for this request
    */
   requestId: string;
 }
+/**
+ * Opaque JSON value submitted for one field in accepted `elicitation.completed` form content.
+ */
+export interface ElicitationCompletedContent {
+  [k: string]: unknown | undefined;
+}
+/**
+ * Session event "sampling.requested". Sampling request from an MCP server; contains the server name and a requestId for correlation
+ */
 export interface SamplingRequestedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: SamplingRequestedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4262,6 +6929,9 @@ export interface SamplingRequestedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "sampling.requested".
+   */
   type: "sampling.requested";
 }
 /**
@@ -4271,7 +6941,9 @@ export interface SamplingRequestedData {
   /**
    * The JSON-RPC request ID from the MCP protocol
    */
-  mcpRequestId: string | number;
+  mcpRequestId: {
+    [k: string]: unknown | undefined;
+  };
   /**
    * Unique identifier for this sampling request; used to respond via session.respondToSampling()
    */
@@ -4280,14 +6952,19 @@ export interface SamplingRequestedData {
    * Name of the MCP server that initiated the sampling request
    */
   serverName: string;
-  [k: string]: unknown;
 }
+/**
+ * Session event "sampling.completed". Sampling request completion notification signaling UI dismissal
+ */
 export interface SamplingCompletedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: SamplingCompletedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4301,6 +6978,9 @@ export interface SamplingCompletedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "sampling.completed".
+   */
   type: "sampling.completed";
 }
 /**
@@ -4312,12 +6992,18 @@ export interface SamplingCompletedData {
    */
   requestId: string;
 }
+/**
+ * Session event "mcp.oauth_required". OAuth authentication request for an MCP server
+ */
 export interface McpOauthRequiredEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: McpOauthRequiredData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4331,16 +7017,24 @@ export interface McpOauthRequiredEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "mcp.oauth_required".
+   */
   type: "mcp.oauth_required";
 }
 /**
  * OAuth authentication request for an MCP server
  */
 export interface McpOauthRequiredData {
+  reason: McpOauthRequestReason;
   /**
-   * Unique identifier for this OAuth request; used to respond via session.respondToMcpOAuth()
+   * Unique identifier for this OAuth request; used to respond via session.mcp.oauth.handlePendingRequest
    */
   requestId: string;
+  /**
+   * Raw OAuth protected-resource metadata document fetched for the MCP server, if available
+   */
+  resourceMetadata?: string;
   /**
    * Display name of the MCP server that requires OAuth
    */
@@ -4350,6 +7044,7 @@ export interface McpOauthRequiredData {
    */
   serverUrl: string;
   staticClientConfig?: McpOauthRequiredStaticClientConfig;
+  wwwAuthenticateParams?: McpOauthWWWAuthenticateParams;
 }
 /**
  * Static OAuth client configuration, if the server specifies one
@@ -4360,6 +7055,10 @@ export interface McpOauthRequiredStaticClientConfig {
    */
   clientId: string;
   /**
+   * Optional OAuth client secret for confidential static clients, when the runtime can resolve one
+   */
+  clientSecret?: string;
+  /**
    * Optional non-default OAuth grant type. When set to 'client_credentials', the OAuth flow runs headlessly using the client_id + keychain-stored secret (no browser, no callback server).
    */
   grantType?: "client_credentials";
@@ -4368,12 +7067,35 @@ export interface McpOauthRequiredStaticClientConfig {
    */
   publicClient?: boolean;
 }
+/**
+ * OAuth WWW-Authenticate parameters parsed from an MCP auth challenge
+ */
+export interface McpOauthWWWAuthenticateParams {
+  /**
+   * OAuth error from the WWW-Authenticate error parameter, if present
+   */
+  error?: string;
+  /**
+   * Protected resource metadata URL from the WWW-Authenticate resource_metadata parameter, if present
+   */
+  resourceMetadataUrl?: string;
+  /**
+   * Requested OAuth scopes from the WWW-Authenticate scope parameter, if present
+   */
+  scope?: string;
+}
+/**
+ * Session event "mcp.oauth_completed". MCP OAuth request completion notification
+ */
 export interface McpOauthCompletedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: McpOauthCompletedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4387,17 +7109,173 @@ export interface McpOauthCompletedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "mcp.oauth_completed".
+   */
   type: "mcp.oauth_completed";
 }
 /**
  * MCP OAuth request completion notification
  */
 export interface McpOauthCompletedData {
+  outcome: McpOauthCompletionOutcome;
   /**
    * Request ID of the resolved OAuth request
    */
   requestId: string;
 }
+/**
+ * Session event "mcp.headers_refresh_required". Dynamic headers refresh request for a remote MCP server
+ */
+export interface McpHeadersRefreshRequiredEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: McpHeadersRefreshRequiredData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "mcp.headers_refresh_required".
+   */
+  type: "mcp.headers_refresh_required";
+}
+/**
+ * Dynamic headers refresh request for a remote MCP server
+ */
+export interface McpHeadersRefreshRequiredData {
+  reason: McpHeadersRefreshRequiredReason;
+  /**
+   * Unique identifier for this headers refresh request; used to respond via session.mcp.headers.handlePendingHeadersRefreshRequest()
+   */
+  requestId: string;
+  /**
+   * Display name of the remote MCP server requesting headers
+   */
+  serverName: string;
+  /**
+   * URL of the remote MCP server requesting headers
+   */
+  serverUrl: string;
+}
+/**
+ * Session event "mcp.headers_refresh_completed". MCP headers refresh request completion notification
+ */
+export interface McpHeadersRefreshCompletedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: McpHeadersRefreshCompletedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "mcp.headers_refresh_completed".
+   */
+  type: "mcp.headers_refresh_completed";
+}
+/**
+ * MCP headers refresh request completion notification
+ */
+export interface McpHeadersRefreshCompletedData {
+  outcome: McpHeadersRefreshCompletedOutcome;
+  /**
+   * Request ID of the resolved headers refresh request
+   */
+  requestId: string;
+}
+/**
+ * Session event "session.custom_notification". Opaque custom notification data. Consumers may branch on source and name, but payload semantics are source-defined.
+ */
+export interface CustomNotificationEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: CustomNotificationData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.custom_notification".
+   */
+  type: "session.custom_notification";
+}
+/**
+ * Opaque custom notification data. Consumers may branch on source and name, but payload semantics are source-defined.
+ */
+export interface CustomNotificationData {
+  /**
+   * Source-defined custom notification name
+   */
+  name: string;
+  payload: CustomNotificationPayload;
+  /**
+   * Namespace for the custom notification producer
+   */
+  source: string;
+  subject?: CustomNotificationSubject;
+  /**
+   * Optional source-defined payload schema version
+   */
+  version?: number;
+}
+/**
+ * Source-defined JSON payload for the custom notification
+ */
+export interface CustomNotificationPayload {
+  [k: string]: unknown | undefined;
+}
+/**
+ * Optional source-defined string identifiers describing the payload subject
+ */
+export interface CustomNotificationSubject {
+  [k: string]: string | undefined;
+}
+/**
+ * Session event "external_tool.requested". External tool invocation request for client-side tool execution
+ */
 export interface ExternalToolRequestedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
@@ -4420,6 +7298,9 @@ export interface ExternalToolRequestedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "external_tool.requested".
+   */
   type: "external_tool.requested";
 }
 /**
@@ -4430,7 +7311,7 @@ export interface ExternalToolRequestedData {
    * Arguments to pass to the external tool
    */
   arguments?: {
-    [k: string]: unknown;
+    [k: string]: unknown | undefined;
   };
   /**
    * Unique identifier for this request; used to respond via session.respondToExternalTool()
@@ -4456,13 +7337,23 @@ export interface ExternalToolRequestedData {
    * W3C Trace Context tracestate header for the execute_tool span
    */
   tracestate?: string;
+  /**
+   * Active session working directory, when known.
+   */
+  workingDirectory?: string;
 }
+/**
+ * Session event "external_tool.completed". External tool completion notification signaling UI dismissal
+ */
 export interface ExternalToolCompletedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: ExternalToolCompletedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral?: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4476,6 +7367,9 @@ export interface ExternalToolCompletedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "external_tool.completed".
+   */
   type: "external_tool.completed";
 }
 /**
@@ -4487,12 +7381,18 @@ export interface ExternalToolCompletedData {
    */
   requestId: string;
 }
+/**
+ * Session event "command.queued". Queued slash command dispatch request for client execution
+ */
 export interface CommandQueuedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: CommandQueuedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4506,6 +7406,9 @@ export interface CommandQueuedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "command.queued".
+   */
   type: "command.queued";
 }
 /**
@@ -4521,12 +7424,18 @@ export interface CommandQueuedData {
    */
   requestId: string;
 }
+/**
+ * Session event "command.execute". Registered command dispatch request routed to the owning client
+ */
 export interface CommandExecuteEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: CommandExecuteData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4540,6 +7449,9 @@ export interface CommandExecuteEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "command.execute".
+   */
   type: "command.execute";
 }
 /**
@@ -4563,12 +7475,18 @@ export interface CommandExecuteData {
    */
   requestId: string;
 }
+/**
+ * Session event "command.completed". Queued command completion notification signaling UI dismissal
+ */
 export interface CommandCompletedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: CommandCompletedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4582,6 +7500,9 @@ export interface CommandCompletedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "command.completed".
+   */
   type: "command.completed";
 }
 /**
@@ -4593,12 +7514,18 @@ export interface CommandCompletedData {
    */
   requestId: string;
 }
+/**
+ * Session event "auto_mode_switch.requested". Auto mode switch request notification requiring user approval
+ */
 export interface AutoModeSwitchRequestedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: AutoModeSwitchRequestedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4612,6 +7539,9 @@ export interface AutoModeSwitchRequestedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "auto_mode_switch.requested".
+   */
   type: "auto_mode_switch.requested";
 }
 /**
@@ -4631,12 +7561,18 @@ export interface AutoModeSwitchRequestedData {
    */
   retryAfterSeconds?: number;
 }
+/**
+ * Session event "auto_mode_switch.completed". Auto mode switch completion notification
+ */
 export interface AutoModeSwitchCompletedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: AutoModeSwitchCompletedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4650,6 +7586,9 @@ export interface AutoModeSwitchCompletedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "auto_mode_switch.completed".
+   */
   type: "auto_mode_switch.completed";
 }
 /**
@@ -4660,17 +7599,20 @@ export interface AutoModeSwitchCompletedData {
    * Request ID of the resolved request; clients should dismiss any UI for this request
    */
   requestId: string;
-  /**
-   * The user's choice: 'yes', 'yes_always', or 'no'
-   */
-  response: string;
+  response: AutoModeSwitchResponse;
 }
-export interface CommandsChangedEvent {
+/**
+ * Session event "session_limits_exhausted.requested". Session limit exhaustion notification requiring user action.
+ */
+export interface SessionLimitsExhaustedRequestedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
-  data: CommandsChangedData;
+  data: SessionLimitsExhaustedRequestedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4684,6 +7626,110 @@ export interface CommandsChangedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session_limits_exhausted.requested".
+   */
+  type: "session_limits_exhausted.requested";
+}
+/**
+ * Session limit exhaustion notification requiring user action.
+ */
+export interface SessionLimitsExhaustedRequestedData {
+  /**
+   * Configured max AI Credits for the current accounting window.
+   */
+  maxAiCredits: number;
+  /**
+   * Unique identifier for this request; used to respond via session.ui.handlePendingSessionLimitsExhausted().
+   */
+  requestId: string;
+  /**
+   * AI Credits already consumed in the current accounting window.
+   */
+  usedAiCredits: number;
+}
+/**
+ * Session event "session_limits_exhausted.completed". Session limit exhaustion prompt completion notification.
+ */
+export interface SessionLimitsExhaustedCompletedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: SessionLimitsExhaustedCompletedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session_limits_exhausted.completed".
+   */
+  type: "session_limits_exhausted.completed";
+}
+/**
+ * Session limit exhaustion prompt completion notification.
+ */
+export interface SessionLimitsExhaustedCompletedData {
+  /**
+   * Request ID of the resolved request; clients should dismiss any UI for this request.
+   */
+  requestId: string;
+  response: SessionLimitsExhaustedResponse;
+}
+/**
+ * The user's selected action for an exhausted session limit.
+ */
+export interface SessionLimitsExhaustedResponse {
+  action: SessionLimitsExhaustedResponseAction;
+  /**
+   * AI Credits to add to the current max when action is 'add'.
+   */
+  additionalAiCredits?: number;
+  /**
+   * New absolute max AI Credits when action is 'set'.
+   */
+  maxAiCredits?: number;
+}
+/**
+ * Session event "commands.changed". SDK command registration change notification
+ */
+export interface CommandsChangedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: CommandsChangedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "commands.changed".
+   */
   type: "commands.changed";
 }
 /**
@@ -4695,16 +7741,31 @@ export interface CommandsChangedData {
    */
   commands: CommandsChangedCommand[];
 }
+/**
+ * A single slash command available in the session, as listed by the `commands.changed` event.
+ */
 export interface CommandsChangedCommand {
+  /**
+   * Optional human-readable command description.
+   */
   description?: string;
+  /**
+   * Slash command name without the leading slash.
+   */
   name: string;
 }
+/**
+ * Session event "capabilities.changed". Session capability change notification
+ */
 export interface CapabilitiesChangedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: CapabilitiesChangedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4718,6 +7779,9 @@ export interface CapabilitiesChangedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "capabilities.changed".
+   */
   type: "capabilities.changed";
 }
 /**
@@ -4731,16 +7795,30 @@ export interface CapabilitiesChangedData {
  */
 export interface CapabilitiesChangedUI {
   /**
+   * Whether canvas rendering is now supported
+   */
+  canvases?: boolean;
+  /**
    * Whether elicitation is now supported
    */
   elicitation?: boolean;
+  /**
+   * Whether MCP Apps (SEP-1865) UI passthrough is now supported
+   */
+  mcpApps?: boolean;
 }
+/**
+ * Session event "exit_plan_mode.requested". Plan approval request with plan content and available user actions
+ */
 export interface ExitPlanModeRequestedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: ExitPlanModeRequestedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4754,6 +7832,9 @@ export interface ExitPlanModeRequestedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "exit_plan_mode.requested".
+   */
   type: "exit_plan_mode.requested";
 }
 /**
@@ -4761,17 +7842,14 @@ export interface ExitPlanModeRequestedEvent {
  */
 export interface ExitPlanModeRequestedData {
   /**
-   * Available actions the user can take (e.g., approve, edit, reject)
+   * Available actions the user can take
    */
-  actions: string[];
+  actions: ExitPlanModeAction[];
   /**
    * Full content of the plan file
    */
   planContent: string;
-  /**
-   * The recommended action for the user to take
-   */
-  recommendedAction: string;
+  recommendedAction: ExitPlanModeAction;
   /**
    * Unique identifier for this request; used to respond via session.respondToExitPlanMode()
    */
@@ -4781,12 +7859,18 @@ export interface ExitPlanModeRequestedData {
    */
   summary: string;
 }
+/**
+ * Session event "exit_plan_mode.completed". Plan mode exit completion with the user's approval decision and optional feedback
+ */
 export interface ExitPlanModeCompletedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: ExitPlanModeCompletedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4800,6 +7884,9 @@ export interface ExitPlanModeCompletedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "exit_plan_mode.completed".
+   */
   type: "exit_plan_mode.completed";
 }
 /**
@@ -4822,17 +7909,20 @@ export interface ExitPlanModeCompletedData {
    * Request ID of the resolved exit plan mode request; clients should dismiss any UI for this request
    */
   requestId: string;
-  /**
-   * Which action the user selected (e.g. 'autopilot', 'interactive', 'exit_only')
-   */
-  selectedAction?: string;
+  selectedAction?: ExitPlanModeAction;
 }
+/**
+ * Session event "session.tools_updated". Payload of `session.tools_updated` identifying the model whose resolved tools were updated.
+ */
 export interface ToolsUpdatedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: ToolsUpdatedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4846,17 +7936,32 @@ export interface ToolsUpdatedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.tools_updated".
+   */
   type: "session.tools_updated";
 }
+/**
+ * Payload of `session.tools_updated` identifying the model whose resolved tools were updated.
+ */
 export interface ToolsUpdatedData {
+  /**
+   * Identifier of the model the resolved tools apply to.
+   */
   model: string;
 }
+/**
+ * Session event "session.background_tasks_changed". Empty payload for `session.background_tasks_changed`, indicating background task state changed.
+ */
 export interface BackgroundTasksChangedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: BackgroundTasksChangedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4870,15 +7975,27 @@ export interface BackgroundTasksChangedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.background_tasks_changed".
+   */
   type: "session.background_tasks_changed";
 }
+/**
+ * Empty payload for `session.background_tasks_changed`, indicating background task state changed.
+ */
 export interface BackgroundTasksChangedData {}
+/**
+ * Session event "session.skills_loaded". Payload of `session.skills_loaded` listing resolved skill metadata.
+ */
 export interface SkillsLoadedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: SkillsLoadedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4892,15 +8009,28 @@ export interface SkillsLoadedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.skills_loaded".
+   */
   type: "session.skills_loaded";
 }
+/**
+ * Payload of `session.skills_loaded` listing resolved skill metadata.
+ */
 export interface SkillsLoadedData {
   /**
    * Array of resolved skill metadata
    */
   skills: SkillsLoadedSkill[];
 }
+/**
+ * A single resolved skill in `session.skills_loaded`, including source, invocability, enabled state, path, and argument hint.
+ */
 export interface SkillsLoadedSkill {
+  /**
+   * Optional freeform hint describing the skill's expected arguments, from the `argument-hint` frontmatter field
+   */
+  argumentHint?: string;
   /**
    * Description of what the skill does
    */
@@ -4917,21 +8047,24 @@ export interface SkillsLoadedSkill {
    * Absolute path to the skill file, if available
    */
   path?: string;
-  /**
-   * Source location type of the skill (e.g., project, personal, plugin)
-   */
-  source: string;
+  source: SkillSource;
   /**
    * Whether the skill can be invoked by the user as a slash command
    */
   userInvocable: boolean;
 }
+/**
+ * Session event "session.custom_agents_updated". Payload of `session.custom_agents_updated` with loaded custom agents plus non-fatal warnings and fatal errors.
+ */
 export interface CustomAgentsUpdatedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: CustomAgentsUpdatedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -4945,8 +8078,14 @@ export interface CustomAgentsUpdatedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.custom_agents_updated".
+   */
   type: "session.custom_agents_updated";
 }
+/**
+ * Payload of `session.custom_agents_updated` with loaded custom agents plus non-fatal warnings and fatal errors.
+ */
 export interface CustomAgentsUpdatedData {
   /**
    * Array of loaded custom agent metadata
@@ -4961,6 +8100,9 @@ export interface CustomAgentsUpdatedData {
    */
   warnings: string[];
 }
+/**
+ * A single loaded custom agent in `session.custom_agents_updated`, with identity, source, tools, invocability, and model override.
+ */
 export interface CustomAgentsUpdatedAgent {
   /**
    * Description of what the agent does
@@ -4995,12 +8137,18 @@ export interface CustomAgentsUpdatedAgent {
    */
   userInvocable: boolean;
 }
+/**
+ * Session event "session.mcp_servers_loaded". Payload of `session.mcp_servers_loaded` listing MCP server status summaries.
+ */
 export interface McpServersLoadedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: McpServersLoadedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -5014,14 +8162,23 @@ export interface McpServersLoadedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.mcp_servers_loaded".
+   */
   type: "session.mcp_servers_loaded";
 }
+/**
+ * Payload of `session.mcp_servers_loaded` listing MCP server status summaries.
+ */
 export interface McpServersLoadedData {
   /**
    * Array of MCP server status summaries
    */
   servers: McpServersLoadedServer[];
 }
+/**
+ * A single MCP server status summary in `session.mcp_servers_loaded`, including name, status, source, transport, and plugin metadata.
+ */
 export interface McpServersLoadedServer {
   /**
    * Error message if the server failed to connect
@@ -5032,17 +8189,29 @@ export interface McpServersLoadedServer {
    */
   name: string;
   /**
-   * Configuration source: user, workspace, plugin, or builtin
+   * Name of the plugin that supplied the effective MCP server config, only when source is plugin
    */
-  source?: string;
-  status: McpServersLoadedServerStatus;
+  pluginName?: string;
+  /**
+   * Version of the plugin that supplied the effective MCP server config, only when source is plugin
+   */
+  pluginVersion?: string;
+  source?: McpServerSource;
+  status: McpServerStatus;
+  transport?: McpServerTransport;
 }
+/**
+ * Session event "session.mcp_server_status_changed". Payload of `session.mcp_server_status_changed` for one MCP server's status and optional failure error.
+ */
 export interface McpServerStatusChangedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: McpServerStatusChangedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -5056,21 +8225,37 @@ export interface McpServerStatusChangedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.mcp_server_status_changed".
+   */
   type: "session.mcp_server_status_changed";
 }
+/**
+ * Payload of `session.mcp_server_status_changed` for one MCP server's status and optional failure error.
+ */
 export interface McpServerStatusChangedData {
+  /**
+   * Error message if the server entered a failed state
+   */
+  error?: string;
   /**
    * Name of the MCP server whose status changed
    */
   serverName: string;
-  status: McpServerStatusChangedStatus;
+  status: McpServerStatus;
 }
+/**
+ * Session event "session.extensions_loaded". Payload of `session.extensions_loaded` listing discovered extensions and their statuses.
+ */
 export interface ExtensionsLoadedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
   data: ExtensionsLoadedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
   ephemeral: true;
   /**
    * Unique event identifier (UUID v4), generated when the event is emitted
@@ -5084,17 +8269,26 @@ export interface ExtensionsLoadedEvent {
    * ISO 8601 timestamp when the event was created
    */
   timestamp: string;
+  /**
+   * Type discriminator. Always "session.extensions_loaded".
+   */
   type: "session.extensions_loaded";
 }
+/**
+ * Payload of `session.extensions_loaded` listing discovered extensions and their statuses.
+ */
 export interface ExtensionsLoadedData {
   /**
    * Array of discovered extensions and their status
    */
   extensions: ExtensionsLoadedExtension[];
 }
+/**
+ * A single extension discovered by `session.extensions_loaded`, including qualified ID, source, and current status.
+ */
 export interface ExtensionsLoadedExtension {
   /**
-   * Source-qualified extension ID (e.g., 'project:my-ext', 'user:auth-helper')
+   * Source-qualified extension ID (e.g., 'project:my-ext', 'user:auth-helper', 'plugin:my-plugin:my-ext')
    */
   id: string;
   /**
@@ -5103,4 +8297,510 @@ export interface ExtensionsLoadedExtension {
   name: string;
   source: ExtensionsLoadedExtensionSource;
   status: ExtensionsLoadedExtensionStatus;
+}
+/**
+ * Session event "session.canvas.opened". Payload of `session.canvas.opened` with canvas instance and provider IDs plus optional title, status, URL, and input.
+ */
+/** @experimental */
+export interface CanvasOpenedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: CanvasOpenedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.canvas.opened".
+   */
+  type: "session.canvas.opened";
+}
+/**
+ * Payload of `session.canvas.opened` with canvas instance and provider IDs plus optional title, status, URL, and input.
+ */
+/** @experimental */
+export interface CanvasOpenedData {
+  /**
+   * Provider-local canvas identifier
+   */
+  canvasId: string;
+  /**
+   * Owning provider identifier
+   */
+  extensionId: string;
+  /**
+   * Owning extension display name, when available
+   */
+  extensionName?: string;
+  /**
+   * Input supplied when the instance was opened
+   */
+  input?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * Stable caller-supplied canvas instance identifier
+   */
+  instanceId: string;
+  /**
+   * Provider-supplied status text
+   */
+  status?: string;
+  /**
+   * Rendered title
+   */
+  title?: string;
+  /**
+   * URL for web-rendered canvases
+   */
+  url?: string;
+}
+/**
+ * Session event "session.canvas.registry_changed". Payload of `session.canvas.registry_changed` listing the canvas declarations currently available.
+ */
+/** @experimental */
+export interface CanvasRegistryChangedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: CanvasRegistryChangedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.canvas.registry_changed".
+   */
+  type: "session.canvas.registry_changed";
+}
+/**
+ * Payload of `session.canvas.registry_changed` listing the canvas declarations currently available.
+ */
+/** @experimental */
+export interface CanvasRegistryChangedData {
+  /**
+   * Canvas declarations currently available
+   */
+  canvases: CanvasRegistryChangedCanvas[];
+}
+/**
+ * A single canvas declaration in `session.canvas.registry_changed`, including provider IDs, display metadata, input schema, and actions.
+ */
+/** @experimental */
+export interface CanvasRegistryChangedCanvas {
+  /**
+   * Actions the agent or host may invoke
+   */
+  actions?: CanvasRegistryChangedCanvasAction[];
+  /**
+   * Provider-local canvas identifier
+   */
+  canvasId: string;
+  /**
+   * Short, single-sentence description shown to the agent in canvas catalogs.
+   */
+  description: string;
+  /**
+   * Human-readable canvas name
+   */
+  displayName: string;
+  /**
+   * Owning provider identifier
+   */
+  extensionId: string;
+  /**
+   * Owning extension display name, when available
+   */
+  extensionName?: string;
+  /**
+   * JSON Schema for canvas open input
+   */
+  inputSchema?: {
+    [k: string]: unknown | undefined;
+  };
+}
+/**
+ * A single action within a canvas declaration, with its name, optional description, and optional input schema.
+ */
+/** @experimental */
+export interface CanvasRegistryChangedCanvasAction {
+  /**
+   * Action description
+   */
+  description?: string;
+  /**
+   * JSON Schema for action input
+   */
+  inputSchema?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * Action name
+   */
+  name: string;
+}
+/**
+ * Session event "session.canvas.closed". Payload of `session.canvas.closed` with the closed canvas instance ID, provider ID, and canvas ID.
+ */
+/** @experimental */
+export interface CanvasClosedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: CanvasClosedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.canvas.closed".
+   */
+  type: "session.canvas.closed";
+}
+/**
+ * Payload of `session.canvas.closed` with the closed canvas instance ID, provider ID, and canvas ID.
+ */
+/** @experimental */
+export interface CanvasClosedData {
+  /**
+   * Provider-local canvas identifier
+   */
+  canvasId: string;
+  /**
+   * Owning provider identifier
+   */
+  extensionId: string;
+  /**
+   * Stable caller-supplied identifier of the canvas instance that was closed
+   */
+  instanceId: string;
+}
+/**
+ * Session event "session.canvas.unavailable". Transient signal that an open canvas instance's provider has dropped (for example the extension is reloading mid-session). The host should keep the panel mounted and surface a reconnecting affordance rather than tearing it down; a subsequent `session.canvas.opened` for the same instanceId clears the affordance once the provider reconnects with a fresh url. Ephemeral and never persisted, so it is never replayed on cold resume.
+ */
+/** @experimental */
+export interface CanvasUnavailableEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: CanvasUnavailableData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.canvas.unavailable".
+   */
+  type: "session.canvas.unavailable";
+}
+/**
+ * Transient signal that an open canvas instance's provider has dropped (for example the extension is reloading mid-session). The host should keep the panel mounted and surface a reconnecting affordance rather than tearing it down; a subsequent `session.canvas.opened` for the same instanceId clears the affordance once the provider reconnects with a fresh url. Ephemeral and never persisted, so it is never replayed on cold resume.
+ */
+/** @experimental */
+export interface CanvasUnavailableData {
+  /**
+   * Provider-local canvas identifier
+   */
+  canvasId: string;
+  /**
+   * Owning provider identifier
+   */
+  extensionId: string;
+  /**
+   * Stable caller-supplied identifier of the canvas instance whose provider became unavailable
+   */
+  instanceId: string;
+}
+/**
+ * Session event "session.canvas.recorded". Durable record that a canvas instance is open, used to restore open canvases on cold session resume. Intentionally omits the transient url and availability.
+ */
+/** @experimental */
+export interface CanvasRecordedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: CanvasRecordedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.canvas.recorded".
+   */
+  type: "session.canvas.recorded";
+}
+/**
+ * Durable record that a canvas instance is open, used to restore open canvases on cold session resume. Intentionally omits the transient url and availability.
+ */
+/** @experimental */
+export interface CanvasRecordedData {
+  /**
+   * Provider-local canvas identifier
+   */
+  canvasId: string;
+  /**
+   * Owning provider identifier
+   */
+  extensionId: string;
+  /**
+   * Input supplied when the instance was opened
+   */
+  input?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * Stable caller-supplied canvas instance identifier
+   */
+  instanceId: string;
+  /**
+   * Rendered title
+   */
+  title?: string;
+}
+/**
+ * Session event "session.canvas.removed". Durable record that a canvas instance was closed, superseding a prior instance_recorded during resume replay.
+ */
+/** @experimental */
+export interface CanvasRemovedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: CanvasRemovedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.canvas.removed".
+   */
+  type: "session.canvas.removed";
+}
+/**
+ * Durable record that a canvas instance was closed, superseding a prior instance_recorded during resume replay.
+ */
+/** @experimental */
+export interface CanvasRemovedData {
+  /**
+   * Provider-local canvas identifier
+   */
+  canvasId: string;
+  /**
+   * Owning provider identifier
+   */
+  extensionId: string;
+  /**
+   * Stable caller-supplied identifier of the canvas instance that was closed
+   */
+  instanceId: string;
+}
+/**
+ * Session event "session.extensions.attachments_pushed". Payload of `session.extensions.attachments_pushed` with extension-contributed attachments for the next send.
+ */
+export interface ExtensionsAttachmentsPushedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: ExtensionsAttachmentsPushedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.extensions.attachments_pushed".
+   */
+  type: "session.extensions.attachments_pushed";
+}
+/**
+ * Payload of `session.extensions.attachments_pushed` with extension-contributed attachments for the next send.
+ */
+export interface ExtensionsAttachmentsPushedData {
+  /**
+   * Attachments contributed by an extension; the host should surface these as composer pills and forward them via the next session.send call.
+   */
+  attachments: Attachment[];
+}
+/**
+ * Session event "mcp_app.tool_call_complete". MCP App view called a tool on a connected MCP server (SEP-1865)
+ */
+export interface McpAppToolCallCompleteEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: McpAppToolCallCompleteData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "mcp_app.tool_call_complete".
+   */
+  type: "mcp_app.tool_call_complete";
+}
+/**
+ * MCP App view called a tool on a connected MCP server (SEP-1865)
+ */
+export interface McpAppToolCallCompleteData {
+  /**
+   * Arguments passed to the tool by the app view, if any
+   */
+  arguments?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * Wall-clock duration of the underlying tools/call in milliseconds
+   */
+  durationMs: number;
+  error?: McpAppToolCallCompleteError;
+  /**
+   * Standard MCP CallToolResult returned by the server. Present whether or not the call set isError.
+   */
+  result?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * Name of the MCP server hosting the tool
+   */
+  serverName: string;
+  /**
+   * True when the call completed without throwing AND the MCP CallToolResult did not set isError
+   */
+  success: boolean;
+  toolMeta?: McpAppToolCallCompleteToolMeta;
+  /**
+   * MCP tool name that was invoked
+   */
+  toolName: string;
+}
+/**
+ * Set when the underlying tools/call threw an error before returning a CallToolResult
+ */
+export interface McpAppToolCallCompleteError {
+  /**
+   * Human-readable error message
+   */
+  message: string;
+}
+/**
+ * The tool's `_meta.ui` block at the time of the call, so consumers can decide whether to forward the result to the model without re-listing tools.
+ */
+export interface McpAppToolCallCompleteToolMeta {
+  ui?: McpAppToolCallCompleteToolMetaUI;
+}
+/**
+ * MCP App tool `_meta.ui` resource URI and SEP-1865 visibility captured with an `mcp_app.tool_call_complete` result.
+ */
+export interface McpAppToolCallCompleteToolMetaUI {
+  /**
+   * `ui://` URI declared by the tool's `_meta.ui.resourceUri`
+   */
+  resourceUri?: string;
+  /**
+   * Tool visibility per SEP-1865 (typically a subset of `["model","app"]`)
+   */
+  visibility?: string[];
 }

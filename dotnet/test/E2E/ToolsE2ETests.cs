@@ -2,17 +2,17 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-using GitHub.Copilot.SDK.Test.Harness;
+using GitHub.Copilot.Rpc;
+using GitHub.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace GitHub.Copilot.SDK.Test.E2E;
+namespace GitHub.Copilot.Test.E2E;
 
 public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E2ETestBase(fixture, "tools", output)
 {
@@ -59,6 +59,59 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         [Description("Encrypts a string")]
         static string EncryptString([Description("String to encrypt")] string input)
             => input.ToUpperInvariant();
+    }
+
+    [Fact]
+    public async Task Low_Level_Tool_Definition()
+    {
+        string currentPhase = string.Empty;
+
+        var session = await CreateSessionAsync(new SessionConfig
+        {
+            Tools =
+            [
+                AIFunctionFactory.Create(SetCurrentPhase, new AIFunctionFactoryOptions
+                {
+                    Name = "set_current_phase",
+                    Description = "Sets the current phase of the agent",
+                }),
+                AIFunctionFactory.Create(SearchItems, new AIFunctionFactoryOptions
+                {
+                    Name = "search_items",
+                    Description = "Search for items by keyword",
+                }),
+            ],
+            AvailableTools = new ToolSet().AddCustom("*").AddBuiltIn("web_fetch"),
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+        });
+
+        await session.SendAsync(new MessageOptions
+        {
+            Prompt = "First, set the current phase to 'analyzing'. Then search for items with keyword 'copilot'. Report the phase and search results."
+        });
+
+        var assistantMessage = await TestHelper.GetFinalAssistantMessageAsync(session);
+
+        Assert.NotNull(assistantMessage);
+        var content = assistantMessage!.Data.Content ?? string.Empty;
+        Assert.NotEmpty(content);
+        Assert.Contains("analyzing", content, StringComparison.OrdinalIgnoreCase);
+        Assert.True(content.Contains("item_alpha", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("item_beta", StringComparison.OrdinalIgnoreCase),
+            $"Expected content to mention item_alpha or item_beta, got: {content}");
+        Assert.Equal("analyzing", currentPhase);
+
+        Task<string> SetCurrentPhase(string phase)
+        {
+            currentPhase = phase;
+            return Task.FromResult($"Phase set to {phase}");
+        }
+
+        Task<string> SearchItems(AIFunctionArguments args)
+        {
+            Assert.Equal("copilot", args["keyword"]?.ToString());
+            return Task.FromResult("Found: item_alpha, item_beta");
+        }
     }
 
     [Fact]
@@ -202,7 +255,7 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             OnPermissionRequest = (_, _) =>
             {
                 didRunPermissionRequest = true;
-                return Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.NoResult });
+                return Task.FromResult<PermissionDecision>(PermissionDecision.NoResult());
             }
         });
 
@@ -241,7 +294,7 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             BinaryResultsForLlm = [new() {
                 // 2x2 yellow square
                 Data = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4/5/h/38GABkAA/0k+7UAAAAASUVORK5CYII=",
-                Type = "base64",
+                Type = ToolBinaryResultType.Image,
                 MimeType = "image/png",
             }],
             SessionLog = "Returned an image",
@@ -259,7 +312,7 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             OnPermissionRequest = (request, invocation) =>
             {
                 permissionRequests.Add(request);
-                return Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.Approved });
+                return Task.FromResult<PermissionDecision>(PermissionDecision.ApproveOnce());
             },
         });
 
@@ -290,7 +343,7 @@ public partial class ToolsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var session = await Client.CreateSessionAsync(new SessionConfig
         {
             Tools = [AIFunctionFactory.Create(EncryptStringDenied, "encrypt_string")],
-            OnPermissionRequest = async (request, invocation) => new() { Kind = PermissionRequestResultKind.Rejected },
+            OnPermissionRequest = async (request, invocation) => PermissionDecision.Reject(),
         });
 
         await session.SendAsync(new MessageOptions

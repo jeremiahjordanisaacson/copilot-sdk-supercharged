@@ -3,7 +3,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { afterAll, describe, expect, it } from "vitest";
-import { CopilotClient, approveAll } from "../../src/index.js";
+import { CopilotClient, approveAll, RuntimeConnection } from "../../src/index.js";
 import type { SessionEvent } from "../../src/index.js";
 import { createSdkTestContext } from "./harness/sdkTestContext.js";
 
@@ -27,7 +27,7 @@ describe("UI Elicitation Callback", async () => {
 
     it(
         "session created with onElicitationRequest reports elicitation capability",
-        { timeout: 20_000 },
+        { timeout: 60_000 },
         async () => {
             const session = await client.createSession({
                 onPermissionRequest: approveAll,
@@ -40,7 +40,7 @@ describe("UI Elicitation Callback", async () => {
 
     it(
         "session created without onElicitationRequest reports no elicitation capability",
-        { timeout: 20_000 },
+        { timeout: 60_000 },
         async () => {
             const session = await client.createSession({
                 onPermissionRequest: approveAll,
@@ -56,7 +56,9 @@ describe("UI Elicitation Multi-Client Capabilities", async () => {
     const tcpConnectionToken = "ui-elicitation-test-token";
     const ctx = await createSdkTestContext({
         useStdio: false,
-        copilotClientOptions: { tcpConnectionToken },
+        copilotClientOptions: {
+            connection: RuntimeConnection.forTcp({ connectionToken: tcpConnectionToken }),
+        },
     });
     const client1 = ctx.copilotClient;
 
@@ -64,8 +66,12 @@ describe("UI Elicitation Multi-Client Capabilities", async () => {
     const initSession = await client1.createSession({ onPermissionRequest: approveAll });
     await initSession.disconnect();
 
-    const { actualPort } = client1 as unknown as { actualPort: number };
-    const client2 = new CopilotClient({ cliUrl: `localhost:${actualPort}`, tcpConnectionToken });
+    const { runtimePort } = client1 as unknown as { runtimePort: number };
+    const client2 = new CopilotClient({
+        connection: RuntimeConnection.forUri(`localhost:${runtimePort}`, {
+            connectionToken: tcpConnectionToken,
+        }),
+    });
 
     afterAll(async () => {
         await client2.stop();
@@ -73,7 +79,7 @@ describe("UI Elicitation Multi-Client Capabilities", async () => {
 
     it(
         "capabilities.changed fires when second client joins with elicitation handler",
-        { timeout: 20_000 },
+        { timeout: 60_000 },
         async () => {
             // Client1 creates session without elicitation
             const session1 = await client1.createSession({
@@ -95,7 +101,7 @@ describe("UI Elicitation Multi-Client Capabilities", async () => {
             const session2 = await client2.resumeSession(session1.sessionId, {
                 onPermissionRequest: approveAll,
                 onElicitationRequest: async () => ({ action: "accept", content: {} }),
-                disableResume: true,
+                suppressResumeEvent: true,
             });
 
             const capEvent = await capChangedPromise;
@@ -112,7 +118,7 @@ describe("UI Elicitation Multi-Client Capabilities", async () => {
 
     it(
         "capabilities.changed fires when elicitation provider disconnects",
-        { timeout: 20_000 },
+        { timeout: 60_000 },
         async () => {
             // Client1 creates session without elicitation
             const session1 = await client1.createSession({
@@ -139,15 +145,16 @@ describe("UI Elicitation Multi-Client Capabilities", async () => {
 
             // Use a dedicated client so we can stop it without affecting shared client2
             const client3 = new CopilotClient({
-                cliUrl: `localhost:${actualPort}`,
-                tcpConnectionToken,
+                connection: RuntimeConnection.forUri(`localhost:${runtimePort}`, {
+                    connectionToken: tcpConnectionToken,
+                }),
             });
 
             // Client3 joins WITH elicitation handler
             await client3.resumeSession(session1.sessionId, {
                 onPermissionRequest: approveAll,
                 onElicitationRequest: async () => ({ action: "accept", content: {} }),
-                disableResume: true,
+                suppressResumeEvent: true,
             });
 
             await capEnabledPromise;

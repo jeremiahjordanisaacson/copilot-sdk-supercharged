@@ -10,6 +10,7 @@ import (
 
 	copilot "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
+	"github.com/github/copilot-sdk/go/rpc"
 )
 
 func TestToolsE2E(t *testing.T) {
@@ -80,6 +81,91 @@ func TestToolsE2E(t *testing.T) {
 
 		if md, ok := answer.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(md.Content, "HELLO") {
 			t.Errorf("Expected answer to contain 'HELLO', got %v", answer.Data)
+		}
+	})
+
+	t.Run("low_level_tool_definition", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+
+		type PhaseArgs struct {
+			Phase string `json:"phase" jsonschema:"Current phase,enum=searching,enum=analyzing,enum=done"`
+		}
+		type SearchArgs struct {
+			Keyword string `json:"keyword" jsonschema:"Search keyword"`
+		}
+
+		var mu sync.Mutex
+		currentPhase := ""
+		searchKeyword := ""
+
+		setCurrentPhaseTool := copilot.DefineTool("set_current_phase", "Sets the current phase of the agent",
+			func(params PhaseArgs, inv copilot.ToolInvocation) (string, error) {
+				mu.Lock()
+				currentPhase = params.Phase
+				mu.Unlock()
+				return "Phase set to " + params.Phase, nil
+			})
+
+		searchItemsTool := copilot.DefineTool("search_items", "Search for items by keyword",
+			func(params SearchArgs, inv copilot.ToolInvocation) (string, error) {
+				mu.Lock()
+				searchKeyword = params.Keyword
+				mu.Unlock()
+				return "Found: item_alpha, item_beta", nil
+			})
+
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			AvailableTools:      copilot.NewToolSet().AddCustom("*").AddBuiltIn("web_fetch").ToSlice(),
+			Tools: []copilot.Tool{
+				setCurrentPhaseTool,
+				searchItemsTool,
+			},
+		})
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+
+		_, err = session.Send(t.Context(), copilot.MessageOptions{
+			Prompt: "First, set the current phase to 'analyzing'. Then search for items with keyword 'copilot'. Report the phase and search results.",
+		})
+		if err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+
+		answer, err := testharness.GetFinalAssistantMessage(t.Context(), session)
+		if err != nil {
+			t.Fatalf("Failed to get assistant message: %v", err)
+		}
+
+		if answer == nil {
+			t.Fatalf("Expected non-nil assistant message")
+		}
+		ad, ok := answer.Data.(*copilot.AssistantMessageData)
+		if !ok {
+			t.Fatalf("Expected AssistantMessageData")
+		}
+
+		content := ad.Content
+		if content == "" {
+			t.Fatalf("Expected non-empty response")
+		}
+		lower := strings.ToLower(content)
+		if !strings.Contains(lower, "analyzing") {
+			t.Errorf("Expected response to contain 'analyzing', got %q", content)
+		}
+		if !strings.Contains(lower, "item_alpha") && !strings.Contains(lower, "item_beta") {
+			t.Errorf("Expected response to contain 'item_alpha' or 'item_beta', got %q", content)
+		}
+		mu.Lock()
+		gotPhase := currentPhase
+		gotKeyword := searchKeyword
+		mu.Unlock()
+		if gotKeyword != "copilot" {
+			t.Errorf("Expected search keyword to be 'copilot', got %q", gotKeyword)
+		}
+		if gotPhase != "analyzing" {
+			t.Errorf("Expected currentPhase to be 'analyzing', got %q", gotPhase)
 		}
 	})
 
@@ -234,6 +320,7 @@ func TestToolsE2E(t *testing.T) {
 
 		if answer == nil {
 			t.Fatalf("Expected assistant message with content")
+			return
 		}
 		ad, ok := answer.Data.(*copilot.AssistantMessageData)
 		if !ok {
@@ -283,9 +370,9 @@ func TestToolsE2E(t *testing.T) {
 
 		didRunPermissionRequest := false
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
-			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
 				didRunPermissionRequest = true
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindNoResult}, nil
+				return &rpc.PermissionDecisionNoResult{}, nil
 			},
 			Tools: []copilot.Tool{
 				safeLookupTool,
@@ -495,11 +582,11 @@ func TestToolsE2E(t *testing.T) {
 						return strings.ToUpper(params.Input), nil
 					}),
 			},
-			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
 				mu.Lock()
 				permissionRequests = append(permissionRequests, request)
 				mu.Unlock()
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+				return &rpc.PermissionDecisionApproveOnce{}, nil
 			},
 		})
 		if err != nil {
@@ -524,10 +611,10 @@ func TestToolsE2E(t *testing.T) {
 		mu.Lock()
 		customToolReqs := 0
 		for _, req := range permissionRequests {
-			if req.Kind == "custom-tool" {
+			if customReq, ok := req.(*copilot.PermissionRequestCustomTool); ok {
 				customToolReqs++
-				if req.ToolName == nil || *req.ToolName != "encrypt_string" {
-					t.Errorf("Expected toolName 'encrypt_string', got '%v'", req.ToolName)
+				if customReq.ToolName != "encrypt_string" {
+					t.Errorf("Expected toolName 'encrypt_string', got '%v'", req)
 				}
 			}
 		}
@@ -554,8 +641,8 @@ func TestToolsE2E(t *testing.T) {
 						return strings.ToUpper(params.Input), nil
 					}),
 			},
-			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-				return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindRejected}, nil
+			OnPermissionRequest: func(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+				return &rpc.PermissionDecisionReject{}, nil
 			},
 		})
 		if err != nil {

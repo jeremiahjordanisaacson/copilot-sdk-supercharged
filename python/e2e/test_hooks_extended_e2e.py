@@ -2,10 +2,11 @@
 Extended hook lifecycle tests that mirror dotnet/test/HookLifecycleAndOutputTests.cs.
 
 E2E coverage for every handler exposed on ``SessionHooks``:
-``on_pre_tool_use``, ``on_post_tool_use``, ``on_user_prompt_submitted``,
-``on_session_start``, ``on_session_end``, ``on_error_occurred``. Output-shape
-behavior (modifiedPrompt / additionalContext / errorHandling / modifiedArgs /
-modifiedResult / sessionSummary) is asserted alongside hook invocation.
+``on_pre_tool_use``, ``on_post_tool_use``, ``on_post_tool_use_failure``,
+``on_user_prompt_submitted``, ``on_session_start``, ``on_session_end``,
+``on_error_occurred``. Output-shape behavior (modifiedPrompt /
+additionalContext / errorHandling / modifiedArgs / modifiedResult /
+sessionSummary) is asserted alongside hook invocation.
 """
 
 from __future__ import annotations
@@ -27,10 +28,11 @@ class TestHooksExtended:
         self, ctx: E2ETestContext
     ):
         inputs: list[dict] = []
+        invocation_session_ids: list[str] = []
 
         async def on_user_prompt_submitted(input_data, invocation):
             inputs.append(input_data)
-            assert invocation["session_id"]
+            invocation_session_ids.append(invocation["session_id"])
             return {"modifiedPrompt": "Reply with exactly: HOOKED_PROMPT"}
 
         session = await ctx.client.create_session(
@@ -40,6 +42,7 @@ class TestHooksExtended:
         try:
             response = await session.send_and_wait("Say something else")
             assert inputs
+            assert all(session_id == session.session_id for session_id in invocation_session_ids)
             assert "Say something else" in inputs[0].get("prompt", "")
             assert "HOOKED_PROMPT" in (response.data.content or "")
         finally:
@@ -47,10 +50,11 @@ class TestHooksExtended:
 
     async def test_should_invoke_sessionstart_hook(self, ctx: E2ETestContext):
         inputs: list[dict] = []
+        invocation_session_ids: list[str] = []
 
         async def on_session_start(input_data, invocation):
             inputs.append(input_data)
-            assert invocation["session_id"]
+            invocation_session_ids.append(invocation["session_id"])
             return {"additionalContext": "Session start hook context."}
 
         session = await ctx.client.create_session(
@@ -60,20 +64,22 @@ class TestHooksExtended:
         try:
             await session.send_and_wait("Say hi")
             assert inputs
+            assert all(session_id == session.session_id for session_id in invocation_session_ids)
             assert inputs[0].get("source") == "new"
-            assert inputs[0].get("cwd")
+            assert inputs[0].get("workingDirectory")
         finally:
             await session.disconnect()
 
     async def test_should_invoke_sessionend_hook(self, ctx: E2ETestContext):
         inputs: list[dict] = []
+        invocation_session_ids: list[str] = []
         hook_invoked: asyncio.Future = asyncio.get_event_loop().create_future()
 
         async def on_session_end(input_data, invocation):
             inputs.append(input_data)
+            invocation_session_ids.append(invocation["session_id"])
             if not hook_invoked.done():
                 hook_invoked.set_result(input_data)
-            assert invocation["session_id"]
             return {"sessionSummary": "session ended"}
 
         session = await ctx.client.create_session(
@@ -84,13 +90,15 @@ class TestHooksExtended:
         await session.disconnect()
         await asyncio.wait_for(hook_invoked, 10.0)
         assert inputs
+        assert all(session_id == session.session_id for session_id in invocation_session_ids)
 
     async def test_should_register_erroroccurred_hook(self, ctx: E2ETestContext):
         inputs: list[dict] = []
+        invocation_session_ids: list[str] = []
 
         async def on_error_occurred(input_data, invocation):
             inputs.append(input_data)
-            assert invocation["session_id"]
+            invocation_session_ids.append(invocation["session_id"])
             return {"errorHandling": "skip"}
 
         session = await ctx.client.create_session(
@@ -101,6 +109,7 @@ class TestHooksExtended:
             await session.send_and_wait("Say hi")
             # Registration-only test: a healthy turn shouldn't fire OnErrorOccurred.
             assert not inputs
+            assert not invocation_session_ids
             assert session.session_id
         finally:
             await session.disconnect()
@@ -160,23 +169,73 @@ class TestHooksExtended:
 
         async def on_post_tool_use(input_data, invocation):
             inputs.append(input_data)
-            if input_data.get("toolName") != "report_intent":
+            if input_data.get("toolName") != "view":
                 return None
             return {
-                "modifiedResult": "modified by post hook",
+                "modifiedResult": {
+                    "textResultForLlm": "modified by post hook",
+                    "resultType": "success",
+                    "toolTelemetry": {},
+                },
                 "suppressOutput": False,
             }
 
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all,
-            available_tools=["report_intent"],
             hooks={"on_post_tool_use": on_post_tool_use},
         )
         try:
             response = await session.send_and_wait(
-                "Call the report_intent tool with intent 'Testing post hook', then reply done."
+                "Call the view tool to read the current directory, then reply done."
             )
-            assert any(inp.get("toolName") == "report_intent" for inp in inputs)
-            assert (response.data.content or "").strip().rstrip(".") in {"Done", "done"}
+            assert any(inp.get("toolName") == "view" for inp in inputs)
+            assert "done" in (response.data.content or "").lower()
+        finally:
+            await session.disconnect()
+
+    @pytest.mark.skip(
+        reason="Fails with 1.0.64-0 runtime: built-in tools are not available when hooks "
+        "restrict availableTools, so the failure path cannot be exercised. "
+        "Follow up with runtime team."
+    )
+    async def test_should_invoke_posttoolusefailure_hook_for_failed_tool_result(
+        self, ctx: E2ETestContext
+    ):
+        failure_inputs: list[dict] = []
+        post_tool_use_inputs: list[dict] = []
+        invocation_session_ids: list[str] = []
+
+        async def on_post_tool_use(input_data, invocation):
+            post_tool_use_inputs.append(input_data)
+            return None
+
+        async def on_post_tool_use_failure(input_data, invocation):
+            failure_inputs.append(input_data)
+            invocation_session_ids.append(invocation["session_id"])
+            return {"additionalContext": "HOOK_FAILURE_GUIDANCE_APPLIED"}
+
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all,
+            available_tools=["report_intent"],
+            hooks={
+                "on_post_tool_use": on_post_tool_use,
+                "on_post_tool_use_failure": on_post_tool_use_failure,
+            },
+        )
+        try:
+            response = await session.send_and_wait(
+                "Call the view tool with path 'missing.txt'. "
+                "If it fails, use the hook guidance to answer."
+            )
+            assert not post_tool_use_inputs
+            assert len(failure_inputs) == 1
+            assert all(session_id == session.session_id for session_id in invocation_session_ids)
+            failure_input = failure_inputs[0]
+            assert failure_input["toolName"] == "view"
+            assert "does not exist" in failure_input["error"]
+            assert "missing.txt" in failure_input["toolArgs"]["path"]
+            assert failure_input["timestamp"].timestamp() > 0
+            assert failure_input["workingDirectory"]
+            assert "HOOK_FAILURE_GUIDANCE_APPLIED" in (response.data.content or "")
         finally:
             await session.disconnect()

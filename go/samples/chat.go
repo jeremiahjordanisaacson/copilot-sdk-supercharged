@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/github/copilot-sdk/go"
+	copilot "github.com/github/copilot-sdk/go"
 )
 
 const blue = "\033[34m"
@@ -17,17 +17,13 @@ const reset = "\033[0m"
 func main() {
 	ctx := context.Background()
 	cliPath := filepath.Join("..", "..", "nodejs", "node_modules", "@github", "copilot", "index.js")
-	client := copilot.NewClient(&copilot.ClientOptions{
-		CLIPath:                   cliPath,
-		SessionIdleTimeoutSeconds: 600,
-	})
+	client := copilot.NewClient(&copilot.ClientOptions{Connection: copilot.StdioConnection{Path: cliPath}})
 	if err := client.Start(ctx); err != nil {
 		panic(err)
 	}
 	defer client.Stop()
 
 	session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-		CLIPath:             cliPath,
 		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
 	})
 	if err != nil {
@@ -48,7 +44,8 @@ func main() {
 		}
 	})
 
-	fmt.Println("Chat with Copilot (Ctrl+C to exit)\n")
+	fmt.Println("Chat with Copilot (Ctrl+C to exit)")
+	fmt.Println()
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
@@ -71,19 +68,4 @@ func main() {
 		}
 		fmt.Printf("\nAssistant: %s\n\n", content)
 	}
-
-	// --- v2.0 Features ---
-
-	// Session Metadata
-	meta, err := client.GetSessionMetadata(ctx, session.SessionID())
-	if err == nil && meta != nil {
-		fmt.Printf("Session ID: %s, Summary: %s\n", meta.SessionID, meta.Summary)
-	}
-
-	// Skills (uncomment to use)
-	// skillSession, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-	//     OnPermissionRequest:           copilot.ApproveAll,
-	//     SkillDirectories:              []string{"./skills"},
-	//     IncludeSubAgentStreamingEvents: true,
-	// })
 }
