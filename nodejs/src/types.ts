@@ -2616,6 +2616,23 @@ export interface ProviderModelConfig {
      */
     capabilities?: ModelCapabilitiesOverride;
 }
+/**
+ * Response format for message responses.
+ */
+export type ResponseFormat = "text" | "image" | "json_object";
+
+/**
+ * Options for image generation (Supercharged extension).
+ */
+export interface ImageOptions {
+    /** Image size (e.g. "1024x1024") */
+    size?: string;
+    /** Image quality ("hd" or "standard") */
+    quality?: string;
+    /** Image style ("natural" or "vivid") */
+    style?: string;
+}
+
 export interface MessageOptions {
     /**
      * The prompt/message to send
@@ -2676,6 +2693,19 @@ export interface MessageOptions {
      * If provided, this is shown in the timeline instead of `prompt`.
      */
     displayPrompt?: string;
+
+    /**
+     * Response format for this turn (Supercharged extension).
+     * - "text": Plain text (default)
+     * - "image": Image generation
+     * - "json_object": Structured JSON
+     */
+    responseFormat?: ResponseFormat;
+
+    /**
+     * Options for image generation (only used when responseFormat is "image").
+     */
+    imageOptions?: ImageOptions;
 }
 
 /**
