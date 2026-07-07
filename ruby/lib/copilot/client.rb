@@ -812,6 +812,23 @@ module Copilot
         payload[:infiniteSessions] = is_cfg.respond_to?(:to_wire) ? is_cfg.to_wire : is_cfg
       end
 
+      # --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+      payload[:enableCitations] = config[:enable_citations] unless config[:enable_citations].nil?
+      payload[:excludedBuiltinAgents] = config[:excluded_builtin_agents] if config[:excluded_builtin_agents]
+      if config[:session_limits]
+        sl = config[:session_limits]
+        payload[:sessionLimits] = sl.respond_to?(:to_wire) ? sl.to_wire : sl
+      end
+      if config[:memory]
+        mem = config[:memory]
+        payload[:memory] = mem.respond_to?(:to_wire) ? mem.to_wire : mem
+      end
+      payload[:otlpProtocol] = config[:otlp_protocol] if config[:otlp_protocol]
+      payload[:enableWebSocketResponses] = config[:enable_web_socket_responses] unless config[:enable_web_socket_responses].nil?
+      payload[:expAssignments] = config[:exp_assignments] if config[:exp_assignments]
+      # MCP OAuth host token handler: signal to the runtime that a handler is registered.
+      payload[:mcpAuthHandler] = true if config[:on_mcp_auth_request]
+
       payload
     end
 

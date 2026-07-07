@@ -63,10 +63,13 @@ module Copilot
     # @param response_format [String, nil]       desired response format ("text", "image", "json_object")
     # @param image_options   [ImageOptions, nil] options for image generation
     # @return [String] the message ID
-    def send(prompt:, attachments: nil, mode: nil, response_format: nil, image_options: nil)
+    def send(prompt:, attachments: nil, mode: nil, agent_mode: nil, display_prompt: nil, request_headers: nil, response_format: nil, image_options: nil)
       payload = { sessionId: @session_id, prompt: prompt }
       payload[:attachments] = attachments if attachments
       payload[:mode] = mode if mode
+      payload[:agentMode] = agent_mode if agent_mode
+      payload[:displayPrompt] = display_prompt if display_prompt
+      payload[:requestHeaders] = request_headers if request_headers
       payload[:responseFormat] = response_format if response_format
       payload[:imageOptions] = image_options.to_h if image_options
       response = @rpc_client.request("session.send", payload)
@@ -87,7 +90,7 @@ module Copilot
     # @return [SessionEvent, nil] the final assistant.message event, or nil
     # @raise [Timeout::Error] if the timeout expires before session.idle
     # @raise [RuntimeError] if the session emits a session.error event
-    def send_and_wait(prompt:, attachments: nil, mode: nil, response_format: nil, image_options: nil, timeout: 60)
+    def send_and_wait(prompt:, attachments: nil, mode: nil, agent_mode: nil, display_prompt: nil, request_headers: nil, response_format: nil, image_options: nil, timeout: 60)
       idle_mutex = Mutex.new
       idle_cv    = ConditionVariable.new
       idle_fired = false
@@ -118,6 +121,8 @@ module Copilot
 
       begin
         self.send(prompt: prompt, attachments: attachments, mode: mode,
+                  agent_mode: agent_mode, display_prompt: display_prompt,
+                  request_headers: request_headers,
                   response_format: response_format, image_options: image_options)
 
         idle_mutex.synchronize do

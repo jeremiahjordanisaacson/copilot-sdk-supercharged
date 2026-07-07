@@ -596,6 +596,67 @@ module Copilot
     :github_token, :use_logged_in_user, :session_idle_timeout_seconds,
     :session_fs,
     :copilot_home, :tcp_connection_token,
+    :request_handler,
     keyword_init: true
   )
+
+  # --- Upstream-sync feature types (parity with @github/copilot-sdk) ---
+
+  # Per-session AI-credit budget; set +max_ai_credits+ to cap spend.
+  SessionLimitsConfig = Struct.new(:max_ai_credits, keyword_init: true) do
+    def to_wire
+      { maxAiCredits: max_ai_credits }.compact
+    end
+  end
+
+  # Opt-in persistent session memory.
+  MemoryConfiguration = Struct.new(:enabled, keyword_init: true) do
+    def to_wire
+      { enabled: enabled }.compact
+    end
+  end
+
+  # Arguments passed to a BYOK +bearer_token_provider+ callable (per-session scoping).
+  ProviderTokenArgs = Struct.new(:session_id, keyword_init: true)
+
+  # Intercept outbound LLM inference HTTP/WebSocket requests. Assign an instance to
+  # +ClientOptions#request_handler+ and override +send_request+ to mutate, replace,
+  # or forward the request. BYOK providers may also set +bearer_token_provider+.
+  class CopilotRequestHandler
+    def send_request(request, _context)
+      request
+    end
+  end
+
+  # Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto").
+  module ToolDefer
+    AUTO  = "auto"
+    NEVER = "never"
+  end
+
+  # System-message section identifiers (used with system_message section overrides).
+  # The "preamble" section targets only the identity preamble; the "preserve" action
+  # protects an individually-addressable section from a group-level remove.
+  module SystemMessageSection
+    PREAMBLE          = "preamble"
+    IDENTITY          = "identity"
+    TOOL_INSTRUCTIONS = "tool_instructions"
+    PRESERVE          = "preserve"
+  end
+
+  # Hook names include :on_pre_tool_use, :on_post_tool_use, :on_pre_mcp_tool_call,
+  # and :on_mcp_auth_request (MCP OAuth host token handler).
+
+  # GitHub-anchored attachment variants.
+  module GitHubAttachment
+    GITHUB_COMMIT          = "GitHubCommit"
+    GITHUB_RELEASE         = "GitHubRelease"
+    GITHUB_ACTIONS_JOB     = "GitHubActionsJob"
+    GITHUB_REPOSITORY      = "GitHubRepository"
+    GITHUB_FILE_DIFF       = "GitHubFileDiff"
+    GITHUB_TREE_COMPARISON = "GitHubTreeComparison"
+    GITHUB_URL             = "GitHubUrl"
+    GITHUB_FILE            = "GitHubFile"
+    GITHUB_SNIPPET         = "GitHubSnippet"
+  end
 end

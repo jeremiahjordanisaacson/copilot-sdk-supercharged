@@ -48,6 +48,25 @@ const REQUIRED_FEATURES = [
   ['Sub-agent streaming events',    ['subAgentStreaming', 'sub_agent_streaming', 'SubAgentStreaming', 'streamingForward', 'streaming_forward', 'agentStreaming', 'agent_streaming']],
   ['MCP server config',             ['mcp', 'Mcp', 'MCP', 'mcpServer', 'mcp_server', 'McpServer', 'stdioServer', 'stdio_server', 'httpServer', 'http_server']],
   ['Image generation options',      ['imageGeneration', 'image_generation', 'ImageGeneration', 'responseFormat', 'response_format', 'ResponseFormat', 'imageOption', 'image_option']],
+  // --- Upstream-sync features (parity with @github/copilot-sdk, 2026-07) ---
+  ['MCP OAuth token handler',       ['onMcpAuthRequest', 'on_mcp_auth_request', 'OnMcpAuthRequest', 'mcpAuthHandler', 'mcp_auth_handler', 'McpAuthHandler']],
+  ['BYOK bearer token provider',    ['bearerTokenProvider', 'bearer_token_provider', 'BearerTokenProvider', 'getBearerToken', 'get_bearer_token']],
+  ['Session citations',             ['enableCitations', 'enable_citations', 'EnableCitations']],
+  ['Excluded built-in agents',      ['excludedBuiltinAgents', 'excluded_builtin_agents', 'ExcludedBuiltinAgents', 'excludedBuiltInAgents', 'ExcludedBuiltInAgents']],
+  ['Session spending limits',       ['sessionLimits', 'session_limits', 'SessionLimits', 'maxAiCredits', 'max_ai_credits', 'MaxAiCredits']],
+  ['OTLP telemetry protocol',       ['otlpProtocol', 'otlp_protocol', 'OtlpProtocol', 'OTLPProtocol']],
+  ['WebSocket transport',           ['enableWebSocketResponses', 'enable_web_socket_responses', 'EnableWebSocketResponses', 'webSocket', 'web_socket', 'WebSocket', 'websocket']],
+  ['Tool defer loading',            ['defer', 'Defer', 'ToolDefer', 'toolDefer']],
+  ['System message preamble',       ['preamble', 'Preamble', 'PREAMBLE']],
+  ['System message preserve',       ['preserve', 'Preserve', 'PRESERVE']],
+  ['Session memory config',         ['MemoryConfiguration', 'memoryConfig', 'memory_config', 'MemoryConfig', 'enableMemory', 'enable_memory']],
+  ['Post-tool-use hook',            ['onPostToolUse', 'on_post_tool_use', 'OnPostToolUse', 'postToolUse', 'post_tool_use', 'PostToolUse']],
+  ['Pre-MCP-tool-call hook',        ['preMcpToolCall', 'pre_mcp_tool_call', 'PreMcpToolCall', 'onPreMcpToolCall', 'on_pre_mcp_tool_call']],
+  ['Message agent mode',            ['agentMode', 'agent_mode', 'AgentMode']],
+  ['Display prompt',                ['displayPrompt', 'display_prompt', 'DisplayPrompt']],
+  ['HTTP request handler',          ['requestHandler', 'request_handler', 'RequestHandler', 'CopilotRequestHandler']],
+  ['GitHub attachment variants',    ['GitHubCommit', 'github_commit', 'githubCommit', 'GitHubRepository', 'github_repository', 'GITHUB_COMMIT']],
+  ['Experiment assignments',        ['expAssignments', 'exp_assignments', 'ExpAssignments']],
 ];
 
 // SDK directories and their client file glob patterns
