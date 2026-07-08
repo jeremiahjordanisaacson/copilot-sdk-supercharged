@@ -1,6 +1,6 @@
 {
     "name": "copilot-sdk-supercharged-solidity",
-    "version": "2.1.0",
+    "version": "2.4.0",
     "description": "Solidity / Web3 SDK for GitHub Copilot CLI - smart contract auditing, gas optimization, and test generation",
     "main": "./dist/index.js",
     "module": "./dist/index.js",

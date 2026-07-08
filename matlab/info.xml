@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <info>
   <name>copilot-sdk-supercharged</name>
-  <version>2.1.0</version>
+  <version>2.4.0</version>
   <description>MATLAB SDK for the GitHub Copilot CLI</description>
   <author>Jeremiah Isaacson</author>
   <license>MIT</license>
