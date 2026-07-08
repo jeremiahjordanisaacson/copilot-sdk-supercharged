@@ -39,6 +39,7 @@ public actor CopilotSession {
     private var permissionHandler: PermissionHandler?
     private var userInputHandler: UserInputHandler?
     private var hooks: SessionHooks?
+    private var exitPlanModeHandler: ExitPlanModeHandler?
 
     // MARK: - Init
 
@@ -112,20 +113,14 @@ public actor CopilotSession {
         _ options: MessageOptions,
         timeout: TimeInterval = 60
     ) async throws -> SessionEvent? {
-        // Use a continuation-based approach: register event handler, send message,
-        // wait for session.idle or session.error.
+        let state = SendAndWaitState()
+        let handlerId = UUID()
 
         return try await withCheckedThrowingContinuation { continuation in
-            var lastAssistantMessage: SessionEvent?
-            var resumed = false
-            let handlerId = UUID()
-
             // Set up a timeout task
             let timeoutTask = Task {
                 try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                if !resumed {
-                    resumed = true
-                    // Remove the handler
+                if state.tryResume() {
                     Task { await self.removeEventHandler(handlerId) }
                     continuation.resume(
                         throwing: CopilotError.timeout(
@@ -136,17 +131,15 @@ public actor CopilotSession {
             // Register event handler BEFORE sending to avoid race conditions
             let handler: SessionEventHandler = { event in
                 if event.type == "assistant.message" {
-                    lastAssistantMessage = event
+                    state.setLastAssistantMessage(event)
                 } else if event.type == "session.idle" {
-                    if !resumed {
-                        resumed = true
+                    if state.tryResume() {
                         timeoutTask.cancel()
                         Task { await self.removeEventHandler(handlerId) }
-                        continuation.resume(returning: lastAssistantMessage)
+                        continuation.resume(returning: state.getLastAssistantMessage())
                     }
                 } else if event.type == "session.error" {
-                    if !resumed {
-                        resumed = true
+                    if state.tryResume() {
                         timeoutTask.cancel()
                         Task { await self.removeEventHandler(handlerId) }
                         let msg = event.data["message"] as? String ?? "Unknown session error"
@@ -162,8 +155,7 @@ public actor CopilotSession {
                 do {
                     try await self.send(options)
                 } catch {
-                    if !resumed {
-                        resumed = true
+                    if state.tryResume() {
                         timeoutTask.cancel()
                         await self.removeEventHandler(handlerId)
                         continuation.resume(throwing: error)
@@ -291,6 +283,25 @@ public actor CopilotSession {
     /// Registers hook handlers.
     func registerHooks(_ hooks: SessionHooks) {
         self.hooks = hooks
+    }
+
+    // MARK: - Exit Plan Mode Handler (Internal)
+
+    /// Registers an exit plan mode handler.
+    func registerExitPlanModeHandler(_ handler: @escaping ExitPlanModeHandler) {
+        exitPlanModeHandler = handler
+    }
+
+    /// Handles an exit plan mode request from the server.
+    func handleExitPlanModeRequest(_ request: ExitPlanModeRequest) async throws -> ExitPlanModeResponse {
+        guard let handler = exitPlanModeHandler else {
+            return ExitPlanModeResponse(approved: true)
+        }
+        do {
+            return try await handler(request)
+        } catch {
+            return ExitPlanModeResponse(approved: true)
+        }
     }
 
     /// Handles a hook invocation from the server.
@@ -425,6 +436,7 @@ public actor CopilotSession {
         permissionHandler = nil
         userInputHandler = nil
         hooks = nil
+        exitPlanModeHandler = nil
     }
 
     // MARK: - Abort
@@ -437,5 +449,35 @@ public actor CopilotSession {
             method: "session.abort",
             params: ["sessionId": sessionId]
         )
+    }
+}
+
+/// Thread-safe state container for `sendAndWait` to avoid mutating captured vars
+/// in concurrently-executing closures.
+private final class SendAndWaitState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _resumed = false
+    private var _lastAssistantMessage: SessionEvent?
+
+    /// Atomically attempts to mark as resumed. Returns true if this call was the one
+    /// that flipped the flag (i.e., first caller wins).
+    func tryResume() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if _resumed { return false }
+        _resumed = true
+        return true
+    }
+
+    func setLastAssistantMessage(_ event: SessionEvent) {
+        lock.lock()
+        defer { lock.unlock() }
+        _lastAssistantMessage = event
+    }
+
+    func getLastAssistantMessage() -> SessionEvent? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _lastAssistantMessage
     }
 }

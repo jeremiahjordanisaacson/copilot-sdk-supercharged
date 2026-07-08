@@ -42,16 +42,34 @@ public class DefineTool {
         return new DefineTool(name);
     }
 
+    /**
+     * Sets the tool description.
+     *
+     * @param description the tool description
+     * @return this builder
+     */
     public DefineTool description(String description) {
         this.description = description;
         return this;
     }
 
+    /**
+     * Sets the tool parameter schema.
+     *
+     * @param parameters the JSON schema parameters
+     * @return this builder
+     */
     public DefineTool parameters(Map<String, Object> parameters) {
         this.parameters = parameters;
         return this;
     }
 
+    /**
+     * Sets the tool handler.
+     *
+     * @param handler the tool handler
+     * @return this builder
+     */
     public DefineTool handler(ToolHandler handler) {
         this.handler = handler;
         return this;

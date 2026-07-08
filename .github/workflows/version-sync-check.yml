@@ -1,0 +1,47 @@
+name: "CI: Version Sync Check"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/package.json'
+      - '**/pyproject.toml'
+      - '**/Cargo.toml'
+      - '**/*.csproj'
+      - '**/pom.xml'
+      - '**/pubspec.yaml'
+      - '**/mix.exs'
+      - '**/composer.json'
+      - '**/build.gradle.kts'
+      - '**/version.rb'
+      - '**/copilot/__init__.py'
+      - 'scripts/verify-version-sync.sh'
+  pull_request:
+    paths:
+      - '**/package.json'
+      - '**/pyproject.toml'
+      - '**/Cargo.toml'
+      - '**/*.csproj'
+      - '**/pom.xml'
+      - '**/pubspec.yaml'
+      - '**/mix.exs'
+      - '**/composer.json'
+      - '**/build.gradle.kts'
+      - '**/version.rb'
+      - '**/copilot/__init__.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version-sync:
+    name: "Verify Version Sync"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Check all SDK versions are in sync
+        run: bash scripts/verify-version-sync.sh

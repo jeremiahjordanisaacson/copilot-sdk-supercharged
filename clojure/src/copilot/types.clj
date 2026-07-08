@@ -228,6 +228,98 @@
   {:answer answer :wasFreeform was-freeform})
 
 ;; ============================================================================
+;; Canvas / cloud session types
+;; ============================================================================
+
+(defn canvas-action
+  "Create a canvas action.
+
+  `name` and `description` are required.
+  Optional: :input-schema (JSON-schema map)."
+  [name description & {:as opts}]
+  (cond-> {:name name :description description}
+    (:input-schema opts) (assoc :inputSchema (:input-schema opts))))
+
+(defn canvas-declaration
+  "Create a canvas declaration.
+
+  Required: `id`, `display-name`, `description`.
+  Optional: :input-schema, :actions (vector of canvas-action maps)."
+  [id display-name description & {:as opts}]
+  (cond-> {:id id :displayName display-name :description description}
+    (:input-schema opts) (assoc :inputSchema (:input-schema opts))
+    (:actions opts)      (assoc :actions (:actions opts))))
+
+(defn canvas-open-response
+  "Create a canvas-open response.
+  Optional keys: :url :title :status"
+  [& {:as opts}]
+  (cond-> {}
+    (:url opts)    (assoc :url (:url opts))
+    (:title opts)  (assoc :title (:title opts))
+    (:status opts) (assoc :status (:status opts))))
+
+(defn canvas-host-capabilities
+  "Create a canvas-host-capabilities map.
+  Optional: :canvases (defaults to false)."
+  [& {:as opts}]
+  (if (contains? opts :canvases)
+    {:canvases (:canvases opts)}
+    {:canvases false}))
+
+(defn canvas-host-context
+  "Create a canvas-host-context map. `capabilities` is required."
+  [capabilities]
+  {:capabilities capabilities})
+
+(defn canvas-open-context
+  "Create a canvas-open-context map.
+  Optional: :host"
+  [session-id extension-id canvas-id instance-id input & {:as opts}]
+  (cond-> {:sessionId session-id
+           :extensionId extension-id
+           :canvasId canvas-id
+           :instanceId instance-id
+           :input input}
+    (:host opts) (assoc :host (:host opts))))
+
+(defn canvas-action-context
+  "Create a canvas-action-context map.
+  Optional: :host"
+  [session-id extension-id canvas-id instance-id action-name input & {:as opts}]
+  (cond-> {:sessionId session-id
+           :extensionId extension-id
+           :canvasId canvas-id
+           :instanceId instance-id
+           :actionName action-name
+           :input input}
+    (:host opts) (assoc :host (:host opts))))
+
+(defn canvas-lifecycle-context
+  "Create a canvas-lifecycle-context map.
+  Optional: :host"
+  [session-id extension-id canvas-id instance-id & {:as opts}]
+  (cond-> {:sessionId session-id
+           :extensionId extension-id
+           :canvasId canvas-id
+           :instanceId instance-id}
+    (:host opts) (assoc :host (:host opts))))
+
+(defn cloud-session-repository
+  "Create cloud-session repository metadata.
+  Optional: :branch"
+  [owner name & {:as opts}]
+  (cond-> {:owner owner :name name}
+    (:branch opts) (assoc :branch (:branch opts))))
+
+(defn cloud-session-options
+  "Create cloud-session options.
+  Optional: :repository"
+  [& {:as opts}]
+  (cond-> {}
+    (:repository opts) (assoc :repository (:repository opts))))
+
+;; ============================================================================
 ;; Provider configuration
 ;; ============================================================================
 
@@ -540,6 +632,161 @@
 ;;   :readdir-with-types  (fn [session-id path] ...) → vector of file-info maps
 ;;   :rm                  (fn [session-id path recursive?] ...) → nil
 ;;   :rename              (fn [session-id old-path new-path] ...) → nil
+
+;; ============================================================================
+;; Exit Plan Mode
+;; ============================================================================
+
+(defn exit-plan-mode-request
+  "Construct an exit plan mode request map."
+  [session-id]
+  {:session-id session-id})
+
+(defn exit-plan-mode-response
+  "Construct an exit plan mode response map."
+  [approved]
+  {:approved approved})
+
+;; ============================================================================
+;; Trace Context
+;; ============================================================================
+
+(defn trace-context
+  "Construct a trace context map."
+  [& {:keys [traceparent tracestate]}]
+  (cond-> {}
+    traceparent (assoc :traceparent traceparent)
+    tracestate  (assoc :tracestate tracestate)))
+
+;; ============================================================================
+;; Model Capabilities Override
+;; ============================================================================
+
+(defn model-capabilities-override
+  "Construct a model capabilities override map.
+
+  `supports` - map of capability flags (e.g. {:vision true})
+  `limits`   - map of limits (e.g. {:max-prompt-tokens 4096})
+  `vision`   - optional vision limits map"
+  [& {:keys [supports limits vision]}]
+  (cond-> {}
+    supports (assoc :supports supports)
+    limits   (assoc :limits limits)
+    vision   (assoc :vision vision)))
+
+;; ============================================================================
+;; Slash Command types
+;; ============================================================================
+
+(defn slash-command-input
+  "Construct a slash command input map.
+
+  `hint` - hint string for the command input
+  Optional: :completion (\"directory\")"
+  [hint & {:keys [completion]}]
+  (cond-> {:hint hint}
+    completion (assoc :completion completion)))
+
+(defn slash-command-info
+  "Construct a slash command info map.
+
+  `allow-during-agent-execution` - boolean
+  `description`                  - description string
+  `kind`                         - one of \"builtin\" \"client\" \"skill\"
+  `name`                         - command name
+  Optional: :aliases (vector of strings), :experimental (boolean),
+            :input (slash-command-input map)"
+  [allow-during-agent-execution description kind name & {:as opts}]
+  (cond-> {:allowDuringAgentExecution allow-during-agent-execution
+           :description               description
+           :kind                      kind
+           :name                      name}
+    (:aliases opts)      (assoc :aliases (:aliases opts))
+    (:experimental opts) (assoc :experimental (:experimental opts))
+    (:input opts)        (assoc :input (:input opts))))
+
+;; ============================================================================
+;; Command request types
+;; ============================================================================
+
+(defn commands-invoke-request
+  "Construct a commands invoke request map.
+
+  `name`  - command name
+  Optional: :input (string)"
+  [name & {:keys [input]}]
+  (cond-> {:name name}
+    input (assoc :input input)))
+
+(defn commands-list-request
+  "Construct a commands list request map.
+
+  Optional: :include-builtins (boolean), :include-client-commands (boolean),
+            :include-skills (boolean)"
+  [& {:keys [include-builtins include-client-commands include-skills]}]
+  (cond-> {}
+    (some? include-builtins)        (assoc :includeBuiltins include-builtins)
+    (some? include-client-commands) (assoc :includeClientCommands include-client-commands)
+    (some? include-skills)          (assoc :includeSkills include-skills)))
+
+;; ============================================================================
+;; Model Billing types
+;; ============================================================================
+
+(defn model-billing-token-prices
+  "Construct a model billing token prices map.
+
+  Optional: :batch-size (int), :cache-price (int),
+            :input-price (int), :output-price (int)"
+  [& {:keys [batch-size cache-price input-price output-price]}]
+  (cond-> {}
+    batch-size   (assoc :batchSize batch-size)
+    cache-price  (assoc :cachePrice cache-price)
+    input-price  (assoc :inputPrice input-price)
+    output-price (assoc :outputPrice output-price)))
+
+(defn model-billing
+  "Construct a model billing map.
+
+  `multiplier` - billing multiplier (double)
+  Optional: :token-prices (model-billing-token-prices map),
+            :picker-price-category (one of \"high\" \"low\" \"medium\" \"very_high\")"
+  [multiplier & {:keys [token-prices picker-price-category]}]
+  (cond-> {:multiplier multiplier}
+    token-prices          (assoc :tokenPrices token-prices)
+    picker-price-category (assoc :pickerPriceCategory picker-price-category)))
+
+;; Experimental
+(defn skills-load-diagnostics
+  "Construct a skills load diagnostics map.
+
+  `errors`   - vector of error strings
+  `warnings` - vector of warning strings"
+  [errors warnings]
+  {:errors errors :warnings warnings})
+
+;; Experimental
+(def remote-session-modes
+  "Valid remote session mode values."
+  #{"export" "off" "on"})
+
+;; Experimental
+(defn remote-enable-request
+  "Construct a remote enable request map.
+
+  Optional: :mode (one of \"export\" \"off\" \"on\")"
+  [& {:keys [mode]}]
+  (cond-> {}
+    mode (assoc :mode mode)))
+
+;; Experimental
+(defn remote-enable-result
+  "Parse a remote enable result map.
+
+  `m` - raw JSON map with :remoteSteerable (boolean, required) and :url (string, optional)"
+  [m]
+  {:remote-steerable (:remoteSteerable m)
+   :url              (:url m)})
 
 ;; ============================================================================
 ;; Client options

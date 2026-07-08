@@ -29,6 +29,7 @@ COPILOT_SDK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # --- Source SDK modules ---
 # Order matters: protocol version first, then transport, then higher-level modules.
 source "${COPILOT_SDK_DIR}/sdk_protocol_version.sh"
+source "${COPILOT_SDK_DIR}/types.sh"
 source "${COPILOT_SDK_DIR}/json_rpc.sh"
 source "${COPILOT_SDK_DIR}/client.sh"
 source "${COPILOT_SDK_DIR}/session.sh"

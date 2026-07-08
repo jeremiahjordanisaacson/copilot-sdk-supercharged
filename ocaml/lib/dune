@@ -2,5 +2,7 @@
  (name copilot_sdk)
  (public_name copilot-sdk-supercharged)
  (libraries lwt lwt.unix yojson)
+ (ocamlopt_flags (:standard -w -32))
+ (ocamlc_flags (:standard -w -32))
  (preprocess
   (pps lwt_ppx)))

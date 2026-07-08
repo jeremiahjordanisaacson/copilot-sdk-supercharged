@@ -54,9 +54,9 @@ jobs:
         working-directory: ./go
         run: |
           go fmt ./...
-          if [ -n "$(git status --porcelain)" ]; then
+          if [ -n "$(git status --porcelain -- '*.go')" ]; then
             echo "❌ go fmt produced changes. Please run 'go fmt ./...' in go"
-            git --no-pager diff
+            git --no-pager diff -- '*.go'
             exit 1
           fi
           echo "✅ go fmt produced no changes"
@@ -71,7 +71,7 @@ jobs:
 
       - name: Install test harness dependencies
         working-directory: ./test/harness
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       - name: Warm up PowerShell
         if: runner.os == 'Windows'
@@ -84,7 +84,7 @@ jobs:
         run: |
           if [ -z "$COPILOT_HMAC_KEY" ]; then
             echo "::warning::COPILOT_HMAC_KEY not set — running fmt, lint, and build checks only"
-            cd go && go fmt ./... && go vet ./... && go build ./...
+            go fmt ./... && go vet ./... && go build ./...
           else
             /bin/bash test.sh
           fi

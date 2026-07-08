@@ -142,8 +142,8 @@ class JsonRpcClient {
         StringBuilder headerLine = new StringBuilder()
         int c
         while ((c = stream.read()) != -1) {
-            if (c == (int) '\n') break
-            if (c != (int) '\r') headerLine.append((char) c)
+            if (c == 10) break          // '\n'
+            if (c != 13) headerLine.append((char) c)  // '\r'
         }
         if (c == -1) return null
 
@@ -154,7 +154,7 @@ class JsonRpcClient {
 
         // Read empty line separator
         while ((c = stream.read()) != -1) {
-            if (c == (int) '\n') break
+            if (c == 10) break  // '\n'
         }
 
         byte[] content = new byte[contentLength]

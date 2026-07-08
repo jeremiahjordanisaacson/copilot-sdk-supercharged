@@ -50,6 +50,12 @@ class CopilotSession
     /** @var SessionHooks|null Hook handlers */
     private ?SessionHooks $hooks = null;
 
+    /** @var callable|null Exit plan mode handler */
+    private $exitPlanModeHandler = null;
+
+    /** @var callable|null Trace context provider */
+    private $traceContextProvider = null;
+
     /**
      * Creates a new CopilotSession instance.
      *
@@ -85,6 +91,27 @@ class CopilotSession
             ['sessionId' => $this->sessionId],
             $options->toArray(),
         );
+
+        if ($this->traceContextProvider !== null) {
+            try {
+                $tc = ($this->traceContextProvider)();
+                if ($tc instanceof TraceContext) {
+                    $tcArr = $tc->toArray();
+                } elseif (is_array($tc)) {
+                    $tcArr = $tc;
+                } else {
+                    $tcArr = [];
+                }
+                if (!empty($tcArr['traceparent'])) {
+                    $params['traceparent'] = $tcArr['traceparent'];
+                }
+                if (!empty($tcArr['tracestate'])) {
+                    $params['tracestate'] = $tcArr['tracestate'];
+                }
+            } catch (\Throwable) {
+                // Ignore trace context errors
+            }
+        }
 
         $response = $this->connection->request('session.send', $params);
         return $response['messageId'] ?? '';
@@ -271,6 +298,46 @@ class CopilotSession
     }
 
     /**
+     * Registers a handler for exit plan mode requests.
+     * @internal
+     */
+    public function registerExitPlanModeHandler(?callable $handler): void
+    {
+        $this->exitPlanModeHandler = $handler;
+    }
+
+    /**
+     * Handle an exit plan mode request from the server.
+     * @internal
+     */
+    public function handleExitPlanModeRequestInternal(array $request): array
+    {
+        if ($this->exitPlanModeHandler === null) {
+            return ['approved' => true];
+        }
+
+        try {
+            $exitRequest = ExitPlanModeRequest::fromArray($request);
+            $result = ($this->exitPlanModeHandler)($exitRequest);
+            if ($result instanceof ExitPlanModeResponse) {
+                return $result->toArray();
+            }
+            return $result;
+        } catch (\Throwable) {
+            return ['approved' => true];
+        }
+    }
+
+    /**
+     * Registers a trace context provider.
+     * @internal
+     */
+    public function registerTraceContextProvider(?callable $provider): void
+    {
+        $this->traceContextProvider = $provider;
+    }
+
+    /**
      * Handle a permission request from the server.
      *
      * @internal
@@ -398,6 +465,8 @@ class CopilotSession
         $this->permissionHandler = null;
         $this->userInputHandler = null;
         $this->hooks = null;
+        $this->exitPlanModeHandler = null;
+        $this->traceContextProvider = null;
     }
 
     /**

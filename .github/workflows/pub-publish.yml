@@ -8,11 +8,14 @@ on:
 permissions:
   contents: read
   id-token: write
+  attestations: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     defaults:
+      run:
+        working-directory: ./dart
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -28,12 +31,14 @@ jobs:
       - name: Install dependencies
         run: dart pub get
 
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: dart/pubspec.yaml
       - name: Publish to pub.dev
         run: |
           mkdir -p ~/.config/dart
           echo '${{ secrets.PUB_DEV_CREDENTIALS }}' > ~/.config/dart/pub-credentials.json
           dart pub publish --force
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: dart/pubspec.yaml

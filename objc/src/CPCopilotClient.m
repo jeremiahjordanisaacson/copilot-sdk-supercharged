@@ -11,6 +11,8 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 
 @interface CPCopilotSession ()
 
+@property (nonatomic, copy, nullable) CPSessionConfig *config;
+
 - (instancetype)initWithSessionId:(NSString *)sessionId
                     workspacePath:(nullable NSString *)workspacePath
                         rpcClient:(CPJsonRpcClient *)rpcClient
@@ -240,6 +242,13 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
                                              void (^respond)(NSDictionary *, NSDictionary *)) {
         [weakSelf handlePermissionRequest:params respond:respond];
     }];
+
+    // Handle exit plan mode requests
+    [self.rpcClient registerRequestHandler:@"exitPlanMode.request"
+                                   handler:^(NSDictionary<NSString *, id> *params,
+                                             void (^respond)(NSDictionary *, NSDictionary *)) {
+        [weakSelf handleExitPlanModeRequest:params respond:respond];
+    }];
 }
 
 - (void)handleToolInvocation:(NSDictionary *)params
@@ -276,6 +285,26 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
 
     // Default: approve all permissions
     respond(@{@"kind": @"approved"}, nil);
+}
+
+- (void)handleExitPlanModeRequest:(NSDictionary *)params
+                          respond:(void (^)(NSDictionary *, NSDictionary *))respond {
+    NSString *sessionId = params[@"sessionId"] ?: @"";
+    CPCopilotSession *session = nil;
+
+    @synchronized (self.sessions) {
+        session = self.sessions[sessionId];
+    }
+
+    CPExitPlanModeHandler handler = session.config.exitPlanModeHandler;
+    if (handler) {
+        handler(sessionId, ^(BOOL approved) {
+            respond(@{@"approved": @(approved)}, nil);
+        });
+    } else {
+        // Default: approve
+        respond(@{@"approved": @YES}, nil);
+    }
 }
 
 - (void)handleNotification:(NSString *)method params:(NSDictionary *)params {
@@ -348,6 +377,17 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
              completion:(void (^)(CPCopilotSession * _Nullable, NSError * _Nullable))completion {
     NSDictionary *params = config ? [config toDictionary] : @{};
 
+    // Inject trace context
+    if (self.options.onGetTraceContext) {
+        CPTraceContext *ctx = self.options.onGetTraceContext();
+        if (ctx) {
+            NSMutableDictionary *mutableParams = [params mutableCopy];
+            if (ctx.traceparent) mutableParams[@"traceparent"] = ctx.traceparent;
+            if (ctx.tracestate) mutableParams[@"tracestate"] = ctx.tracestate;
+            params = [mutableParams copy];
+        }
+    }
+
     [self.rpcClient sendRequest:@"session.create"
                          params:params
                      completion:^(NSDictionary *result, NSError *error) {
@@ -404,6 +444,15 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
     params[@"sessionId"] = sessionId;
     if (config) {
         [params addEntriesFromDictionary:[config toDictionary]];
+    }
+
+    // Inject trace context
+    if (self.options.onGetTraceContext) {
+        CPTraceContext *ctx = self.options.onGetTraceContext();
+        if (ctx) {
+            if (ctx.traceparent) params[@"traceparent"] = ctx.traceparent;
+            if (ctx.tracestate) params[@"tracestate"] = ctx.tracestate;
+        }
     }
 
     [self.rpcClient sendRequest:@"session.resume"

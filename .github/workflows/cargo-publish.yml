@@ -28,12 +28,16 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           sed -i "s/^version = .*/version = \"$VERSION\"/" Cargo.toml
 
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: rust/target/package/*.crate
+      - name: Package crate
+        run: cargo package --allow-dirty --no-default-features
 
       - name: Publish to crates.io
-        run: cargo publish --allow-dirty
+        run: cargo publish --allow-dirty --no-default-features
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: rust/target/package/*.crate

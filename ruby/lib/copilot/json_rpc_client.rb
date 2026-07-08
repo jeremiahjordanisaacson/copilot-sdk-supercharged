@@ -79,7 +79,8 @@ module Copilot
     # @return [Object] the +result+ from the JSON-RPC response
     # @raise [JsonRpcError] if the server returns an error
     # @raise [Timeout::Error] if the request times out
-    def request(method, params = nil, timeout: 30)
+    def request(method, params = nil, timeout: 30, **kwargs)
+      params = kwargs if params.nil? && !kwargs.empty?
       request_id = SecureRandom.uuid
       queue = Queue.new
 
@@ -126,7 +127,8 @@ module Copilot
     #
     # @param method [String]    the RPC method name
     # @param params [Hash, nil] optional parameters
-    def notify(method, params = nil)
+    def notify(method, params = nil, **kwargs)
+      params = kwargs if params.nil? && !kwargs.empty?
       send_message({
         jsonrpc: "2.0",
         method: method,

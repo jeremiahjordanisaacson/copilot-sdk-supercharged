@@ -46,7 +46,7 @@ jobs:
 
       - name: Install codegen dependencies
         working-directory: ./java/scripts/codegen
-        run: npm ci
+        run: npm install --ignore-scripts
 
       - name: Run codegen
         working-directory: ./java/scripts/codegen

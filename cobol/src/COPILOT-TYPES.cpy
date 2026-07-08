@@ -234,6 +234,123 @@
            05 WS-AUTH-TOKEN          PIC X(256) VALUE SPACES.
 
       *----------------------------------------------------------------*
+      * Image generation options                                       *
+      *----------------------------------------------------------------*
+       01  WS-IMAGE-OPTIONS.
+           05 WS-IMG-SIZE           PIC X(32)  VALUE SPACES.
+           05 WS-IMG-QUALITY        PIC X(16)  VALUE SPACES.
+           05 WS-IMG-STYLE          PIC X(16)  VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * System message configuration                                   *
+      *----------------------------------------------------------------*
+       01  WS-SECTION-OVERRIDE.
+           05 WS-SO-ACTION          PIC X(16)  VALUE SPACES.
+           05 WS-SO-CONTENT         PIC X(2048) VALUE SPACES.
+
+       01  WS-SYSTEM-MSG-APPEND.
+           05 WS-SMA-MODE           PIC X(16)  VALUE SPACES.
+           05 WS-SMA-CONTENT        PIC X(2048) VALUE SPACES.
+
+       01  WS-SYSTEM-MSG-REPLACE.
+           05 WS-SMR-MODE           PIC X(16)  VALUE "replace".
+           05 WS-SMR-CONTENT        PIC X(4096) VALUE SPACES.
+
+       01  WS-SYSTEM-MSG-CUSTOMIZE.
+           05 WS-SMC-MODE           PIC X(16)  VALUE "customize".
+           05 WS-SMC-SECTIONS       PIC X(4096) VALUE SPACES.
+           05 WS-SMC-CONTENT        PIC X(4096) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * User input request / response                                  *
+      *----------------------------------------------------------------*
+       01  WS-USER-INPUT-REQ.
+           05 WS-UIR-QUESTION       PIC X(1024) VALUE SPACES.
+           05 WS-UIR-CHOICES        PIC X(2048) VALUE SPACES.
+           05 WS-UIR-ALLOW-FREEFORM PIC 9      VALUE 0.
+               88 UIR-ALLOW-FREEFORM-YES       VALUE 1.
+               88 UIR-ALLOW-FREEFORM-NO        VALUE 0.
+
+       01  WS-USER-INPUT-RESP.
+           05 WS-UIRESP-ANSWER      PIC X(1024) VALUE SPACES.
+           05 WS-UIRESP-WAS-FREEFORM PIC 9     VALUE 0.
+               88 UIRESP-WAS-FREEFORM-YES      VALUE 1.
+               88 UIRESP-WAS-FREEFORM-NO       VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Cloud session metadata                                          *
+      *----------------------------------------------------------------*
+       01  WS-CLOUD-SESSION-REPOSITORY.
+           05 WS-CSR-OWNER          PIC X(128) VALUE SPACES.
+           05 WS-CSR-NAME           PIC X(128) VALUE SPACES.
+           05 WS-CSR-BRANCH         PIC X(128) VALUE SPACES.
+
+       01  WS-CLOUD-SESSION-OPTIONS.
+           05 WS-CSO-HAS-REPOSITORY PIC 9      VALUE 0.
+               88 CSO-HAS-REPOSITORY-YES       VALUE 1.
+               88 CSO-HAS-REPOSITORY-NO        VALUE 0.
+           05 WS-CSO-REPOSITORY.
+               10 WS-CSO-OWNER      PIC X(128) VALUE SPACES.
+               10 WS-CSO-NAME       PIC X(128) VALUE SPACES.
+               10 WS-CSO-BRANCH     PIC X(128) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Canvas types                                                    *
+      *----------------------------------------------------------------*
+       01  WS-CANVAS-ACTION.
+           05 WS-CVA-NAME           PIC X(128) VALUE SPACES.
+           05 WS-CVA-DESCRIPTION    PIC X(256) VALUE SPACES.
+           05 WS-CVA-INPUT-SCHEMA   PIC X(2048) VALUE SPACES.
+
+       01  WS-CANVAS-DECLARATION.
+           05 WS-CVD-ID             PIC X(128) VALUE SPACES.
+           05 WS-CVD-DISPLAY-NAME   PIC X(128) VALUE SPACES.
+           05 WS-CVD-DESCRIPTION    PIC X(256) VALUE SPACES.
+           05 WS-CVD-INPUT-SCHEMA   PIC X(2048) VALUE SPACES.
+           05 WS-CVD-ACTIONS        PIC X(4096) VALUE SPACES.
+
+       01  WS-CANVAS-OPEN-RESP.
+           05 WS-COR-URL            PIC X(256) VALUE SPACES.
+           05 WS-COR-TITLE          PIC X(128) VALUE SPACES.
+           05 WS-COR-STATUS         PIC X(128) VALUE SPACES.
+
+       01  WS-CANVAS-HOST-CAPS.
+           05 WS-CHC-CANVASES       PIC 9      VALUE 0.
+               88 CHC-CANVASES-YES             VALUE 1.
+               88 CHC-CANVASES-NO              VALUE 0.
+
+       01  WS-CANVAS-HOST-CONTEXT.
+           05 WS-CHCTX-CAPS.
+               10 WS-CHCTX-CANVASES PIC 9      VALUE 0.
+
+       01  WS-CANVAS-OPEN-CONTEXT.
+           05 WS-COC-SESSION-ID     PIC X(64)  VALUE SPACES.
+           05 WS-COC-EXTENSION-ID   PIC X(128) VALUE SPACES.
+           05 WS-COC-CANVAS-ID      PIC X(128) VALUE SPACES.
+           05 WS-COC-INSTANCE-ID    PIC X(128) VALUE SPACES.
+           05 WS-COC-INPUT          PIC X(4096) VALUE SPACES.
+           05 WS-COC-HAS-HOST       PIC 9      VALUE 0.
+           05 WS-COC-HOST           PIC X(256) VALUE SPACES.
+
+       01  WS-CANVAS-ACTION-CONTEXT.
+           05 WS-CAC-SESSION-ID     PIC X(64)  VALUE SPACES.
+           05 WS-CAC-EXTENSION-ID   PIC X(128) VALUE SPACES.
+           05 WS-CAC-CANVAS-ID      PIC X(128) VALUE SPACES.
+           05 WS-CAC-INSTANCE-ID    PIC X(128) VALUE SPACES.
+           05 WS-CAC-ACTION-NAME    PIC X(128) VALUE SPACES.
+           05 WS-CAC-INPUT          PIC X(4096) VALUE SPACES.
+           05 WS-CAC-HAS-HOST       PIC 9      VALUE 0.
+           05 WS-CAC-HOST           PIC X(256) VALUE SPACES.
+
+       01  WS-CANVAS-LIFECYCLE-CONTEXT.
+           05 WS-CLC-SESSION-ID     PIC X(64)  VALUE SPACES.
+           05 WS-CLC-EXTENSION-ID   PIC X(128) VALUE SPACES.
+           05 WS-CLC-CANVAS-ID      PIC X(128) VALUE SPACES.
+           05 WS-CLC-INSTANCE-ID    PIC X(128) VALUE SPACES.
+           05 WS-CLC-HAS-HOST       PIC 9      VALUE 0.
+           05 WS-CLC-HOST           PIC X(256) VALUE SPACES.
+
+      *----------------------------------------------------------------*
       * Client extended options                                        *
       *----------------------------------------------------------------*
        01  WS-CLIENT-EXTENDED.
@@ -242,3 +359,163 @@
                88 USE-LOGGED-IN-NO            VALUE 0.
            05 WS-CLI-IDLE-TIMEOUT   PIC 9(10)  VALUE 0.
            05 WS-CLI-LOG-LEVEL      PIC X(16)  VALUE "error".
+
+      *----------------------------------------------------------------*
+      * Remote option for CLI spawn                                    *
+      *----------------------------------------------------------------*
+       01  WS-REMOTE-OPTION.
+           05 WS-REMOTE-ENABLED      PIC 9      VALUE 0.
+               88 REMOTE-ON                     VALUE 1.
+               88 REMOTE-OFF                    VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Session telemetry                                               *
+      *----------------------------------------------------------------*
+       01  WS-SESSION-TELEMETRY.
+           05 WS-ENABLE-SESS-TELEMETRY PIC 9    VALUE 0.
+               88 SESS-TELEMETRY-ON             VALUE 1.
+               88 SESS-TELEMETRY-OFF            VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Exit Plan Mode request/response                                *
+      *----------------------------------------------------------------*
+       01  WS-EXIT-PLAN-MODE-REQ.
+           05 WS-EPM-SUMMARY         PIC X(1024) VALUE SPACES.
+           05 WS-EPM-PLAN-CONTENT    PIC X(2048) VALUE SPACES.
+           05 WS-EPM-ACTIONS         PIC X(1024) VALUE SPACES.
+           05 WS-EPM-RECOMMENDED     PIC X(64)  VALUE SPACES.
+           05 WS-EPM-SESSION-ID      PIC X(64)  VALUE SPACES.
+
+       01  WS-EXIT-PLAN-MODE-RESP.
+           05 WS-EPM-APPROVED        PIC 9      VALUE 1.
+               88 EPM-APPROVED                  VALUE 1.
+               88 EPM-DENIED                    VALUE 0.
+           05 WS-EPM-SELECTED-ACTION PIC X(64)  VALUE SPACES.
+           05 WS-EPM-FEEDBACK        PIC X(256) VALUE SPACES.
+
+       01  WS-EPM-HANDLER-SET        PIC 9      VALUE 0.
+           88 EPM-HANDLER-ACTIVE                VALUE 1.
+           88 EPM-HANDLER-INACTIVE              VALUE 0.
+
+      *----------------------------------------------------------------*
+      * W3C Trace Context                                              *
+      *----------------------------------------------------------------*
+       01  WS-TRACE-CONTEXT.
+           05 WS-TRACEPARENT         PIC X(256) VALUE SPACES.
+           05 WS-TRACESTATE          PIC X(256) VALUE SPACES.
+
+       01  WS-TRACE-PROVIDER-SET     PIC 9      VALUE 0.
+           88 TRACE-PROVIDER-ACTIVE             VALUE 1.
+           88 TRACE-PROVIDER-INACTIVE           VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Slash command input                                             *
+      *----------------------------------------------------------------*
+       01  WS-SLASH-CMD-INPUT.
+           05 WS-SCI-HINT            PIC X(256) VALUE SPACES.
+           05 WS-SCI-COMPLETION      PIC X(16)  VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Slash command info                                              *
+      *----------------------------------------------------------------*
+       01  WS-SLASH-CMD-INFO.
+           05 WS-SCMD-ALLOW-AGENT    PIC 9      VALUE 0.
+               88 SCMD-ALLOW-AGENT-YES          VALUE 1.
+               88 SCMD-ALLOW-AGENT-NO           VALUE 0.
+           05 WS-SCMD-DESCRIPTION    PIC X(256) VALUE SPACES.
+           05 WS-SCMD-KIND           PIC X(16)  VALUE SPACES.
+           05 WS-SCMD-NAME           PIC X(64)  VALUE SPACES.
+           05 WS-SCMD-ALIASES        PIC X(512) VALUE SPACES.
+           05 WS-SCMD-EXPERIMENTAL   PIC 9      VALUE 0.
+               88 SCMD-EXPERIMENTAL-YES         VALUE 1.
+               88 SCMD-EXPERIMENTAL-NO          VALUE 0.
+           05 WS-SCMD-INPUT          PIC X(256) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Commands invoke request                                         *
+      *----------------------------------------------------------------*
+       01  WS-CMD-INVOKE-REQ.
+           05 WS-CINV-NAME           PIC X(64)  VALUE SPACES.
+           05 WS-CINV-INPUT          PIC X(1024) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Commands list request                                           *
+      *----------------------------------------------------------------*
+       01  WS-CMD-LIST-REQ.
+           05 WS-CLST-INCL-BUILTINS  PIC 9      VALUE 0.
+               88 CLST-BUILTINS-YES             VALUE 1.
+               88 CLST-BUILTINS-NO              VALUE 0.
+           05 WS-CLST-INCL-CLIENT    PIC 9      VALUE 0.
+               88 CLST-CLIENT-YES               VALUE 1.
+               88 CLST-CLIENT-NO                VALUE 0.
+           05 WS-CLST-INCL-SKILLS    PIC 9      VALUE 0.
+               88 CLST-SKILLS-YES               VALUE 1.
+               88 CLST-SKILLS-NO                VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Model billing token prices                                      *
+      *----------------------------------------------------------------*
+       01  WS-MODEL-BILL-PRICES.
+           05 WS-MBP-BATCH-SIZE      PIC 9(10)  VALUE 0.
+           05 WS-MBP-CACHE-PRICE     PIC 9(10)  VALUE 0.
+           05 WS-MBP-INPUT-PRICE     PIC 9(10)  VALUE 0.
+           05 WS-MBP-OUTPUT-PRICE    PIC 9(10)  VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Model billing                                                   *
+      *----------------------------------------------------------------*
+       01  WS-MODEL-BILLING.
+           05 WS-MB-MULTIPLIER       PIC 9(5)V9(4) VALUE 0.
+           05 WS-MB-HAS-PRICES       PIC 9      VALUE 0.
+               88 MB-HAS-PRICES-YES             VALUE 1.
+               88 MB-HAS-PRICES-NO              VALUE 0.
+           05 WS-MB-PRICE-CATEGORY   PIC X(16)  VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Experimental                                                    *
+      * Diagnostics from loading skills                                 *
+      *----------------------------------------------------------------*
+       01  WS-SKILLS-DIAG.
+           05 WS-SDIAG-ERRORS        PIC X(2048) VALUE SPACES.
+           05 WS-SDIAG-WARNINGS      PIC X(2048) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Experimental                                                    *
+      * Remote session mode enum                                        *
+      * Values: "export", "off", "on"                                   *
+      *----------------------------------------------------------------*
+       01  WS-REMOTE-SESSION-MODE     PIC X(16)  VALUE SPACES.
+           88 REMOTE-MODE-EXPORT                  VALUE "export".
+           88 REMOTE-MODE-OFF                     VALUE "off".
+           88 REMOTE-MODE-ON                      VALUE "on".
+
+      *----------------------------------------------------------------*
+      * Experimental                                                    *
+      * Remote enable request                                           *
+      *----------------------------------------------------------------*
+       01  WS-REMOTE-ENABLE-REQ.
+           05 WS-RER-MODE             PIC X(16)  VALUE SPACES.
+           05 WS-RER-MODE-SET         PIC 9      VALUE 0.
+               88 RER-MODE-SET-YES               VALUE 1.
+               88 RER-MODE-SET-NO                VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Experimental                                                    *
+      * Remote enable result                                            *
+      *----------------------------------------------------------------*
+       01  WS-REMOTE-ENABLE-RESULT.
+           05 WS-RERES-STEERABLE     PIC 9      VALUE 0.
+               88 RERES-STEERABLE-YES            VALUE 1.
+               88 RERES-STEERABLE-NO             VALUE 0.
+           05 WS-RERES-URL            PIC X(256) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Model capabilities override                                    *
+      *----------------------------------------------------------------*
+       01  WS-MODEL-CAP-OVERRIDE.
+           05 WS-MCO-SUPPORTS        PIC X(512) VALUE SPACES.
+           05 WS-MCO-LIMITS          PIC X(512) VALUE SPACES.
+           05 WS-MCO-VISION          PIC X(256) VALUE SPACES.
+           05 WS-MCO-ENABLED         PIC 9      VALUE 0.
+               88 MCO-ENABLED                   VALUE 1.
+               88 MCO-DISABLED                  VALUE 0.

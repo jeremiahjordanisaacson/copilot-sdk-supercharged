@@ -9,7 +9,58 @@ import type {
     CopilotClientOptions,
     SessionConfig,
     Tool,
+    CanvasAction,
+    CanvasActionContext,
+    CanvasDeclaration,
+    CanvasHostCapabilities,
+    CanvasHostContext,
+    CanvasLifecycleContext,
+    CanvasOpenContext,
+    CanvasOpenResponse,
+    CloudSessionOptions,
+    CloudSessionRepository,
+    ExitPlanModeRequest,
+    ExitPlanModeResult,
+    ExitPlanModeHandler,
+    ImageOptions,
+    ModelCapabilitiesOverride,
+    ResponseFormat,
+    SectionOverride,
+    SystemMessageAppendConfig,
+    SystemMessageCustomizeConfig,
+    SystemMessageReplaceConfig,
+    TraceContext,
+    TraceContextProvider,
+    UserInputRequest,
+    UserInputResponse,
 } from "copilot-sdk-supercharged";
+
+export type {
+    CanvasAction,
+    CanvasActionContext,
+    CanvasDeclaration,
+    CanvasHostCapabilities,
+    CanvasHostContext,
+    CanvasLifecycleContext,
+    CanvasOpenContext,
+    CanvasOpenResponse,
+    CloudSessionOptions,
+    CloudSessionRepository,
+    ExitPlanModeRequest,
+    ExitPlanModeResult,
+    ExitPlanModeHandler,
+    ImageOptions,
+    ModelCapabilitiesOverride,
+    ResponseFormat,
+    SectionOverride,
+    SystemMessageAppendConfig,
+    SystemMessageCustomizeConfig,
+    SystemMessageReplaceConfig,
+    TraceContext,
+    TraceContextProvider,
+    UserInputRequest,
+    UserInputResponse,
+};
 
 // ---------------------------------------------------------------------------
 // Severity & finding types
@@ -127,6 +178,10 @@ export interface CopilotSolidityClientOptions extends CopilotClientOptions {
     copilotHome?: string;
     /** TCP connection token for authenticated server connections. */
     tcpConnectionToken?: string;
+    /** Enable remote session support (Mission Control). */
+    remote?: boolean;
+    /** W3C Trace Context provider for distributed tracing. */
+    onGetTraceContext?: TraceContextProvider;
 }
 
 /** Configuration for a Solidity-focused session. */
@@ -137,6 +192,12 @@ export interface SoliditySessionConfig extends SessionConfig {
     projectRoot?: string;
     /** Directories containing instruction files. */
     instructionDirectories?: string[];
+    /** Enable/disable session telemetry. */
+    enableSessionTelemetry?: boolean;
+    /** Handler for exit-plan-mode requests. */
+    onExitPlanMode?: ExitPlanModeHandler;
+    /** Model capabilities override. */
+    modelCapabilities?: ModelCapabilitiesOverride;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +332,122 @@ export interface SolidityExtendedSessionConfig extends SoliditySessionConfig {
     authToken?: string;
     /** Directories containing instruction files. */
     instructionDirectories?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Slash command types
+// ---------------------------------------------------------------------------
+
+/** Completion type for slash command input. */
+export type SlashCommandInputCompletion = "directory";
+
+/** Kind of a slash command. */
+export type SlashCommandKind = "builtin" | "client" | "skill";
+
+/** Price category for the model picker. */
+export type ModelPickerPriceCategory = "high" | "low" | "medium" | "very_high";
+
+/** Input specification for a slash command. */
+export interface SlashCommandInput {
+    /** Hint string for the command input. */
+    hint: string;
+    /** Completion type. */
+    completion?: SlashCommandInputCompletion;
+}
+
+/** Information about a slash command. */
+export interface SlashCommandInfo {
+    /** Whether the command can run during agent execution. */
+    allowDuringAgentExecution: boolean;
+    /** Description of the command. */
+    description: string;
+    /** Kind of command. */
+    kind: SlashCommandKind;
+    /** Name of the command. */
+    name: string;
+    /** Aliases for the command. */
+    aliases?: string[];
+    /** Whether the command is experimental. */
+    experimental?: boolean;
+    /** Input specification. */
+    input?: SlashCommandInput;
+}
+
+// ---------------------------------------------------------------------------
+// Command request types
+// ---------------------------------------------------------------------------
+
+/** Request to invoke a command. */
+export interface CommandsInvokeRequest {
+    /** Command name. */
+    name: string;
+    /** Input string for the command. */
+    input?: string;
+}
+
+/** Request to list available commands. */
+export interface CommandsListRequest {
+    /** Include built-in commands. */
+    includeBuiltins?: boolean;
+    /** Include client commands. */
+    includeClientCommands?: boolean;
+    /** Include skill commands. */
+    includeSkills?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Model billing types
+// ---------------------------------------------------------------------------
+
+/** Token prices for model billing. */
+export interface ModelBillingTokenPrices {
+    /** Batch size for pricing. */
+    batchSize?: number;
+    /** Cache price. */
+    cachePrice?: number;
+    /** Input token price. */
+    inputPrice?: number;
+    /** Output token price. */
+    outputPrice?: number;
+}
+
+/** Model billing information. */
+export interface ModelBilling {
+    /** Billing multiplier. */
+    multiplier: number;
+    /** Token prices. */
+    tokenPrices?: ModelBillingTokenPrices;
+    /** Picker price category. */
+    pickerPriceCategory?: ModelPickerPriceCategory;
+}
+
+/** Experimental
+ *  Diagnostics from loading skills. */
+export interface SkillsLoadDiagnostics {
+    /** Error messages. */
+    errors: string[];
+    /** Warning messages. */
+    warnings: string[];
+}
+
+/** Experimental
+ *  Mode for remote session control. */
+export type RemoteSessionMode = "export" | "off" | "on";
+
+/** Experimental
+ *  Request to enable or configure remote session mode. */
+export interface RemoteEnableRequest {
+    /** Remote session mode. */
+    mode?: RemoteSessionMode;
+}
+
+/** Experimental
+ *  Result of enabling remote session mode. */
+export interface RemoteEnableResult {
+    /** Whether the session is remotely steerable. */
+    remoteSteerable: boolean;
+    /** URL for the remote session. */
+    url?: string;
 }
 
 // ---------------------------------------------------------------------------

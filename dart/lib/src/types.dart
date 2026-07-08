@@ -27,6 +27,7 @@ enum ToolResultType {
   failure,
   rejected,
   denied,
+  timeout,
 }
 
 /// Extension to convert [ToolResultType] to/from JSON string.
@@ -124,6 +125,26 @@ class ToolResultObject {
 }
 
 // ---------------------------------------------------------------------------
+// Trace Context (W3C distributed tracing)
+// ---------------------------------------------------------------------------
+
+/// W3C Trace Context propagation data.
+class TraceContext {
+  final String? traceparent;
+  final String? tracestate;
+
+  const TraceContext({this.traceparent, this.tracestate});
+
+  Map<String, dynamic> toJson() => {
+        if (traceparent != null) 'traceparent': traceparent,
+        if (tracestate != null) 'tracestate': tracestate,
+      };
+}
+
+/// Callback that returns the current W3C Trace Context.
+typedef TraceContextProvider = Future<TraceContext> Function();
+
+// ---------------------------------------------------------------------------
 // Tool Invocation
 // ---------------------------------------------------------------------------
 
@@ -185,18 +206,298 @@ class Tool {
 }
 
 // ---------------------------------------------------------------------------
+// Cloud Session Types
+// ---------------------------------------------------------------------------
+
+/// GitHub repository metadata associated with a cloud session.
+class CloudSessionRepository {
+  final String owner;
+  final String name;
+  final String? branch;
+
+  const CloudSessionRepository({
+    required this.owner,
+    required this.name,
+    this.branch,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'owner': owner,
+        'name': name,
+        if (branch != null) 'branch': branch,
+      };
+
+  factory CloudSessionRepository.fromJson(Map<String, dynamic> json) {
+    return CloudSessionRepository(
+      owner: json['owner'] as String,
+      name: json['name'] as String,
+      branch: json['branch'] as String?,
+    );
+  }
+}
+
+/// Options for creating a remote session in the cloud.
+class CloudSessionOptions {
+  final CloudSessionRepository? repository;
+
+  const CloudSessionOptions({this.repository});
+
+  Map<String, dynamic> toJson() => {
+        if (repository != null) 'repository': repository!.toJson(),
+      };
+
+  factory CloudSessionOptions.fromJson(Map<String, dynamic> json) {
+    return CloudSessionOptions(
+      repository: json['repository'] == null
+          ? null
+          : CloudSessionRepository.fromJson(
+              json['repository'] as Map<String, dynamic>,
+            ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Canvas Types
+// ---------------------------------------------------------------------------
+
+/// A single agent-callable action contributed by a canvas.
+class CanvasAction {
+  final String name;
+  final String description;
+  final Map<String, dynamic>? inputSchema;
+
+  const CanvasAction({
+    required this.name,
+    required this.description,
+    this.inputSchema,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'description': description,
+        if (inputSchema != null) 'inputSchema': inputSchema,
+      };
+
+  factory CanvasAction.fromJson(Map<String, dynamic> json) {
+    return CanvasAction(
+      name: json['name'] as String,
+      description: json['description'] as String,
+      inputSchema: json['inputSchema'] as Map<String, dynamic>?,
+    );
+  }
+}
+
+/// Declarative metadata for a single canvas.
+class CanvasDeclaration {
+  final String id;
+  final String displayName;
+  final String description;
+  final Map<String, dynamic>? inputSchema;
+  final List<CanvasAction>? actions;
+
+  const CanvasDeclaration({
+    required this.id,
+    required this.displayName,
+    required this.description,
+    this.inputSchema,
+    this.actions,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'displayName': displayName,
+        'description': description,
+        if (inputSchema != null) 'inputSchema': inputSchema,
+        if (actions != null) 'actions': actions!.map((a) => a.toJson()).toList(),
+      };
+
+  factory CanvasDeclaration.fromJson(Map<String, dynamic> json) {
+    return CanvasDeclaration(
+      id: json['id'] as String,
+      displayName: json['displayName'] as String,
+      description: json['description'] as String,
+      inputSchema: json['inputSchema'] as Map<String, dynamic>?,
+      actions: (json['actions'] as List<dynamic>?)
+          ?.map((a) => CanvasAction.fromJson(a as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+/// Response returned from a canvas open handler.
+class CanvasOpenResponse {
+  final String? url;
+  final String? title;
+  final String? status;
+
+  const CanvasOpenResponse({this.url, this.title, this.status});
+
+  Map<String, dynamic> toJson() => {
+        if (url != null) 'url': url,
+        if (title != null) 'title': title,
+        if (status != null) 'status': status,
+      };
+
+  factory CanvasOpenResponse.fromJson(Map<String, dynamic> json) {
+    return CanvasOpenResponse(
+      url: json['url'] as String?,
+      title: json['title'] as String?,
+      status: json['status'] as String?,
+    );
+  }
+}
+
+/// Host capability details passed to canvas callbacks.
+class CanvasHostCapabilities {
+  final bool canvases;
+
+  const CanvasHostCapabilities({this.canvases = false});
+
+  Map<String, dynamic> toJson() => {
+        'canvases': canvases,
+      };
+
+  factory CanvasHostCapabilities.fromJson(Map<String, dynamic> json) {
+    return CanvasHostCapabilities(
+      canvases: json['canvases'] as bool? ?? false,
+    );
+  }
+}
+
+/// Host context passed to canvas callbacks.
+class CanvasHostContext {
+  final CanvasHostCapabilities capabilities;
+
+  const CanvasHostContext({
+    this.capabilities = const CanvasHostCapabilities(),
+  });
+
+  Map<String, dynamic> toJson() => {
+        'capabilities': capabilities.toJson(),
+      };
+
+  factory CanvasHostContext.fromJson(Map<String, dynamic> json) {
+    return CanvasHostContext(
+      capabilities: json['capabilities'] == null
+          ? const CanvasHostCapabilities()
+          : CanvasHostCapabilities.fromJson(
+              json['capabilities'] as Map<String, dynamic>,
+            ),
+    );
+  }
+}
+
+/// Context handed to a canvas open handler.
+class CanvasOpenContext {
+  final String sessionId;
+  final String extensionId;
+  final String canvasId;
+  final String instanceId;
+  final dynamic input;
+  final CanvasHostContext? host;
+
+  const CanvasOpenContext({
+    required this.sessionId,
+    required this.extensionId,
+    required this.canvasId,
+    required this.instanceId,
+    required this.input,
+    this.host,
+  });
+
+  factory CanvasOpenContext.fromJson(Map<String, dynamic> json) {
+    return CanvasOpenContext(
+      sessionId: json['sessionId'] as String,
+      extensionId: json['extensionId'] as String,
+      canvasId: json['canvasId'] as String,
+      instanceId: json['instanceId'] as String,
+      input: json['input'],
+      host: json['host'] == null
+          ? null
+          : CanvasHostContext.fromJson(json['host'] as Map<String, dynamic>),
+    );
+  }
+}
+
+/// Context handed to a canvas action handler.
+class CanvasActionContext {
+  final String sessionId;
+  final String extensionId;
+  final String canvasId;
+  final String instanceId;
+  final String actionName;
+  final dynamic input;
+  final CanvasHostContext? host;
+
+  const CanvasActionContext({
+    required this.sessionId,
+    required this.extensionId,
+    required this.canvasId,
+    required this.instanceId,
+    required this.actionName,
+    required this.input,
+    this.host,
+  });
+
+  factory CanvasActionContext.fromJson(Map<String, dynamic> json) {
+    return CanvasActionContext(
+      sessionId: json['sessionId'] as String,
+      extensionId: json['extensionId'] as String,
+      canvasId: json['canvasId'] as String,
+      instanceId: json['instanceId'] as String,
+      actionName: json['actionName'] as String,
+      input: json['input'],
+      host: json['host'] == null
+          ? null
+          : CanvasHostContext.fromJson(json['host'] as Map<String, dynamic>),
+    );
+  }
+}
+
+/// Context handed to a canvas lifecycle handler.
+class CanvasLifecycleContext {
+  final String sessionId;
+  final String extensionId;
+  final String canvasId;
+  final String instanceId;
+  final CanvasHostContext? host;
+
+  const CanvasLifecycleContext({
+    required this.sessionId,
+    required this.extensionId,
+    required this.canvasId,
+    required this.instanceId,
+    this.host,
+  });
+
+  factory CanvasLifecycleContext.fromJson(Map<String, dynamic> json) {
+    return CanvasLifecycleContext(
+      sessionId: json['sessionId'] as String,
+      extensionId: json['extensionId'] as String,
+      canvasId: json['canvasId'] as String,
+      instanceId: json['instanceId'] as String,
+      host: json['host'] == null
+          ? null
+          : CanvasHostContext.fromJson(json['host'] as Map<String, dynamic>),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // System Message Configuration
 // ---------------------------------------------------------------------------
 
 /// System message in append mode (default).
 /// Uses the CLI foundation with optional appended content.
 class SystemMessageAppendConfig {
+  final String? mode;
   final String? content;
 
-  const SystemMessageAppendConfig({this.content});
+  const SystemMessageAppendConfig({this.mode = 'append', this.content});
 
   Map<String, dynamic> toJson() => {
-        'mode': 'append',
+        'mode': mode ?? 'append',
         if (content != null) 'content': content,
       };
 }
@@ -204,12 +505,13 @@ class SystemMessageAppendConfig {
 /// System message in replace mode.
 /// Replaces the entire SDK-managed system message.
 class SystemMessageReplaceConfig {
+  final String mode;
   final String content;
 
-  const SystemMessageReplaceConfig({required this.content});
+  const SystemMessageReplaceConfig({this.mode = 'replace', required this.content});
 
   Map<String, dynamic> toJson() => {
-        'mode': 'replace',
+        'mode': mode,
         'content': content,
       };
 }
@@ -229,6 +531,7 @@ class SystemPromptSection {
   static const String safety = 'safety';
   static const String toolInstructions = 'tool_instructions';
   static const String customInstructions = 'custom_instructions';
+  static const String runtimeInstructions = 'runtime_instructions';
   static const String lastInstructions = 'last_instructions';
 }
 
@@ -238,17 +541,18 @@ class SectionOverrideAction {
   static const String remove = 'remove';
   static const String append = 'append';
   static const String prepend = 'prepend';
+  static const String transform = 'transform';
 }
 
 /// Override operation for a single system prompt section.
 class SectionOverride {
-  final String action;
+  final dynamic action;
   final String? content;
 
   const SectionOverride({required this.action, this.content});
 
   Map<String, dynamic> toJson() => {
-        'action': action,
+        'action': action is Function ? SectionOverrideAction.transform : action,
         if (content != null) 'content': content,
       };
 
@@ -262,13 +566,18 @@ class SectionOverride {
 
 /// System message in customize mode — section-level overrides.
 class SystemMessageCustomizeConfig {
+  final String mode;
   final Map<String, SectionOverride>? sections;
   final String? content;
 
-  const SystemMessageCustomizeConfig({this.sections, this.content});
+  const SystemMessageCustomizeConfig({
+    this.mode = 'customize',
+    this.sections,
+    this.content,
+  });
 
   Map<String, dynamic> toJson() => {
-        'mode': 'customize',
+        'mode': mode,
         if (sections != null)
           'sections': sections!.map((k, v) => MapEntry(k, v.toJson())),
         if (content != null) 'content': content,
@@ -329,21 +638,21 @@ typedef PermissionHandler = Future<PermissionRequestResult> Function(
 
 /// Request for user input from the agent (enables ask_user tool).
 class UserInputRequest {
-  final String question;
+  final String? question;
   final List<String>? choices;
-  final bool allowFreeform;
+  final bool? allowFreeform;
 
   const UserInputRequest({
-    required this.question,
+    this.question,
     this.choices,
-    this.allowFreeform = true,
+    this.allowFreeform,
   });
 
   factory UserInputRequest.fromJson(Map<String, dynamic> json) {
     return UserInputRequest(
-      question: json['question'] as String,
+      question: json['question'] as String?,
       choices: (json['choices'] as List<dynamic>?)?.cast<String>(),
-      allowFreeform: json['allowFreeform'] as bool? ?? true,
+      allowFreeform: json['allowFreeform'] as bool?,
     );
   }
 }
@@ -915,7 +1224,7 @@ class AzureProviderOptions {
 /// Response from a ping request.
 class PingResponse {
   final String message;
-  final int timestamp;
+  final String timestamp;
   final int? protocolVersion;
 
   const PingResponse({
@@ -927,7 +1236,7 @@ class PingResponse {
   factory PingResponse.fromJson(Map<String, dynamic> json) {
     return PingResponse(
       message: json['message'] as String? ?? '',
-      timestamp: json['timestamp'] as int,
+      timestamp: json['timestamp']?.toString() ?? '',
       protocolVersion: json['protocolVersion'] as int?,
     );
   }
@@ -946,9 +1255,10 @@ class ModelCapabilities {
 
   factory ModelCapabilities.fromJson(Map<String, dynamic> json) {
     return ModelCapabilities(
-      supports:
-          ModelSupports.fromJson(json['supports'] as Map<String, dynamic>),
-      limits: ModelLimits.fromJson(json['limits'] as Map<String, dynamic>),
+      supports: ModelSupports.fromJson(
+          (json['supports'] as Map<String, dynamic>?) ?? {}),
+      limits: ModelLimits.fromJson(
+          (json['limits'] as Map<String, dynamic>?) ?? {}),
     );
   }
 }
@@ -971,12 +1281,12 @@ class ModelLimits {
   final int? maxPromptTokens;
   final int maxContextWindowTokens;
 
-  const ModelLimits({this.maxPromptTokens, required this.maxContextWindowTokens});
+  const ModelLimits({this.maxPromptTokens, this.maxContextWindowTokens = 0});
 
   factory ModelLimits.fromJson(Map<String, dynamic> json) {
     return ModelLimits(
       maxPromptTokens: json['max_prompt_tokens'] as int?,
-      maxContextWindowTokens: json['max_context_window_tokens'] as int,
+      maxContextWindowTokens: (json['max_context_window_tokens'] as int?) ?? 0,
     );
   }
 }
@@ -996,15 +1306,200 @@ class ModelPolicy {
   }
 }
 
+/// Completion type for slash command inputs.
+enum SlashCommandInputCompletion {
+  directory;
+
+  factory SlashCommandInputCompletion.fromJson(String value) {
+    return SlashCommandInputCompletion.values.firstWhere((e) => e.name == value);
+  }
+}
+
+/// Kind of slash command.
+enum SlashCommandKind {
+  builtin,
+  client,
+  skill;
+
+  factory SlashCommandKind.fromJson(String value) {
+    return SlashCommandKind.values.firstWhere((e) => e.name == value);
+  }
+}
+
+/// Price category for model picker.
+enum ModelPickerPriceCategory {
+  high,
+  low,
+  medium,
+  veryHigh;
+
+  static const _jsonMap = {
+    'high': ModelPickerPriceCategory.high,
+    'low': ModelPickerPriceCategory.low,
+    'medium': ModelPickerPriceCategory.medium,
+    'very_high': ModelPickerPriceCategory.veryHigh,
+  };
+
+  factory ModelPickerPriceCategory.fromJson(String value) {
+    return _jsonMap[value]!;
+  }
+}
+
+/// Input definition for a slash command.
+class SlashCommandInput {
+  final String hint;
+  final SlashCommandInputCompletion? completion;
+
+  const SlashCommandInput({required this.hint, this.completion});
+
+  factory SlashCommandInput.fromJson(Map<String, dynamic> json) {
+    return SlashCommandInput(
+      hint: json['hint'] as String,
+      completion: json['completion'] != null
+          ? SlashCommandInputCompletion.fromJson(
+              json['completion'] as String)
+          : null,
+    );
+  }
+}
+
+/// Information about a slash command.
+class SlashCommandInfo {
+  final bool allowDuringAgentExecution;
+  final String description;
+  final SlashCommandKind kind;
+  final String name;
+  final List<String>? aliases;
+  final bool? experimental;
+  final SlashCommandInput? input;
+
+  const SlashCommandInfo({
+    required this.allowDuringAgentExecution,
+    required this.description,
+    required this.kind,
+    required this.name,
+    this.aliases,
+    this.experimental,
+    this.input,
+  });
+
+  factory SlashCommandInfo.fromJson(Map<String, dynamic> json) {
+    return SlashCommandInfo(
+      allowDuringAgentExecution: json['allowDuringAgentExecution'] as bool,
+      description: json['description'] as String,
+      kind: SlashCommandKind.fromJson(json['kind'] as String),
+      name: json['name'] as String,
+      aliases:
+          (json['aliases'] as List<dynamic>?)?.cast<String>(),
+      experimental: json['experimental'] as bool?,
+      input: json['input'] != null
+          ? SlashCommandInput.fromJson(json['input'] as Map<String, dynamic>)
+          : null,
+    );
+  }
+}
+
+/// Request to invoke a command.
+class CommandsInvokeRequest {
+  final String name;
+  final String? input;
+
+  const CommandsInvokeRequest({required this.name, this.input});
+
+  factory CommandsInvokeRequest.fromJson(Map<String, dynamic> json) {
+    return CommandsInvokeRequest(
+      name: json['name'] as String,
+      input: json['input'] as String?,
+    );
+  }
+}
+
+/// Request to list available commands.
+class CommandsListRequest {
+  final bool? includeBuiltins;
+  final bool? includeClientCommands;
+  final bool? includeSkills;
+
+  const CommandsListRequest({
+    this.includeBuiltins,
+    this.includeClientCommands,
+    this.includeSkills,
+  });
+
+  factory CommandsListRequest.fromJson(Map<String, dynamic> json) {
+    return CommandsListRequest(
+      includeBuiltins: json['includeBuiltins'] as bool?,
+      includeClientCommands: json['includeClientCommands'] as bool?,
+      includeSkills: json['includeSkills'] as bool?,
+    );
+  }
+}
+
+/// Token pricing information for model billing.
+class ModelBillingTokenPrices {
+  final int? batchSize;
+  final int? cachePrice;
+  final int? inputPrice;
+  final int? outputPrice;
+
+  const ModelBillingTokenPrices({
+    this.batchSize,
+    this.cachePrice,
+    this.inputPrice,
+    this.outputPrice,
+  });
+
+  factory ModelBillingTokenPrices.fromJson(Map<String, dynamic> json) {
+    return ModelBillingTokenPrices(
+      batchSize: json['batchSize'] as int?,
+      cachePrice: json['cachePrice'] as int?,
+      inputPrice: json['inputPrice'] as int?,
+      outputPrice: json['outputPrice'] as int?,
+    );
+  }
+}
+
+/// Experimental: Diagnostics from loading skills.
+class SkillsLoadDiagnostics {
+  final List<String> errors;
+  final List<String> warnings;
+
+  const SkillsLoadDiagnostics({
+    required this.errors,
+    required this.warnings,
+  });
+
+  factory SkillsLoadDiagnostics.fromJson(Map<String, dynamic> json) {
+    return SkillsLoadDiagnostics(
+      errors: (json['errors'] as List<dynamic>).cast<String>(),
+      warnings: (json['warnings'] as List<dynamic>).cast<String>(),
+    );
+  }
+}
+
 /// Model billing information.
 class ModelBilling {
   final double multiplier;
+  final ModelBillingTokenPrices? tokenPrices;
+  final ModelPickerPriceCategory? pickerPriceCategory;
 
-  const ModelBilling({required this.multiplier});
+  const ModelBilling({
+    required this.multiplier,
+    this.tokenPrices,
+    this.pickerPriceCategory,
+  });
 
   factory ModelBilling.fromJson(Map<String, dynamic> json) {
     return ModelBilling(
       multiplier: (json['multiplier'] as num).toDouble(),
+      tokenPrices: json['tokenPrices'] != null
+          ? ModelBillingTokenPrices.fromJson(
+              json['tokenPrices'] as Map<String, dynamic>)
+          : null,
+      pickerPriceCategory: json['pickerPriceCategory'] != null
+          ? ModelPickerPriceCategory.fromJson(
+              json['pickerPriceCategory'] as String)
+          : null,
     );
   }
 }
@@ -1045,6 +1540,79 @@ class ModelInfo {
           (json['supportedReasoningEfforts'] as List<dynamic>?)
               ?.cast<String>(),
       defaultReasoningEffort: json['defaultReasoningEffort'] as String?,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Remote Session
+// ---------------------------------------------------------------------------
+
+/// Mode for remote session control.
+enum RemoteSessionMode {
+  export_,
+  off,
+  on,
+}
+
+/// Extension to convert [RemoteSessionMode] to/from JSON string.
+extension RemoteSessionModeJson on RemoteSessionMode {
+  String toJson() {
+    switch (this) {
+      case RemoteSessionMode.export_:
+        return 'export';
+      case RemoteSessionMode.off:
+        return 'off';
+      case RemoteSessionMode.on:
+        return 'on';
+    }
+  }
+
+  static RemoteSessionMode fromJson(String value) {
+    switch (value) {
+      case 'export':
+        return RemoteSessionMode.export_;
+      case 'off':
+        return RemoteSessionMode.off;
+      case 'on':
+        return RemoteSessionMode.on;
+      default:
+        return RemoteSessionMode.off;
+    }
+  }
+}
+
+/// Experimental: Request to enable or configure a remote session.
+class RemoteEnableRequest {
+  final RemoteSessionMode? mode;
+
+  const RemoteEnableRequest({
+    this.mode,
+  });
+
+  factory RemoteEnableRequest.fromJson(Map<String, dynamic> json) {
+    return RemoteEnableRequest(
+      mode: json['mode'] != null
+          ? RemoteSessionModeJson.fromJson(json['mode'] as String)
+          : null,
+    );
+  }
+}
+
+/// Experimental: Result of enabling a remote session.
+class RemoteEnableResult {
+  final bool remoteSteerable;
+  final String? url;
+
+  const RemoteEnableResult({
+    required this.remoteSteerable,
+    this.url,
+  });
+
+  factory RemoteEnableResult.fromJson(Map<String, dynamic> json) {
+    return RemoteEnableResult(
+      remoteSteerable: json['remoteSteerable'] as bool,
+      url: json['url'] as String?,
     );
   }
 }
@@ -1132,6 +1700,19 @@ enum ResponseFormat {
         return 'json_object';
     }
   }
+
+  static ResponseFormat fromJson(String value) {
+    switch (value) {
+      case 'text':
+        return ResponseFormat.text;
+      case 'image':
+        return ResponseFormat.image;
+      case 'json_object':
+        return ResponseFormat.jsonObject;
+      default:
+        return ResponseFormat.text;
+    }
+  }
 }
 
 /// Options for image generation.
@@ -1152,6 +1733,14 @@ class ImageOptions {
         if (quality != null) 'quality': quality,
         if (style != null) 'style': style,
       };
+
+  factory ImageOptions.fromJson(Map<String, dynamic> json) {
+    return ImageOptions(
+      size: json['size'] as String?,
+      quality: json['quality'] as String?,
+      style: json['style'] as String?,
+    );
+  }
 }
 
 /// Image data from an assistant image response.
@@ -1413,6 +2002,59 @@ typedef ElicitationHandler = Future<ElicitationResult> Function(
     ElicitationContext context);
 
 // ---------------------------------------------------------------------------
+// Exit Plan Mode
+// ---------------------------------------------------------------------------
+
+/// Request to exit plan mode from the agent.
+class ExitPlanModeRequest {
+  final String summary;
+  final String? planContent;
+  final List<String> actions;
+  final String recommendedAction;
+
+  const ExitPlanModeRequest({
+    required this.summary,
+    this.planContent,
+    required this.actions,
+    required this.recommendedAction,
+  });
+
+  factory ExitPlanModeRequest.fromJson(Map<String, dynamic> json) {
+    return ExitPlanModeRequest(
+      summary: json['summary'] as String,
+      planContent: json['planContent'] as String?,
+      actions: (json['actions'] as List<dynamic>).cast<String>(),
+      recommendedAction: json['recommendedAction'] as String,
+    );
+  }
+}
+
+/// Response to an exit-plan-mode request.
+class ExitPlanModeResult {
+  final bool approved;
+  final String? selectedAction;
+  final String? feedback;
+
+  const ExitPlanModeResult({
+    required this.approved,
+    this.selectedAction,
+    this.feedback,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'approved': approved,
+        if (selectedAction != null) 'selectedAction': selectedAction,
+        if (feedback != null) 'feedback': feedback,
+      };
+}
+
+/// Handler for exit-plan-mode requests.
+typedef ExitPlanModeHandler = Future<ExitPlanModeResult> Function(
+  ExitPlanModeRequest request,
+  SessionInvocationContext context,
+);
+
+// ---------------------------------------------------------------------------
 // Session Configuration
 // ---------------------------------------------------------------------------
 
@@ -1424,7 +2066,8 @@ class SessionConfig {
   final String? configDir;
   final List<Tool>? tools;
 
-  /// Either [SystemMessageAppendConfig] or [SystemMessageReplaceConfig].
+  /// One of [SystemMessageAppendConfig], [SystemMessageReplaceConfig],
+  /// or [SystemMessageCustomizeConfig].
   final dynamic systemMessage;
 
   final List<String>? availableTools;
@@ -1459,6 +2102,12 @@ class SessionConfig {
 
   /// Handler for elicitation requests from the server.
   final ElicitationHandler? onElicitationRequest;
+
+  /// Handler for exit-plan-mode requests from the agent.
+  final ExitPlanModeHandler? onExitPlanMode;
+
+  /// When true, enables session-level telemetry collection.
+  final bool? enableSessionTelemetry;
 
   /// Directories to search for instruction files.
   final List<String>? instructionDirectories;
@@ -1516,6 +2165,8 @@ class SessionConfig {
     this.gitHubToken,
     this.commands,
     this.onElicitationRequest,
+    this.onExitPlanMode,
+    this.enableSessionTelemetry,
     this.instructionDirectories,
     this.enableCitations,
     this.excludedBuiltinAgents,
@@ -1569,6 +2220,12 @@ class ResumeSessionConfig {
   /// Handler for elicitation requests from the server.
   final ElicitationHandler? onElicitationRequest;
 
+  /// Handler for exit-plan-mode requests from the agent.
+  final ExitPlanModeHandler? onExitPlanMode;
+
+  /// When true, enables session-level telemetry collection.
+  final bool? enableSessionTelemetry;
+
   final bool? disableResume;
 
   /// Directories to search for instruction files.
@@ -1599,6 +2256,8 @@ class ResumeSessionConfig {
     this.gitHubToken,
     this.commands,
     this.onElicitationRequest,
+    this.onExitPlanMode,
+    this.enableSessionTelemetry,
     this.disableResume,
     this.instructionDirectories,
   });
@@ -1750,6 +2409,9 @@ class CopilotClientOptions {
   /// Token for TCP connection authentication.
   final String? tcpConnectionToken;
 
+  /// Callback that returns the current W3C Trace Context for distributed tracing.
+  final TraceContextProvider? onGetTraceContext;
+
   const CopilotClientOptions({
     this.cliPath,
     this.cliArgs,
@@ -1767,6 +2429,7 @@ class CopilotClientOptions {
     this.sessionFs,
     this.copilotHome,
     this.tcpConnectionToken,
+    this.onGetTraceContext,
   });
 }
 

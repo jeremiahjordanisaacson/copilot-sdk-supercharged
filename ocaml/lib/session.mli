@@ -19,6 +19,10 @@ type permission_handler =
 (** [permission_handler request session_id] decides whether a permission
     request should be approved or denied. *)
 
+type exit_plan_mode_handler =
+  Types.exit_plan_mode_request -> Types.exit_plan_mode_response Lwt.t
+(** Callback invoked when the agent requests to exit plan mode. *)
+
 (** {1 Session handle} *)
 
 type t
@@ -51,6 +55,13 @@ val register_tool : t -> string -> tool_handler -> unit
 
 val register_permission_handler : t -> permission_handler -> unit
 (** [register_permission_handler t handler] sets the permission callback. *)
+
+val register_exit_plan_mode_handler : t -> exit_plan_mode_handler -> unit
+(** [register_exit_plan_mode_handler t handler] sets the exit plan mode callback. *)
+
+val register_trace_context_provider : t -> (unit -> Types.trace_context) -> unit
+(** [register_trace_context_provider t provider] sets a trace context provider
+    that injects traceparent/tracestate into outgoing requests. *)
 
 val destroy : t -> unit Lwt.t
 (** [destroy t] terminates the session on the server side. *)

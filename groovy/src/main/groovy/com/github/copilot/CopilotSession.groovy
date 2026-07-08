@@ -43,6 +43,7 @@ class CopilotSession {
     private volatile Closure permissionHandler
     private volatile Closure userInputHandler
     private volatile Closure elicitationHandler
+    private volatile Closure exitPlanModeHandler
     private final ConcurrentHashMap<String, CommandDefinition> commandHandlers = new ConcurrentHashMap<>()
 
     CopilotSession(String sessionId, JsonRpcClient client, String workspacePath) {
@@ -189,6 +190,7 @@ class CopilotSession {
         commandHandlers.clear()
         permissionHandler = null
         elicitationHandler = null
+        exitPlanModeHandler = null
     }
 
     /** Aborts the currently processing message. */
@@ -215,6 +217,10 @@ class CopilotSession {
 
     void registerElicitationHandler(Closure handler) {
         this.elicitationHandler = handler
+    }
+
+    void registerExitPlanModeHandler(Closure handler) {
+        this.exitPlanModeHandler = handler
     }
 
     void registerCommands(List<CommandDefinition> commands) {
@@ -351,6 +357,15 @@ class CopilotSession {
             req.toolCallId = (String) map.toolCallId
         }
         (PermissionRequestResult) permissionHandler.call(req, sessionId)
+    }
+
+    ExitPlanModeResponse handleExitPlanModeRequest(Map<String, Object> params) throws Exception {
+        if (exitPlanModeHandler == null) {
+            return new ExitPlanModeResponse(true)
+        }
+        ExitPlanModeRequest req = new ExitPlanModeRequest()
+        req.sessionId = (String) params.get('sessionId')
+        (ExitPlanModeResponse) exitPlanModeHandler.call(req)
     }
 
     @SuppressWarnings('unchecked')

@@ -66,6 +66,8 @@ import           Copilot.Session           (CopilotSession, newCopilotSession, d
                                             registerSessionUserInputHandler, registerSessionHooks,
                                             getSessionToolHandler, handleSessionPermissionRequest,
                                             handleSessionUserInputRequest, handleSessionHooksInvoke,
+                                            registerExitPlanModeHandler, handleExitPlanModeRequest,
+                                            registerTraceContextProvider,
                                             destroySession)
 import           Copilot.Types
 
@@ -346,6 +348,9 @@ createSession client config = do
           case scHooks config of
             Just h  -> registerSessionHooks session h
             Nothing -> pure ()
+          case ccoOnGetTraceContext (ccOptions client) of
+            Just p  -> registerTraceContextProvider session p
+            Nothing -> pure ()
           modifyMVar_ (ccSessions client) $ \m -> pure (Map.insert sid session m)
           pure session
 
@@ -403,6 +408,9 @@ resumeSession client sessionId config = do
             Nothing -> pure ()
           case rscHooks config of
             Just h  -> registerSessionHooks session h
+            Nothing -> pure ()
+          case ccoOnGetTraceContext (ccOptions client) of
+            Just p  -> registerTraceContextProvider session p
             Nothing -> pure ()
           modifyMVar_ (ccSessions client) $ \m -> pure (Map.insert sid session m)
           pure session
@@ -571,10 +579,6 @@ onLifecycleEvent client handler = do
 -- Internal
 -- ============================================================================
 
-isJust :: Maybe a -> Bool
-isJust (Just _) = True
-isJust Nothing  = False
-
 hasHooks :: Maybe SessionHooks -> Bool
 hasHooks Nothing = False
 hasHooks (Just sh) = isJust (shOnPreToolUse sh)
@@ -647,6 +651,10 @@ setupHandlers client rpc = do
   -- hooks.invoke
   setRequestHandler rpc "hooks.invoke" $ \params -> do
     handleHooksInvokeReq client params
+
+  -- exitPlanMode.request
+  setRequestHandler rpc "exitPlanMode.request" $ \params -> do
+    handleExitPlanModeReq client params
 
 -- | Dispatch a session.event notification to the appropriate session.
 handleSessionEventNotification :: CopilotClient -> Value -> IO ()
@@ -780,3 +788,20 @@ handleHooksInvokeReq client params = do
             Left (e :: SomeException) ->
               pure $ Left $ JsonRpcError (-32603) (T.pack $ show e) Nothing
     _ -> pure $ Left $ JsonRpcError (-32602) "Invalid hooks invoke payload" Nothing
+
+-- | Handle an exitPlanMode.request from the server.
+handleExitPlanModeReq :: CopilotClient -> Value -> IO (Either JsonRpcError Value)
+handleExitPlanModeReq client params = do
+  let mSessionId = parseMaybe (withObject "" $ \o -> o .: "sessionId") params :: Maybe Text
+  case mSessionId of
+    Nothing -> pure $ Right $ object [ "result" .= object [ "approved" .= True ] ]
+    Just sid -> do
+      sessions <- readMVar (ccSessions client)
+      case Map.lookup sid sessions of
+        Nothing -> pure $ Right $ object [ "result" .= object [ "approved" .= True ] ]
+        Just session -> do
+          result <- try $ handleExitPlanModeRequest session params
+          case result of
+            Right resp -> pure $ Right $ object [ "result" .= resp ]
+            Left (_ :: SomeException) ->
+              pure $ Right $ object [ "result" .= object [ "approved" .= True ] ]

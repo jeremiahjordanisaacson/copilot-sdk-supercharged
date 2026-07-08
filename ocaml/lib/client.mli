@@ -44,3 +44,35 @@ val list_models : t -> Types.model_info list Lwt.t
 
 val connection_state : t -> Types.connection_state
 (** [connection_state t] returns the current connection state. *)
+
+val get_foreground_session_id : t -> string Lwt.t
+(** [get_foreground_session_id t] returns the session ID of the current
+    foreground session. *)
+
+val set_foreground_session_id : t -> string -> unit Lwt.t
+(** [set_foreground_session_id t session_id] sets the foreground session
+    to the given session ID. *)
+
+val get_last_session_id : t -> string option Lwt.t
+(** [get_last_session_id t] returns the last-used session ID, or [None]. *)
+
+val get_session_metadata : t -> string -> Yojson.Safe.t Lwt.t
+(** [get_session_metadata t session_id] retrieves metadata for a session. *)
+
+val ping : ?message:string -> t -> Yojson.Safe.t Lwt.t
+(** [ping ?message t] pings the server and returns the response. *)
+
+val resume_session : t -> string -> ?config:Types.session_config -> unit -> Session.t Lwt.t
+(** [resume_session t session_id ?config ()] resumes a session by ID. *)
+
+val delete_session : t -> string -> unit Lwt.t
+(** [delete_session t session_id] permanently deletes a session. *)
+
+val list_sessions : t -> Yojson.Safe.t Lwt.t
+(** [list_sessions t] lists all sessions. *)
+
+val get_auth_status : t -> Yojson.Safe.t Lwt.t
+(** [get_auth_status t] returns authentication status. *)
+
+val set_session_fs_provider : t -> Types.session_fs_config -> Yojson.Safe.t Lwt.t
+(** [set_session_fs_provider t config] registers a session filesystem provider. *)

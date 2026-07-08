@@ -8,6 +8,9 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * Manages a replaying CAPI proxy for E2E tests.
@@ -20,6 +23,14 @@ class TestHarness {
 
     /** The URL the proxy is listening on after [start]. */
     var proxyUrl: String? = null
+        private set
+
+    /** The CONNECT proxy URL parsed from harness startup metadata. */
+    var connectProxyUrl: String? = null
+        private set
+
+    /** The CA file path parsed from harness startup metadata. */
+    var caFilePath: String? = null
         private set
 
     /**
@@ -57,24 +68,75 @@ class TestHarness {
         val proc = pb.start()
         this.process = proc
 
-        // Read the first line to get the listening URL
+        // Read lines until we find the "Listening:" line (npx may emit wrapper output first)
         val reader = BufferedReader(InputStreamReader(proc.inputStream))
-        val line = reader.readLine()
-            ?: run {
+        val listenRegex = Regex("""Listening:\s*(http://\S+)""")
+        var line: String?
+        var listenMatch: MatchResult? = null
+        while (true) {
+            line = reader.readLine()
+            if (line == null) {
                 kill()
                 throw RuntimeException("Failed to read proxy URL from stdout")
             }
+            listenMatch = listenRegex.find(line)
+            if (listenMatch != null) break
+        }
 
-        val regex = Regex("""Listening:\s*(http://\S+)""")
-        val match = regex.find(line)
+        val url = listenMatch!!.groupValues[1]
+        this.proxyUrl = url
+
+        // Parse the JSON metadata (connectProxyUrl, caFilePath) from the same line
+        val metadataRegex = Regex("""\{.*\}\s*$""")
+        val metadataMatch = metadataRegex.find(line!!)
             ?: run {
                 kill()
-                throw RuntimeException("Unexpected proxy output: $line")
+                throw RuntimeException("Proxy startup line missing CONNECT proxy metadata: $line")
             }
 
-        val url = match.groupValues[1]
-        this.proxyUrl = url
+        try {
+            val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            val metadata = json.parseToJsonElement(metadataMatch.value).jsonObject
+            this.connectProxyUrl = metadata["connectProxyUrl"]?.jsonPrimitive?.contentOrNull
+            this.caFilePath = metadata["caFilePath"]?.jsonPrimitive?.contentOrNull
+        } catch (e: Exception) {
+            kill()
+            throw RuntimeException("Failed to parse proxy startup metadata: $line", e)
+        }
+
+        if (this.connectProxyUrl.isNullOrEmpty() || this.caFilePath.isNullOrEmpty()) {
+            kill()
+            throw RuntimeException("Proxy startup metadata missing CONNECT proxy details: $line")
+        }
+
         return url
+    }
+
+    /**
+     * Return environment variables that route HTTPS traffic through the CONNECT proxy.
+     */
+    fun getProxyEnv(): Map<String, String> {
+        val connectUrl = connectProxyUrl ?: return emptyMap()
+        val caFile = caFilePath ?: return emptyMap()
+
+        val noProxy = "127.0.0.1,localhost,::1"
+        return mapOf(
+            "HTTP_PROXY" to connectUrl,
+            "HTTPS_PROXY" to connectUrl,
+            "http_proxy" to connectUrl,
+            "https_proxy" to connectUrl,
+            "NO_PROXY" to noProxy,
+            "no_proxy" to noProxy,
+            "NODE_EXTRA_CA_CERTS" to caFile,
+            "SSL_CERT_FILE" to caFile,
+            "REQUESTS_CA_BUNDLE" to caFile,
+            "CURL_CA_BUNDLE" to caFile,
+            "GIT_SSL_CAINFO" to caFile,
+            "GH_TOKEN" to "",
+            "GITHUB_TOKEN" to "",
+            "GH_ENTERPRISE_TOKEN" to "",
+            "GITHUB_ENTERPRISE_TOKEN" to "",
+        )
     }
 
     /**
@@ -135,6 +197,8 @@ class TestHarness {
         }
         process = null
         proxyUrl = null
+        connectProxyUrl = null
+        caFilePath = null
     }
 
     companion object {

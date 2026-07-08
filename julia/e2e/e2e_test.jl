@@ -11,11 +11,12 @@
       cd julia && julia --project=. e2e/e2e_test.jl
 =#
 
+using JSON3
 using Test
 
 # ── Bootstrap: load the test harness and the SDK ────────────────────────────
 include(joinpath(@__DIR__, "testharness", "proxy.jl"))
-using .TestHarness: start_proxy, stop_proxy, cli_url_from_proxy
+using .TestHarness: start_proxy, stop_proxy, cli_path_from_repo, proxy_test_env
 
 # Add the parent julia/ dir to LOAD_PATH so `using CopilotSDK` resolves
 push!(LOAD_PATH, joinpath(@__DIR__, ".."))
@@ -23,7 +24,22 @@ using CopilotSDK
 
 # ── Shared setup / teardown ─────────────────────────────────────────────────
 proxy_url = start_proxy()
-cli_url   = cli_url_from_proxy(proxy_url)
+cli_path  = cli_path_from_repo()
+work_dir  = mktempdir("copilot-julia-e2e-")
+test_env  = proxy_test_env(work_dir)
+const snapshots_dir = normpath(joinpath(@__DIR__, "..", "..", "test", "snapshots"))
+
+function configure_snapshot(category::String, test_name::String)
+    snapshot_path = joinpath(snapshots_dir, category, "$(test_name).yaml")
+    response = TestHarness.HTTP.post(
+        string(proxy_url, "/config");
+        headers=Dict("Content-Type" => "application/json"),
+        body=JSON3.write(Dict("filePath" => snapshot_path, "workDir" => work_dir)),
+        readtimeout=5,
+        connect_timeout=5,
+    )
+    response.status == 200 || error("Failed to configure snapshot: $(response.status)")
+end
 
 # Ensure the proxy is torn down no matter what
 atexit() do
@@ -35,10 +51,10 @@ end
 @testset "Julia SDK E2E" begin
 
     @testset "Session create and disconnect" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
 
         @test session isa CopilotSession
         @test !isempty(session.session_id)
@@ -48,13 +64,15 @@ end
     end
 
     @testset "Send message and receive response" begin
-        client = CopilotClient(cli_url=cli_url)
+        configure_snapshot("session", "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message")
+
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         # Collect assistant messages via event handler
         messages = String[]
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             on_event=function (event)
                 if event.type == "assistant.message"
                     content = get(event.data, "content", "")
@@ -68,7 +86,7 @@ end
         session = create_session(client, config)
 
         # send_and_wait blocks until the session goes idle
-        send_and_wait(session, "Hello!")
+        send_and_wait(session, "What is 2+2?")
 
         @test length(messages) > 0
         @test any(m -> !isempty(m), messages)
@@ -85,7 +103,9 @@ end
         )
 
         client = CopilotClient(CopilotClientOptions(
-            cli_url=cli_url,
+            cli_path=cli_path,
+            cwd=work_dir,
+            env=test_env,
             session_fs=fs_config,
         ))
 
@@ -96,7 +116,7 @@ end
 
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
         @test session isa CopilotSession
 
         disconnect(session)
@@ -105,12 +125,14 @@ end
 
     # ── Test 4: Multi-turn conversation ──────────────────────────────────────
     @testset "Multi-turn conversation" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        configure_snapshot("session", "should_have_stateful_conversation")
+
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         messages = String[]
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             on_event=function (event)
                 if event.type == "assistant.message"
                     content = get(event.data, "content", "")
@@ -124,11 +146,11 @@ end
         session = create_session(client, config)
 
         # First turn
-        try send_and_wait(session, "Hello!") catch; end
+        try send_and_wait(session, "What is 1+1?") catch; end
         first_count = length(messages)
 
         # Second turn (follow-up)
-        try send_and_wait(session, "Tell me more.") catch; end
+        try send_and_wait(session, "Now if you double that, what do you get?") catch; end
         second_count = length(messages)
 
         @test first_count >= 0
@@ -141,22 +163,19 @@ end
 
     # ── Test 5: Session resume ───────────────────────────────────────────────
     @testset "Session resume by ID" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        configure_snapshot("session", "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message")
+
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
         original_id = session.session_id
         @test !isempty(original_id)
 
         disconnect(session)
-        stop!(client)
-
-        # New client, resume by the captured session ID
-        client2 = CopilotClient(CopilotClientOptions(cli_url=cli_url))
-        start!(client2)
 
         try
-            resumed = resume_session(client2, original_id, SessionConfig(model="gpt-4"))
+            resumed = resume_session(client, original_id, SessionConfig(model="claude-sonnet-4.5"))
             @test resumed isa CopilotSession
             @test resumed.session_id == original_id
             disconnect(resumed)
@@ -165,16 +184,16 @@ end
             @test e isa Exception
         end
 
-        stop!(client2)
+        stop!(client)
     end
 
     # ── Test 6: Session list ─────────────────────────────────────────────────
     @testset "Session list" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        s1 = create_session(client, SessionConfig(model="gpt-4"))
-        s2 = create_session(client, SessionConfig(model="gpt-4"))
+        s1 = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
+        s2 = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
 
         @test s1.session_id != s2.session_id
 
@@ -192,10 +211,10 @@ end
 
     # ── Test 7: Session metadata ─────────────────────────────────────────────
     @testset "Session metadata" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
         sid = session.session_id
 
         try
@@ -211,10 +230,10 @@ end
 
     # ── Test 8: Session delete ───────────────────────────────────────────────
     @testset "Session delete" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
         sid = session.session_id
         @test haskey(client.sessions, sid)
 
@@ -233,7 +252,7 @@ end
 
     # ── Test 9: Model list ───────────────────────────────────────────────────
     @testset "Model list" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         try
@@ -251,7 +270,7 @@ end
 
     # ── Test 10: Ping ────────────────────────────────────────────────────────
     @testset "Ping" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         try
@@ -266,7 +285,7 @@ end
 
     # ── Test 11: Auth status ─────────────────────────────────────────────────
     @testset "Auth status" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         try
@@ -281,7 +300,7 @@ end
 
     # ── Test 12: Client lifecycle states ─────────────────────────────────────
     @testset "Client lifecycle states" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         @test client.state == DISCONNECTED
 
         start!(client)
@@ -293,10 +312,10 @@ end
 
     # ── Test 13: Foreground session ──────────────────────────────────────────
     @testset "Foreground session" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
-        session = create_session(client, SessionConfig(model="gpt-4"))
+        session = create_session(client, SessionConfig(model="claude-sonnet-4.5"))
         sid = session.session_id
 
         try
@@ -314,6 +333,8 @@ end
 
     # ── Test 14: Tool definition and invocation ──────────────────────────────
     @testset "Tool definition and invocation" begin
+        configure_snapshot("session", "should_create_session_with_custom_tool")
+
         tool_called = Ref(false)
         tool_args   = Ref{Any}(nothing)
 
@@ -333,11 +354,11 @@ end
         @test my_tool isa Tool
         @test my_tool.name == "get_weather"
 
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             tools=[my_tool],
             on_permission_request=approve_all,
         )
@@ -348,7 +369,7 @@ end
 
         # Send a prompt that would trigger the tool
         try
-            send_and_wait(session, "What is the weather in Seattle?")
+            send_and_wait(session, "What is the secret number for key ALPHA?")
         catch; end
 
         # The tool wire format should be well-formed
@@ -363,13 +384,13 @@ end
 
     # ── Test 15: Streaming events ────────────────────────────────────────────
     @testset "Streaming events" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         deltas   = String[]
         finals   = String[]
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             streaming=true,
             on_event=function (event)
                 if event.type == "assistant.message_delta"
@@ -402,12 +423,12 @@ end
 
     # ── Test 16: System message configuration ────────────────────────────────
     @testset "System message configuration" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         messages = String[]
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             system_message="You are a pirate. Always respond in pirate speak.",
             on_event=function (event)
                 if event.type == "assistant.message"
@@ -441,14 +462,16 @@ end
         )
 
         client = CopilotClient(CopilotClientOptions(
-            cli_url=cli_url,
+            cli_path=cli_path,
+            cwd=work_dir,
+            env=test_env,
             session_fs=fs_config,
         ))
         start!(client)
 
         messages = String[]
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             on_event=function (event)
                 if event.type == "assistant.message"
                     content = get(event.data, "content", "")
@@ -475,7 +498,7 @@ end
 
     # ── Test 18: MCP server configuration ────────────────────────────────────
     @testset "MCP server configuration" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         mcp_servers = Dict{String, McpServerConfig}(
@@ -487,7 +510,7 @@ end
         )
 
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             mcp_servers=mcp_servers,
         )
 
@@ -509,11 +532,11 @@ end
 
     # ── Test 19: Skill directories configuration ─────────────────────────────
     @testset "Skill directories configuration" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             skill_directories=["/home/user/skills", "/home/user/more-skills"],
             disabled_skills=["dangerous-skill"],
         )
@@ -536,7 +559,9 @@ end
 
     # ── Test 20: Compaction events ───────────────────────────────────────────
     @testset "Compaction events" begin
-        client = CopilotClient(CopilotClientOptions(cli_url=cli_url))
+        configure_snapshot("session", "should_have_stateful_conversation")
+
+        client = CopilotClient(CopilotClientOptions(cli_path=cli_path, cwd=work_dir, env=test_env))
         start!(client)
 
         compaction_starts   = Ref(0)
@@ -544,7 +569,7 @@ end
         all_events = String[]
 
         config = SessionConfig(
-            model="gpt-4",
+            model="claude-sonnet-4.5",
             on_event=function (event)
                 push!(all_events, event.type)
                 if event.type == "session.compaction_start"
@@ -557,10 +582,8 @@ end
 
         session = create_session(client, config)
 
-        # Send several messages to try to trigger compaction
-        for msg in ["Message 1", "Message 2", "Message 3", "Message 4", "Message 5"]
-            try send_and_wait(session, msg) catch; end
-        end
+        try send_and_wait(session, "What is 1+1?") catch; end
+        try send_and_wait(session, "Now if you double that, what do you get?") catch; end
 
         # Compaction is proxy-dependent; just verify the counters are consistent
         @test compaction_starts[] >= 0

@@ -422,6 +422,9 @@ case class SessionConfig(
   /** Handler for elicitation requests from the server. */
   onElicitationRequest: Option[ElicitationHandler] = None,
 
+  /** Handler for exit plan mode requests from the server. */
+  onExitPlanMode: Option[ExitPlanModeHandler] = None,
+
   /** Additional HTTP headers sent with each model request. */
   requestHeaders: Option[Map[String, String]] = None,
   /** Response format for image generation ("text", "image", "json_object"). */
@@ -496,10 +499,54 @@ case class ResumeSessionConfig(
   /** Handler for elicitation requests from the server. */
   onElicitationRequest: Option[ElicitationHandler] = None,
 
+  /** Handler for exit plan mode requests from the server. */
+  onExitPlanMode: Option[ExitPlanModeHandler] = None,
+
   disableResume: Option[Boolean] = None,
   /** Custom instruction directory paths. */
   instructionDirectories: Option[Seq[String]] = None,
 )
+
+// ============================================================================
+// Exit Plan Mode Types
+// ============================================================================
+
+/** Request payload for an exit plan mode request from the server. */
+case class ExitPlanModeRequest(
+  sessionId: String
+)
+
+object ExitPlanModeRequest:
+  given Decoder[ExitPlanModeRequest] = deriveDecoder
+
+/** Response for an exit plan mode request. */
+case class ExitPlanModeResponse(
+  approved: Boolean
+)
+
+object ExitPlanModeResponse:
+  given Encoder[ExitPlanModeResponse] = deriveEncoder
+  given Decoder[ExitPlanModeResponse] = deriveDecoder
+
+/** Handler for exit plan mode requests. */
+type ExitPlanModeHandler = ExitPlanModeRequest => Future[ExitPlanModeResponse]
+
+// ============================================================================
+// Trace Context Types
+// ============================================================================
+
+/** Trace context for distributed tracing. */
+case class TraceContext(
+  traceparent: Option[String] = None,
+  tracestate: Option[String] = None
+)
+
+object TraceContext:
+  given Encoder[TraceContext] = deriveEncoder
+  given Decoder[TraceContext] = deriveDecoder
+
+/** Provider that returns a trace context for outbound requests. */
+type TraceContextProvider = () => Future[TraceContext]
 
 // ============================================================================
 // Session Events
@@ -628,7 +675,7 @@ case class PermissionInvocation(sessionId: String)
 
 /** Request for user input from the agent (enables ask_user tool). */
 case class UserInputRequest(
-  question: String,
+  question: Option[String] = None,
   choices: Option[List[String]] = None,
   allowFreeform: Option[Boolean] = None
 )
@@ -826,7 +873,7 @@ case class SessionHooks(
 /** Response from a ping request. */
 case class PingResponse(
   message: String,
-  timestamp: Long,
+  timestamp: String,
   protocolVersion: Option[Int] = None
 )
 
@@ -909,9 +956,62 @@ case class ModelPolicy(
 object ModelPolicy:
   given Decoder[ModelPolicy] = deriveDecoder
 
+/** Completion type for slash command input. */
+enum SlashCommandInputCompletion(val value: String):
+  case Directory extends SlashCommandInputCompletion("directory")
+
+object SlashCommandInputCompletion:
+  given Encoder[SlashCommandInputCompletion] = Encoder.encodeString.contramap(_.value)
+  given Decoder[SlashCommandInputCompletion] = Decoder.decodeString.emap:
+    case "directory" => Right(SlashCommandInputCompletion.Directory)
+    case other       => Left(s"Unknown SlashCommandInputCompletion: $other")
+
+/** Kind of slash command. */
+enum SlashCommandKind(val value: String):
+  case Builtin extends SlashCommandKind("builtin")
+  case Client  extends SlashCommandKind("client")
+  case Skill   extends SlashCommandKind("skill")
+
+object SlashCommandKind:
+  given Encoder[SlashCommandKind] = Encoder.encodeString.contramap(_.value)
+  given Decoder[SlashCommandKind] = Decoder.decodeString.emap:
+    case "builtin" => Right(SlashCommandKind.Builtin)
+    case "client"  => Right(SlashCommandKind.Client)
+    case "skill"   => Right(SlashCommandKind.Skill)
+    case other     => Left(s"Unknown SlashCommandKind: $other")
+
+/** Price category for the model picker. */
+enum ModelPickerPriceCategory(val value: String):
+  case High     extends ModelPickerPriceCategory("high")
+  case Low      extends ModelPickerPriceCategory("low")
+  case Medium   extends ModelPickerPriceCategory("medium")
+  case VeryHigh extends ModelPickerPriceCategory("very_high")
+
+object ModelPickerPriceCategory:
+  given Encoder[ModelPickerPriceCategory] = Encoder.encodeString.contramap(_.value)
+  given Decoder[ModelPickerPriceCategory] = Decoder.decodeString.emap:
+    case "high"      => Right(ModelPickerPriceCategory.High)
+    case "low"       => Right(ModelPickerPriceCategory.Low)
+    case "medium"    => Right(ModelPickerPriceCategory.Medium)
+    case "very_high" => Right(ModelPickerPriceCategory.VeryHigh)
+    case other       => Left(s"Unknown ModelPickerPriceCategory: $other")
+
+/** Token prices for model billing. */
+case class ModelBillingTokenPrices(
+  batchSize: Option[Int] = None,
+  cachePrice: Option[Int] = None,
+  inputPrice: Option[Int] = None,
+  outputPrice: Option[Int] = None
+)
+
+object ModelBillingTokenPrices:
+  given Decoder[ModelBillingTokenPrices] = deriveDecoder
+
 /** Model billing information. */
 case class ModelBilling(
-  multiplier: Double
+  multiplier: Double,
+  tokenPrices: Option[ModelBillingTokenPrices] = None,
+  pickerPriceCategory: Option[ModelPickerPriceCategory] = None
 )
 
 object ModelBilling:
@@ -930,6 +1030,104 @@ case class ModelInfo(
 
 object ModelInfo:
   given Decoder[ModelInfo] = deriveDecoder
+
+// ============================================================================
+// Slash Command Types
+// ============================================================================
+
+/** Input configuration for a slash command. */
+case class SlashCommandInput(
+  hint: String,
+  completion: Option[SlashCommandInputCompletion] = None
+)
+
+object SlashCommandInput:
+  given Decoder[SlashCommandInput] = deriveDecoder
+
+/** Information about a slash command. */
+case class SlashCommandInfo(
+  allowDuringAgentExecution: Boolean,
+  description: String,
+  kind: SlashCommandKind,
+  name: String,
+  aliases: Option[List[String]] = None,
+  experimental: Option[Boolean] = None,
+  input: Option[SlashCommandInput] = None
+)
+
+object SlashCommandInfo:
+  given Decoder[SlashCommandInfo] = deriveDecoder
+
+// ============================================================================
+// Command Request Types
+// ============================================================================
+
+/** Request to invoke a command. */
+case class CommandsInvokeRequest(
+  name: String,
+  input: Option[String] = None
+)
+
+object CommandsInvokeRequest:
+  given Encoder[CommandsInvokeRequest] = deriveEncoder
+  given Decoder[CommandsInvokeRequest] = deriveDecoder
+
+/** Request to list commands. */
+case class CommandsListRequest(
+  includeBuiltins: Option[Boolean] = None,
+  includeClientCommands: Option[Boolean] = None,
+  includeSkills: Option[Boolean] = None
+)
+
+object CommandsListRequest:
+  given Encoder[CommandsListRequest] = deriveEncoder
+  given Decoder[CommandsListRequest] = deriveDecoder
+
+/** Experimental: Diagnostics from loading skills. */
+case class SkillsLoadDiagnostics(
+  errors: List[String],
+  warnings: List[String]
+)
+
+object SkillsLoadDiagnostics:
+  given Decoder[SkillsLoadDiagnostics] = deriveDecoder
+
+// ============================================================================
+// Remote Session Types
+// ============================================================================
+
+/** Per-session remote mode. "off" disables remote, "export" exports session events to Mission Control without enabling remote steering, "on" enables both export and remote steering. */
+enum RemoteSessionMode(val value: String):
+  case Export extends RemoteSessionMode("export")
+  case Off    extends RemoteSessionMode("off")
+  case On     extends RemoteSessionMode("on")
+
+object RemoteSessionMode:
+  given Encoder[RemoteSessionMode] = Encoder.encodeString.contramap(_.value)
+  given Decoder[RemoteSessionMode] = Decoder.decodeString.emap:
+    case "export" => Right(RemoteSessionMode.Export)
+    case "off"    => Right(RemoteSessionMode.Off)
+    case "on"     => Right(RemoteSessionMode.On)
+    case other    => Left(s"Unknown RemoteSessionMode: $other")
+
+/** Experimental: Request to enable remote mode for a session. */
+case class RemoteEnableRequest(
+  mode: Option[RemoteSessionMode] = None
+)
+
+object RemoteEnableRequest:
+  given Encoder[RemoteEnableRequest] = deriveEncoder
+  given Decoder[RemoteEnableRequest] = deriveDecoder
+
+/** Experimental: Result of enabling remote mode for a session. */
+case class RemoteEnableResult(
+  remoteSteerable: Boolean,
+  url: Option[String] = None
+)
+
+object RemoteEnableResult:
+  given Encoder[RemoteEnableResult] = deriveEncoder
+  given Decoder[RemoteEnableResult] = deriveDecoder
 
 // ============================================================================
 // Session Metadata
@@ -1236,6 +1434,9 @@ case class CopilotClientOptions(
   /** Configurable data directory, passed as COPILOT_HOME env var. */
   copilotHome: Option[String] = None,
 
+  /** Provider for trace context to include in outbound requests. */
+  onGetTraceContext: Option[TraceContextProvider] = None,
+
   /** Auth token for TCP server connections. */
   tcpConnectionToken: Option[String] = None,
 
@@ -1245,3 +1446,133 @@ case class CopilotClientOptions(
   /** Supplies bearer tokens for outbound model requests (bring-your-own-key). */
   bearerTokenProvider: Option[BearerTokenProvider] = None
 )
+
+// ============================================================================
+// Canvas, Cloud Session, and Prompt Types
+// ============================================================================
+
+/** Declaration for a canvas exposed by an extension. */
+case class CanvasDeclaration(
+  id: String,
+  displayName: String,
+  description: String,
+  inputSchema: Option[JsonObject] = None,
+  actions: Option[List[CanvasAction]] = None
+)
+
+object CanvasDeclaration:
+  given Encoder[CanvasDeclaration] = deriveEncoder
+  given Decoder[CanvasDeclaration] = deriveDecoder
+
+/** Action exposed by a canvas. */
+case class CanvasAction(
+  name: String,
+  description: String,
+  inputSchema: Option[JsonObject] = None
+)
+
+object CanvasAction:
+  given Encoder[CanvasAction] = deriveEncoder
+  given Decoder[CanvasAction] = deriveDecoder
+
+/** Response returned when opening a canvas. */
+case class CanvasOpenResponse(
+  url: Option[String] = None,
+  title: Option[String] = None,
+  status: Option[String] = None
+)
+
+object CanvasOpenResponse:
+  given Encoder[CanvasOpenResponse] = deriveEncoder
+  given Decoder[CanvasOpenResponse] = deriveDecoder
+
+/** Host capabilities available to canvases. */
+case class CanvasHostCapabilities(
+  canvases: Boolean = false
+)
+
+object CanvasHostCapabilities:
+  given Encoder[CanvasHostCapabilities] = deriveEncoder
+  given Decoder[CanvasHostCapabilities] = deriveDecoder
+
+/** Host context available to canvases. */
+case class CanvasHostContext(
+  capabilities: CanvasHostCapabilities
+)
+
+object CanvasHostContext:
+  given Encoder[CanvasHostContext] = deriveEncoder
+  given Decoder[CanvasHostContext] = deriveDecoder
+
+/** Context passed when opening a canvas. */
+case class CanvasOpenContext(
+  sessionId: String,
+  extensionId: String,
+  canvasId: String,
+  instanceId: String,
+  input: Json,
+  host: Option[CanvasHostContext] = None
+)
+
+object CanvasOpenContext:
+  given Encoder[CanvasOpenContext] = deriveEncoder
+  given Decoder[CanvasOpenContext] = deriveDecoder
+
+/** Context passed when invoking a canvas action. */
+case class CanvasActionContext(
+  sessionId: String,
+  extensionId: String,
+  canvasId: String,
+  instanceId: String,
+  actionName: String,
+  input: Json,
+  host: Option[CanvasHostContext] = None
+)
+
+object CanvasActionContext:
+  given Encoder[CanvasActionContext] = deriveEncoder
+  given Decoder[CanvasActionContext] = deriveDecoder
+
+/** Lifecycle context for a canvas instance. */
+case class CanvasLifecycleContext(
+  sessionId: String,
+  extensionId: String,
+  canvasId: String,
+  instanceId: String,
+  host: Option[CanvasHostContext] = None
+)
+
+object CanvasLifecycleContext:
+  given Encoder[CanvasLifecycleContext] = deriveEncoder
+  given Decoder[CanvasLifecycleContext] = deriveDecoder
+
+/** Repository context for a cloud session. */
+case class CloudSessionRepository(
+  owner: String,
+  name: String,
+  branch: Option[String] = None
+)
+
+object CloudSessionRepository:
+  given Encoder[CloudSessionRepository] = deriveEncoder
+  given Decoder[CloudSessionRepository] = deriveDecoder
+
+/** Options for creating a cloud session. */
+case class CloudSessionOptions(
+  repository: Option[CloudSessionRepository] = None
+)
+
+object CloudSessionOptions:
+  given Encoder[CloudSessionOptions] = deriveEncoder
+  given Decoder[CloudSessionOptions] = deriveDecoder
+
+/** System message configuration -- customize mode. */
+case class SystemMessageCustomizeConfig(
+  mode: String = "customize",
+  sections: Option[Map[String, SectionOverride]] = None,
+  content: Option[String] = None
+)
+
+object SystemMessageCustomizeConfig:
+  given Encoder[SystemMessageCustomizeConfig] = deriveEncoder
+  given Decoder[SystemMessageCustomizeConfig] = deriveDecoder

@@ -20,6 +20,14 @@ public class SessionHooks {
     /** Generic hook handler. */
     @FunctionalInterface
     public interface HookHandler {
+        /**
+         * Handles a session hook invocation.
+         *
+         * @param input the hook input payload
+         * @param sessionId the session identifier
+         * @return the hook output payload
+         * @throws Exception if handling fails
+         */
         Map<String, Object> handle(Map<String, Object> input, String sessionId) throws Exception;
     }
 
@@ -39,6 +47,11 @@ public class SessionHooks {
     public HookHandler getOnSessionEnd() { return onSessionEnd; }
     public HookHandler getOnErrorOccurred() { return onErrorOccurred; }
 
+    /**
+     * Returns whether any hook handler is configured.
+     *
+     * @return true if at least one hook handler is set
+     */
     public boolean hasAnyHook() {
         return onPreToolUse != null || onPostToolUse != null || onPreMcpToolCall != null || onUserPromptSubmitted != null
             || onSessionStart != null || onSessionEnd != null || onErrorOccurred != null;

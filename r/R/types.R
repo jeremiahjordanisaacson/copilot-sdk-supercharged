@@ -214,6 +214,342 @@ UserInputResponse <- R6::R6Class(
 
 
 # ---------------------------------------------------------------------------
+# Canvas and Cloud Session Types
+# ---------------------------------------------------------------------------
+
+#' CanvasAction
+#'
+#' Agent-callable action exposed by a canvas.
+#'
+#' @field name Character. Action name.
+#' @field description Character. Action description.
+#' @field input_schema List or NULL. Optional input schema.
+#' @export
+CanvasAction <- R6::R6Class(
+  "CanvasAction",
+  public = list(
+    name = NULL,
+    description = NULL,
+    input_schema = NULL,
+
+    initialize = function(name, description, input_schema = NULL) {
+      self$name <- name
+      self$description <- description
+      self$input_schema <- input_schema
+    },
+
+    to_list = function() {
+      result <- list(name = self$name, description = self$description)
+      if (!is.null(self$input_schema)) result$inputSchema <- self$input_schema
+      result
+    }
+  )
+)
+
+#' CanvasDeclaration
+#'
+#' Declarative metadata for a canvas.
+#'
+#' @field id Character. Canvas identifier.
+#' @field display_name Character. Human-readable display name.
+#' @field description Character. Canvas description.
+#' @field input_schema List or NULL. Optional input schema.
+#' @field actions List of CanvasAction or NULL. Optional actions.
+#' @export
+CanvasDeclaration <- R6::R6Class(
+  "CanvasDeclaration",
+  public = list(
+    id = NULL,
+    display_name = NULL,
+    description = NULL,
+    input_schema = NULL,
+    actions = NULL,
+
+    initialize = function(id, display_name, description, input_schema = NULL, actions = NULL) {
+      self$id <- id
+      self$display_name <- display_name
+      self$description <- description
+      self$input_schema <- input_schema
+      self$actions <- actions
+    },
+
+    to_list = function() {
+      result <- list(id = self$id, displayName = self$display_name, description = self$description)
+      if (!is.null(self$input_schema)) result$inputSchema <- self$input_schema
+      if (!is.null(self$actions)) {
+        result$actions <- lapply(self$actions, function(action) {
+          if (inherits(action, "CanvasAction")) action$to_list() else action
+        })
+      }
+      result
+    }
+  )
+)
+
+#' CanvasOpenResponse
+#'
+#' Response returned from opening a canvas.
+#'
+#' @field url Character or NULL. Optional canvas URL.
+#' @field title Character or NULL. Optional title.
+#' @field status Character or NULL. Optional status text.
+#' @export
+CanvasOpenResponse <- R6::R6Class(
+  "CanvasOpenResponse",
+  public = list(
+    url = NULL,
+    title = NULL,
+    status = NULL,
+
+    initialize = function(url = NULL, title = NULL, status = NULL) {
+      self$url <- url
+      self$title <- title
+      self$status <- status
+    },
+
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$url)) result$url <- self$url
+      if (!is.null(self$title)) result$title <- self$title
+      if (!is.null(self$status)) result$status <- self$status
+      result
+    }
+  )
+)
+
+#' CanvasHostCapabilities
+#'
+#' Host capability details passed to canvas callbacks.
+#'
+#' @field canvases Logical. Whether the host supports canvases.
+#' @export
+CanvasHostCapabilities <- R6::R6Class(
+  "CanvasHostCapabilities",
+  public = list(
+    canvases = FALSE,
+
+    initialize = function(canvases = FALSE) {
+      self$canvases <- canvases
+    },
+
+    to_list = function() {
+      list(canvases = self$canvases)
+    }
+  )
+)
+
+#' CanvasHostContext
+#'
+#' Host context passed to canvas callbacks.
+#'
+#' @field capabilities CanvasHostCapabilities. Host capability details.
+#' @export
+CanvasHostContext <- R6::R6Class(
+  "CanvasHostContext",
+  public = list(
+    capabilities = NULL,
+
+    initialize = function(capabilities = CanvasHostCapabilities$new()) {
+      self$capabilities <- capabilities
+    },
+
+    to_list = function() {
+      list(capabilities = self$capabilities$to_list())
+    }
+  )
+)
+
+#' CanvasOpenContext
+#'
+#' Context provided when opening a canvas.
+#'
+#' @field session_id Character. Session ID.
+#' @field extension_id Character. Extension ID.
+#' @field canvas_id Character. Canvas ID.
+#' @field instance_id Character. Instance ID.
+#' @field input Any. Input payload.
+#' @field host CanvasHostContext or NULL. Optional host context.
+#' @export
+CanvasOpenContext <- R6::R6Class(
+  "CanvasOpenContext",
+  public = list(
+    session_id = NULL,
+    extension_id = NULL,
+    canvas_id = NULL,
+    instance_id = NULL,
+    input = NULL,
+    host = NULL,
+
+    initialize = function(session_id, extension_id, canvas_id, instance_id, input = NULL, host = NULL) {
+      self$session_id <- session_id
+      self$extension_id <- extension_id
+      self$canvas_id <- canvas_id
+      self$instance_id <- instance_id
+      self$input <- input
+      self$host <- host
+    },
+
+    to_list = function() {
+      result <- list(
+        sessionId = self$session_id,
+        extensionId = self$extension_id,
+        canvasId = self$canvas_id,
+        instanceId = self$instance_id,
+        input = self$input
+      )
+      if (!is.null(self$host)) result$host <- self$host$to_list()
+      result
+    }
+  )
+)
+
+#' CanvasActionContext
+#'
+#' Context provided when invoking a canvas action.
+#'
+#' @field session_id Character. Session ID.
+#' @field extension_id Character. Extension ID.
+#' @field canvas_id Character. Canvas ID.
+#' @field instance_id Character. Instance ID.
+#' @field action_name Character. Action name.
+#' @field input Any. Input payload.
+#' @field host CanvasHostContext or NULL. Optional host context.
+#' @export
+CanvasActionContext <- R6::R6Class(
+  "CanvasActionContext",
+  public = list(
+    session_id = NULL,
+    extension_id = NULL,
+    canvas_id = NULL,
+    instance_id = NULL,
+    action_name = NULL,
+    input = NULL,
+    host = NULL,
+
+    initialize = function(session_id, extension_id, canvas_id, instance_id, action_name, input = NULL, host = NULL) {
+      self$session_id <- session_id
+      self$extension_id <- extension_id
+      self$canvas_id <- canvas_id
+      self$instance_id <- instance_id
+      self$action_name <- action_name
+      self$input <- input
+      self$host <- host
+    },
+
+    to_list = function() {
+      result <- list(
+        sessionId = self$session_id,
+        extensionId = self$extension_id,
+        canvasId = self$canvas_id,
+        instanceId = self$instance_id,
+        actionName = self$action_name,
+        input = self$input
+      )
+      if (!is.null(self$host)) result$host <- self$host$to_list()
+      result
+    }
+  )
+)
+
+#' CanvasLifecycleContext
+#'
+#' Context provided for canvas lifecycle events.
+#'
+#' @field session_id Character. Session ID.
+#' @field extension_id Character. Extension ID.
+#' @field canvas_id Character. Canvas ID.
+#' @field instance_id Character. Instance ID.
+#' @field host CanvasHostContext or NULL. Optional host context.
+#' @export
+CanvasLifecycleContext <- R6::R6Class(
+  "CanvasLifecycleContext",
+  public = list(
+    session_id = NULL,
+    extension_id = NULL,
+    canvas_id = NULL,
+    instance_id = NULL,
+    host = NULL,
+
+    initialize = function(session_id, extension_id, canvas_id, instance_id, host = NULL) {
+      self$session_id <- session_id
+      self$extension_id <- extension_id
+      self$canvas_id <- canvas_id
+      self$instance_id <- instance_id
+      self$host <- host
+    },
+
+    to_list = function() {
+      result <- list(
+        sessionId = self$session_id,
+        extensionId = self$extension_id,
+        canvasId = self$canvas_id,
+        instanceId = self$instance_id
+      )
+      if (!is.null(self$host)) result$host <- self$host$to_list()
+      result
+    }
+  )
+)
+
+#' CloudSessionRepository
+#'
+#' GitHub repository metadata for a cloud session.
+#'
+#' @field owner Character. Repository owner.
+#' @field name Character. Repository name.
+#' @field branch Character or NULL. Optional branch.
+#' @export
+CloudSessionRepository <- R6::R6Class(
+  "CloudSessionRepository",
+  public = list(
+    owner = NULL,
+    name = NULL,
+    branch = NULL,
+
+    initialize = function(owner, name, branch = NULL) {
+      self$owner <- owner
+      self$name <- name
+      self$branch <- branch
+    },
+
+    to_list = function() {
+      result <- list(owner = self$owner, name = self$name)
+      if (!is.null(self$branch)) result$branch <- self$branch
+      result
+    }
+  )
+)
+
+#' CloudSessionOptions
+#'
+#' Options for creating a cloud session.
+#'
+#' @field repository CloudSessionRepository or NULL. Optional repository metadata.
+#' @export
+CloudSessionOptions <- R6::R6Class(
+  "CloudSessionOptions",
+  public = list(
+    repository = NULL,
+
+    initialize = function(repository = NULL) {
+      self$repository <- repository
+    },
+
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$repository)) {
+        result$repository <- if (inherits(self$repository, "CloudSessionRepository")) {
+          self$repository$to_list()
+        } else {
+          self$repository
+        }
+      }
+      result
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
 # PingResponse
 # ---------------------------------------------------------------------------
 
@@ -386,27 +722,295 @@ ModelPolicy <- R6::R6Class(
     }
   )
 )
+# ---------------------------------------------------------------------------
+# SlashCommandInputCompletion (enum-like constants)
+# ---------------------------------------------------------------------------
+
+#' SlashCommandInputCompletion
+#'
+#' Constants for slash command input completion types.
+#' @export
+SlashCommandInputCompletion <- list(
+  DIRECTORY = "directory"
+)
+
+# ---------------------------------------------------------------------------
+# SlashCommandKind (enum-like constants)
+# ---------------------------------------------------------------------------
+
+#' SlashCommandKind
+#'
+#' Constants for slash command kinds.
+#' @export
+SlashCommandKind <- list(
+  BUILTIN = "builtin",
+  CLIENT  = "client",
+  SKILL   = "skill"
+)
+
+# ---------------------------------------------------------------------------
+# ModelPickerPriceCategory (enum-like constants)
+# ---------------------------------------------------------------------------
+
+#' ModelPickerPriceCategory
+#'
+#' Constants for model picker price categories.
+#' @export
+ModelPickerPriceCategory <- list(
+  HIGH      = "high",
+  LOW       = "low",
+  MEDIUM    = "medium",
+  VERY_HIGH = "very_high"
+)
+
+# ---------------------------------------------------------------------------
+# SlashCommandInput
+# ---------------------------------------------------------------------------
+
+#' SlashCommandInput
+#'
+#' Input configuration for a slash command.
+#'
+#' @field hint Character. Hint text for the input.
+#' @field completion Character or NULL. Completion type.
+#' @export
+SlashCommandInput <- R6::R6Class(
+  "SlashCommandInput",
+  public = list(
+    hint = NULL,
+    completion = NULL,
+
+    #' @description Create a new SlashCommandInput.
+    #' @param hint Character. Required.
+    #' @param completion Character or NULL.
+    initialize = function(hint, completion = NULL) {
+      self$hint <- hint
+      self$completion <- completion
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list(hint = self$hint)
+      if (!is.null(self$completion)) result$completion <- self$completion
+      result
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# SlashCommandInfo
+# ---------------------------------------------------------------------------
+
+#' SlashCommandInfo
+#'
+#' Information about a slash command.
+#'
+#' @field allow_during_agent_execution Logical. Whether command can run during agent execution.
+#' @field description Character. Description of the command.
+#' @field kind Character. Kind of command (builtin, client, skill).
+#' @field name Character. Name of the command.
+#' @field aliases Character vector or NULL. Alternative names.
+#' @field experimental Logical or NULL. Whether command is experimental.
+#' @field input SlashCommandInput or NULL. Input configuration.
+#' @export
+SlashCommandInfo <- R6::R6Class(
+  "SlashCommandInfo",
+  public = list(
+    allow_during_agent_execution = NULL,
+    description = NULL,
+    kind = NULL,
+    name = NULL,
+    aliases = NULL,
+    experimental = NULL,
+    input = NULL,
+
+    #' @description Create a new SlashCommandInfo.
+    #' @param allow_during_agent_execution Logical.
+    #' @param description Character.
+    #' @param kind Character.
+    #' @param name Character.
+    #' @param aliases Character vector or NULL.
+    #' @param experimental Logical or NULL.
+    #' @param input SlashCommandInput or NULL.
+    initialize = function(allow_during_agent_execution, description, kind, name,
+                          aliases = NULL, experimental = NULL, input = NULL) {
+      self$allow_during_agent_execution <- allow_during_agent_execution
+      self$description <- description
+      self$kind <- kind
+      self$name <- name
+      self$aliases <- aliases
+      self$experimental <- experimental
+      self$input <- input
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list(
+        allowDuringAgentExecution = self$allow_during_agent_execution,
+        description = self$description,
+        kind = self$kind,
+        name = self$name
+      )
+      if (!is.null(self$aliases)) result$aliases <- self$aliases
+      if (!is.null(self$experimental)) result$experimental <- self$experimental
+      if (!is.null(self$input)) result$input <- self$input$to_list()
+      result
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# CommandsInvokeRequest
+# ---------------------------------------------------------------------------
+
+#' CommandsInvokeRequest
+#'
+#' Request to invoke a command.
+#'
+#' @field name Character. Command name.
+#' @field input Character or NULL. Command input.
+#' @export
+CommandsInvokeRequest <- R6::R6Class(
+  "CommandsInvokeRequest",
+  public = list(
+    name = NULL,
+    input = NULL,
+
+    #' @description Create a new CommandsInvokeRequest.
+    #' @param name Character.
+    #' @param input Character or NULL.
+    initialize = function(name, input = NULL) {
+      self$name <- name
+      self$input <- input
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list(name = self$name)
+      if (!is.null(self$input)) result$input <- self$input
+      result
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# CommandsListRequest
+# ---------------------------------------------------------------------------
+
+#' CommandsListRequest
+#'
+#' Request to list available commands.
+#'
+#' @field include_builtins Logical or NULL.
+#' @field include_client_commands Logical or NULL.
+#' @field include_skills Logical or NULL.
+#' @export
+CommandsListRequest <- R6::R6Class(
+  "CommandsListRequest",
+  public = list(
+    include_builtins = NULL,
+    include_client_commands = NULL,
+    include_skills = NULL,
+
+    #' @description Create a new CommandsListRequest.
+    #' @param include_builtins Logical or NULL.
+    #' @param include_client_commands Logical or NULL.
+    #' @param include_skills Logical or NULL.
+    initialize = function(include_builtins = NULL, include_client_commands = NULL,
+                          include_skills = NULL) {
+      self$include_builtins <- include_builtins
+      self$include_client_commands <- include_client_commands
+      self$include_skills <- include_skills
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$include_builtins)) result$includeBuiltins <- self$include_builtins
+      if (!is.null(self$include_client_commands)) result$includeClientCommands <- self$include_client_commands
+      if (!is.null(self$include_skills)) result$includeSkills <- self$include_skills
+      result
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# ModelBillingTokenPrices
+# ---------------------------------------------------------------------------
+
+#' ModelBillingTokenPrices
+#'
+#' Token prices for model billing.
+#'
+#' @field batch_size Integer or NULL.
+#' @field cache_price Integer or NULL.
+#' @field input_price Integer or NULL.
+#' @field output_price Integer or NULL.
+#' @export
+ModelBillingTokenPrices <- R6::R6Class(
+  "ModelBillingTokenPrices",
+  public = list(
+    batch_size = NULL,
+    cache_price = NULL,
+    input_price = NULL,
+    output_price = NULL,
+
+    #' @description Create a new ModelBillingTokenPrices.
+    #' @param batch_size Integer or NULL.
+    #' @param cache_price Integer or NULL.
+    #' @param input_price Integer or NULL.
+    #' @param output_price Integer or NULL.
+    initialize = function(batch_size = NULL, cache_price = NULL,
+                          input_price = NULL, output_price = NULL) {
+      self$batch_size <- batch_size
+      self$cache_price <- cache_price
+      self$input_price <- input_price
+      self$output_price <- output_price
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$batch_size)) result$batchSize <- self$batch_size
+      if (!is.null(self$cache_price)) result$cachePrice <- self$cache_price
+      if (!is.null(self$input_price)) result$inputPrice <- self$input_price
+      if (!is.null(self$output_price)) result$outputPrice <- self$output_price
+      result
+    }
+  )
+)
 
 #' ModelBilling
 #'
 #' Model billing information.
 #'
 #' @field multiplier Numeric. Billing multiplier.
+#' @field token_prices ModelBillingTokenPrices or NULL. Token prices.
+#' @field picker_price_category Character or NULL. Price category.
 #' @export
 ModelBilling <- R6::R6Class(
   "ModelBilling",
   public = list(
     multiplier = NULL,
+    token_prices = NULL,
+    picker_price_category = NULL,
 
     #' @description Create a new ModelBilling.
     #' @param multiplier Numeric.
-    initialize = function(multiplier) {
+    #' @param token_prices ModelBillingTokenPrices or NULL.
+    #' @param picker_price_category Character or NULL.
+    initialize = function(multiplier, token_prices = NULL, picker_price_category = NULL) {
       self$multiplier <- multiplier
+      self$token_prices <- token_prices
+      self$picker_price_category <- picker_price_category
     },
 
     #' @description Convert to list.
     to_list = function() {
-      list(multiplier = self$multiplier)
+      result <- list(multiplier = self$multiplier)
+      if (!is.null(self$token_prices)) result$tokenPrices <- self$token_prices$to_list()
+      if (!is.null(self$picker_price_category)) result$pickerPriceCategory <- self$picker_price_category
+      result
     }
   )
 )
@@ -500,7 +1104,20 @@ model_info_from_list <- function(obj) {
 
   billing <- NULL
   if (!is.null(obj$billing)) {
-    billing <- ModelBilling$new(multiplier = obj$billing$multiplier)
+    token_prices <- NULL
+    if (!is.null(obj$billing$tokenPrices)) {
+      token_prices <- ModelBillingTokenPrices$new(
+        batch_size = obj$billing$tokenPrices$batchSize,
+        cache_price = obj$billing$tokenPrices$cachePrice,
+        input_price = obj$billing$tokenPrices$inputPrice,
+        output_price = obj$billing$tokenPrices$outputPrice
+      )
+    }
+    billing <- ModelBilling$new(
+      multiplier = obj$billing$multiplier,
+      token_prices = token_prices,
+      picker_price_category = obj$billing$pickerPriceCategory
+    )
   }
 
   ModelInfo$new(
@@ -513,6 +1130,113 @@ model_info_from_list <- function(obj) {
     default_reasoning_effort = obj$defaultReasoningEffort
   )
 }
+
+
+# ---------------------------------------------------------------------------
+# ExitPlanModeRequest / ExitPlanModeResult
+# ---------------------------------------------------------------------------
+
+#' ExitPlanModeRequest
+#'
+#' Request to exit plan mode from the agent.
+#'
+#' @field summary Character. Summary of the plan.
+#' @field plan_content Character or NULL. Full plan content.
+#' @field actions Character vector. Available actions.
+#' @field recommended_action Character. The recommended action.
+#' @export
+ExitPlanModeRequest <- R6::R6Class(
+  "ExitPlanModeRequest",
+  public = list(
+    summary = NULL,
+    plan_content = NULL,
+    actions = NULL,
+    recommended_action = NULL,
+
+    #' @description Create a new ExitPlanModeRequest.
+    #' @param summary Character. Summary of the plan.
+    #' @param actions Character vector. Available actions.
+    #' @param recommended_action Character. The recommended action.
+    #' @param plan_content Character or NULL. Full plan content.
+    initialize = function(summary, actions, recommended_action, plan_content = NULL) {
+      self$summary <- summary
+      self$plan_content <- plan_content
+      self$actions <- actions
+      self$recommended_action <- recommended_action
+    }
+  )
+)
+
+#' ExitPlanModeResult
+#'
+#' Response to an exit-plan-mode request.
+#'
+#' @field approved Logical. Whether the user approved exiting plan mode.
+#' @field selected_action Character or NULL. Selected action.
+#' @field feedback Character or NULL. User feedback.
+#' @export
+ExitPlanModeResult <- R6::R6Class(
+  "ExitPlanModeResult",
+  public = list(
+    approved = NULL,
+    selected_action = NULL,
+    feedback = NULL,
+
+    #' @description Create a new ExitPlanModeResult.
+    #' @param approved Logical. Whether the user approved exiting plan mode.
+    #' @param selected_action Character or NULL. Selected action.
+    #' @param feedback Character or NULL. User feedback.
+    initialize = function(approved, selected_action = NULL, feedback = NULL) {
+      self$approved <- approved
+      self$selected_action <- selected_action
+      self$feedback <- feedback
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list(approved = self$approved)
+      if (!is.null(self$selected_action)) result$selectedAction <- self$selected_action
+      if (!is.null(self$feedback)) result$feedback <- self$feedback
+      result
+    }
+  )
+)
+
+
+# ---------------------------------------------------------------------------
+# TraceContext
+# ---------------------------------------------------------------------------
+
+#' TraceContext
+#'
+#' W3C Trace Context propagation data for distributed tracing.
+#'
+#' @field traceparent Character or NULL.
+#' @field tracestate Character or NULL.
+#' @export
+TraceContext <- R6::R6Class(
+  "TraceContext",
+  public = list(
+    traceparent = NULL,
+    tracestate = NULL,
+
+    #' @description Create a new TraceContext.
+    #' @param traceparent Character or NULL.
+    #' @param tracestate Character or NULL.
+    initialize = function(traceparent = NULL, tracestate = NULL) {
+      self$traceparent <- traceparent
+      self$tracestate <- tracestate
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$traceparent)) result$traceparent <- self$traceparent
+      if (!is.null(self$tracestate)) result$tracestate <- self$tracestate
+      result
+    }
+  )
+)
 
 
 # ---------------------------------------------------------------------------
@@ -812,6 +1536,37 @@ MessageOptions <- R6::R6Class(
 #' @export
 RESPONSE_FORMATS <- c("text", "image", "json_object")
 
+#' ImageOptions
+#'
+#' Image generation options.
+#'
+#' @field size Character or NULL. Image size.
+#' @field quality Character or NULL. Image quality.
+#' @field style Character or NULL. Image style.
+#' @export
+ImageOptions <- R6::R6Class(
+  "ImageOptions",
+  public = list(
+    size = NULL,
+    quality = NULL,
+    style = NULL,
+
+    initialize = function(size = NULL, quality = NULL, style = NULL) {
+      self$size <- size
+      self$quality <- quality
+      self$style <- style
+    },
+
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$size)) result$size <- self$size
+      if (!is.null(self$quality)) result$quality <- self$quality
+      if (!is.null(self$style)) result$style <- self$style
+      result
+    }
+  )
+)
+
 #' Create image options for image generation
 #'
 #' @param size Image size (e.g. "1024x1024")
@@ -820,11 +1575,7 @@ RESPONSE_FORMATS <- c("text", "image", "json_object")
 #' @return A list of image options
 #' @export
 image_options <- function(size = NULL, quality = NULL, style = NULL) {
-  opts <- list()
-  if (!is.null(size)) opts$size <- size
-  if (!is.null(quality)) opts$quality <- quality
-  if (!is.null(style)) opts$style <- style
-  opts
+  ImageOptions$new(size = size, quality = quality, style = style)$to_list()
 }
 
 #' Parse assistant image data from JSON response
@@ -1230,6 +1981,89 @@ SectionOverride <- R6::R6Class(
   )
 )
 
+#' SystemMessageAppendConfig
+#'
+#' Append mode system message configuration.
+#'
+#' @field mode Character. Always "append".
+#' @field content Character or NULL. Optional appended content.
+#' @export
+SystemMessageAppendConfig <- R6::R6Class(
+  "SystemMessageAppendConfig",
+  public = list(
+    mode = "append",
+    content = NULL,
+
+    initialize = function(content = NULL) {
+      self$content <- content
+    },
+
+    to_list = function() {
+      result <- list(mode = "append")
+      if (!is.null(self$content)) result$content <- self$content
+      result
+    }
+  )
+)
+
+#' SystemMessageReplaceConfig
+#'
+#' Replace mode system message configuration.
+#'
+#' @field mode Character. Always "replace".
+#' @field content Character. Replacement system message content.
+#' @export
+SystemMessageReplaceConfig <- R6::R6Class(
+  "SystemMessageReplaceConfig",
+  public = list(
+    mode = "replace",
+    content = NULL,
+
+    initialize = function(content) {
+      self$content <- content
+    },
+
+    to_list = function() {
+      list(mode = "replace", content = self$content)
+    }
+  )
+)
+
+#' SystemMessageCustomizeConfig
+#'
+#' Customize mode system message configuration.
+#'
+#' @field mode Character. Always "customize".
+#' @field sections Named list of SectionOverride or NULL. Section overrides.
+#' @field content Character or NULL. Optional appended content.
+#' @export
+SystemMessageCustomizeConfig <- R6::R6Class(
+  "SystemMessageCustomizeConfig",
+  public = list(
+    mode = "customize",
+    sections = NULL,
+    content = NULL,
+
+    initialize = function(sections = NULL, content = NULL) {
+      self$sections <- sections
+      self$content <- content
+    },
+
+    to_list = function() {
+      result <- list(mode = "customize")
+      if (!is.null(self$sections)) {
+        sections_list <- list()
+        for (key in names(self$sections)) {
+          sections_list[[key]] <- self$sections[[key]]$to_list()
+        }
+        result$sections <- sections_list
+      }
+      if (!is.null(self$content)) result$content <- self$content
+      result
+    }
+  )
+)
+
 #' SystemMessageConfig
 #'
 #' System message configuration for session creation.
@@ -1492,7 +2326,7 @@ SessionConfig <- R6::R6Class(
       result <- list()
       if (!is.null(self$model)) result$model <- self$model
       if (!is.null(self$system_message)) {
-        if (inherits(self$system_message, "SystemMessageConfig")) {
+        if (inherits(self$system_message, c("SystemMessageConfig", "SystemMessageAppendConfig", "SystemMessageReplaceConfig", "SystemMessageCustomizeConfig"))) {
           result$systemMessage <- self$system_message$to_list()
         } else {
           result$systemMessage <- self$system_message
@@ -1530,6 +2364,110 @@ SessionConfig <- R6::R6Class(
         })
         result$commands <- cmds_list
       }
+      result
+    }
+  )
+)
+
+
+# ---------------------------------------------------------------------------
+# Experimental: SkillsLoadDiagnostics
+# ---------------------------------------------------------------------------
+
+#' SkillsLoadDiagnostics (Experimental)
+#'
+#' Diagnostics from loading skills.
+#'
+#' @field errors Character vector. Error messages.
+#' @field warnings Character vector. Warning messages.
+#' @export
+SkillsLoadDiagnostics <- R6::R6Class(
+  "SkillsLoadDiagnostics",
+  public = list(
+    errors = NULL,
+    warnings = NULL,
+
+    #' @description Create a new SkillsLoadDiagnostics.
+    #' @param errors Character vector.
+    #' @param warnings Character vector.
+    initialize = function(errors, warnings) {
+      self$errors <- errors
+      self$warnings <- warnings
+    },
+
+    #' @description Convert to list.
+    to_list = function() {
+      list(
+        errors = self$errors,
+        warnings = self$warnings
+      )
+    }
+  )
+)
+
+# ---------------------------------------------------------------------------
+# Remote Session Types
+# ---------------------------------------------------------------------------
+
+#' Valid remote session mode values
+#'
+#' Per-session remote mode. "off" disables remote, "export" exports session
+#' events to Mission Control without enabling remote steering, "on" enables
+#' both export and remote steering.
+#' @export
+REMOTE_SESSION_MODES <- c("export", "off", "on")
+
+#' RemoteEnableRequest (Experimental)
+#'
+#' Request to enable remote mode for a session.
+#'
+#' @field mode Character or NULL. Per-session remote mode.
+#' @export
+RemoteEnableRequest <- R6::R6Class(
+  "RemoteEnableRequest",
+  public = list(
+    mode = NULL,
+
+    #' @description Create a new RemoteEnableRequest.
+    #' @param mode Character or NULL. Per-session remote mode.
+    initialize = function(mode = NULL) {
+      self$mode <- mode
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$mode)) result$mode <- self$mode
+      result
+    }
+  )
+)
+
+#' RemoteEnableResult (Experimental)
+#'
+#' Result of enabling remote mode for a session.
+#'
+#' @field remote_steerable Logical. Whether remote steering is enabled.
+#' @field url Character or NULL. Mission Control frontend URL for this session.
+#' @export
+RemoteEnableResult <- R6::R6Class(
+  "RemoteEnableResult",
+  public = list(
+    remote_steerable = NULL,
+    url = NULL,
+
+    #' @description Create a new RemoteEnableResult.
+    #' @param remote_steerable Logical. Whether remote steering is enabled.
+    #' @param url Character or NULL. Mission Control frontend URL.
+    initialize = function(remote_steerable, url = NULL) {
+      self$remote_steerable <- remote_steerable
+      self$url <- url
+    },
+
+    #' @description Convert to list for JSON serialization.
+    to_list = function() {
+      result <- list(remoteSteerable = self$remote_steerable)
+      if (!is.null(self$url)) result$url <- self$url
       result
     }
   )

@@ -7,8 +7,12 @@ use Carp qw(croak);
 use IPC::Open3;
 use Symbol 'gensym';
 use File::Which qw(which);
+use File::Spec;
+use File::Basename;
+use Cwd qw(abs_path);
 use JSON::PP;
 use Scalar::Util qw(blessed);
+use POSIX ();
 
 use GitHub::Copilot::JsonRpcClient;
 use GitHub::Copilot::Session;
@@ -61,6 +65,7 @@ sub new {
     my ($class, %args) = @_;
 
     my $cli_path   = $args{cli_path};
+    my $cli_url    = $args{cli_url};
     my $cli_args   = $args{cli_args}   // [];
     my $cwd        = $args{cwd};
     my $log_level  = $args{log_level}  // 'info';
@@ -78,17 +83,39 @@ sub new {
         $use_logged_in_user = defined $github_token ? 0 : 1;
     }
 
-    # Try to find CLI if not specified
-    if (!defined $cli_path) {
-        $cli_path = which('copilot') // which('github-copilot');
-        croak "Copilot CLI not found. Provide cli_path or install copilot on PATH."
-            unless defined $cli_path;
-    }
+    # When cli_url is provided, skip CLI binary detection (connect to external server)
+    if (!defined $cli_url) {
+        # Try to find CLI if not specified
+        if (!defined $cli_path) {
+            $cli_path = $ENV{COPILOT_CLI_PATH};
+            if (!defined $cli_path || !-e $cli_path) {
+                # Try repo-relative paths
+                my $script_dir = dirname(abs_path(__FILE__));
+                my @candidates = (
+                    File::Spec->catfile($script_dir, '..', '..', '..', '..', 'nodejs', 'node_modules', '@github', 'copilot', 'index.js'),
+                    File::Spec->catfile($script_dir, '..', '..', '..', '..', 'test', 'harness', 'node_modules', '@github', 'copilot', 'npm-loader.js'),
+                );
+                $cli_path = undef;
+                for my $candidate (@candidates) {
+                    if (-e $candidate) {
+                        $cli_path = abs_path($candidate);
+                        last;
+                    }
+                }
+            }
+            if (!defined $cli_path) {
+                $cli_path = which('copilot') // which('github-copilot');
+            }
+            croak "Copilot CLI not found. Provide cli_path, cli_url, or install copilot on PATH."
+                unless defined $cli_path;
+        }
 
-    croak "Copilot CLI not found at '$cli_path'" unless -e $cli_path;
+        croak "Copilot CLI not found at '$cli_path'" unless -e $cli_path;
+    }
 
     my $self = bless {
         cli_path           => $cli_path,
+        cli_url            => $cli_url,
         cli_args           => $cli_args,
         cwd                => $cwd,
         log_level          => $log_level,
@@ -104,6 +131,7 @@ sub new {
         _state             => 'disconnected',
         _sessions          => {},
         _models_cache      => undef,
+        on_get_trace_context => $args{on_get_trace_context},
     }, $class;
 
     return $self;
@@ -161,6 +189,13 @@ sub stop {
         kill('TERM', $self->{_process_pid});
         waitpid($self->{_process_pid}, 0);
         $self->{_process_pid} = undef;
+    }
+
+    # Kill stderr reader
+    if ($self->{_stderr_pid}) {
+        kill('TERM', $self->{_stderr_pid});
+        waitpid($self->{_stderr_pid}, 0);
+        $self->{_stderr_pid} = undef;
     }
 
     # Close filehandles
@@ -231,6 +266,16 @@ sub create_session {
         $session->register_hooks($config->hooks);
     }
 
+    # Register exit plan mode handler
+    if ($config->on_exit_plan_mode) {
+        $session->register_exit_plan_mode_handler($config->on_exit_plan_mode);
+    }
+
+    # Register trace context provider
+    if ($self->{on_get_trace_context}) {
+        $session->register_trace_context_provider($self->{on_get_trace_context});
+    }
+
     # Session supports: idleTimeout, elicitation (requestElicitation),
     # systemMessage / system_prompt, skills / skillDirectories,
     # excludedTools, requestHeaders, modelCapabilities,
@@ -288,6 +333,16 @@ sub resume_session {
     }
     if ($config->hooks) {
         $session->register_hooks($config->hooks);
+    }
+
+    # Register exit plan mode handler
+    if ($config->on_exit_plan_mode) {
+        $session->register_exit_plan_mode_handler($config->on_exit_plan_mode);
+    }
+
+    # Register trace context provider
+    if ($self->{on_get_trace_context}) {
+        $session->register_trace_context_provider($self->{on_get_trace_context});
     }
 
     $self->{_sessions}{$resumed_id} = $session;
@@ -461,13 +516,17 @@ sub _start_cli_server {
     );
     $self->{_client}->start();
 
-    # Start a thread to read stderr and forward it
-    threads->create(sub {
+    # Fork a child process to read stderr and forward it
+    my $stderr_pid = fork();
+    if (defined $stderr_pid && $stderr_pid == 0) {
+        # Child: read stderr lines until EOF
         while (my $line = <$stderr_fh>) {
             chomp $line;
             print STDERR "[CLI subprocess] $line\n" if $line;
         }
-    })->detach();
+        POSIX::_exit(0);
+    }
+    $self->{_stderr_pid} = $stderr_pid;
 }
 
 # --------------------------------------------------------------------------
@@ -514,6 +573,12 @@ sub _setup_handlers {
     $self->{_client}->set_request_handler('hooks.invoke', sub {
         my ($params) = @_;
         return $self->_handle_hooks_invoke($params);
+    });
+
+    # Handle exitPlanMode.request from server
+    $self->{_client}->set_request_handler('exitPlanMode.request', sub {
+        my ($params) = @_;
+        return $self->_handle_exit_plan_mode_request($params);
     });
 }
 
@@ -670,6 +735,25 @@ sub _handle_hooks_invoke {
 
     my $output = $session->_handle_hooks_invoke($hook_type, $input);
     return { output => $output };
+}
+
+sub _handle_exit_plan_mode_request {
+    my ($self, $params) = @_;
+    my $session_id = $params->{sessionId};
+    croak "Invalid exit plan mode request payload" unless $session_id;
+
+    my $session = $self->{_sessions}{$session_id};
+    croak "Session not found: $session_id" unless $session;
+
+    my $result;
+    eval {
+        $result = $session->_handle_exit_plan_mode_request($params);
+    };
+    if ($@) {
+        return { approved => \1 };
+    }
+
+    return $result;
 }
 
 # --------------------------------------------------------------------------

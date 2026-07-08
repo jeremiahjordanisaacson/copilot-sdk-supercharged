@@ -330,6 +330,8 @@ final class CopilotClient
         args ~= "--log-level";
         args ~= _opts.logLevel;
         args ~= "--stdio";
+        if (_opts.remote)
+            args ~= "--remote";
         args ~= _opts.cliArgs;
 
         auto stdinPipe  = pipe();

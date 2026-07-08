@@ -128,6 +128,429 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
 
 @end
 
+#pragma mark - CPTraceContext
+
+@implementation CPTraceContext
+@end
+
+#pragma mark - CPSlashCommandInput
+
+@implementation CPSlashCommandInput
+
+- (instancetype)initWithHint:(NSString *)hint
+                  completion:(CPSlashCommandInputCompletion)completion
+               hasCompletion:(BOOL)hasCompletion {
+    self = [super init];
+    if (self) {
+        _hint = [hint copy];
+        _completion = completion;
+        _hasCompletion = hasCompletion;
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPSlashCommandInfo
+
+@implementation CPSlashCommandInfo
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _allowDuringAgentExecution = [dict[@"allowDuringAgentExecution"] boolValue];
+        _commandDescription = dict[@"description"] ?: @"";
+        _name = dict[@"name"] ?: @"";
+
+        NSString *kindStr = dict[@"kind"];
+        if ([kindStr isEqualToString:@"client"]) _kind = CPSlashCommandKindClient;
+        else if ([kindStr isEqualToString:@"skill"]) _kind = CPSlashCommandKindSkill;
+        else _kind = CPSlashCommandKindBuiltin;
+
+        _aliases = dict[@"aliases"];
+        _experimental = dict[@"experimental"];
+
+        NSDictionary *inputDict = dict[@"input"];
+        if (inputDict) {
+            NSString *comp = inputDict[@"completion"];
+            _input = [[CPSlashCommandInput alloc] initWithHint:inputDict[@"hint"] ?: @""
+                                                    completion:CPSlashCommandInputCompletionDirectory
+                                                 hasCompletion:(comp != nil)];
+        }
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPCommandsInvokeRequest
+
+@implementation CPCommandsInvokeRequest
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"name"] = self.name;
+    if (self.input) dict[@"input"] = self.input;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPCommandsListRequest
+
+@implementation CPCommandsListRequest
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    if (self.includeBuiltins) dict[@"includeBuiltins"] = self.includeBuiltins;
+    if (self.includeClientCommands) dict[@"includeClientCommands"] = self.includeClientCommands;
+    if (self.includeSkills) dict[@"includeSkills"] = self.includeSkills;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPModelBillingTokenPrices
+
+@implementation CPModelBillingTokenPrices
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _batchSize = dict[@"batchSize"];
+        _cachePrice = dict[@"cachePrice"];
+        _inputPrice = dict[@"inputPrice"];
+        _outputPrice = dict[@"outputPrice"];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPSkillsLoadDiagnostics
+
+@implementation CPSkillsLoadDiagnostics
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _errors = dict[@"errors"] ?: @[];
+        _warnings = dict[@"warnings"] ?: @[];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPRemoteEnableRequest
+
+@implementation CPRemoteEnableRequest
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    if (self.mode) {
+        switch ((CPRemoteSessionMode)[self.mode integerValue]) {
+            case CPRemoteSessionModeExport: dict[@"mode"] = @"export"; break;
+            case CPRemoteSessionModeOff:    dict[@"mode"] = @"off"; break;
+            case CPRemoteSessionModeOn:     dict[@"mode"] = @"on"; break;
+        }
+    }
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPRemoteEnableResult
+
+@implementation CPRemoteEnableResult
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _remoteSteerable = [dict[@"remoteSteerable"] boolValue];
+        _url = dict[@"url"];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPCloudSessionRepository
+
+@implementation CPCloudSessionRepository
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"owner"] = self.owner ?: @"";
+    dict[@"name"] = self.name ?: @"";
+    if (self.branch) dict[@"branch"] = self.branch;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPCloudSessionOptions
+
+@implementation CPCloudSessionOptions
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    if (self.repository) dict[@"repository"] = [self.repository toDictionary];
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPCanvasAction
+
+@implementation CPCanvasAction
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"name"] = self.name ?: @"";
+    dict[@"description"] = self.actionDescription ?: @"";
+    if (self.inputSchema) dict[@"inputSchema"] = self.inputSchema;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPCanvasDeclaration
+
+@implementation CPCanvasDeclaration
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"id"] = self.canvasId ?: @"";
+    dict[@"displayName"] = self.displayName ?: @"";
+    dict[@"description"] = self.canvasDescription ?: @"";
+    if (self.inputSchema) dict[@"inputSchema"] = self.inputSchema;
+    if (self.actions.count > 0) {
+        NSMutableArray *actions = [NSMutableArray arrayWithCapacity:self.actions.count];
+        for (CPCanvasAction *action in self.actions) {
+            [actions addObject:[action toDictionary]];
+        }
+        dict[@"actions"] = actions;
+    }
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPCanvasOpenResponse
+
+@implementation CPCanvasOpenResponse
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    if (self.url) dict[@"url"] = self.url;
+    if (self.title) dict[@"title"] = self.title;
+    if (self.status) dict[@"status"] = self.status;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPCanvasHostCapabilities
+
+@implementation CPCanvasHostCapabilities
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _canvases = [dict[@"canvases"] boolValue];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPCanvasHostContext
+
+@implementation CPCanvasHostContext
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        NSDictionary *capabilities = dict[@"capabilities"];
+        _capabilities = capabilities ? [[CPCanvasHostCapabilities alloc] initWithDictionary:capabilities] : [[CPCanvasHostCapabilities alloc] init];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPCanvasOpenContext
+
+@implementation CPCanvasOpenContext
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _sessionId = [(dict[@"sessionId"] ?: @"") copy];
+        _extensionId = [(dict[@"extensionId"] ?: @"") copy];
+        _canvasId = [(dict[@"canvasId"] ?: @"") copy];
+        _instanceId = [(dict[@"instanceId"] ?: @"") copy];
+        _input = dict[@"input"];
+        NSDictionary *host = dict[@"host"];
+        _host = host ? [[CPCanvasHostContext alloc] initWithDictionary:host] : nil;
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPCanvasActionContext
+
+@implementation CPCanvasActionContext
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _sessionId = [(dict[@"sessionId"] ?: @"") copy];
+        _extensionId = [(dict[@"extensionId"] ?: @"") copy];
+        _canvasId = [(dict[@"canvasId"] ?: @"") copy];
+        _instanceId = [(dict[@"instanceId"] ?: @"") copy];
+        _actionName = [(dict[@"actionName"] ?: @"") copy];
+        _input = dict[@"input"];
+        NSDictionary *host = dict[@"host"];
+        _host = host ? [[CPCanvasHostContext alloc] initWithDictionary:host] : nil;
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPCanvasLifecycleContext
+
+@implementation CPCanvasLifecycleContext
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _sessionId = [(dict[@"sessionId"] ?: @"") copy];
+        _extensionId = [(dict[@"extensionId"] ?: @"") copy];
+        _canvasId = [(dict[@"canvasId"] ?: @"") copy];
+        _instanceId = [(dict[@"instanceId"] ?: @"") copy];
+        NSDictionary *host = dict[@"host"];
+        _host = host ? [[CPCanvasHostContext alloc] initWithDictionary:host] : nil;
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPSectionOverride
+
+@implementation CPSectionOverride
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _action = [(dict[@"action"] ?: @"") copy];
+        _content = [dict[@"content"] copy];
+    }
+    return self;
+}
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"action"] = self.action ?: @"";
+    if (self.content) dict[@"content"] = self.content;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPSystemMessageAppendConfig
+
+@implementation CPSystemMessageAppendConfig
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"mode"] = @"append";
+    if (self.content) dict[@"content"] = self.content;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPSystemMessageReplaceConfig
+
+@implementation CPSystemMessageReplaceConfig
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"mode"] = @"replace";
+    dict[@"content"] = self.content ?: @"";
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPSystemMessageCustomizeConfig
+
+@implementation CPSystemMessageCustomizeConfig
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"mode"] = @"customize";
+    if (self.sections.count > 0) {
+        NSMutableDictionary *sections = [NSMutableDictionary dictionaryWithCapacity:self.sections.count];
+        [self.sections enumerateKeysAndObjectsUsingBlock:^(NSString *key, CPSectionOverride *obj, BOOL *stop) {
+            sections[key] = [obj toDictionary];
+        }];
+        dict[@"sections"] = sections;
+    }
+    if (self.content) dict[@"content"] = self.content;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPUserInputRequest
+
+@implementation CPUserInputRequest
+
+- (instancetype)initWithDictionary:(NSDictionary<NSString *, id> *)dict {
+    self = [super init];
+    if (self) {
+        _question = [dict[@"question"] copy];
+        _choices = [dict[@"choices"] copy];
+        _allowFreeform = dict[@"allowFreeform"];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - CPUserInputResponse
+
+@implementation CPUserInputResponse
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    return @{
+        @"answer": self.answer ?: @"",
+        @"wasFreeform": @(self.wasFreeform),
+    };
+}
+
+@end
+
+#pragma mark - CPImageOptions
+
+@implementation CPImageOptions
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    if (self.size) dict[@"size"] = self.size;
+    if (self.quality) dict[@"quality"] = self.quality;
+    if (self.style) dict[@"style"] = self.style;
+    return [dict copy];
+}
+
+@end
+
 #pragma mark - CPSessionEvent
 
 @implementation CPSessionEvent
@@ -244,6 +667,10 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
     if (self.systemMessage) dict[@"systemMessage"] = self.systemMessage;
     if (self.githubToken) dict[@"githubToken"] = self.githubToken;
     if (self.instructionDirectories) dict[@"instructionDirectories"] = self.instructionDirectories;
+    if (self.permissionHandler) dict[@"requestPermission"] = @YES;
+    if (self.exitPlanModeHandler) dict[@"requestExitPlanMode"] = @YES;
+    if (self.enableSessionTelemetry) dict[@"enableSessionTelemetry"] = @YES;
+    if (self.modelCapabilities) dict[@"modelCapabilities"] = self.modelCapabilities;
 
     if (self.hooks && [self.hooks hasAnyHandler]) {
         dict[@"hooks"] = @YES;

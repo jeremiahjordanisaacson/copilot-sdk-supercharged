@@ -134,7 +134,7 @@ final class Types {
     @ToString(includeNames = true)
     static class PingResponse {
         String message
-        long timestamp
+        String timestamp
         Integer protocolVersion
     }
 
@@ -340,5 +340,237 @@ final class Types {
     static class StopError {
         String message
         StopError(String message) { this.message = message }
+    }
+
+    /** Request payload for an exit plan mode request from the server. */
+    @ToString(includeNames = true)
+    static class ExitPlanModeRequest {
+        String sessionId
+    }
+
+    /** Response payload for an exit plan mode request. */
+    @ToString(includeNames = true)
+    static class ExitPlanModeResponse {
+        boolean approved
+
+        ExitPlanModeResponse() {}
+        ExitPlanModeResponse(boolean approved) { this.approved = approved }
+    }
+
+    /** Trace context for distributed tracing. */
+    @ToString(includeNames = true)
+    static class TraceContext {
+        String traceparent
+        String tracestate
+    }
+
+    /** Completion type for slash command input. */
+    enum SlashCommandInputCompletion {
+        DIRECTORY
+    }
+
+    /** Kind of slash command. */
+    enum SlashCommandKind {
+        BUILTIN, CLIENT, SKILL
+    }
+
+    /** Price category for the model picker. */
+    enum ModelPickerPriceCategory {
+        HIGH, LOW, MEDIUM, VERY_HIGH
+    }
+
+    /** Input configuration for a slash command. */
+    @ToString(includeNames = true)
+    static class SlashCommandInput {
+        String hint
+        SlashCommandInputCompletion completion
+    }
+
+    /** Information about a slash command. */
+    @ToString(includeNames = true)
+    static class SlashCommandInfo {
+        boolean allowDuringAgentExecution
+        String description
+        SlashCommandKind kind
+        String name
+        List<String> aliases
+        Boolean experimental
+        SlashCommandInput input
+    }
+
+    /** Request to invoke a command. */
+    @ToString(includeNames = true)
+    static class CommandsInvokeRequest {
+        String name
+        String input
+    }
+
+    /** Request to list commands. */
+    @ToString(includeNames = true)
+    static class CommandsListRequest {
+        Boolean includeBuiltins
+        Boolean includeClientCommands
+        Boolean includeSkills
+    }
+
+    /** Token prices for model billing. */
+    @ToString(includeNames = true)
+    static class ModelBillingTokenPrices {
+        Integer batchSize
+        Integer cachePrice
+        Integer inputPrice
+        Integer outputPrice
+    }
+
+    /** Model billing information. */
+    @ToString(includeNames = true)
+    static class ModelBilling {
+        double multiplier
+        ModelBillingTokenPrices tokenPrices
+        ModelPickerPriceCategory pickerPriceCategory
+    }
+
+    /** Experimental: Diagnostics from loading skills. */
+    @ToString(includeNames = true)
+    static class SkillsLoadDiagnostics {
+        List<String> errors
+        List<String> warnings
+    }
+
+    /** Per-session remote mode. "off" disables remote, "export" exports session events to Mission Control without enabling remote steering, "on" enables both export and remote steering. */
+    enum RemoteSessionMode {
+        EXPORT, OFF, ON
+    }
+
+    /** Experimental: Request to enable remote mode for a session. */
+    @ToString(includeNames = true)
+    static class RemoteEnableRequest {
+        String mode
+    }
+
+    /** Experimental: Result of enabling remote mode for a session. */
+    @ToString(includeNames = true)
+    static class RemoteEnableResult {
+        boolean remoteSteerable
+        String url
+    }
+
+    /** Response format for image generation responses. */
+    enum ResponseFormat {
+        TEXT, IMAGE, JSON_OBJECT
+    }
+
+    /** Override operation for a single system prompt section. */
+    @ToString(includeNames = true)
+    static class SectionOverride {
+        String action
+        String content
+    }
+
+    /** System message configuration in append mode. */
+    @ToString(includeNames = true)
+    static class SystemMessageAppendConfig {
+        String mode = 'append'
+        String content
+    }
+
+    /** System message configuration in replace mode. */
+    @ToString(includeNames = true)
+    static class SystemMessageReplaceConfig {
+        String mode = 'replace'
+        String content
+    }
+
+    /** System message configuration in customize mode. */
+    @ToString(includeNames = true)
+    static class SystemMessageCustomizeConfig {
+        String mode = 'customize'
+        Map<String, SectionOverride> sections
+        String content
+    }
+
+    /** Declaration for a canvas exposed by an extension. */
+    @ToString(includeNames = true)
+    static class CanvasDeclaration {
+        String id
+        String displayName
+        String description
+        Map<String, Object> inputSchema
+        List<CanvasAction> actions
+    }
+
+    /** Action exposed by a canvas. */
+    @ToString(includeNames = true)
+    static class CanvasAction {
+        String name
+        String description
+        Map<String, Object> inputSchema
+    }
+
+    /** Response returned when opening a canvas. */
+    @ToString(includeNames = true)
+    static class CanvasOpenResponse {
+        String url
+        String title
+        String status
+    }
+
+    /** Host capabilities available to canvases. */
+    @ToString(includeNames = true)
+    static class CanvasHostCapabilities {
+        Boolean canvases = false
+    }
+
+    /** Host context available to canvases. */
+    @ToString(includeNames = true)
+    static class CanvasHostContext {
+        CanvasHostCapabilities capabilities
+    }
+
+    /** Context passed when opening a canvas. */
+    @ToString(includeNames = true)
+    static class CanvasOpenContext {
+        String sessionId
+        String extensionId
+        String canvasId
+        String instanceId
+        Object input
+        CanvasHostContext host
+    }
+
+    /** Context passed when invoking a canvas action. */
+    @ToString(includeNames = true)
+    static class CanvasActionContext {
+        String sessionId
+        String extensionId
+        String canvasId
+        String instanceId
+        String actionName
+        Object input
+        CanvasHostContext host
+    }
+
+    /** Lifecycle context for a canvas instance. */
+    @ToString(includeNames = true)
+    static class CanvasLifecycleContext {
+        String sessionId
+        String extensionId
+        String canvasId
+        String instanceId
+        CanvasHostContext host
+    }
+
+    /** Repository context for a cloud session. */
+    @ToString(includeNames = true)
+    static class CloudSessionRepository {
+        String owner
+        String name
+        String branch
+    }
+
+    /** Options for creating a cloud session. */
+    @ToString(includeNames = true)
+    static class CloudSessionOptions {
+        CloudSessionRepository repository
     }
 }

@@ -49,7 +49,7 @@ class SessionE2ETest extends E2ETestCase
         $client->start();
 
         try {
-            $session = $client->createSession(new SessionConfig(model: 'gpt-4'));
+            $session = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
 
             // Session ID must be non-empty
             $this->assertNotEmpty(
@@ -86,7 +86,7 @@ class SessionE2ETest extends E2ETestCase
         $client->start();
 
         try {
-            $session = $client->createSession(new SessionConfig(model: 'gpt-4'));
+            $session = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
             $this->assertNotEmpty($session->sessionId);
 
             $response = $session->sendAndWait(new MessageOptions(prompt: 'What is 1+1?'));
@@ -136,7 +136,7 @@ class SessionE2ETest extends E2ETestCase
         try {
             // If the sessionFs config was invalid, start() or createSession() would throw.
             // Successfully creating a session proves the config was accepted.
-            $session = $client->createSession(new SessionConfig(model: 'gpt-4'));
+            $session = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
             $this->assertNotEmpty($session->sessionId);
 
             $session->destroy();
@@ -164,7 +164,7 @@ class SessionE2ETest extends E2ETestCase
         $client->start();
 
         try {
-            $session = $client->createSession(new SessionConfig(model: 'gpt-4'));
+            $session = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
             $this->assertNotEmpty($session->sessionId);
 
             $response1 = $session->sendAndWait(new MessageOptions(prompt: 'What is 2+2?'));
@@ -200,7 +200,7 @@ class SessionE2ETest extends E2ETestCase
         $client->start();
 
         try {
-            $session = $client->createSession(new SessionConfig(model: 'gpt-4'));
+            $session = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
             $sessionId = $session->sessionId;
             $this->assertNotEmpty($sessionId);
             $session->destroy();
@@ -217,7 +217,7 @@ class SessionE2ETest extends E2ETestCase
         $client2->start();
 
         try {
-            $resumed = $client2->resumeSession($sessionId, new ResumeSessionConfig(model: 'gpt-4'));
+            $resumed = $client2->resumeSession($sessionId, new ResumeSessionConfig(model: 'claude-sonnet-4.5'));
             $this->assertNotEmpty($resumed->sessionId);
             $resumed->destroy();
         } finally {
@@ -244,8 +244,8 @@ class SessionE2ETest extends E2ETestCase
         $client->start();
 
         try {
-            $session1 = $client->createSession(new SessionConfig(model: 'gpt-4'));
-            $session2 = $client->createSession(new SessionConfig(model: 'gpt-4'));
+            $session1 = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
+            $session2 = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
             $this->assertNotEmpty($session1->sessionId);
             $this->assertNotEmpty($session2->sessionId);
 
@@ -279,7 +279,7 @@ class SessionE2ETest extends E2ETestCase
         $client->start();
 
         try {
-            $session = $client->createSession(new SessionConfig(model: 'gpt-4'));
+            $session = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
             $this->assertNotEmpty($session->sessionId);
 
             $metadata = $client->getSessionMetadata($session->sessionId);
@@ -310,7 +310,7 @@ class SessionE2ETest extends E2ETestCase
         $client->start();
 
         try {
-            $session = $client->createSession(new SessionConfig(model: 'gpt-4'));
+            $session = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
             $sessionId = $session->sessionId;
             $this->assertNotEmpty($sessionId);
             $session->destroy();
@@ -452,7 +452,7 @@ class SessionE2ETest extends E2ETestCase
         $client->start();
 
         try {
-            $session = $client->createSession(new SessionConfig(model: 'gpt-4'));
+            $session = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
             $this->assertNotEmpty($session->sessionId);
 
             $client->setForegroundSessionId($session->sessionId);
@@ -501,7 +501,7 @@ class SessionE2ETest extends E2ETestCase
 
         try {
             $session = $client->createSession(new SessionConfig(
-                model: 'gpt-4',
+                model: 'claude-sonnet-4.5',
                 tools: [$tool],
             ));
             $this->assertNotEmpty($session->sessionId);
@@ -537,7 +537,7 @@ class SessionE2ETest extends E2ETestCase
 
         try {
             $session = $client->createSession(new SessionConfig(
-                model: 'gpt-4',
+                model: 'claude-sonnet-4.5',
                 streaming: true,
             ));
             $this->assertNotEmpty($session->sessionId);
@@ -577,7 +577,7 @@ class SessionE2ETest extends E2ETestCase
 
         try {
             $session = $client->createSession(new SessionConfig(
-                model: 'gpt-4',
+                model: 'claude-sonnet-4.5',
                 systemMessage: new SystemMessageAppendConfig(
                     content: 'You are a helpful PHP assistant.',
                 ),
@@ -615,7 +615,7 @@ class SessionE2ETest extends E2ETestCase
 
         try {
             $client->setSessionFsProvider();
-            $session = $client->createSession(new SessionConfig(model: 'gpt-4'));
+            $session = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
             $this->assertNotEmpty($session->sessionId);
 
             $session->destroy();
@@ -644,7 +644,7 @@ class SessionE2ETest extends E2ETestCase
 
         try {
             $session = $client->createSession(new SessionConfig(
-                model: 'gpt-4',
+                model: 'claude-sonnet-4.5',
                 mcpServers: [
                     'test-server' => new MCPLocalServerConfig(
                         tools: [],
@@ -681,7 +681,7 @@ class SessionE2ETest extends E2ETestCase
 
         try {
             $session = $client->createSession(new SessionConfig(
-                model: 'gpt-4',
+                model: 'claude-sonnet-4.5',
                 skillDirectories: [static::$workDir],
             ));
             $this->assertNotEmpty($session->sessionId);
@@ -711,7 +711,7 @@ class SessionE2ETest extends E2ETestCase
         $client->start();
 
         try {
-            $session = $client->createSession(new SessionConfig(model: 'gpt-4'));
+            $session = $client->createSession(new SessionConfig(model: 'claude-sonnet-4.5'));
             $this->assertNotEmpty($session->sessionId);
 
             $response1 = $session->sendAndWait(new MessageOptions(prompt: 'What is 1+1?'));

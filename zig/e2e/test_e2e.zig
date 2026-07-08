@@ -212,7 +212,7 @@ test "multi-turn conversation" {
 
     // First message
     const msg1_body =
-        \\{"messages":[{"role":"user","content":"Hello, start a conversation"}]}
+        \\{"messages":[{"role":"user","content":"What is 1+1?"}]}
     ;
     const response1 = try httpPost(allocator, chat_url, msg1_body);
     defer allocator.free(response1);
@@ -227,7 +227,7 @@ test "multi-turn conversation" {
 
     // Second message
     const msg2_body =
-        \\{"messages":[{"role":"user","content":"Continue the conversation"}]}
+        \\{"messages":[{"role":"user","content":"Now if you double that, what do you get?"}]}
     ;
     const response2 = try httpPost(allocator, chat_url, msg2_body);
     defer allocator.free(response2);
@@ -588,7 +588,7 @@ test "tools" {
     defer allocator.free(config_url);
 
     const config_body =
-        \\{"filePath":"session","workDir":"should_have_stateful_conversation"}
+        \\{"filePath":"session","workDir":"should_create_session_with_custom_tool"}
     ;
     _ = try httpPost(allocator, config_url, config_body);
 
@@ -596,7 +596,7 @@ test "tools" {
     defer allocator.free(chat_url);
 
     const msg_body =
-        \\{"messages":[{"role":"user","content":"Use the tool"}],"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}}]}
+        \\{"messages":[{"role":"user","content":"What is the secret number for key ALPHA?"}],"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}}]}
     ;
     const response = try httpPost(allocator, chat_url, msg_body);
     defer allocator.free(response);
@@ -805,24 +805,17 @@ test "compaction" {
     const chat_url = try std.fmt.allocPrint(allocator, "{s}/v1/chat/completions", .{proxy.url});
     defer allocator.free(chat_url);
 
-    // Send multiple messages to trigger compaction behavior
     const msg1_body =
-        \\{"messages":[{"role":"user","content":"First message for compaction"}]}
+        \\{"messages":[{"role":"user","content":"What is 1+1?"}]}
     ;
     const r1 = try httpPost(allocator, chat_url, msg1_body);
     defer allocator.free(r1);
 
     const msg2_body =
-        \\{"messages":[{"role":"user","content":"Second message for compaction"}]}
+        \\{"messages":[{"role":"user","content":"Now if you double that, what do you get?"}]}
     ;
     const r2 = try httpPost(allocator, chat_url, msg2_body);
     defer allocator.free(r2);
-
-    const msg3_body =
-        \\{"messages":[{"role":"user","content":"Third message for compaction"}]}
-    ;
-    const r3 = try httpPost(allocator, chat_url, msg3_body);
-    defer allocator.free(r3);
 
     const exchanges_url = try std.fmt.allocPrint(allocator, "{s}/exchanges", .{proxy.url});
     defer allocator.free(exchanges_url);

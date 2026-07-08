@@ -95,6 +95,25 @@ function CapiProxy:start()
 
     self._proxy_url = url
 
+    -- Parse CONNECT proxy metadata from JSON at end of line
+    -- Format: Listening: http://... {"connectProxyUrl":"...","caFilePath":"..."}
+    local json_str = line:match("%s+(%b{})")
+    if json_str then
+        -- Try to parse with cjson if available
+        local ok_cjson, cjson = pcall(require, "cjson")
+        if ok_cjson and cjson then
+            local ok_decode, metadata = pcall(cjson.decode, json_str)
+            if ok_decode and metadata then
+                self._connect_proxy_url = metadata.connectProxyUrl
+                self._ca_file_path = metadata.caFilePath
+            end
+        else
+            -- Simple pattern matching fallback
+            self._connect_proxy_url = json_str:match('"connectProxyUrl"%s*:%s*"([^"]+)"')
+            self._ca_file_path = json_str:match('"caFilePath"%s*:%s*"([^"]+)"')
+        end
+    end
+
     -- Save original env and set COPILOT_API_URL so the CLI uses the proxy
     self._original_copilot_api_url = os.getenv("COPILOT_API_URL")
     self:_setenv("COPILOT_API_URL", url)
@@ -178,6 +197,29 @@ end
 -- @return string|nil
 function CapiProxy:url()
     return self._proxy_url
+end
+
+--- Get environment variables for routing HTTPS traffic through the CONNECT proxy.
+-- @return table|nil  Map of env var names to values, or nil if proxy not started
+function CapiProxy:get_proxy_env()
+    if not self._connect_proxy_url or not self._ca_file_path then
+        return nil
+    end
+
+    local no_proxy = "127.0.0.1,localhost,::1"
+    return {
+        HTTP_PROXY = self._connect_proxy_url,
+        HTTPS_PROXY = self._connect_proxy_url,
+        http_proxy = self._connect_proxy_url,
+        https_proxy = self._connect_proxy_url,
+        NO_PROXY = no_proxy,
+        no_proxy = no_proxy,
+        NODE_EXTRA_CA_CERTS = self._ca_file_path,
+        SSL_CERT_FILE = self._ca_file_path,
+        REQUESTS_CA_BUNDLE = self._ca_file_path,
+        CURL_CA_BUNDLE = self._ca_file_path,
+        GIT_SSL_CAINFO = self._ca_file_path,
+    }
 end
 
 -- ---------------------------------------------------------------------------

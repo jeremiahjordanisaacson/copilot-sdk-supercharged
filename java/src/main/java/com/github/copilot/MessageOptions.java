@@ -22,6 +22,11 @@ public class MessageOptions {
     /** Prompt text to display in the UI, when it differs from the model prompt. */
     private String displayPrompt;
 
+    /**
+     * Creates message options for the given prompt.
+     *
+     * @param prompt the message prompt
+     */
     public MessageOptions(String prompt) {
         this.prompt = prompt;
     }

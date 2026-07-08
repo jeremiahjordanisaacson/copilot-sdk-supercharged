@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/master.swiftdeps"
+  },
+  "/Users/home/Documents/copilot-sdk-supercharged/swift/Tests/E2ETests/SessionE2ETests.swift": {
+    "dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/SessionE2ETests.d",
+    "object": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/SessionE2ETests.swift.o",
+    "swiftmodule": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/SessionE2ETests~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/SessionE2ETests.swiftdeps",
+    "diagnostics": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/SessionE2ETests.dia"
+  },
+  "/Users/home/Documents/copilot-sdk-supercharged/swift/Tests/E2ETests/TestHarness.swift": {
+    "dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/TestHarness.d",
+    "object": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/TestHarness.swift.o",
+    "swiftmodule": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/TestHarness~partial.swiftmodule",
+    "swift-dependencies": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/TestHarness.swiftdeps",
+    "diagnostics": "/Users/home/Documents/copilot-sdk-supercharged/swift/.build/index-build/arm64-apple-macosx/debug/E2ETests.build/TestHarness.dia"
+  }
+}

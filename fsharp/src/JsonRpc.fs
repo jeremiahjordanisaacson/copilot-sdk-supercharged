@@ -64,6 +64,7 @@ type JsonRpcTransport(input: Stream, output: Stream) =
     let mutable nextId = 0
     let pendingRequests = System.Collections.Concurrent.ConcurrentDictionary<int, TaskCompletionSource<JsonRpcResponse>>()
     let notificationHandlers = System.Collections.Concurrent.ConcurrentDictionary<string, Action<JsonElement option>>()
+    let requestHandlers = System.Collections.Concurrent.ConcurrentDictionary<string, JsonElement option -> Async<obj>>()
     let writeLock = new SemaphoreSlim(1, 1)
     let cts = new CancellationTokenSource()
 
@@ -115,6 +116,18 @@ type JsonRpcTransport(input: Stream, output: Stream) =
             writeLock.Release() |> ignore
     }
 
+    let sendJsonRpcResponse (idRawText: string) (result: obj) = async {
+        let resultJson = JsonSerializer.Serialize(result, jsonOpts)
+        let responseMsg = sprintf """{"jsonrpc":"2.0","id":%s,"result":%s}""" idRawText resultJson
+        do! writeMessage responseMsg
+    }
+
+    let sendJsonRpcErrorResponse (idRawText: string) (code: int) (errMessage: string) = async {
+        let escapedMsg = JsonSerializer.Serialize(errMessage)
+        let responseMsg = sprintf """{"jsonrpc":"2.0","id":%s,"error":{"code":%d,"message":%s}}""" idRawText code escapedMsg
+        do! writeMessage responseMsg
+    }
+
     /// Dispatch an incoming JSON message to pending requests or notification handlers.
     let dispatchMessage (json: string) =
         let doc = JsonDocument.Parse(json)
@@ -154,9 +167,29 @@ type JsonRpcTransport(input: Stream, output: Stream) =
                     match root.TryGetProperty("params") with
                     | true, p -> Some (p.Clone())
                     | _ -> None
-                match notificationHandlers.TryGetValue(methodName) with
-                | true, handler -> handler.Invoke(paramData)
-                | _ -> ()
+                if hasId then
+                    // Server-initiated request — dispatch and send response
+                    let idRawText =
+                        match root.TryGetProperty("id") with
+                        | true, idElem -> idElem.GetRawText()
+                        | _ -> "null"
+                    match requestHandlers.TryGetValue(methodName) with
+                    | true, handler ->
+                        async {
+                            try
+                                let! result = handler paramData
+                                do! sendJsonRpcResponse idRawText result
+                            with ex ->
+                                do! sendJsonRpcErrorResponse idRawText -32000 ex.Message
+                        } |> Async.Start
+                    | _ ->
+                        match notificationHandlers.TryGetValue(methodName) with
+                        | true, handler -> handler.Invoke(paramData)
+                        | _ -> ()
+                else
+                    match notificationHandlers.TryGetValue(methodName) with
+                    | true, handler -> handler.Invoke(paramData)
+                    | _ -> ()
             | _ -> ()
 
     /// Start the read loop that dispatches incoming messages.
@@ -224,6 +257,15 @@ type JsonRpcTransport(input: Stream, output: Stream) =
     /// Remove a previously registered notification handler.
     member _.RemoveNotification(method: string) =
         notificationHandlers.TryRemove(method) |> ignore
+
+    /// Register a handler for a server-initiated request method.
+    /// The handler receives params and returns a result sent back as the JSON-RPC response.
+    member _.OnRequest(method: string, handler: JsonElement option -> Async<obj>) =
+        requestHandlers.[method] <- handler
+
+    /// Remove a previously registered request handler.
+    member _.RemoveRequest(method: string) =
+        requestHandlers.TryRemove(method) |> ignore
 
     /// Shut down the transport, cancelling any pending reads.
     member _.Dispose() =

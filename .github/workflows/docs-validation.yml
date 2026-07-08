@@ -35,11 +35,11 @@ jobs:
 
       - name: Install SDK dependencies
         working-directory: nodejs
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       - name: Install validation dependencies
         working-directory: scripts/docs-validation
-        run: npm ci
+        run: npm install --ignore-scripts
 
       - name: Extract and validate TypeScript
         working-directory: scripts/docs-validation
@@ -72,7 +72,7 @@ jobs:
 
       - name: Install validation dependencies
         working-directory: scripts/docs-validation
-        run: npm ci
+        run: npm install --ignore-scripts
 
       - name: Extract and validate Python
         working-directory: scripts/docs-validation
@@ -96,7 +96,7 @@ jobs:
 
       - name: Install validation dependencies
         working-directory: scripts/docs-validation
-        run: npm ci
+        run: npm install --ignore-scripts
 
       - name: Extract and validate Go
         working-directory: scripts/docs-validation
@@ -119,7 +119,7 @@ jobs:
 
       - name: Install validation dependencies
         working-directory: scripts/docs-validation
-        run: npm ci
+        run: npm install --ignore-scripts
 
       - name: Restore SDK dependencies
         working-directory: dotnet

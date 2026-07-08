@@ -8,18 +8,17 @@
     ".NETCoreApp,Version=v8.0": {
       "CopilotSDK.Supercharged.FSharp/0.1.0": {
         "dependencies": {
-          "FSharp.Core": "9.0.303",
-          "System.Text.Json": "8.0.6"
+          "FSharp.Core": "10.0.107"
         },
         "runtime": {
           "CopilotSDK.Supercharged.FSharp.dll": {}
         }
       },
-      "FSharp.Core/9.0.303": {
+      "FSharp.Core/10.0.107": {
         "runtime": {
           "lib/netstandard2.1/FSharp.Core.dll": {
-            "assemblyVersion": "9.0.0.0",
-            "fileVersion": "9.3.325.36101"
+            "assemblyVersion": "10.0.0.0",
+            "fileVersion": "10.1.726.21808"
           }
         },
         "resources": {
@@ -63,8 +62,7 @@
             "locale": "zh-Hant"
           }
         }
-      },
-      "System.Text.Json/8.0.6": {}
+      }
     }
   },
   "libraries": {
@@ -73,19 +71,12 @@
       "serviceable": false,
       "sha512": ""
     },
-    "FSharp.Core/9.0.303": {
+    "FSharp.Core/10.0.107": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-6JlV8aD8qQvcmfoe/PMOxCHXc0uX4lR23u0fAyQtnVQxYULLoTZgwgZHSnRcuUHOvS3wULFWcwdnP1iwslH60g==",
-      "path": "fsharp.core/9.0.303",
-      "hashPath": "fsharp.core.9.0.303.nupkg.sha512"
-    },
-    "System.Text.Json/8.0.6": {
-      "type": "package",
-      "serviceable": true,
-      "sha512": "sha512-BvSpVBsVN9b+Y+wONbvJOHd1HjXQf33+XiC28ZMOwRsYb42mz3Q8YHnpTSwpwJLqYCMqM+0UUVC3V+pi25XfkQ==",
-      "path": "system.text.json/8.0.6",
-      "hashPath": "system.text.json.8.0.6.nupkg.sha512"
+      "sha512": "sha512-9FGx5KgWja2QOla6D6rhmPPjb9Uo2CzJMT4M8LIDUPVCwYRdfYySZNXeRJV0yQ8ba43aJMZDY+Yw/GpfxyEX9Q==",
+      "path": "fsharp.core/10.0.107",
+      "hashPath": "fsharp.core.10.0.107.nupkg.sha512"
     }
   }
 }

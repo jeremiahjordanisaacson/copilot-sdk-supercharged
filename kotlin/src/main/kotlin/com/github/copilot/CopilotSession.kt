@@ -65,6 +65,9 @@ class CopilotSession internal constructor(
     @Volatile
     private var elicitationHandler: ElicitationHandler? = null
 
+    @Volatile
+    private var exitPlanModeHandler: ExitPlanModeHandler? = null
+
     /**
      * Sends a message to this session.
      *
@@ -196,6 +199,7 @@ class CopilotSession internal constructor(
         permissionHandler = null
         userInputHandler = null
         elicitationHandler = null
+        exitPlanModeHandler = null
         hooks = null
     }
 
@@ -264,6 +268,14 @@ class CopilotSession internal constructor(
     }
 
     /**
+     * Registers an exit plan mode handler.
+     * @suppress
+     */
+    internal fun registerExitPlanModeHandler(handler: ExitPlanModeHandler?) {
+        this.exitPlanModeHandler = handler
+    }
+
+    /**
      * Dispatches a session event to all registered handlers.
      * @suppress
      */
@@ -327,6 +339,20 @@ class CopilotSession internal constructor(
             handler(context)
         } catch (_: Exception) {
             ElicitationResult(action = "dismiss")
+        }
+    }
+
+    /**
+     * Handles an exit plan mode request from the server.
+     * @suppress
+     */
+    internal suspend fun handleExitPlanModeRequest(request: ExitPlanModeRequest): ExitPlanModeResponse {
+        val handler = exitPlanModeHandler
+            ?: return ExitPlanModeResponse(approved = true)
+        return try {
+            handler(request)
+        } catch (_: Exception) {
+            ExitPlanModeResponse(approved = true)
         }
     }
 

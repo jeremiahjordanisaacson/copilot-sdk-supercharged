@@ -17,6 +17,8 @@ using HTTP
 # Module-level state for the proxy process and URL
 const _process = Ref{Union{Base.Process, Nothing}}(nothing)
 const _proxy_url = Ref{Union{String, Nothing}}(nothing)
+const _connect_proxy_url = Ref{Union{String, Nothing}}(nothing)
+const _ca_file_path = Ref{Union{String, Nothing}}(nothing)
 const _stdout_pipe = Ref{Union{IO, Nothing}}(nothing)
 
 """
@@ -52,7 +54,7 @@ function start_proxy()::String
     _process[] = proc
     _stdout_pipe[] = pipe
 
-    # Read the first line — expect "Listening: http://localhost:XXXX"
+    # Read the first line — expect "Listening: http://localhost:XXXX {...}"
     line = readline(pipe)
     if isempty(line)
         kill(proc)
@@ -66,6 +68,23 @@ function start_proxy()::String
     end
 
     _proxy_url[] = String(m.captures[1])
+
+    # Parse connect proxy metadata JSON from the same line
+    meta_match = match(r"(\{.*\})\s*$", line)
+    if meta_match !== nothing
+        try
+            meta_json = JSON_parse(String(meta_match.captures[1]))
+            if haskey(meta_json, "connectProxyUrl")
+                _connect_proxy_url[] = meta_json["connectProxyUrl"]
+            end
+            if haskey(meta_json, "caFilePath")
+                _ca_file_path[] = meta_json["caFilePath"]
+            end
+        catch
+            # Non-fatal
+        end
+    end
+
     return _proxy_url[]
 end
 
@@ -105,18 +124,75 @@ function stop_proxy(; skip_writing_cache::Bool=false)
 
     _process[] = nothing
     _proxy_url[] = nothing
+    _connect_proxy_url[] = nothing
+    _ca_file_path[] = nothing
     _stdout_pipe[] = nothing
     return nothing
 end
 
 """
-    cli_url_from_proxy(proxy_url::String) -> String
+    cli_path_from_repo() -> String
 
-Strip the `http://` scheme from a proxy URL so it can be used as a `cli_url`
-value (e.g. `"http://localhost:3000"` → `"localhost:3000"`).
+Resolve the Copilot CLI executable path.
 """
-function cli_url_from_proxy(proxy_url::String)::String
-    return replace(proxy_url, r"^https?://" => "")
+function cli_path_from_repo()::String
+    env_path = get(ENV, "COPILOT_CLI_PATH", "")
+    if !isempty(env_path) && isfile(env_path)
+        return abspath(env_path)
+    end
+
+    repo_root = normpath(joinpath(@__DIR__, "..", "..", ".."))
+    node_cli = joinpath(repo_root, "nodejs", "node_modules", "@github", "copilot", "index.js")
+    if isfile(node_cli)
+        return abspath(node_cli)
+    end
+
+    return "copilot"
+end
+
+"""
+    proxy_test_env(work_dir::String) -> Dict{String,String}
+
+Return environment variables that route CLI traffic through the proxy.
+"""
+function proxy_test_env(work_dir::String)::Dict{String,String}
+    env = Dict{String,String}()
+    for (k, v) in ENV
+        env[k] = v
+    end
+    env["COPILOT_API_URL"] = _proxy_url[] !== nothing ? _proxy_url[] : ""
+    env["COPILOT_HOME"] = work_dir
+    env["XDG_CONFIG_HOME"] = work_dir
+    env["XDG_STATE_HOME"] = work_dir
+    env["GH_TOKEN"] = get(ENV, "GH_TOKEN", "fake-test-token")
+    env["GITHUB_TOKEN"] = get(ENV, "GITHUB_TOKEN", "fake-test-token")
+
+    if _connect_proxy_url[] !== nothing
+        url = _connect_proxy_url[]
+        env["HTTP_PROXY"] = url
+        env["HTTPS_PROXY"] = url
+        env["http_proxy"] = url
+        env["https_proxy"] = url
+        env["NO_PROXY"] = "127.0.0.1,localhost,::1"
+        env["no_proxy"] = "127.0.0.1,localhost,::1"
+    end
+    if _ca_file_path[] !== nothing
+        path = _ca_file_path[]
+        env["NODE_EXTRA_CA_CERTS"] = path
+        env["SSL_CERT_FILE"] = path
+    end
+
+    return env
+end
+
+# Simple JSON parser for the metadata line (avoids adding JSON dependency)
+function JSON_parse(s::String)
+    result = Dict{String,Any}()
+    # Match "key":"value" pairs
+    for m in eachmatch(r"\"([^\"]+)\"\s*:\s*\"([^\"]+)\"", s)
+        result[m.captures[1]] = m.captures[2]
+    end
+    return result
 end
 
 end # module TestHarness

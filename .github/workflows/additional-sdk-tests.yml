@@ -107,8 +107,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: actions/setup-java@v4
         with:
@@ -129,8 +129,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
@@ -148,8 +148,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: ruby/setup-ruby@v1
         with:
@@ -171,8 +171,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: shivammathur/setup-php@v2
         with:
@@ -193,8 +193,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: actions/setup-java@v4
         with:
@@ -216,8 +216,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: dart-lang/setup-dart@v1
       - run: dart pub get
@@ -226,6 +226,7 @@ jobs:
   scala:
     name: "Test: Scala SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: scala
@@ -236,8 +237,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: actions/setup-java@v4
         with:
@@ -259,8 +260,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: erlef/setup-beam@v1
         with:
@@ -282,8 +283,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: crystal-lang/install-crystal@v1
       - run: shards install
@@ -302,8 +303,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: julia-actions/setup-julia@v2
         with:
@@ -323,8 +324,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: jiro4989/setup-nim-action@v2
       - run: nimble test -y
@@ -339,8 +340,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: leafo/gh-actions-lua@v10
       - uses: leafo/gh-actions-luarocks@v4
@@ -361,8 +362,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - run: |
           cd cpp
@@ -380,8 +381,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - run: |
           cd c
@@ -402,8 +403,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - run: swift test
 
@@ -420,8 +421,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: haskell-actions/setup@v2
         with:
@@ -443,8 +444,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: actions/setup-dotnet@v4
         with:
@@ -464,8 +465,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: actions/setup-dotnet@v4
         with:
@@ -485,8 +486,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: fortran-lang/setup-fpm@v5
         with:
@@ -507,8 +508,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: goto-bus-stop/setup-zig@v2
         with:
@@ -528,8 +529,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - run: |
           xcodebuild test \
@@ -551,14 +552,17 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: shogo82148/actions-setup-perl@v1
         with:
           perl-version: '5.38'
           install-modules-with: cpanm
+          enable-modules-cache: false
+          multi-thread: true
       - run: |
+          cpanm --notest Type::Tiny Moo File::Which Test::Exception HTTP::Tiny
           cpanm --installdeps --notest .
           prove -l t/ e2e/
 
@@ -575,8 +579,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: r-lib/actions/setup-r@v2
       - uses: r-lib/actions/setup-r-dependencies@v2
@@ -598,8 +602,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: actions/setup-java@v4
         with:
@@ -621,8 +625,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: DeLaGuardo/setup-clojure@12.5
         with:
@@ -642,8 +646,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: erlef/setup-beam@v1
         with:
@@ -664,8 +668,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: dlang-community/setup-dlang@v2
       - run: dub test
@@ -683,8 +687,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - uses: ocaml/setup-ocaml@v3
         with:
@@ -705,8 +709,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - run: |
           sudo apt-get update && sudo apt-get install -y tcl tcllib
@@ -725,8 +729,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - run: |
           sudo apt-get update && sudo apt-get install -y jq
@@ -744,8 +748,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - run: cd ../test/harness && npm install
-      - run: npm install
+      - run: cd ../nodejs && npm install --ignore-scripts && npx tsx esbuild-copilotsdk-nodejs.ts
+      - run: cd ../test/harness && npm install --ignore-scripts
+      - run: rm -rf node_modules package-lock.json && npm install
       - run: npm test
 
   # ---- Tier 4: Specialized environments (syntax check only) ----
@@ -759,13 +764,13 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - run: |
-          wget -q https://github.com/nickelca/vlang-action/releases/download/v0.4.8/vlang-ubuntu-latest.tar.gz -O /tmp/v.tar.gz
-          tar xf /tmp/v.tar.gz -C /tmp
-          /tmp/v/v vlang/src/*.v || echo "::warning::V compiler check completed with warnings"
+          git clone --depth 1 https://github.com/vlang/v.git /tmp/vlang
+          cd /tmp/vlang && make -j$(nproc) 2>/dev/null
+          /tmp/vlang/v $GITHUB_WORKSPACE/vlang/src/*.v || echo "::warning::V compiler check completed with warnings"
 
   ada:
     name: "Test: Ada SDK"
@@ -777,8 +782,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - run: |
           sudo apt-get update && sudo apt-get install -y gnat
@@ -794,8 +799,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - run: |
           sudo apt-get update && sudo apt-get install -y gnucobol
@@ -811,8 +816,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - run: |
           # Delphi/Free Pascal syntax check
@@ -829,8 +834,8 @@ jobs:
           node-version: '22'
       - name: Install SDK and test harness
         run: |
-          cd $GITHUB_WORKSPACE/nodejs && npm ci
-          cd $GITHUB_WORKSPACE/test/harness && npm ci
+          cd $GITHUB_WORKSPACE/nodejs && npm install --ignore-scripts
+          cd $GITHUB_WORKSPACE/test/harness && npm install --ignore-scripts
         working-directory: .
       - run: |
           # MATLAB syntax validation via Octave

@@ -125,14 +125,14 @@ let test_tool_definition_to_yojson () =
 let test_session_config_to_yojson () =
   let config =
     { (Types.default_session_config ()) with
-      model = Some "gpt-4o"
+      model = Some "claude-sonnet-4.5o"
     ; reasoning_effort = Some High
     }
   in
   let json = Types.session_config_to_yojson config in
   let open Yojson.Safe.Util in
   Alcotest.(check string) "model"
-    "gpt-4o"
+    "claude-sonnet-4.5o"
     (json |> member "model" |> to_string);
   Alcotest.(check bool) "streaming"
     true
@@ -217,7 +217,7 @@ let test_get_status_response_of_yojson () =
 
 let test_version_constants () =
   Alcotest.(check int) "sdk_protocol_version" 3 Version.sdk_protocol_version;
-  Alcotest.(check int) "min_protocol_version" 2 Version.min_protocol_version;
+  Alcotest.(check int) "min_protocol_version" 3 Version.min_protocol_version;
   Alcotest.(check string) "sdk_name"
     "copilot-sdk-supercharged-ocaml" Version.sdk_name
 

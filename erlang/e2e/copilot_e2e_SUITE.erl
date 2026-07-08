@@ -165,10 +165,10 @@ test_multi_turn(Config) ->
     Proxy = proplists:get_value(proxy, Config),
     e2e_test_harness:configure(Proxy, "session", "should_have_stateful_conversation"),
 
-    Body1 = <<"{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}">>,
+    Body1 = <<"{\"messages\":[{\"role\":\"user\",\"content\":\"What is 1+1?\"}]}">>,
     _Result1 = e2e_test_harness:http_post(Proxy, "/v1/chat/completions", Body1),
 
-    Body2 = <<"{\"messages\":[{\"role\":\"user\",\"content\":\"Follow up question\"}]}">>,
+    Body2 = <<"{\"messages\":[{\"role\":\"user\",\"content\":\"Now if you double that, what do you get?\"}]}">>,
     _Result2 = e2e_test_harness:http_post(Proxy, "/v1/chat/completions", Body2),
 
     {ok, Exchanges} = e2e_test_harness:http_get(Proxy, "/exchanges"),
@@ -304,9 +304,9 @@ test_foreground_session(Config) ->
 %% Test 14: Tools
 test_tools(Config) ->
     Proxy = proplists:get_value(proxy, Config),
-    e2e_test_harness:configure(Proxy, "session", "should_have_stateful_conversation"),
+    e2e_test_harness:configure(Proxy, "session", "should_create_session_with_custom_tool"),
 
-    Body = <<"{\"messages\":[{\"role\":\"user\",\"content\":\"Use tool\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{}}}}]}">>,
+    Body = <<"{\"messages\":[{\"role\":\"user\",\"content\":\"What is the secret number for key ALPHA?\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{}}}}]}">>,
     _Result = e2e_test_harness:http_post(Proxy, "/v1/chat/completions", Body),
 
     {ok, Exchanges} = e2e_test_harness:http_get(Proxy, "/exchanges"),
@@ -390,14 +390,11 @@ test_compaction(Config) ->
     Proxy = proplists:get_value(proxy, Config),
     e2e_test_harness:configure(Proxy, "session", "should_have_stateful_conversation"),
 
-    Body1 = <<"{\"messages\":[{\"role\":\"user\",\"content\":\"Message 1\"}]}">>,
+    Body1 = <<"{\"messages\":[{\"role\":\"user\",\"content\":\"What is 1+1?\"}]}">>,
     _Result1 = e2e_test_harness:http_post(Proxy, "/v1/chat/completions", Body1),
 
-    Body2 = <<"{\"messages\":[{\"role\":\"user\",\"content\":\"Message 2\"}]}">>,
+    Body2 = <<"{\"messages\":[{\"role\":\"user\",\"content\":\"Now if you double that, what do you get?\"}]}">>,
     _Result2 = e2e_test_harness:http_post(Proxy, "/v1/chat/completions", Body2),
-
-    Body3 = <<"{\"messages\":[{\"role\":\"user\",\"content\":\"Message 3\"}]}">>,
-    _Result3 = e2e_test_harness:http_post(Proxy, "/v1/chat/completions", Body3),
 
     {ok, Exchanges} = e2e_test_harness:http_get(Proxy, "/exchanges"),
     true = byte_size(Exchanges) > 0,

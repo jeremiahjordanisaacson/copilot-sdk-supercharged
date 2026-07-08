@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Test harness for Haskell E2E tests.
 --
@@ -12,6 +13,8 @@ module CopilotE2E.TestHarness
   , stopProxy
   , withProxy
   , getCliPath
+  , configureProxy
+  , snapshotsDir
   ) where
 
 import Control.Exception    (SomeException, bracket, catch)
@@ -48,8 +51,8 @@ getCliPath = do
   where
     fallbackCliPath = do
       cwd <- getCurrentDirectory
-      -- We're in haskell/e2e, so go up two levels to repo root
-      let repoRoot = cwd </> ".." </> ".."
+      -- cabal test runs from haskell/, so go up one level to repo root
+      let repoRoot = cwd </> ".."
           cliPath  = repoRoot </> "nodejs" </> "node_modules"
                      </> "@github" </> "copilot" </> "index.js"
       exists <- doesFileExist cliPath
@@ -68,7 +71,7 @@ getCliPath = do
 startProxy :: IO ProxyHandle
 startProxy = do
   cwd <- getCurrentDirectory
-  let harnessDir  = cwd </> ".." </> ".." </> "test" </> "harness"
+  let harnessDir  = cwd </> ".." </> "test" </> "harness"
       serverPath  = harnessDir </> "server.ts"
 
   let cpSpec = if isWindows
@@ -126,10 +129,14 @@ readListeningUrl h = do
 stopProxy :: ProxyHandle -> IO ()
 stopProxy ph = do
   -- Best-effort graceful stop via HTTP
-  sendStopRequest (phUrl ph) `catch` \(_ :: SomeException) -> pure ()
+  sendStopRequest (phUrl ph) `catch` ignoreException
   terminateProcess (phProcess ph)
   _ <- waitForProcess (phProcess ph)
-  hClose (phStdout ph) `catch` \(_ :: SomeException) -> pure ()
+  hClose (phStdout ph) `catch` ignoreException
+
+-- | Ignore any exception (used for best-effort cleanup).
+ignoreException :: SomeException -> IO ()
+ignoreException _ = pure ()
 
 -- | Send a POST to /stop on the proxy. We use a simple shell curl to avoid
 -- pulling in an HTTP client dependency just for tests.
@@ -150,3 +157,24 @@ withProxy = bracket startProxy stopProxy
 -- | Detect Windows at runtime.
 isWindows :: Bool
 isWindows = "mingw" `isInfixOf` os || "windows" `isInfixOf` os
+
+-- | The directory containing test snapshot YAML files.
+snapshotsDir :: IO FilePath
+snapshotsDir = do
+  cwd <- getCurrentDirectory
+  let repoRoot = cwd </> ".."
+  pure (repoRoot </> "test" </> "snapshots")
+
+-- | Configure the proxy with a specific snapshot file and working directory.
+--
+-- Uses curl to POST JSON to the proxy's /config endpoint.
+configureProxy :: ProxyHandle -> FilePath -> FilePath -> IO ()
+configureProxy proxy filePath wd = do
+  let configUrl = phUrl proxy ++ "/config"
+      body = "{\"filePath\":\"" ++ filePath ++ "\",\"workDir\":\"" ++ wd ++ "\"}"
+      cpSpec = if isWindows
+        then shell $ "curl -s -X POST -H \"Content-Type: application/json\" -d '" ++ body ++ "' " ++ show configUrl
+        else proc "curl" ["-s", "-X", "POST", "-H", "Content-Type: application/json", "-d", body, configUrl]
+  (_, _, _, ph) <- createProcess cpSpec { std_out = CreatePipe, std_err = CreatePipe }
+  _ <- waitForProcess ph
+  pure ()

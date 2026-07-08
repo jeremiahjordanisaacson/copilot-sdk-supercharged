@@ -52,6 +52,12 @@ classdef CopilotClientOptions
 
         % TCP connection token for authenticated server connections.
         TcpConnectionToken (1,:) char = ''
+
+        % Enable remote session support (Mission Control).
+        Remote (1,1) logical = false
+
+        % W3C Trace Context provider (function handle returning struct).
+        OnGetTraceContext
     end
 
     methods
@@ -76,6 +82,8 @@ classdef CopilotClientOptions
             p.addParameter('SessionFs', struct());
             p.addParameter('CopilotHome', obj.CopilotHome);
             p.addParameter('TcpConnectionToken', obj.TcpConnectionToken);
+            p.addParameter('Remote', obj.Remote);
+            p.addParameter('OnGetTraceContext', []);
             p.parse(varargin{:});
 
             obj.CliPath          = p.Results.CliPath;
@@ -92,6 +100,8 @@ classdef CopilotClientOptions
             obj.SessionFs        = p.Results.SessionFs;
             obj.CopilotHome      = p.Results.CopilotHome;
             obj.TcpConnectionToken = p.Results.TcpConnectionToken;
+            obj.Remote           = p.Results.Remote;
+            obj.OnGetTraceContext = p.Results.OnGetTraceContext;
         end
 
         function s = toStruct(obj)
@@ -112,6 +122,9 @@ classdef CopilotClientOptions
             end
             if ~isempty(obj.TcpConnectionToken)
                 s.tcpConnectionToken = obj.TcpConnectionToken;
+            end
+            if obj.Remote
+                s.remote = true;
             end
         end
     end

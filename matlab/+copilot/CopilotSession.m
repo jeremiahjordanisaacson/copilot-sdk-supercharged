@@ -19,6 +19,7 @@ classdef CopilotSession < handle
         Listener        % event listener handle
         Messages        cell = {}
         IdleFuture      % struct used for sendAndWait blocking
+        ExitPlanModeHandler  % function handle for exit-plan-mode requests
     end
 
     events
@@ -30,11 +31,18 @@ classdef CopilotSession < handle
     end
 
     methods (Access = {?copilot.CopilotClient})
-        function obj = CopilotSession(rpcClient, sessionId, tools)
+        function obj = CopilotSession(rpcClient, sessionId, tools, exitPlanModeHandler)
             %CopilotSession  Internal constructor.
+            arguments
+                rpcClient   copilot.JsonRpcClient
+                sessionId   (1,:) char
+                tools       cell = {}
+                exitPlanModeHandler = []
+            end
             obj.RpcClient = rpcClient;
             obj.SessionId = sessionId;
             obj.Tools     = tools;
+            obj.ExitPlanModeHandler = exitPlanModeHandler;
 
             % Subscribe to RPC notifications and route session events.
             obj.Listener = addlistener(rpcClient, 'Notification', ...
@@ -243,6 +251,19 @@ classdef CopilotSession < handle
                 'sessionId', obj.SessionId, ...
                 'callId',    callId, ...
                 'result',    content));
+        end
+
+        function result = handleExitPlanMode(obj, params)
+            %handleExitPlanMode  Handle an exit-plan-mode request.
+            if isempty(obj.ExitPlanModeHandler)
+                result = struct('approved', true);
+                return;
+            end
+            try
+                result = obj.ExitPlanModeHandler(params);
+            catch
+                result = struct('approved', true);
+            end
         end
     end
 end

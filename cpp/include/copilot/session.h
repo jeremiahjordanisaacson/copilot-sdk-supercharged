@@ -96,6 +96,12 @@ public:
     /// @internal Handle a hook invocation from the CLI.
     nlohmann::json handleHooksInvoke(const std::string& hookType, const nlohmann::json& input);
 
+    /// @internal Register an exit plan mode handler.
+    void registerExitPlanModeHandler(ExitPlanModeHandler handler);
+
+    /// @internal Handle an exit plan mode request from the CLI.
+    ExitPlanModeResponse handleExitPlanModeRequest(const ExitPlanModeRequest& request);
+
 private:
     friend class CopilotClient;
 
@@ -129,6 +135,10 @@ private:
     // Hooks
     mutable std::mutex hooksMutex_;
     std::optional<SessionHooks> hooks_;
+
+    // Exit plan mode handler
+    mutable std::mutex exitPlanModeMutex_;
+    ExitPlanModeHandler exitPlanModeHandler_;
 };
 
 } // namespace copilot
