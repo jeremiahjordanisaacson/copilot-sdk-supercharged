@@ -45,6 +45,75 @@ package Copilot.Types is
    type Log_Level is (Trace, Debug, Info, Warn, Error, Fatal);
 
    --  -----------------------------------------------------------------------
+   --  Upstream-sync feature types & constants (parity with @github/copilot-sdk)
+   --  -----------------------------------------------------------------------
+
+   --  Per-session AI-credit spending limits (SessionLimitsConfig).
+   type Session_Limits_Config is record
+      Max_Ai_Credits : Natural := 0;
+   end record;
+
+   --  Persistent session memory configuration (MemoryConfiguration / memory_config).
+   type Memory_Configuration is record
+      Enabled : Boolean := False;
+   end record;
+
+   --  Arguments passed to a BYOK bearer_token_provider (per-session scoping).
+   type Provider_Token_Args is record
+      Session_Id : UString := Null_UString;
+   end record;
+
+   --  HTTP request_handler (CopilotRequestHandler): intercept/mutate an
+   --  outbound LLM inference request (JSON in, possibly-modified JSON out).
+   type Request_Handler_Access is
+     access function (Request_Json : String) return String;
+
+   --  BYOK bearer_token_provider (per-session token minting; a.k.a. get_bearer_token).
+   type Bearer_Token_Provider_Access is
+     access function (Args : Provider_Token_Args) return String;
+
+   --  MCP OAuth host token handler (on_mcp_auth_request); when set, the runtime
+   --  is signalled via the mcpAuthHandler flag on session.create.
+   type Mcp_Auth_Handler_Access is
+     access function (Session_Id : String; Server_Url : String) return String;
+
+   --  Post-tool-use hook (on_post_tool_use / post_tool_use): inspect a tool
+   --  result and optionally return an override.
+   type Post_Tool_Use_Hook_Access is
+     access function
+       (Tool_Name : String; Result_Json : String; Session_Id : String)
+        return String;
+
+   --  Pre-MCP-tool-call hook (on_pre_mcp_tool_call / pre_mcp_tool_call): gate an
+   --  MCP server tool call, returning a permission decision.
+   type Pre_Mcp_Tool_Call_Hook_Access is
+     access function
+       (Server_Name : String; Tool_Name : String;
+        Args_Json : String; Session_Id : String) return String;
+
+   --  Tool "defer" loading policy (ToolDefer): eager pre-load or lazy search.
+   Tool_Defer_Auto  : constant String := "auto";
+   Tool_Defer_Never : constant String := "never";
+
+   --  System-message section identifiers.  "preamble" targets the identity
+   --  preamble; "preserve" shields a section from a group-level remove.
+   Section_Preamble          : constant String := "preamble";
+   Section_Identity          : constant String := "identity";
+   Section_Tool_Instructions : constant String := "tool_instructions";
+   Section_Preserve          : constant String := "preserve";
+
+   --  GitHub-anchored attachment variants.
+   GitHub_Commit          : constant String := "GitHubCommit";
+   GitHub_Release         : constant String := "GitHubRelease";
+   GitHub_Actions_Job     : constant String := "GitHubActionsJob";
+   GitHub_Repository      : constant String := "GitHubRepository";
+   GitHub_File_Diff       : constant String := "GitHubFileDiff";
+   GitHub_Tree_Comparison : constant String := "GitHubTreeComparison";
+   GitHub_Url             : constant String := "GitHubUrl";
+   GitHub_File            : constant String := "GitHubFile";
+   GitHub_Snippet         : constant String := "GitHubSnippet";
+
+   --  -----------------------------------------------------------------------
    --  Client options
    --  -----------------------------------------------------------------------
 
@@ -66,6 +135,10 @@ package Copilot.Types is
       Session_Fs_Conventions      : UString := Null_UString;
       Copilot_Home                : UString := Null_UString;
       Tcp_Connection_Token        : UString := Null_UString;
+      --  HTTP request_handler / CopilotRequestHandler for outbound inference requests.
+      Request_Handler             : Request_Handler_Access := null;
+      --  BYOK bearer_token_provider (per-session token minting).
+      Bearer_Token_Provider       : Bearer_Token_Provider_Access := null;
    end record;
 
    Default_Options : constant Client_Options :=
@@ -85,7 +158,9 @@ package Copilot.Types is
       Session_Fs_State_Path       => Null_UString,
       Session_Fs_Conventions      => Null_UString,
       Copilot_Home                => Null_UString,
-      Tcp_Connection_Token        => Null_UString);
+      Tcp_Connection_Token        => Null_UString,
+      Request_Handler             => null,
+      Bearer_Token_Provider       => null);
 
    --  -----------------------------------------------------------------------
    --  Session configuration
@@ -115,6 +190,17 @@ package Copilot.Types is
       Auth_Token                    : UString  := Null_UString;
       Elicitation_Handler_Set       : Boolean  := False;
       Instruction_Directories_Json  : UString  := Null_UString;
+      --  --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+      Enable_Citations              : Boolean  := False;
+      Excluded_Builtin_Agents_Json  : UString  := Null_UString;
+      Session_Limits                : Session_Limits_Config := (Max_Ai_Credits => 0);
+      Memory                        : Memory_Configuration  := (Enabled => False);
+      Otlp_Protocol                 : UString  := Null_UString;
+      Enable_Web_Socket_Responses   : Boolean  := False;
+      Exp_Assignments_Json          : UString  := Null_UString;
+      On_Mcp_Auth_Request           : Mcp_Auth_Handler_Access       := null;
+      On_Post_Tool_Use              : Post_Tool_Use_Hook_Access     := null;
+      On_Pre_Mcp_Tool_Call          : Pre_Mcp_Tool_Call_Hook_Access := null;
    end record;
 
    Default_Session_Config : constant Session_Config :=
@@ -140,7 +226,17 @@ package Copilot.Types is
        Available_Tools_Json          => Null_UString,
        Auth_Token                    => Null_UString,
        Elicitation_Handler_Set       => False,
-       Instruction_Directories_Json  => Null_UString);
+       Instruction_Directories_Json  => Null_UString,
+       Enable_Citations              => False,
+       Excluded_Builtin_Agents_Json  => Null_UString,
+       Session_Limits                => (Max_Ai_Credits => 0),
+       Memory                        => (Enabled => False),
+       Otlp_Protocol                 => Null_UString,
+       Enable_Web_Socket_Responses   => False,
+       Exp_Assignments_Json          => Null_UString,
+       On_Mcp_Auth_Request           => null,
+       On_Post_Tool_Use              => null,
+       On_Pre_Mcp_Tool_Call          => null);
 
    --  -----------------------------------------------------------------------
    --  Resume session configuration
@@ -171,6 +267,12 @@ package Copilot.Types is
    type Message_Options is record
       Prompt      : UString := Null_UString;
       Mode        : UString := Null_UString;
+      --  Per-send agent mode override (wire key: agentMode).
+      Agent_Mode           : UString := Null_UString;
+      --  Prompt text shown to the user instead of the real prompt (wire: displayPrompt).
+      Display_Prompt       : UString := Null_UString;
+      --  Custom HTTP headers for this send as a JSON object string (wire: requestHeaders).
+      Request_Headers_Json : UString := Null_UString;
    end record;
 
    --  -----------------------------------------------------------------------
@@ -262,6 +364,8 @@ package Copilot.Types is
       Name        : UString    := Null_UString;
       Description : UString    := Null_UString;
       Parameters  : Param_List := Param_Vectors.Empty_Vector;
+      --  Defer loading policy (ToolDefer): "auto" (lazy) or "never" (eager).
+      Defer       : UString    := Null_UString;
    end record;
 
    package Tool_Vectors is new Ada.Containers.Indefinite_Vectors

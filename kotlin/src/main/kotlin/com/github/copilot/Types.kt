@@ -84,7 +84,9 @@ data class Tool(
     val name: String,
     val description: String? = null,
     val parameters: Map<String, Any?>? = null,
-    val handler: ToolHandler
+    val handler: ToolHandler,
+    /** Tool "defer" loading policy: "auto" (lazy via search) or "never" (eager pre-load). */
+    val defer: String? = null
 )
 
 // ============================================================================
@@ -330,6 +332,22 @@ data class SessionConfig(
     val idleTimeout: Int? = null,
     /** Custom instruction directory paths. */
     val instructionDirectories: List<String>? = null,
+    /** Enable inline source citations in assistant responses. */
+    val enableCitations: Boolean? = null,
+    /** Built-in agent names to exclude from this session. */
+    val excludedBuiltinAgents: List<String>? = null,
+    /** Per-session AI-credit spending limits. */
+    val sessionLimits: SessionLimitsConfig? = null,
+    /** Opt-in persistent session memory configuration. */
+    val memory: MemoryConfiguration? = null,
+    /** OTLP telemetry export protocol ("grpc" or "http/protobuf"). */
+    val otlpProtocol: String? = null,
+    /** Stream model responses over a WebSocket transport when true. */
+    val enableWebSocketResponses: Boolean? = null,
+    /** Experiment assignment overrides forwarded to the runtime. */
+    val expAssignments: Map<String, Any?>? = null,
+    /** Handler invoked when an MCP server requests an OAuth host token. */
+    val onMcpAuthRequest: McpAuthHandler? = null,
 )
 
 /**
@@ -481,6 +499,7 @@ typealias HookHandler = suspend (input: Map<String, Any?>, sessionId: String) ->
 data class SessionHooks(
     val onPreToolUse: HookHandler? = null,
     val onPostToolUse: HookHandler? = null,
+    val onPreMcpToolCall: HookHandler? = null,
     val onUserPromptSubmitted: HookHandler? = null,
     val onSessionStart: HookHandler? = null,
     val onSessionEnd: HookHandler? = null,
@@ -490,7 +509,7 @@ data class SessionHooks(
      * Returns true if any hook handler is registered.
      */
     fun hasAnyHook(): Boolean =
-        onPreToolUse != null || onPostToolUse != null || onUserPromptSubmitted != null ||
+        onPreToolUse != null || onPostToolUse != null || onPreMcpToolCall != null || onUserPromptSubmitted != null ||
             onSessionStart != null || onSessionEnd != null || onErrorOccurred != null
 
     /**
@@ -499,6 +518,7 @@ data class SessionHooks(
     fun getHandler(hookType: String): HookHandler? = when (hookType) {
         "preToolUse" -> onPreToolUse
         "postToolUse" -> onPostToolUse
+        "preMcpToolCall" -> onPreMcpToolCall
         "userPromptSubmitted" -> onUserPromptSubmitted
         "sessionStart" -> onSessionStart
         "sessionEnd" -> onSessionEnd
@@ -596,7 +616,13 @@ data class MessageOptions(
     /**
      * Custom HTTP headers to include in outbound model requests for this turn.
      */
-    val requestHeaders: Map<String, String>? = null
+    val requestHeaders: Map<String, String>? = null,
+
+    /** Agent execution mode for this turn (e.g. "agent", "chat"). */
+    val agentMode: String? = null,
+
+    /** Prompt text to display in the UI, when it differs from the model prompt. */
+    val displayPrompt: String? = null
 )
 
 // ============================================================================
@@ -874,5 +900,46 @@ data class CopilotClientOptions(
     /**
      * Auth token for TCP server connections.
      */
-    val tcpConnectionToken: String? = null
+    val tcpConnectionToken: String? = null,
+
+    /**
+     * Intercepts outbound LLM inference HTTP/WebSocket requests before they are sent.
+     */
+    val requestHandler: CopilotRequestHandler? = null,
+
+    /**
+     * BYOK provider that supplies per-session bearer tokens.
+     */
+    val bearerTokenProvider: BearerTokenProvider? = null
 )
+
+// ============================================================================
+// Upstream-sync feature types (parity with @github/copilot-sdk)
+// ============================================================================
+
+/** Per-session AI-credit budget; set [maxAiCredits] to cap spend. */
+@Serializable
+data class SessionLimitsConfig(
+    val maxAiCredits: Int? = null
+)
+
+/** Opt-in persistent session memory configuration. */
+@Serializable
+data class MemoryConfiguration(
+    val enabled: Boolean? = null
+)
+
+/** Arguments passed to a BYOK bearer-token provider (per-session scoping). */
+@Serializable
+data class ProviderTokenArgs(
+    val sessionId: String
+)
+
+/** Supplies a per-session bearer token for BYOK model providers. */
+typealias BearerTokenProvider = suspend (args: ProviderTokenArgs) -> String
+
+/** Intercepts outbound LLM inference HTTP/WebSocket requests before they are sent. */
+typealias CopilotRequestHandler = suspend (request: Map<String, Any?>, context: Map<String, Any?>) -> Map<String, Any?>
+
+/** Handler invoked when an MCP server requests an OAuth host token. */
+typealias McpAuthHandler = suspend (request: Map<String, Any?>, sessionId: String) -> String

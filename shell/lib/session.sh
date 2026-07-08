@@ -35,6 +35,57 @@ COPILOT_SYSTEM_MESSAGE_APPEND="append"
 COPILOT_SYSTEM_MESSAGE_REPLACE="replace"
 COPILOT_SYSTEM_MESSAGE_CUSTOMIZE="customize"
 
+# --- Tool Defer Loading Constants (ToolDefer) ---
+# Control whether a tool is eagerly pre-loaded or lazily discovered via search.
+# Set a tool's "defer" field (wire key: toolDefer) to one of these:
+COPILOT_TOOL_DEFER_AUTO="auto"     # lazy: discovered on demand
+COPILOT_TOOL_DEFER_NEVER="never"   # eager: always pre-loaded
+
+# --- System Message Section (extended) ---
+# The identity "preamble" section, and the "preserve" action that shields an
+# individually-addressable section from a group-level remove.
+COPILOT_SECTION_PREAMBLE="preamble"
+COPILOT_OVERRIDE_PRESERVE="preserve"
+
+# --- GitHub Attachment Type Constants ---
+# GitHub-anchored attachment variants for context attachments.
+COPILOT_GITHUB_COMMIT="GitHubCommit"
+COPILOT_GITHUB_RELEASE="GitHubRelease"
+COPILOT_GITHUB_ACTIONS_JOB="GitHubActionsJob"
+COPILOT_GITHUB_REPOSITORY="GitHubRepository"
+COPILOT_GITHUB_FILE_DIFF="GitHubFileDiff"
+COPILOT_GITHUB_TREE_COMPARISON="GitHubTreeComparison"
+COPILOT_GITHUB_URL="GitHubUrl"
+COPILOT_GITHUB_FILE="GitHubFile"
+COPILOT_GITHUB_SNIPPET="GitHubSnippet"
+
+# --- Message Send Options ---
+# Set these before calling copilot_session_send / _send_and_wait to include them
+# in the session.send payload (camelCase wire keys).
+# Agent mode override for a single send (wire: agentMode)
+COPILOT_AGENT_MODE=""
+# Display prompt shown to the user instead of the real prompt (wire: displayPrompt)
+COPILOT_DISPLAY_PROMPT=""
+
+# --- Additional Handler Conventions (parity with @github/copilot-sdk) ---
+# Like COPILOT_ELICITATION_HANDLER, set each of these to a shell function name.
+#
+# BYOK bearer token provider (per-session token minting). Convention:
+#   copilot_bearer_token_provider <session_id>   → echoes bearer token
+# (also referred to as get_bearer_token in other SDKs)
+COPILOT_BEARER_TOKEN_PROVIDER=""
+# HTTP request handler intercepting outbound LLM inference requests
+# (CopilotRequestHandler). Convention:
+#   copilot_request_handler <request_json>       → echoes (possibly mutated) request_json
+COPILOT_REQUEST_HANDLER=""
+# Lifecycle hooks (set to function names). Hook conventions:
+#   copilot_on_pre_tool_use      <context_json>
+#   copilot_on_post_tool_use     <context_json>   (post_tool_use)
+#   copilot_on_pre_mcp_tool_call <context_json>   (pre_mcp_tool_call)
+#   copilot_on_mcp_auth_request  <context_json>
+COPILOT_ON_POST_TOOL_USE=""
+COPILOT_ON_PRE_MCP_TOOL_CALL=""
+
 # --- Command Handler Support ---
 # Command contexts are passed as JSON strings with these fields:
 #   sessionId     - Session ID where the command was invoked
@@ -139,6 +190,16 @@ copilot_session_send() {
         params=$(echo "$params" | jq -c --argjson rh "$COPILOT_REQUEST_HEADERS" '. + {"requestHeaders":$rh}')
     fi
 
+    # Add message agent mode override if set
+    if [[ -n "$COPILOT_AGENT_MODE" ]]; then
+        params=$(echo "$params" | jq -c --arg am "$COPILOT_AGENT_MODE" '. + {"agentMode":$am}')
+    fi
+
+    # Add display prompt (shown to the user in place of the real prompt) if set
+    if [[ -n "$COPILOT_DISPLAY_PROMPT" ]]; then
+        params=$(echo "$params" | jq -c --arg dp "$COPILOT_DISPLAY_PROMPT" '. + {"displayPrompt":$dp}')
+    fi
+
     if ! copilot_jsonrpc_request "session.send" "$params"; then
         echo "ERROR: Failed to send message" >&2
         return 1
@@ -205,6 +266,16 @@ copilot_session_send_and_wait() {
     # Add custom HTTP headers for outbound model requests if set
     if [[ -n "$COPILOT_REQUEST_HEADERS" ]]; then
         params=$(echo "$params" | jq -c --argjson rh "$COPILOT_REQUEST_HEADERS" '. + {"requestHeaders":$rh}')
+    fi
+
+    # Add message agent mode override if set
+    if [[ -n "$COPILOT_AGENT_MODE" ]]; then
+        params=$(echo "$params" | jq -c --arg am "$COPILOT_AGENT_MODE" '. + {"agentMode":$am}')
+    fi
+
+    # Add display prompt (shown to the user in place of the real prompt) if set
+    if [[ -n "$COPILOT_DISPLAY_PROMPT" ]]; then
+        params=$(echo "$params" | jq -c --arg dp "$COPILOT_DISPLAY_PROMPT" '. + {"displayPrompt":$dp}')
     fi
 
     if ! copilot_jsonrpc_request "session.send" "$params"; then

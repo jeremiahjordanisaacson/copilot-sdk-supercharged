@@ -113,6 +113,17 @@ final class CopilotSession
             params["attachments"] = JSONValue(opts.attachments);
         if (!opts.responseFormat.isNull)
             params["responseFormat"] = opts.responseFormat.get;
+        if (!opts.agentMode.isNull)
+            params["agentMode"] = opts.agentMode.get;
+        if (!opts.displayPrompt.isNull)
+            params["displayPrompt"] = opts.displayPrompt.get;
+        if (opts.requestHeaders.length > 0)
+        {
+            auto hdrObj = JSONValue(string[string].init);
+            foreach (key, val; opts.requestHeaders)
+                hdrObj[key] = val;
+            params["requestHeaders"] = hdrObj;
+        }
 
         _rpc.notify("session/send", params);
     }

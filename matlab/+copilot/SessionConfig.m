@@ -62,6 +62,44 @@ classdef SessionConfig
 
         % Directories containing instruction files (cell array of char).
         InstructionDirectories (1,:) cell = {}
+
+        % --- Upstream-sync session configuration (parity with @github/copilot-sdk) ---
+
+        % Emit inline source citations (wire: enableCitations).
+        EnableCitations (1,1) logical = false
+
+        % Built-in agents to exclude (cell of char) (wire: excludedBuiltinAgents).
+        ExcludedBuiltinAgents (1,:) cell = {}
+
+        % Per-session spending / credit limits (copilot.SessionLimits or struct).
+        SessionLimits
+
+        % Persistent session memory (copilot.MemoryConfiguration or struct).
+        Memory
+
+        % OTLP telemetry protocol, e.g. 'grpc' or 'http/protobuf' (wire: otlpProtocol).
+        OtlpProtocol (1,:) char = ''
+
+        % Stream responses over a WebSocket (wire: enableWebSocketResponses).
+        EnableWebSocketResponses (1,1) logical = false
+
+        % Experiment assignment overrides (containers.Map) (wire: expAssignments).
+        ExpAssignments
+
+        % Handler for MCP OAuth token requests (function handle or empty).
+        OnMcpAuthRequest
+
+        % BYOK bearer-token provider (function handle or empty).
+        BearerTokenProvider
+
+        % Post-tool-use hook (function handle or empty).
+        OnPostToolUse
+
+        % Pre-MCP-tool-call hook (function handle or empty).
+        OnPreMcpToolCall
+
+        % Custom HTTP request handler (function handle or empty).
+        RequestHandler
     end
 
     methods
@@ -91,6 +129,18 @@ classdef SessionConfig
             p.addParameter('ImageOptions',        struct());
             p.addParameter('ElicitationHandler',  []);
             p.addParameter('InstructionDirectories', obj.InstructionDirectories);
+            p.addParameter('EnableCitations',          obj.EnableCitations);
+            p.addParameter('ExcludedBuiltinAgents',    obj.ExcludedBuiltinAgents);
+            p.addParameter('SessionLimits',            []);
+            p.addParameter('Memory',                   []);
+            p.addParameter('OtlpProtocol',             obj.OtlpProtocol);
+            p.addParameter('EnableWebSocketResponses', obj.EnableWebSocketResponses);
+            p.addParameter('ExpAssignments',           containers.Map());
+            p.addParameter('OnMcpAuthRequest',         []);
+            p.addParameter('BearerTokenProvider',      []);
+            p.addParameter('OnPostToolUse',            []);
+            p.addParameter('OnPreMcpToolCall',         []);
+            p.addParameter('RequestHandler',           []);
             p.parse(varargin{:});
 
             obj.Model              = p.Results.Model;
@@ -112,6 +162,18 @@ classdef SessionConfig
             obj.ImageOptions       = p.Results.ImageOptions;
             obj.ElicitationHandler = p.Results.ElicitationHandler;
             obj.InstructionDirectories = p.Results.InstructionDirectories;
+            obj.EnableCitations          = p.Results.EnableCitations;
+            obj.ExcludedBuiltinAgents    = p.Results.ExcludedBuiltinAgents;
+            obj.SessionLimits            = p.Results.SessionLimits;
+            obj.Memory                   = p.Results.Memory;
+            obj.OtlpProtocol             = p.Results.OtlpProtocol;
+            obj.EnableWebSocketResponses = p.Results.EnableWebSocketResponses;
+            obj.ExpAssignments           = p.Results.ExpAssignments;
+            obj.OnMcpAuthRequest         = p.Results.OnMcpAuthRequest;
+            obj.BearerTokenProvider      = p.Results.BearerTokenProvider;
+            obj.OnPostToolUse            = p.Results.OnPostToolUse;
+            obj.OnPreMcpToolCall         = p.Results.OnPreMcpToolCall;
+            obj.RequestHandler           = p.Results.RequestHandler;
         end
 
         function s = toStruct(obj)
@@ -144,6 +206,49 @@ classdef SessionConfig
             end
             if ~isempty(obj.InstructionDirectories)
                 s.instructionDirectories = obj.InstructionDirectories;
+            end
+            % --- Upstream-sync session configuration passthroughs (camelCase wire keys) ---
+            if obj.EnableCitations
+                s.enableCitations = true;
+            end
+            if ~isempty(obj.ExcludedBuiltinAgents)
+                s.excludedBuiltinAgents = obj.ExcludedBuiltinAgents;
+            end
+            if ~isempty(obj.SessionLimits)
+                if isa(obj.SessionLimits, 'copilot.SessionLimits')
+                    s.sessionLimits = obj.SessionLimits.toStruct();
+                else
+                    s.sessionLimits = obj.SessionLimits;
+                end
+            end
+            if ~isempty(obj.Memory)
+                if isa(obj.Memory, 'copilot.MemoryConfiguration')
+                    s.memory = obj.Memory.toStruct();
+                else
+                    s.memory = obj.Memory;
+                end
+            end
+            if ~isempty(obj.OtlpProtocol)
+                s.otlpProtocol = obj.OtlpProtocol;
+            end
+            if obj.EnableWebSocketResponses
+                s.enableWebSocketResponses = true;
+            end
+            if isa(obj.ExpAssignments, 'containers.Map') && obj.ExpAssignments.Count > 0
+                s.expAssignments = obj.ExpAssignments;
+            end
+            if ~isempty(obj.OnMcpAuthRequest)
+                s.mcpAuthHandler = true;
+            end
+            hooks = struct();
+            if ~isempty(obj.OnPostToolUse)
+                hooks.postToolUse = true;
+            end
+            if ~isempty(obj.OnPreMcpToolCall)
+                hooks.preMcpToolCall = true;
+            end
+            if ~isempty(fieldnames(hooks))
+                s.hooks = hooks;
             end
         end
     end

@@ -270,6 +270,22 @@ module CopilotSDK
     property elicitation_handler : Bool?
     @[JSON::Field(key: "instructionDirectories")]
     property instruction_directories : Array(String)?
+    @[JSON::Field(key: "enableCitations")]
+    property enable_citations : Bool?
+    @[JSON::Field(key: "excludedBuiltinAgents")]
+    property excluded_builtin_agents : Array(String)?
+    @[JSON::Field(key: "sessionLimits")]
+    property session_limits : SessionLimits?
+    @[JSON::Field(key: "memory")]
+    property memory_config : MemoryConfiguration?
+    @[JSON::Field(key: "otlpProtocol")]
+    property otlp_protocol : String?
+    @[JSON::Field(key: "enableWebSocketResponses")]
+    property enable_web_socket_responses : Bool?
+    @[JSON::Field(key: "expAssignments")]
+    property exp_assignments : Hash(String, JSON::Any)?
+    @[JSON::Field(key: "mcpAuthHandler")]
+    property mcp_auth_handler : Bool?
 
     def initialize(@model = nil, @streaming = nil, @system_message = nil,
                    @tools = nil, @instructions = nil, @agent_mode = nil,
@@ -278,7 +294,10 @@ module CopilotSDK
                    @commands = nil, @skill_directories = nil, @disabled_skills = nil,
                    @working_directory = nil, @github_token = nil, @reasoning_effort = nil,
                    @response_format = nil, @request_headers = nil, @elicitation_handler = nil,
-                   @instruction_directories = nil)
+                   @instruction_directories = nil, @enable_citations = nil,
+                   @excluded_builtin_agents = nil, @session_limits = nil, @memory_config = nil,
+                   @otlp_protocol = nil, @enable_web_socket_responses = nil,
+                   @exp_assignments = nil, @mcp_auth_handler = nil)
     end
   end
 
@@ -304,8 +323,15 @@ module CopilotSDK
     property prompt : String
     property attachments : Array(JSON::Any)?
     property mode : String?
+    @[JSON::Field(key: "agentMode")]
+    property agent_mode : String?
+    @[JSON::Field(key: "displayPrompt")]
+    property display_prompt : String?
+    @[JSON::Field(key: "requestHeaders")]
+    property request_headers : Hash(String, String)?
 
-    def initialize(@prompt, @attachments = nil, @mode = nil)
+    def initialize(@prompt, @attachments = nil, @mode = nil,
+                   @agent_mode = nil, @display_prompt = nil, @request_headers = nil)
     end
   end
 
@@ -371,11 +397,14 @@ module CopilotSDK
     property session_fs : SessionFsConfig?
     property copilot_home : String?
     property tcp_connection_token : String?
+    property bearer_token_provider : BearerTokenProvider?
+    property on_mcp_auth_request : McpAuthHandler?
 
     def initialize(@cli_path = nil, @cli_url = nil, @auto_start = true, @request_timeout = 30,
                    @github_token = nil, @use_logged_in_user = nil,
                    @session_idle_timeout_seconds = nil, @session_fs = nil,
-                   @copilot_home = nil, @tcp_connection_token = nil)
+                   @copilot_home = nil, @tcp_connection_token = nil,
+                   @bearer_token_provider = nil, @on_mcp_auth_request = nil)
     end
   end
 
@@ -416,6 +445,110 @@ module CopilotSDK
     def initialize(@session_id, @model = nil, @created_at = nil)
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Upstream-sync feature types (parity with @github/copilot-sdk)
+  # JSON-RPC wire keys are preserved in camelCase.
+  # ---------------------------------------------------------------------------
+
+  # Per-session spending limits.
+  class SessionLimits
+    include JSON::Serializable
+
+    @[JSON::Field(key: "maxAiCredits")]
+    property max_ai_credits : Float64?
+
+    def initialize(@max_ai_credits = nil)
+    end
+  end
+
+  # Opt-in persistent session memory configuration.
+  class MemoryConfiguration
+    include JSON::Serializable
+
+    property enabled : Bool?
+
+    def initialize(@enabled = nil)
+    end
+  end
+
+  # Session hook identifiers (includes post-tool-use and pre-MCP-tool-call).
+  enum HookType
+    PreToolUse
+    PostToolUse
+    PreMcpToolCall
+    UserPromptSubmitted
+    SessionStart
+    SessionEnd
+
+    # The camelCase wire name for this hook.
+    def to_wire : String
+      case self
+      when PreToolUse          then "preToolUse"
+      when PostToolUse         then "postToolUse"
+      when PreMcpToolCall      then "preMcpToolCall"
+      when UserPromptSubmitted then "userPromptSubmitted"
+      when SessionStart        then "sessionStart"
+      when SessionEnd          then "sessionEnd"
+      else                          "preToolUse"
+      end
+    end
+  end
+
+  # Tool defer-loading policy (:auto loads lazily via search, :never pre-loads).
+  enum ToolDeferMode
+    Auto
+    Never
+
+    def to_wire : String
+      case self
+      when Auto  then "auto"
+      when Never then "never"
+      else            "auto"
+      end
+    end
+  end
+
+  # Addressable system-message sections.
+  enum SystemMessageSection
+    Preamble
+    Identity
+    ToolInstructions
+    Preserve
+
+    def to_wire : String
+      case self
+      when Preamble         then "preamble"
+      when Identity         then "identity"
+      when ToolInstructions then "tool_instructions"
+      when Preserve         then "preserve"
+      else                       "preamble"
+      end
+    end
+  end
+
+  # GitHub-anchored attachment variants.
+  enum GitHubAttachmentType
+    GitHubCommit
+    GitHubRelease
+    GitHubActionsJob
+    GitHubRepository
+    GitHubFileDiff
+    GitHubTreeComparison
+    GitHubUrl
+    GitHubFile
+    GitHubSnippet
+
+    def to_wire : String
+      to_s
+    end
+  end
+
+  # Alias for a BYOK bearer-token provider (returns a token for outbound requests).
+  alias BearerTokenProvider = Proc(JSON::Any, String)
+
+  # Alias for an MCP OAuth host-token handler.
+  alias McpAuthHandler = Proc(JSON::Any, String)
 
   # Alias for tool handler callbacks.
   alias ToolHandler = Proc(JSON::Any, ToolInvocation, JSON::Any)

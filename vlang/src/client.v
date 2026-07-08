@@ -106,6 +106,31 @@ pub fn (mut c CopilotClient) create_session(config SessionConfig) !&CopilotSessi
 	if config.history.len > 0 {
 		params['"history"'] = json.encode(config.history)
 	}
+	// --- Upstream-sync session configuration passthroughs ---
+	if config.enable_citations {
+		params['"enableCitations"'] = 'true'
+	}
+	if config.excluded_builtin_agents.len > 0 {
+		params['"excludedBuiltinAgents"'] = json.encode(config.excluded_builtin_agents)
+	}
+	if config.session_limits.max_ai_credits != 0 || config.session_limits.max_requests != 0 || config.session_limits.max_tokens != 0 {
+		params['"sessionLimits"'] = json.encode(config.session_limits)
+	}
+	if config.memory.enabled {
+		params['"memory"'] = json.encode(config.memory)
+	}
+	if config.otlp_protocol.len > 0 {
+		params['"otlpProtocol"'] = '"${config.otlp_protocol}"'
+	}
+	if config.enable_web_socket_responses {
+		params['"enableWebSocketResponses"'] = 'true'
+	}
+	if config.exp_assignments.len > 0 {
+		params['"expAssignments"'] = json.encode(config.exp_assignments)
+	}
+	if !isnil(config.on_mcp_auth_request) {
+		params['"mcpAuthHandler"'] = 'true'
+	}
 
 	raw_result := c.transport.send_request('session.create', build_params(params))!
 	result := parse_response_result(raw_result)!

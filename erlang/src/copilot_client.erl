@@ -428,7 +428,14 @@ build_session_params(Config, _State) ->
         {include_sub_agent_streaming_events, <<"includeSubAgentStreamingEvents">>},
         {model_capabilities, <<"modelCapabilities">>},
         {enable_config_discovery, <<"enableConfigDiscovery">>},
-        {github_token, <<"gitHubToken">>}
+        {github_token, <<"gitHubToken">>},
+        {enable_citations, <<"enableCitations">>},
+        {excluded_builtin_agents, <<"excludedBuiltinAgents">>},
+        {session_limits, <<"sessionLimits">>},
+        {memory_config, <<"memory">>},
+        {otlp_protocol, <<"otlpProtocol">>},
+        {enable_web_socket_responses, <<"enableWebSocketResponses">>},
+        {exp_assignments, <<"expAssignments">>}
     ],
     Params1 = lists:foldl(fun({Key, JsonKey}, Acc) ->
         case maps:get(Key, Config, undefined) of
@@ -450,9 +457,14 @@ build_session_params(Config, _State) ->
             Params1#{<<"commands">> => CmdList}
     end,
     %% Wire requestElicitation flag
-    case maps:get(on_elicitation_request, Config, undefined) of
+    Params3 = case maps:get(on_elicitation_request, Config, undefined) of
         undefined -> Params2;
         _         -> Params2#{<<"requestElicitation">> => true}
+    end,
+    %% Wire mcpAuthHandler flag (MCP OAuth host token handler registered)
+    case maps:get(on_mcp_auth_request, Config, undefined) of
+        undefined -> Params3;
+        _         -> Params3#{<<"mcpAuthHandler">> => true}
     end.
 
 register_session_handlers(Rpc, SessionId, SessionPid, Config) ->

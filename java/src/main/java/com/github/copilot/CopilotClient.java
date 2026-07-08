@@ -78,6 +78,10 @@ public class CopilotClient {
     private boolean useLoggedInUser = true;
     private Integer sessionIdleTimeoutSeconds;
     private Types.SessionFsConfig sessionFsConfig;
+    /** Intercepts outbound LLM inference HTTP/WebSocket requests, when configured. */
+    private Types.CopilotRequestHandler requestHandler;
+    /** BYOK provider that supplies per-session bearer tokens, when configured. */
+    private Types.BearerTokenProvider bearerTokenProvider;
 
     /**
      * Creates a new CopilotClient with default options.
@@ -126,6 +130,9 @@ public class CopilotClient {
             if (options.getUseLoggedInUser() != null) this.useLoggedInUser = options.getUseLoggedInUser();
             if (options.getSessionIdleTimeoutSeconds() != null) this.sessionIdleTimeoutSeconds = options.getSessionIdleTimeoutSeconds();
             if (options.getSessionFs() != null) this.sessionFsConfig = options.getSessionFs();
+            // Upstream-sync client-side interceptors: consulted by the runtime transport when present.
+            if (options.getRequestHandler() != null) this.requestHandler = options.getRequestHandler();
+            if (options.getBearerTokenProvider() != null) this.bearerTokenProvider = options.getBearerTokenProvider();
         }
 
         this.isExternalServer = external;
@@ -434,6 +441,7 @@ public class CopilotClient {
                 def.put("name", tool.name);
                 if (tool.description != null) def.put("description", tool.description);
                 if (tool.parameters != null) def.put("parameters", tool.parameters);
+                if (tool.defer != null) def.put("defer", tool.defer);
                 toolDefs.add(def);
             }
             payload.put("tools", toolDefs);
@@ -444,7 +452,20 @@ public class CopilotClient {
         if (config.getProvider() != null) payload.put("provider", config.getProvider());
         if (config.getOnPermissionRequest() != null) payload.put("requestPermission", true);
         if (config.getOnUserInputRequest() != null) payload.put("requestUserInput", true);
-        if (config.getHooks() != null && config.getHooks().hasAnyHook()) payload.put("hooks", true);
+        if (config.getHooks() != null && config.getHooks().hasAnyHook()) {
+            payload.put("hooks", true);
+            // Surface the specific lifecycle hooks the runtime should invoke.
+            SessionHooks hooks = config.getHooks();
+            List<String> hookTypes = new ArrayList<>();
+            if (hooks.getOnPreToolUse() != null) hookTypes.add("preToolUse");
+            if (hooks.getOnPostToolUse() != null) hookTypes.add("postToolUse");
+            if (hooks.getOnPreMcpToolCall() != null) hookTypes.add("preMcpToolCall");
+            if (hooks.getOnUserPromptSubmitted() != null) hookTypes.add("userPromptSubmitted");
+            if (hooks.getOnSessionStart() != null) hookTypes.add("sessionStart");
+            if (hooks.getOnSessionEnd() != null) hookTypes.add("sessionEnd");
+            if (hooks.getOnErrorOccurred() != null) hookTypes.add("errorOccurred");
+            payload.put("hookTypes", hookTypes);
+        }
         if (config.getWorkingDirectory() != null) payload.put("workingDirectory", config.getWorkingDirectory());
         if (config.getStreaming() != null) payload.put("streaming", config.getStreaming());
         if (config.getMcpServers() != null) payload.put("mcpServers", config.getMcpServers());
@@ -472,7 +493,76 @@ public class CopilotClient {
         // Wire requestHeaders and imageGeneration / responseFormat for the session
         if (config.getRequestHeaders() != null) payload.put("requestHeaders", config.getRequestHeaders());
         if (config.getResponseFormat() != null) payload.put("responseFormat", config.getResponseFormat());
+
+        // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+        if (config.getEnableCitations() != null) payload.put("enableCitations", config.getEnableCitations());
+        if (config.getExcludedBuiltinAgents() != null) payload.put("excludedBuiltinAgents", config.getExcludedBuiltinAgents());
+        if (config.getSessionLimits() != null) {
+            Types.SessionLimitsConfig sl = config.getSessionLimits();
+            Map<String, Object> slWire = new HashMap<>();
+            if (sl.maxAiCredits != null) slWire.put("maxAiCredits", sl.maxAiCredits);
+            payload.put("sessionLimits", slWire);
+        }
+        if (config.getMemory() != null) {
+            Types.MemoryConfiguration mem = config.getMemory();
+            Map<String, Object> memWire = new HashMap<>();
+            if (mem.enabled != null) memWire.put("enabled", mem.enabled);
+            payload.put("memory", memWire);
+        }
+        if (config.getOtlpProtocol() != null) payload.put("otlpProtocol", config.getOtlpProtocol());
+        if (config.getEnableWebSocketResponses() != null) payload.put("enableWebSocketResponses", config.getEnableWebSocketResponses());
+        if (config.getExpAssignments() != null) payload.put("expAssignments", config.getExpAssignments());
+        // MCP OAuth host token handler: signal to the runtime that a handler is registered.
+        if (config.getOnMcpAuthRequest() != null) payload.put("mcpAuthHandler", true);
         return payload;
+    }
+
+    /**
+     * Builds the {@code session.send} JSON-RPC payload, including the upstream-sync
+     * message options (agentMode, displayPrompt, requestHeaders).
+     */
+    static Map<String, Object> buildSendPayload(String sessionId, MessageOptions options) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("sessionId", sessionId);
+        params.put("prompt", options.getPrompt());
+        if (options.getAttachments() != null) params.put("attachments", options.getAttachments());
+        if (options.getMode() != null) params.put("mode", options.getMode());
+        if (options.getAgentMode() != null) params.put("agentMode", options.getAgentMode());
+        if (options.getDisplayPrompt() != null) params.put("displayPrompt", options.getDisplayPrompt());
+        if (options.getRequestHeaders() != null) params.put("requestHeaders", options.getRequestHeaders());
+        if (options.getResponseFormat() != null) params.put("responseFormat", options.getResponseFormat());
+        if (options.getImageOptions() != null) params.put("imageOptions", options.getImageOptions());
+        return params;
+    }
+
+    /** Tool "defer" loading policy values. */
+    public static final class ToolDefer {
+        public static final String AUTO = "auto";
+        public static final String NEVER = "never";
+        private ToolDefer() {}
+    }
+
+    /** System-message section identifiers (used with system-message section overrides). */
+    public static final class SystemMessageSection {
+        public static final String PREAMBLE = "preamble";
+        public static final String IDENTITY = "identity";
+        public static final String TOOL_INSTRUCTIONS = "tool_instructions";
+        public static final String PRESERVE = "preserve";
+        private SystemMessageSection() {}
+    }
+
+    /** GitHub-anchored attachment type identifiers. */
+    public static final class GitHubAttachment {
+        public static final String GITHUB_COMMIT = "GitHubCommit";
+        public static final String GITHUB_RELEASE = "GitHubRelease";
+        public static final String GITHUB_ACTIONS_JOB = "GitHubActionsJob";
+        public static final String GITHUB_REPOSITORY = "GitHubRepository";
+        public static final String GITHUB_FILE_DIFF = "GitHubFileDiff";
+        public static final String GITHUB_TREE_COMPARISON = "GitHubTreeComparison";
+        public static final String GITHUB_URL = "GitHubUrl";
+        public static final String GITHUB_FILE = "GitHubFile";
+        public static final String GITHUB_SNIPPET = "GitHubSnippet";
+        private GitHubAttachment() {}
     }
 
     private void verifyProtocolVersion() throws Exception {

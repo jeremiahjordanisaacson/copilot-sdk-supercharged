@@ -866,6 +866,16 @@ function CopilotClient:_build_create_session_request(config)
     if config.disabledSkills then req.disabledSkills = config.disabledSkills end
     if config.infiniteSessions then req.infiniteSessions = config.infiniteSessions end
 
+    -- Upstream-sync session options (parity with @github/copilot-sdk)
+    if config.enableCitations ~= nil then req.enableCitations = config.enableCitations end
+    if config.excludedBuiltinAgents then req.excludedBuiltinAgents = config.excludedBuiltinAgents end
+    if config.sessionLimits then req.sessionLimits = config.sessionLimits end
+    if config.memory then req.memory = config.memory end
+    if config.otlpProtocol then req.otlpProtocol = config.otlpProtocol end
+    if config.enableWebSocketResponses ~= nil then req.enableWebSocketResponses = config.enableWebSocketResponses end
+    if config.expAssignments then req.expAssignments = config.expAssignments end
+    if config.onMcpAuthRequest then req.mcpAuthHandler = true end
+
     if config.streaming then req.streaming = true end
     if config.onPermissionRequest then req.requestPermission = true end
     if config.onUserInputRequest then req.requestUserInput = true end
@@ -873,7 +883,8 @@ function CopilotClient:_build_create_session_request(config)
     if config.hooks then
         local h = config.hooks
         if h.onPreToolUse or h.onPostToolUse or h.onUserPromptSubmitted
-            or h.onSessionStart or h.onSessionEnd or h.onErrorOccurred then
+            or h.onSessionStart or h.onSessionEnd or h.onErrorOccurred
+            or h.onPreMcpToolCall then
             req.hooks = true
         end
     end

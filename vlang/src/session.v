@@ -184,6 +184,15 @@ fn build_send_params(session_id string, opts SendOptions) string {
 	if opts.mode.len > 0 {
 		parts['"mode"'] = '"${opts.mode}"'
 	}
+	if opts.agent_mode.len > 0 {
+		parts['"agentMode"'] = '"${opts.agent_mode}"'
+	}
+	if opts.display_prompt.len > 0 {
+		parts['"displayPrompt"'] = '"${opts.display_prompt}"'
+	}
+	if opts.request_headers.len > 0 {
+		parts['"requestHeaders"'] = json.encode(opts.request_headers)
+	}
 	if opts.attachments.len > 0 {
 		parts['"attachments"'] = json.encode(opts.attachments)
 	}

@@ -98,6 +98,10 @@ class CopilotSession {
       'prompt': options.prompt,
       if (options.attachments != null) 'attachments': options.attachments,
       if (options.mode != null) 'mode': options.mode,
+      if (options.agentMode != null) 'agentMode': options.agentMode,
+      if (options.displayPrompt != null) 'displayPrompt': options.displayPrompt,
+      if (options.requestHeaders != null)
+        'requestHeaders': options.requestHeaders,
       if (options.responseFormat != null)
         'responseFormat': options.responseFormat!.toJson(),
       if (options.imageOptions != null)
@@ -311,6 +315,10 @@ class CopilotSession {
             context,
           );
           return result?.toJson();
+
+        case 'preMcpToolCall':
+          if (_hooks!.onPreMcpToolCall == null) return null;
+          return await _hooks!.onPreMcpToolCall!(inputMap, context);
 
         case 'userPromptSubmitted':
           if (_hooks!.onUserPromptSubmitted == null) return null;

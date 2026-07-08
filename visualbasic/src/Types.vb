@@ -64,6 +64,12 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Token for TCP connection authentication.</summary>
         Public Property TcpConnectionToken As String
 
+        ''' <summary>HTTP request handler for intercepting outbound LLM inference requests.</summary>
+        Public Property RequestHandler As CopilotRequestHandler
+
+        ''' <summary>BYOK bearer-token provider invoked per session (receives <see cref="ProviderTokenArgs"/>).</summary>
+        Public Property BearerTokenProvider As Func(Of ProviderTokenArgs, Task(Of String))
+
     End Class
 
     ' -----------------------------------------------------------------------
@@ -135,6 +141,36 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Directories to search for instruction files.</summary>
         Public Property InstructionDirectories As List(Of String)
 
+        ''' <summary>Enable inline source citations in assistant responses.</summary>
+        Public Property EnableCitations As Boolean? = Nothing
+
+        ''' <summary>Built-in agents to exclude from this session.</summary>
+        Public Property ExcludedBuiltinAgents As List(Of String)
+
+        ''' <summary>Per-session AI-credit spending limits.</summary>
+        Public Property SessionLimits As SessionLimitsConfig
+
+        ''' <summary>Persistent session memory configuration.</summary>
+        Public Property Memory As MemoryConfiguration
+
+        ''' <summary>OTLP telemetry protocol ("grpc" or "http/protobuf").</summary>
+        Public Property OtlpProtocol As String
+
+        ''' <summary>Stream assistant responses over a WebSocket transport.</summary>
+        Public Property EnableWebSocketResponses As Boolean? = Nothing
+
+        ''' <summary>Experiment assignments forwarded to the runtime.</summary>
+        Public Property ExpAssignments As Dictionary(Of String, Object)
+
+        ''' <summary>Handler for MCP OAuth host-token requests.</summary>
+        Public Property OnMcpAuthRequest As Func(Of McpAuthRequest, Task(Of String))
+
+        ''' <summary>Hook invoked after a tool completes (post-tool-use).</summary>
+        Public Property OnPostToolUse As Func(Of ToolCallData, Task)
+
+        ''' <summary>Hook invoked before an MCP tool call (pre-MCP-tool-call).</summary>
+        Public Property OnPreMcpToolCall As Func(Of ToolCallData, Task)
+
     End Class
 
     ''' <summary>
@@ -188,6 +224,15 @@ Namespace GitHub.Copilot.SDK
 
         ''' <summary>Interaction mode (e.g. "agent", "edit", "chat").</summary>
         Public Property Mode As String
+
+        ''' <summary>Agent-mode override for this message.</summary>
+        Public Property AgentMode As String
+
+        ''' <summary>Alternate prompt text shown to the user (the model still sees Prompt).</summary>
+        Public Property DisplayPrompt As String
+
+        ''' <summary>Per-message request headers forwarded with the turn.</summary>
+        Public Property RequestHeaders As Dictionary(Of String, String)
 
     End Class
 
@@ -275,6 +320,15 @@ Namespace GitHub.Copilot.SDK
 
         <JsonPropertyName("mode")>
         Public Property Mode As String
+
+        <JsonPropertyName("agentMode")>
+        Public Property AgentMode As String
+
+        <JsonPropertyName("displayPrompt")>
+        Public Property DisplayPrompt As String
+
+        <JsonPropertyName("requestHeaders")>
+        Public Property RequestHeaders As Dictionary(Of String, String)
 
     End Class
 
@@ -740,5 +794,114 @@ Namespace GitHub.Copilot.SDK
         Public Property Capabilities As SessionCapabilities
 
     End Class
+
+    ' -----------------------------------------------------------------------
+    '  Upstream-sync feature types (parity with @github/copilot-sdk)
+    ' -----------------------------------------------------------------------
+
+    ''' <summary>
+    ''' Per-session AI-credit budget; set <see cref="MaxAiCredits"/> to cap spend.
+    ''' </summary>
+    Public Class SessionLimitsConfig
+
+        ''' <summary>Maximum AI credits the session may consume.</summary>
+        Public Property MaxAiCredits As Integer? = Nothing
+
+        ''' <summary>Build the camelCase JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object)
+            If MaxAiCredits.HasValue Then d("maxAiCredits") = MaxAiCredits.Value
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Opt-in persistent session memory.
+    ''' </summary>
+    Public Class MemoryConfiguration
+
+        ''' <summary>Whether persistent memory is enabled for the session.</summary>
+        Public Property Enabled As Boolean
+
+        ''' <summary>Build the camelCase JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Return New Dictionary(Of String, Object) From {{"enabled", Enabled}}
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Arguments passed to a BYOK bearer-token provider (per-session scoping).
+    ''' </summary>
+    Public Class ProviderTokenArgs
+
+        ''' <summary>The session the token is being requested for.</summary>
+        Public Property SessionId As String
+
+    End Class
+
+    ''' <summary>
+    ''' Arguments passed to an MCP OAuth host-token handler.
+    ''' </summary>
+    Public Class McpAuthRequest
+
+        <JsonPropertyName("sessionId")>
+        Public Property SessionId As String
+
+        <JsonPropertyName("serverName")>
+        Public Property ServerName As String
+
+    End Class
+
+    ''' <summary>
+    ''' Intercepts outbound LLM inference HTTP/WebSocket requests. Assign an
+    ''' instance to <see cref="CopilotClientOptions.RequestHandler"/> and override
+    ''' <see cref="SendRequest"/> to mutate, replace, or forward the request.
+    ''' BYOK providers may also set <see cref="CopilotClientOptions.BearerTokenProvider"/>.
+    ''' </summary>
+    Public Class CopilotRequestHandler
+
+        ''' <summary>Transform an outbound request; override in a derived type.</summary>
+        Public Overridable Function SendRequest(request As Object, context As Object) As Object
+            Return request
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto").
+    ''' </summary>
+    Public Module ToolDefer
+        Public Const Auto As String = "auto"
+        Public Const Never As String = "never"
+    End Module
+
+    ''' <summary>
+    ''' System-message section identifiers (used with system-message overrides).
+    ''' The "preamble" section targets the identity preamble; the "preserve" action
+    ''' protects an individually-addressable section from a group-level remove.
+    ''' </summary>
+    Public Module SystemMessageSection
+        Public Const Preamble As String = "preamble"
+        Public Const Identity As String = "identity"
+        Public Const ToolInstructions As String = "tool_instructions"
+        Public Const Preserve As String = "preserve"
+    End Module
+
+    ''' <summary>
+    ''' GitHub-anchored attachment variants.
+    ''' </summary>
+    Public Module GitHubAttachment
+        Public Const GitHubCommit As String = "GitHubCommit"
+        Public Const GitHubRelease As String = "GitHubRelease"
+        Public Const GitHubActionsJob As String = "GitHubActionsJob"
+        Public Const GitHubRepository As String = "GitHubRepository"
+        Public Const GitHubFileDiff As String = "GitHubFileDiff"
+        Public Const GitHubTreeComparison As String = "GitHubTreeComparison"
+        Public Const GitHubUrl As String = "GitHubUrl"
+        Public Const GitHubFile As String = "GitHubFile"
+        Public Const GitHubSnippet As String = "GitHubSnippet"
+    End Module
 
 End Namespace

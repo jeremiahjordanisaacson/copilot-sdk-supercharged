@@ -64,22 +64,7 @@ public class CopilotSession {
      */
     @SuppressWarnings("unchecked")
     public String send(MessageOptions options) throws Exception {
-        Map<String, Object> params = new HashMap<>();
-        params.put("sessionId", sessionId);
-        params.put("prompt", options.getPrompt());
-        if (options.getAttachments() != null) {
-            params.put("attachments", options.getAttachments());
-        }
-        if (options.getMode() != null) {
-            params.put("mode", options.getMode());
-        }
-        if (options.getResponseFormat() != null) {
-            params.put("responseFormat", options.getResponseFormat());
-        }
-        if (options.getImageOptions() != null) {
-            params.put("imageOptions", options.getImageOptions());
-        }
-
+        Map<String, Object> params = CopilotClient.buildSendPayload(sessionId, options);
         Map<String, Object> response = client.request("session.send", params);
         return (String) response.get("messageId");
     }

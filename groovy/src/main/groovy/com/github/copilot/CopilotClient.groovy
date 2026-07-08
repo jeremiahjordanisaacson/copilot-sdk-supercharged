@@ -70,6 +70,8 @@ class CopilotClient {
     private Integer sessionIdleTimeoutSeconds
     private String copilotHome
     private String tcpConnectionToken
+    private Closure requestHandler
+    private Closure bearerTokenProvider
 
     // Session config defaults (stored for createSession)
     private List<Tool> defaultTools
@@ -156,6 +158,8 @@ class CopilotClient {
             }
             if (options.copilotHome) this.copilotHome = options.copilotHome as String
             if (options.tcpConnectionToken) this.tcpConnectionToken = options.tcpConnectionToken as String
+            if (options.requestHandler) this.requestHandler = options.requestHandler as Closure
+            if (options.bearerTokenProvider) this.bearerTokenProvider = options.bearerTokenProvider as Closure
         }
 
         this.isExternalServer = external
@@ -523,6 +527,7 @@ class CopilotClient {
                 Map<String, Object> def_ = [name: t.name] as Map<String, Object>
                 if (t.description) def_.description = t.description
                 if (t.parameters) def_.parameters = t.parameters
+                if (t.defer) def_.defer = t.defer
                 def_
             }
         }
@@ -560,7 +565,98 @@ class CopilotClient {
         if (config.responseFormat) payload.responseFormat = config.responseFormat
         if (config.imageGeneration) payload.imageGeneration = config.imageGeneration
         if (config.instructionDirectories) payload.instructionDirectories = config.instructionDirectories
+
+        // Hook registrations advertised to the server.
+        if (config.hooks) {
+            Map<String, Object> hooks = (Map<String, Object>) config.hooks
+            List<String> hookTypes = []
+            if (hooks.onPreToolUse) hookTypes.add('preToolUse')
+            if (hooks.onPostToolUse) hookTypes.add('postToolUse')
+            if (hooks.onPreMcpToolCall) hookTypes.add('preMcpToolCall')
+            if (hooks.onUserPromptSubmitted) hookTypes.add('userPromptSubmitted')
+            if (hooks.onSessionStart) hookTypes.add('sessionStart')
+            if (hooks.onSessionEnd) hookTypes.add('sessionEnd')
+            if (hooks.onErrorOccurred) hookTypes.add('errorOccurred')
+            if (hookTypes) {
+                payload.hooks = true
+                payload.hookTypes = hookTypes
+            }
+        }
+
+        // Additional session-config passthroughs.
+        if (config.enableCitations != null) payload.enableCitations = config.enableCitations
+        if (config.excludedBuiltinAgents) payload.excludedBuiltinAgents = config.excludedBuiltinAgents
+        if (config.sessionLimits != null) {
+            Object limCfg = config.sessionLimits
+            Map<String, Object> limits = [:]
+            if (limCfg instanceof SessionLimitsConfig) {
+                Double credits = ((SessionLimitsConfig) limCfg).maxAiCredits
+                if (credits != null) limits.maxAiCredits = credits
+            } else if (limCfg instanceof Map) {
+                Object c = ((Map<String, Object>) limCfg).get('maxAiCredits')
+                if (c != null) limits.maxAiCredits = c
+            }
+            payload.sessionLimits = limits
+        }
+        if (config.memory != null) {
+            Object memCfg = config.memory
+            boolean memEnabled = true
+            if (memCfg instanceof MemoryConfiguration) {
+                memEnabled = ((MemoryConfiguration) memCfg).enabled
+            } else if (memCfg instanceof Map) {
+                Object e = ((Map<String, Object>) memCfg).get('enabled')
+                if (e != null) memEnabled = (boolean) e
+            }
+            payload.memory = [enabled: memEnabled] as Map<String, Object>
+        }
+        if (config.otlpProtocol) payload.otlpProtocol = config.otlpProtocol
+        if (config.enableWebSocketResponses != null) payload.enableWebSocketResponses = config.enableWebSocketResponses
+        if (config.expAssignments) payload.expAssignments = config.expAssignments
+        if (config.onMcpAuthRequest) payload.mcpAuthHandler = true
         payload
+    }
+
+    /**
+     * Builds the JSON-RPC {@code session.send} payload from a message options map.
+     *
+     * @param sessionId the session identifier
+     * @param options   map with keys: prompt, attachments, mode, responseFormat,
+     *                  imageOptions, requestHeaders, agentMode, displayPrompt
+     * @return the request payload
+     */
+    static Map<String, Object> buildSendPayload(String sessionId, Map<String, Object> options) {
+        Map<String, Object> params = [sessionId: sessionId] as Map<String, Object>
+        params.prompt = options.prompt
+        if (options.attachments) params.attachments = options.attachments
+        if (options.mode) params.mode = options.mode
+        if (options.responseFormat) params.responseFormat = options.responseFormat
+        if (options.imageOptions) params.imageOptions = options.imageOptions
+        if (options.requestHeaders) params.requestHeaders = options.requestHeaders
+        if (options.agentMode) params.agentMode = options.agentMode
+        if (options.displayPrompt) params.displayPrompt = options.displayPrompt
+        params
+    }
+
+    /** Tool deferral policies for the {@code defer} field. */
+    static class ToolDefer {
+        static final String AUTO = 'auto'
+        static final String NEVER = 'never'
+    }
+
+    /** Known system message section identifiers for section overrides. */
+    static class SystemMessageSection {
+        static final String PREAMBLE = 'preamble'
+        static final String IDENTITY = 'identity'
+        static final String TOOL_INSTRUCTIONS = 'tool_instructions'
+        static final String PRESERVE = 'preserve'
+    }
+
+    /** GitHub attachment type constants. */
+    static class GitHubAttachment {
+        static final String GITHUB_COMMIT = 'GitHubCommit'
+        static final String GITHUB_REPOSITORY = 'GitHubRepository'
+        static final String GITHUB_PULL_REQUEST = 'GitHubPullRequest'
+        static final String GITHUB_ISSUE = 'GitHubIssue'
     }
 
     private void verifyProtocolVersion() throws Exception {

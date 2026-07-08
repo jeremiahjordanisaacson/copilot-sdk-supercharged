@@ -198,6 +198,46 @@ contains
       if (allocated(config%github_token)) then
         params = params // '"githubToken":"' // config%github_token // '",'
       end if
+      ! --- Upstream-sync session config passthroughs (camelCase wire keys) ---
+      if (config%enable_citations) then
+        params = params // '"enableCitations":true,'
+      end if
+      if (allocated(config%excluded_builtin_agents)) then
+        block
+          integer :: ai
+          character(len=:), allocatable :: arr
+          arr = '['
+          do ai = 1, size(config%excluded_builtin_agents)
+            if (ai > 1) arr = arr // ','
+            arr = arr // '"' // trim(config%excluded_builtin_agents(ai)) // '"'
+          end do
+          arr = arr // ']'
+          params = params // '"excludedBuiltinAgents":' // arr // ','
+        end block
+      end if
+      if (config%session_limits%max_ai_credits > 0) then
+        block
+          character(len=32) :: numbuf
+          write(numbuf, '(I0)') config%session_limits%max_ai_credits
+          params = params // '"sessionLimits":{"maxAiCredits":' // trim(adjustl(numbuf)) // '},'
+        end block
+      end if
+      if (config%memory%enabled) then
+        params = params // '"memory":{"enabled":true},'
+      end if
+      if (allocated(config%otlp_protocol)) then
+        params = params // '"otlpProtocol":"' // config%otlp_protocol // '",'
+      end if
+      if (config%enable_web_socket_responses) then
+        params = params // '"enableWebSocketResponses":true,'
+      end if
+      if (allocated(config%exp_assignments_json)) then
+        params = params // '"expAssignments":' // config%exp_assignments_json // ','
+      end if
+      ! MCP OAuth host token handler: signal the runtime that a handler is registered.
+      if (associated(config%on_mcp_auth_request)) then
+        params = params // '"mcpAuthHandler":true,'
+      end if
       if (config%session_idle_timeout_seconds > 0) then
         ! Would add timeout param here
       end if

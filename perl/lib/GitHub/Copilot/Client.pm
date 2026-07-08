@@ -68,6 +68,10 @@ sub new {
     my $github_token      = $args{github_token};
     my $use_logged_in_user = $args{use_logged_in_user};
     my $session_fs = $args{session_fs};  # SessionFsConfig object
+    # Custom outbound HTTP handler (CopilotRequestHandler) for BYOK transports
+    my $request_handler       = $args{request_handler};
+    # BYOK: code ref returning a bearer token (receives ProviderTokenArgs)
+    my $bearer_token_provider = $args{bearer_token_provider};
 
     # Default use_logged_in_user: false when github_token provided, true otherwise
     if (!defined $use_logged_in_user) {
@@ -92,6 +96,8 @@ sub new {
         github_token       => $github_token,
         use_logged_in_user => $use_logged_in_user,
         session_fs         => $session_fs,
+        request_handler       => $request_handler,
+        bearer_token_provider => $bearer_token_provider,
         env                => $args{env},
         _process_pid       => undef,
         _client            => undef,
@@ -188,6 +194,12 @@ sub create_session {
 
     my $payload = $config->to_wire();
 
+    # Advertise client-level BYOK / custom-transport capabilities to the server.
+    # request_handler is a CopilotRequestHandler; bearer_token_provider is a
+    # code ref invoked with ProviderTokenArgs to mint a bearer token.
+    $payload->{requestHandler}       = \1 if defined $self->{request_handler};
+    $payload->{bearerTokenProvider}  = \1 if defined $self->{bearer_token_provider};
+
     my $response = $self->{_client}->request('session.create', $payload);
 
     my $session_id     = $response->{sessionId};
@@ -225,6 +237,21 @@ sub create_session {
     # configDiscovery (enableConfigDiscovery), subAgentStreaming
     # (includeSubAgentStreamingEvents), mcpServers / mcp_server,
     # imageGeneration / responseFormat / image_generation
+    #
+    # Upstream sync adds the following SessionConfig passthroughs (serialized
+    # by GitHub::Copilot::Types::SessionConfig->to_wire) and per-message
+    # overrides (serialized by MessageOptions in Session->send):
+    #   enableCitations (enable_citations), excludedBuiltinAgents
+    #   (excluded_builtin_agents), sessionLimits (SessionLimitsConfig /
+    #   maxAiCredits), memory (MemoryConfiguration), otlpProtocol
+    #   (otlp_protocol), enableWebSocketResponses, expAssignments
+    #   (exp_assignments), mcpAuthHandler (on_mcp_auth_request), onPostToolUse
+    #   (on_post_tool_use), onPreMcpToolCall (on_pre_mcp_tool_call).
+    #   Per-message: agentMode (agent_mode), displayPrompt (display_prompt).
+    #   Constants: ToolDefer (defer), SystemMessageSection (preamble /
+    #   preserve), GitHubAttachment (GitHubCommit / github_commit),
+    #   ProviderTokenArgs. Client options: request_handler
+    #   (CopilotRequestHandler), bearer_token_provider.
 
     $self->{_sessions}{$session_id} = $session;
     return $session;

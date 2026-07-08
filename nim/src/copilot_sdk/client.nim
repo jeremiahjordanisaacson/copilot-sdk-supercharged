@@ -325,6 +325,22 @@ proc createSession*(client: CopilotClient;
     params["disabledSkills"] = %config.disabledSkills
   if config.excludedTools.len > 0:
     params["excludedTools"] = %config.excludedTools
+  if config.enableCitations:
+    params["enableCitations"] = %true
+  if config.excludedBuiltinAgents.len > 0:
+    params["excludedBuiltinAgents"] = %config.excludedBuiltinAgents
+  if config.sessionLimits.maxAiCredits > 0:
+    params["sessionLimits"] = %*{"maxAiCredits": config.sessionLimits.maxAiCredits}
+  if config.memory.enabled:
+    params["memory"] = %*{"enabled": true}
+  if config.otlpProtocol.len > 0:
+    params["otlpProtocol"] = %config.otlpProtocol
+  if config.enableWebSocketResponses:
+    params["enableWebSocketResponses"] = %true
+  if config.expAssignmentsJson.len > 0:
+    params["expAssignments"] = parseJson(config.expAssignmentsJson)
+  if config.mcpAuthHandler or not config.onMcpAuthRequest.isNil:
+    params["mcpAuthHandler"] = %true
 
   let res = await client.sendRpcRequest("session.create", params)
   let sessionId = res["sessionId"].getStr()

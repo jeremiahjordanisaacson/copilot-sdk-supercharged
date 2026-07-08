@@ -107,6 +107,9 @@ val reasoning_effort_to_string : reasoning_effort -> string
 type message_options = {
   prompt : string;
   mode : string option;
+  agent_mode : string option;
+  display_prompt : string option;
+  request_headers : (string * string) list;
 }
 
 val message_options_to_yojson : message_options -> Yojson.Safe.t
@@ -116,6 +119,43 @@ type tool_definition = {
   tool_description : string;
   tool_parameters : Yojson.Safe.t option;
 }
+
+(** {1 Upstream-sync Feature Types & Constants} *)
+
+type session_limits_config = { max_ai_credits : float option }
+
+val session_limits_config_to_yojson : session_limits_config -> Yojson.Safe.t
+
+type memory_configuration = { memory_enabled : bool }
+
+val memory_configuration_to_yojson : memory_configuration -> Yojson.Safe.t
+
+type provider_token_args = { pta_session_id : string }
+
+val provider_token_args_session_id : provider_token_args -> string
+
+type bearer_token_provider = provider_token_args -> string
+type copilot_request_handler = Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
+
+type tool_defer = DeferAuto | DeferNever
+
+val tool_defer_to_string : tool_defer -> string
+val system_message_section_preamble : string
+val system_message_section_identity : string
+val system_message_section_tool_instructions : string
+val system_message_section_preserve : string
+val attachment_github_commit : string
+val attachment_github_release : string
+val attachment_github_actions_job : string
+val attachment_github_repository : string
+val attachment_github_file_diff : string
+val attachment_github_tree_comparison : string
+val attachment_github_url : string
+val attachment_github_file : string
+val attachment_github_snippet : string
+val hook_on_pre_tool_use : string
+val hook_on_post_tool_use : string
+val hook_on_pre_mcp_tool_call : string
 
 type session_config = {
   model : string option;
@@ -137,6 +177,14 @@ type session_config = {
   request_headers : (string * string) list;
   on_elicitation_request : bool;
   instruction_directories : string list;
+  enable_citations : bool;
+  excluded_builtin_agents : string list;
+  session_limits : session_limits_config option;
+  memory : memory_configuration option;
+  otlp_protocol : string option;
+  enable_web_socket_responses : bool;
+  exp_assignments : (string * Yojson.Safe.t) list;
+  on_mcp_auth_request : bool;
 }
 
 val default_session_config : unit -> session_config
@@ -214,11 +262,20 @@ type client_options = {
   session_fs : session_fs_config option;
   copilot_home : string option;
   tcp_connection_token : string option;
+  request_handler : copilot_request_handler option;
+  bearer_token_provider : bearer_token_provider option;
 }
 
 val default_client_options : unit -> client_options
 
 (** {1 Helper Constructors} *)
 
-val make_message : ?mode:string -> string -> message_options
+val make_message :
+  ?mode:string ->
+  ?agent_mode:string ->
+  ?display_prompt:string ->
+  ?request_headers:(string * string) list ->
+  string ->
+  message_options
+
 val make_tool_definition : ?parameters:Yojson.Safe.t -> string -> string -> tool_definition

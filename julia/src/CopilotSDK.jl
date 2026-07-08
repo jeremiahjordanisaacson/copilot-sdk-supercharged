@@ -60,6 +60,15 @@ export get_session_metadata, set_session_fs_provider
 export on, send, send_and_wait, disconnect
 export approve_all, deny_all, tool_to_wire
 
+# Upstream-sync feature types & constants (parity with @github/copilot-sdk)
+export SessionLimitsConfig, MemoryConfiguration, ProviderTokenArgs
+export SystemMessageSection, GitHubAttachment, ToolDefer, CopilotRequestHandler
+export TOOL_DEFER_EAGER, TOOL_DEFER_LAZY
+export SYSTEM_MESSAGE_PREAMBLE, SYSTEM_MESSAGE_PRESERVE
+export GITHUB_COMMIT_ATTACHMENT, GITHUB_REPOSITORY_ATTACHMENT
+export GITHUB_PULL_REQUEST_ATTACHMENT, GITHUB_ISSUE_ATTACHMENT
+export OTLP_PROTOCOL_GRPC, OTLP_PROTOCOL_HTTP
+
 # Enum values & constants used by tests and consumers
 export DISCONNECTED, CONNECTING, CONNECTED, CONNECTION_ERROR
 export LOG_NONE, LOG_ERROR, LOG_WARNING, LOG_INFO, LOG_DEBUG, LOG_ALL

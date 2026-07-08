@@ -271,6 +271,15 @@ contains
     if (allocated(opts%command)) then
       params = params // ',"command":"' // opts%command // '"'
     end if
+    if (allocated(opts%agent_mode)) then
+      params = params // ',"agentMode":"' // opts%agent_mode // '"'
+    end if
+    if (allocated(opts%display_prompt)) then
+      params = params // ',"displayPrompt":"' // opts%display_prompt // '"'
+    end if
+    if (allocated(opts%request_headers_json)) then
+      params = params // ',"requestHeaders":' // opts%request_headers_json
+    end if
     params = params // '}'
   end function build_send_params
 

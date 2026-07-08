@@ -50,6 +50,22 @@ public class SessionConfig {
     private String responseFormat;
     /** Custom instruction directory paths. */
     private List<String> instructionDirectories;
+    /** Enable inline source citations in assistant responses. */
+    private Boolean enableCitations;
+    /** Built-in agent names to exclude from this session. */
+    private List<String> excludedBuiltinAgents;
+    /** Per-session AI-credit spending limits. */
+    private SessionLimitsConfig sessionLimits;
+    /** Opt-in persistent session memory configuration. */
+    private MemoryConfiguration memory;
+    /** OTLP telemetry export protocol ("grpc" or "http/protobuf"). */
+    private String otlpProtocol;
+    /** Stream model responses over a WebSocket transport when true. */
+    private Boolean enableWebSocketResponses;
+    /** Experiment assignment overrides forwarded to the runtime. */
+    private Map<String, Object> expAssignments;
+    /** Handler invoked when an MCP server requests an OAuth host token. */
+    private McpAuthHandler onMcpAuthRequest;
 
     public SessionConfig() {}
 
@@ -83,6 +99,14 @@ public class SessionConfig {
     public SessionConfig requestHeaders(Map<String, String> headers) { this.requestHeaders = headers; return this; }
     public SessionConfig responseFormat(String format) { this.responseFormat = format; return this; }
     public SessionConfig instructionDirectories(List<String> dirs) { this.instructionDirectories = dirs; return this; }
+    public SessionConfig enableCitations(boolean enable) { this.enableCitations = enable; return this; }
+    public SessionConfig excludedBuiltinAgents(List<String> agents) { this.excludedBuiltinAgents = agents; return this; }
+    public SessionConfig sessionLimits(SessionLimitsConfig limits) { this.sessionLimits = limits; return this; }
+    public SessionConfig memory(MemoryConfiguration memory) { this.memory = memory; return this; }
+    public SessionConfig otlpProtocol(String protocol) { this.otlpProtocol = protocol; return this; }
+    public SessionConfig enableWebSocketResponses(boolean enable) { this.enableWebSocketResponses = enable; return this; }
+    public SessionConfig expAssignments(Map<String, Object> assignments) { this.expAssignments = assignments; return this; }
+    public SessionConfig onMcpAuthRequest(McpAuthHandler handler) { this.onMcpAuthRequest = handler; return this; }
 
     // Getters
     public String getSessionId() { return sessionId; }
@@ -114,4 +138,12 @@ public class SessionConfig {
     public Map<String, String> getRequestHeaders() { return requestHeaders; }
     public String getResponseFormat() { return responseFormat; }
     public List<String> getInstructionDirectories() { return instructionDirectories; }
+    public Boolean getEnableCitations() { return enableCitations; }
+    public List<String> getExcludedBuiltinAgents() { return excludedBuiltinAgents; }
+    public SessionLimitsConfig getSessionLimits() { return sessionLimits; }
+    public MemoryConfiguration getMemory() { return memory; }
+    public String getOtlpProtocol() { return otlpProtocol; }
+    public Boolean getEnableWebSocketResponses() { return enableWebSocketResponses; }
+    public Map<String, Object> getExpAssignments() { return expAssignments; }
+    public McpAuthHandler getOnMcpAuthRequest() { return onMcpAuthRequest; }
 }

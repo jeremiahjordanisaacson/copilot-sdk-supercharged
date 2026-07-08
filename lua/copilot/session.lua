@@ -56,6 +56,9 @@ function CopilotSession:send(options)
         prompt         = options.prompt or "",
         attachments    = options.attachments,
         mode           = options.mode,
+        agentMode      = options.agentMode,
+        displayPrompt  = options.displayPrompt,
+        requestHeaders = options.requestHeaders,
         responseFormat = options.responseFormat,
         imageOptions   = options.imageOptions,
     }

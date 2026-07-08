@@ -294,3 +294,146 @@ export interface SessionEventEnvelope {
     /** The event data payload. */
     data: Record<string, unknown>;
 }
+
+// ---------------------------------------------------------------------------
+// Upstream-sync feature types & constants (parity with @github/copilot-sdk)
+// ---------------------------------------------------------------------------
+
+/** Per-session AI-credit budget. Set {@link maxAiCredits} to cap spend. */
+export interface SessionLimitsConfig {
+    /** Maximum AI credits the session may consume. */
+    maxAiCredits?: number;
+}
+
+/** Opt-in persistent session memory configuration. */
+export interface MemoryConfiguration {
+    /** Whether persistent memory is enabled for this session. */
+    enabled?: boolean;
+}
+
+/** Arguments passed to a {@link BearerTokenProvider} callback (per-session scoping). */
+export interface ProviderTokenArgs {
+    /** The session requesting a token. */
+    sessionId?: string;
+}
+
+/** BYOK callback resolving a bearer token for outbound provider requests. */
+export type BearerTokenProvider = (
+    args: ProviderTokenArgs,
+) => Promise<string | undefined> | string | undefined;
+
+/** Handler for MCP OAuth host token requests. */
+export type McpAuthHandler = (
+    request: Record<string, unknown>,
+    context: { sessionId?: string },
+) => Promise<string | undefined> | string | undefined;
+
+/** Handler fired after a tool execution. */
+export type PostToolUseHandler = (
+    input: Record<string, unknown>,
+    context: { sessionId?: string },
+) => Promise<unknown> | unknown;
+
+/** Handler fired before an MCP tool call is dispatched. */
+export type PreMcpToolCallHandler = (
+    input: Record<string, unknown>,
+    context: { sessionId?: string },
+) => Promise<unknown> | unknown;
+
+/** Session lifecycle hooks surfaced by the Solidity SDK. */
+export interface SolidityHooks {
+    /** Invoked after a tool executes. */
+    onPostToolUse?: PostToolUseHandler;
+    /** Invoked before an MCP tool call is dispatched. */
+    onPreMcpToolCall?: PreMcpToolCallHandler;
+}
+
+/**
+ * Intercept outbound LLM inference HTTP/WebSocket requests. Implement
+ * {@link sendRequest} to mutate, replace, or forward the request. BYOK
+ * providers may also supply a {@link BearerTokenProvider}.
+ */
+export interface CopilotRequestHandler {
+    sendRequest(
+        request: unknown,
+        context: { sessionId?: string },
+    ): Promise<unknown> | unknown;
+}
+
+/** Options for sending a message to a Solidity session. */
+export interface SolidityMessageOptions {
+    /** The prompt text to send. */
+    prompt: string;
+    /** Optional file/directory attachments. */
+    attachments?: unknown[];
+    /** Processing mode ("enqueue" or "immediate"). */
+    mode?: string;
+    /** Agent mode to use for this message. */
+    agentMode?: "interactive" | "plan" | "autopilot" | "shell";
+    /** Alternate prompt text to display in place of {@link prompt}. */
+    displayPrompt?: string;
+    /** Extra HTTP headers for this message's model requests. */
+    requestHeaders?: Record<string, string>;
+    /** Desired response format. */
+    responseFormat?: "text" | "image" | "json_object";
+}
+
+/** Upstream-sync session options forwarded to the base SDK on session creation. */
+export interface SolidityUpstreamSessionOptions {
+    /** Enable response citations. */
+    enableCitations?: boolean;
+    /** Names of built-in agents to exclude. */
+    excludedBuiltinAgents?: string[];
+    /** Per-session AI-credit spending limits. */
+    sessionLimits?: SessionLimitsConfig;
+    /** Persistent session memory configuration. */
+    memory?: MemoryConfiguration;
+    /** OTLP telemetry protocol. */
+    otlpProtocol?: "http/json" | "http/protobuf";
+    /** Use the WebSocket response transport instead of stdio streaming. */
+    enableWebSocketResponses?: boolean;
+    /** Experiment assignment overrides. */
+    expAssignments?: Record<string, string>;
+    /** Handler for MCP OAuth host token requests. */
+    onMcpAuthRequest?: McpAuthHandler;
+    /** BYOK bearer token provider. */
+    bearerTokenProvider?: BearerTokenProvider;
+    /** Session lifecycle hooks (incl. onPostToolUse / onPreMcpToolCall). */
+    hooks?: SolidityHooks;
+}
+
+/** Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto"). */
+export const ToolDefer = {
+    auto: "auto",
+    never: "never",
+} as const;
+export type ToolDeferMode = (typeof ToolDefer)[keyof typeof ToolDefer];
+
+/**
+ * System-message section identifiers. The `preamble` section targets only the
+ * identity preamble; the `preserve` action protects an individually-addressable
+ * section from a group-level remove.
+ */
+export const SystemMessageSection = {
+    preamble: "preamble",
+    identity: "identity",
+    toolInstructions: "tool_instructions",
+    preserve: "preserve",
+} as const;
+export type SystemMessageSectionName =
+    (typeof SystemMessageSection)[keyof typeof SystemMessageSection];
+
+/** GitHub-anchored attachment variants. */
+export const GitHubAttachment = {
+    gitHubCommit: "GitHubCommit",
+    gitHubRelease: "GitHubRelease",
+    gitHubActionsJob: "GitHubActionsJob",
+    gitHubRepository: "GitHubRepository",
+    gitHubFileDiff: "GitHubFileDiff",
+    gitHubTreeComparison: "GitHubTreeComparison",
+    gitHubUrl: "GitHubUrl",
+    gitHubFile: "GitHubFile",
+    gitHubSnippet: "GitHubSnippet",
+} as const;
+export type GitHubAttachmentType =
+    (typeof GitHubAttachment)[keyof typeof GitHubAttachment];

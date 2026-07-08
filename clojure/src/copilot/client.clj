@@ -140,7 +140,10 @@
                 disabled-skills infinite-sessions disable-resume
                 model-capabilities enable-config-discovery
                 include-sub-agent-streaming-events github-token
-                idle-timeout]} config]
+                idle-timeout
+                enable-citations excluded-builtin-agents session-limits
+                memory-config otlp-protocol enable-web-socket-responses
+                exp-assignments on-mcp-auth-request]} config]
     (cond-> {}
       model               (assoc :model model)
       session-id          (assoc :sessionId session-id)
@@ -170,6 +173,14 @@
       (some? enable-config-discovery) (assoc :enableConfigDiscovery enable-config-discovery)
       (some? include-sub-agent-streaming-events) (assoc :includeSubAgentStreamingEvents include-sub-agent-streaming-events)
       github-token        (assoc :gitHubToken github-token)
+      (some? enable-citations) (assoc :enableCitations enable-citations)
+      excluded-builtin-agents  (assoc :excludedBuiltinAgents excluded-builtin-agents)
+      session-limits           (assoc :sessionLimits session-limits)
+      memory-config            (assoc :memory memory-config)
+      otlp-protocol            (assoc :otlpProtocol otlp-protocol)
+      (some? enable-web-socket-responses) (assoc :enableWebSocketResponses enable-web-socket-responses)
+      exp-assignments          (assoc :expAssignments exp-assignments)
+      on-mcp-auth-request      (assoc :mcpAuthHandler true)
       idle-timeout        (assoc :idleTimeout idle-timeout))))
 
 (defn create-client

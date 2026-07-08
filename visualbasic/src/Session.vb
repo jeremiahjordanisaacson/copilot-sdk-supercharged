@@ -62,7 +62,10 @@ Namespace GitHub.Copilot.SDK
                 .SessionId = SessionId,
                 .Prompt = options.Prompt,
                 .Attachments = options.Attachments,
-                .Mode = options.Mode
+                .Mode = options.Mode,
+                .AgentMode = options.AgentMode,
+                .DisplayPrompt = options.DisplayPrompt,
+                .RequestHeaders = options.RequestHeaders
             }
 
             Dim response = Await _rpc.InvokeAsync(Of SendMessageResponse)("session.send", request, cancellationToken)

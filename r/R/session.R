@@ -42,18 +42,27 @@ CopilotSession <- R6::R6Class(
     #' @param prompt Character. The prompt/message text to send.
     #' @param attachments List or NULL. Optional file/directory attachments.
     #' @param mode Character or NULL. "enqueue" or "immediate".
+    #' @param agent_mode Character or NULL. Agent mode for this message.
+    #' @param display_prompt Character or NULL. Alternate prompt text to display.
+    #' @param request_headers Named list or NULL. Extra HTTP headers for this message.
     #' @param response_format Character or NULL. Response format ("text", "image", or "json_object").
     #' @param image_options List or NULL. Image generation options (from \code{image_options()}).
     #'
     #' @return Character. The message ID of the response.
     send = function(prompt, attachments = NULL, mode = NULL,
+                    agent_mode = NULL, display_prompt = NULL, request_headers = NULL,
                     response_format = NULL, image_options = NULL) {
+      agent_mode <- agent_mode %||% private$default_agent_mode
+      display_prompt <- display_prompt %||% private$default_display_prompt
       payload <- list(
         sessionId = self$session_id,
         prompt = prompt
       )
       if (!is.null(attachments)) payload$attachments <- attachments
       if (!is.null(mode)) payload$mode <- mode
+      if (!is.null(agent_mode)) payload$agentMode <- agent_mode
+      if (!is.null(display_prompt)) payload$displayPrompt <- display_prompt
+      if (!is.null(request_headers)) payload$requestHeaders <- request_headers
       if (!is.null(response_format)) payload$responseFormat <- response_format
       if (!is.null(image_options)) payload$imageOptions <- image_options
 
@@ -76,6 +85,8 @@ CopilotSession <- R6::R6Class(
     #'
     #' @return The last assistant.message SessionEvent, or NULL if none received.
     send_and_wait = function(prompt, attachments = NULL, mode = NULL,
+                             agent_mode = NULL, display_prompt = NULL,
+                             request_headers = NULL,
                              response_format = NULL, image_options = NULL,
                              timeout = 60) {
       last_assistant_message <- NULL
@@ -100,6 +111,8 @@ CopilotSession <- R6::R6Class(
 
       # Send the message
       self$send(prompt = prompt, attachments = attachments, mode = mode,
+                agent_mode = agent_mode, display_prompt = display_prompt,
+                request_headers = request_headers,
                 response_format = response_format, image_options = image_options)
 
       # Poll until idle or timeout
@@ -266,6 +279,16 @@ CopilotSession <- R6::R6Class(
       private$commands <- commands
     },
 
+    #' @description Set default message-send options applied to subsequent sends.
+    #' @param agent_mode Character or NULL. Default agent mode.
+    #' @param display_prompt Character or NULL. Default display prompt.
+    #' @keywords internal
+    set_default_message_options = function(agent_mode = NULL, display_prompt = NULL) {
+      if (!is.null(agent_mode)) private$default_agent_mode <- agent_mode
+      if (!is.null(display_prompt)) private$default_display_prompt <- display_prompt
+      invisible(NULL)
+    },
+
     #' @description Handle a hooks invocation from the CLI.
     #' @param hook_type Character. Hook type.
     #' @param input_data Any. Hook input.
@@ -277,6 +300,7 @@ CopilotSession <- R6::R6Class(
       handler_map <- list(
         preToolUse = private$hooks$on_pre_tool_use,
         postToolUse = private$hooks$on_post_tool_use,
+        preMcpToolCall = private$hooks$on_pre_mcp_tool_call,
         userPromptSubmitted = private$hooks$on_user_prompt_submitted,
         sessionStart = private$hooks$on_session_start,
         sessionEnd = private$hooks$on_session_end,
@@ -339,6 +363,8 @@ CopilotSession <- R6::R6Class(
     hooks = NULL,
     elicitation_handler = NULL,
     commands = NULL,
+    default_agent_mode = NULL,
+    default_display_prompt = NULL,
 
     handle_elicitation_request = function(data) {
       request_id <- data$requestId

@@ -28,6 +28,96 @@
            88 WAIT-IS-DONE                      VALUE 1.
            88 WAIT-IN-PROGRESS                  VALUE 0.
 
+      *----------------------------------------------------------------*
+      * Upstream-sync session options (parity with @github/copilot).
+      * Wire keys emitted by BUILD-CREATE-PARAMS are camelCase:
+      *   enableCitations, excludedBuiltinAgents,
+      *   sessionLimits / maxAiCredits, memory, otlpProtocol,
+      *   enableWebSocketResponses, expAssignments, mcpAuthHandler.
+      *----------------------------------------------------------------*
+       01  WS-UPSTREAM-CONFIG.
+      *    Inline citations: enableCitations
+           05 WS-ENABLE-CITATIONS   PIC 9       VALUE 0.
+               88 CITATIONS-ON                  VALUE 1.
+               88 CITATIONS-OFF                 VALUE 0.
+      *    Excluded built-in agents (JSON array): excludedBuiltinAgents
+           05 WS-EXCLUDED-BUILTIN   PIC X(1024) VALUE SPACES.
+      *    Session spending limits: sessionLimits / maxAiCredits
+           05 WS-MAX-AI-CREDITS     PIC 9(10)   VALUE 0.
+           05 WS-MAX-AI-CREDITS-ED  PIC Z(9)9.
+      *    Session memory config: MemoryConfiguration / memory_config
+           05 WS-MEMORY-ENABLED     PIC 9       VALUE 0.
+               88 MEMORY-ON                     VALUE 1.
+               88 MEMORY-OFF                    VALUE 0.
+      *    OTLP telemetry protocol: otlpProtocol
+           05 WS-OTLP-PROTOCOL      PIC X(16)   VALUE SPACES.
+      *    WebSocket transport: enableWebSocketResponses
+           05 WS-ENABLE-WEBSOCKET   PIC 9       VALUE 0.
+               88 WEBSOCKET-ON                  VALUE 1.
+               88 WEBSOCKET-OFF                 VALUE 0.
+      *    Experiment assignments (JSON object): expAssignments
+           05 WS-EXP-ASSIGNMENTS    PIC X(1024) VALUE SPACES.
+      *    MCP OAuth token handler: mcpAuthHandler / on_mcp_auth_request
+           05 WS-MCP-AUTH-HANDLER   PIC 9       VALUE 0.
+               88 MCP-AUTH-ON                   VALUE 1.
+               88 MCP-AUTH-OFF                  VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Upstream-sync host callbacks.  The host enables a callback by
+      * setting the flag; the runtime is then notified.  Conventions
+      * mirror @github/copilot-sdk:
+      *   bearer_token_provider / get_bearer_token,
+      *   request_handler / CopilotRequestHandler,
+      *   on_post_tool_use / post_tool_use,
+      *   on_pre_mcp_tool_call / pre_mcp_tool_call.
+      *----------------------------------------------------------------*
+       01  WS-UPSTREAM-HANDLERS.
+           05 WS-BEARER-PROVIDER    PIC 9       VALUE 0.
+               88 BEARER-PROVIDER-ON            VALUE 1.
+               88 BEARER-PROVIDER-OFF           VALUE 0.
+           05 WS-REQUEST-HANDLER    PIC 9       VALUE 0.
+               88 REQUEST-HANDLER-ON            VALUE 1.
+               88 REQUEST-HANDLER-OFF           VALUE 0.
+           05 WS-POST-TOOL-USE      PIC 9       VALUE 0.
+               88 POST-TOOL-USE-ON              VALUE 1.
+               88 POST-TOOL-USE-OFF             VALUE 0.
+           05 WS-PRE-MCP-TOOL-CALL  PIC 9       VALUE 0.
+               88 PRE-MCP-TOOL-CALL-ON          VALUE 1.
+               88 PRE-MCP-TOOL-CALL-OFF         VALUE 0.
+
+      *----------------------------------------------------------------*
+      * Per-message send options (upstream-sync): agentMode,
+      * displayPrompt, requestHeaders.
+      *----------------------------------------------------------------*
+       01  WS-SEND-OPTIONS-EXT.
+           05 WS-SEND-AGENT-MODE    PIC X(32)   VALUE SPACES.
+           05 WS-SEND-DISPLAY-PROMPT PIC X(4096) VALUE SPACES.
+           05 WS-SEND-REQ-HEADERS   PIC X(1024) VALUE SPACES.
+
+      *----------------------------------------------------------------*
+      * Tool defer-loading policy: ToolDefer / toolDefer
+      *----------------------------------------------------------------*
+       01  WS-TOOL-DEFER            PIC X(8)    VALUE SPACES.
+           88 TOOL-DEFER-AUTO                   VALUE "auto".
+           88 TOOL-DEFER-NEVER                  VALUE "never".
+
+      *----------------------------------------------------------------*
+      * System-message section identifiers
+      *----------------------------------------------------------------*
+       01  WS-SECTION-IDS.
+           05 WS-SECTION-PREAMBLE   PIC X(16)   VALUE "preamble".
+           05 WS-SECTION-IDENTITY   PIC X(16)   VALUE "identity".
+           05 WS-SECTION-PRESERVE   PIC X(16)   VALUE "preserve".
+
+      *----------------------------------------------------------------*
+      * GitHub-anchored attachment variants
+      *----------------------------------------------------------------*
+       01  WS-GITHUB-ATTACH.
+           05 WS-GH-COMMIT       PIC X(16) VALUE "GitHubCommit".
+           05 WS-GH-RELEASE      PIC X(16) VALUE "GitHubRelease".
+           05 WS-GH-REPOSITORY   PIC X(16) VALUE "GitHubRepository".
+           05 WS-GH-URL          PIC X(16) VALUE "GitHubUrl".
+
        PROCEDURE DIVISION.
 
       *----------------------------------------------------------------*
@@ -108,6 +198,86 @@
                END-STRING
            END-IF
 
+      *    Upstream-sync session-config passthroughs (camelCase keys).
+           IF CITATIONS-ON
+               STRING
+                   ',"enableCitations":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-EXCLUDED-BUILTIN NOT = SPACES
+               STRING
+                   ',"excludedBuiltinAgents":'
+                   FUNCTION TRIM(WS-EXCLUDED-BUILTIN)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-MAX-AI-CREDITS > 0
+               MOVE WS-MAX-AI-CREDITS TO WS-MAX-AI-CREDITS-ED
+               STRING
+                   ',"sessionLimits":{"maxAiCredits":'
+                   FUNCTION TRIM(WS-MAX-AI-CREDITS-ED)
+                   '}'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF MEMORY-ON
+               STRING
+                   ',"memory":{"enabled":true}'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-OTLP-PROTOCOL NOT = SPACES
+               STRING
+                   ',"otlpProtocol":"'
+                   FUNCTION TRIM(WS-OTLP-PROTOCOL)
+                   '"'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WEBSOCKET-ON
+               STRING
+                   ',"enableWebSocketResponses":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-EXP-ASSIGNMENTS NOT = SPACES
+               STRING
+                   ',"expAssignments":'
+                   FUNCTION TRIM(WS-EXP-ASSIGNMENTS)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF MCP-AUTH-ON
+               STRING
+                   ',"mcpAuthHandler":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
            STRING
                '}'
                DELIMITED SIZE
@@ -179,7 +349,47 @@
                FUNCTION TRIM(WS-SESSION-ID)
                '","message":"'
                FUNCTION TRIM(WS-SEND-MESSAGE)
-               '"}'
+               '"'
+               DELIMITED SIZE
+               INTO WS-PARAMS-BUFFER
+               WITH POINTER WS-PARAMS-PTR
+           END-STRING
+
+      *    Upstream-sync per-message send options (camelCase keys).
+           IF WS-SEND-AGENT-MODE NOT = SPACES
+               STRING
+                   ',"agentMode":"'
+                   FUNCTION TRIM(WS-SEND-AGENT-MODE)
+                   '"'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-SEND-DISPLAY-PROMPT NOT = SPACES
+               STRING
+                   ',"displayPrompt":"'
+                   FUNCTION TRIM(WS-SEND-DISPLAY-PROMPT)
+                   '"'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-SEND-REQ-HEADERS NOT = SPACES
+               STRING
+                   ',"requestHeaders":'
+                   FUNCTION TRIM(WS-SEND-REQ-HEADERS)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           STRING
+               '}'
                DELIMITED SIZE
                INTO WS-PARAMS-BUFFER
                WITH POINTER WS-PARAMS-PTR

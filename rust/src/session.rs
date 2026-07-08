@@ -212,6 +212,9 @@ impl CopilotSession {
             "prompt": options.prompt,
             "attachments": options.attachments,
             "mode": options.mode,
+            "agentMode": options.agent_mode,
+            "displayPrompt": options.display_prompt,
+            "requestHeaders": options.request_headers,
             "responseFormat": options.response_format,
             "imageOptions": options.image_options,
         });

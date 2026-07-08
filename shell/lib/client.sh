@@ -61,6 +61,32 @@ COPILOT_AVAILABLE_TOOLS=""
 # Example: '[{"name":"deploy","description":"Deploy to prod"}]'
 COPILOT_COMMANDS=""
 
+# --- Upstream-sync Session Config (parity with @github/copilot-sdk) ---
+# Enable inline source citations in assistant responses (boolean string "true"/"false", optional)
+COPILOT_ENABLE_CITATIONS=""
+# Built-in agents to exclude from this session (JSON array string, optional)
+# Example: '["copilot-code-review"]'
+COPILOT_EXCLUDED_BUILTIN_AGENTS=""
+# Per-session spending limits as a JSON object (SessionLimitsConfig, optional)
+# Example: '{"maxAiCredits":100}'
+COPILOT_SESSION_LIMITS=""
+# Convenience: cap AI-credit spend; folded into sessionLimits as {"maxAiCredits":N}
+COPILOT_MAX_AI_CREDITS=""
+# Persistent session memory (MemoryConfiguration); enable with "true"/"false" (optional)
+COPILOT_MEMORY_ENABLED=""
+# OTLP telemetry export protocol, e.g. "grpc" or "http/protobuf" (string, optional)
+COPILOT_OTLP_PROTOCOL=""
+# Stream model responses over a WebSocket transport (boolean string "true"/"false", optional)
+COPILOT_ENABLE_WEB_SOCKET_RESPONSES=""
+# Experiment assignment overrides (JSON object string, optional)
+# Example: '{"my-experiment":"treatment"}'
+COPILOT_EXP_ASSIGNMENTS=""
+# MCP OAuth host token handler function name (optional).
+# When set, session.create signals mcpAuthHandler=true so the runtime routes
+# MCP OAuth token requests to this handler. Convention:
+#   copilot_on_mcp_auth_request <context_json>  → echoes JSON token result
+COPILOT_ON_MCP_AUTH_REQUEST=""
+
 # --- Session Filesystem Config ---
 # Session filesystem configuration (JSON object string, optional)
 # Example: '{"initialCwd":"/home/user/project","sessionStatePath":"/tmp/state","conventions":"posix"}'
@@ -319,6 +345,47 @@ copilot_client_create_session() {
     fi
     if [[ -n "$COPILOT_INSTRUCTION_DIRECTORIES" ]]; then
         params=$(echo "$params" | jq -c --argjson id "$COPILOT_INSTRUCTION_DIRECTORIES" '. + {"instructionDirectories":$id}')
+    fi
+
+    # --- Upstream-sync session config passthroughs (camelCase wire keys) ---
+    if [[ -n "$COPILOT_ENABLE_CITATIONS" ]]; then
+        if [[ "$COPILOT_ENABLE_CITATIONS" == "true" ]]; then
+            params=$(echo "$params" | jq -c '. + {"enableCitations":true}')
+        else
+            params=$(echo "$params" | jq -c '. + {"enableCitations":false}')
+        fi
+    fi
+    if [[ -n "$COPILOT_EXCLUDED_BUILTIN_AGENTS" ]]; then
+        params=$(echo "$params" | jq -c --argjson eba "$COPILOT_EXCLUDED_BUILTIN_AGENTS" '. + {"excludedBuiltinAgents":$eba}')
+    fi
+    if [[ -n "$COPILOT_SESSION_LIMITS" ]]; then
+        params=$(echo "$params" | jq -c --argjson sl "$COPILOT_SESSION_LIMITS" '. + {"sessionLimits":$sl}')
+    elif [[ -n "$COPILOT_MAX_AI_CREDITS" ]]; then
+        params=$(echo "$params" | jq -c --argjson mac "$COPILOT_MAX_AI_CREDITS" '. + {"sessionLimits":{"maxAiCredits":$mac}}')
+    fi
+    if [[ -n "$COPILOT_MEMORY_ENABLED" ]]; then
+        if [[ "$COPILOT_MEMORY_ENABLED" == "true" ]]; then
+            params=$(echo "$params" | jq -c '. + {"memory":{"enabled":true}}')
+        else
+            params=$(echo "$params" | jq -c '. + {"memory":{"enabled":false}}')
+        fi
+    fi
+    if [[ -n "$COPILOT_OTLP_PROTOCOL" ]]; then
+        params=$(echo "$params" | jq -c --arg op "$COPILOT_OTLP_PROTOCOL" '. + {"otlpProtocol":$op}')
+    fi
+    if [[ -n "$COPILOT_ENABLE_WEB_SOCKET_RESPONSES" ]]; then
+        if [[ "$COPILOT_ENABLE_WEB_SOCKET_RESPONSES" == "true" ]]; then
+            params=$(echo "$params" | jq -c '. + {"enableWebSocketResponses":true}')
+        else
+            params=$(echo "$params" | jq -c '. + {"enableWebSocketResponses":false}')
+        fi
+    fi
+    if [[ -n "$COPILOT_EXP_ASSIGNMENTS" ]]; then
+        params=$(echo "$params" | jq -c --argjson ea "$COPILOT_EXP_ASSIGNMENTS" '. + {"expAssignments":$ea}')
+    fi
+    # MCP OAuth host token handler: signal to the runtime that a handler is registered.
+    if [[ -n "$COPILOT_ON_MCP_AUTH_REQUEST" ]]; then
+        params=$(echo "$params" | jq -c '. + {"mcpAuthHandler":true}')
     fi
 
     if ! copilot_jsonrpc_request "session.create" "$params"; then

@@ -126,7 +126,10 @@
     :include-sub-agent-streaming-events
     :github-token :commands :on-elicitation-request
     :session-fs (session filesystem provider map)
-    :instruction-directories (list of directories to search for instruction files)"
+    :instruction-directories (list of directories to search for instruction files)
+    :enable-citations :excluded-builtin-agents :session-limits :memory-config
+    :otlp-protocol :enable-web-socket-responses :exp-assignments
+    :on-mcp-auth-request (fn invoked to supply an MCP OAuth host token)"
   [& {:as opts}]
   (or opts {}))
 
@@ -166,7 +169,8 @@
 
 ;; System prompt section constants
 (def system-prompt-sections
-  {:identity            "identity"
+  {:preamble            "preamble"
+   :identity            "identity"
    :tone                "tone"
    :tool-efficiency     "tool_efficiency"
    :environment-context "environment_context"
@@ -179,10 +183,11 @@
 
 ;; Section override action constants
 (def section-override-actions
-  {:replace "replace"
-   :remove  "remove"
-   :append  "append"
-   :prepend "prepend"})
+  {:replace  "replace"
+   :remove   "remove"
+   :append   "append"
+   :prepend  "prepend"
+   :preserve "preserve"})
 
 ;; ============================================================================
 ;; Permission types
@@ -413,6 +418,8 @@
   `prompt` - the message string
   Optional: :attachments (vector of attachment maps), :mode (:enqueue or :immediate),
             :response-format (keyword from response-formats), :image-options (image options map),
+            :agent-mode (string agent name to route the message to),
+            :display-prompt (string shown in the UI in place of the raw prompt),
             :request-headers (map of string->string custom HTTP headers for outbound model requests)"
   [prompt & {:as opts}]
   (cond-> {:prompt prompt}
@@ -420,6 +427,8 @@
     (:mode opts)            (assoc :mode (name (:mode opts)))
     (:response-format opts) (assoc :response-format (response-format->str (:response-format opts)))
     (:image-options opts)   (assoc :image-options (:image-options opts))
+    (:agent-mode opts)      (assoc :agentMode (:agent-mode opts))
+    (:display-prompt opts)  (assoc :displayPrompt (:display-prompt opts))
     (:request-headers opts) (assoc :requestHeaders (:request-headers opts))))
 
 ;; ============================================================================
@@ -432,12 +441,59 @@
   Optional keys:
     :on-pre-tool-use            (fn [input invocation] ...)
     :on-post-tool-use           (fn [input invocation] ...)
+    :on-pre-mcp-tool-call       (fn [input invocation] ...)
     :on-user-prompt-submitted   (fn [input invocation] ...)
     :on-session-start           (fn [input invocation] ...)
     :on-session-end             (fn [input invocation] ...)
     :on-error-occurred          (fn [input invocation] ...)"
   [& {:as opts}]
   (or opts {}))
+
+;; ============================================================================
+;; Upstream-sync feature constructors & constants
+;; (parity with @github/copilot-sdk — camelCase JSON-RPC wire keys preserved)
+;; ============================================================================
+
+(defn session-limits
+  "Construct a session spending-limits map.
+  Optional: :max-ai-credits (number) → wire key `maxAiCredits`."
+  [& {:keys [max-ai-credits]}]
+  (cond-> {} (some? max-ai-credits) (assoc :maxAiCredits max-ai-credits)))
+
+(defn memory-configuration
+  "Construct a MemoryConfiguration map (opt-in persistent session memory).
+  Optional: :enabled (boolean).  Maps to the camelCase wire key `memory`."
+  [& {:keys [enabled]}]
+  (cond-> {} (some? enabled) (assoc :enabled enabled)))
+
+(defn bearer-token-provider
+  "Wrap a token-producing function as a BYOK bearer-token provider.
+  `f` is a (fn [args] ...) returning a bearer token string (or a promise)."
+  [f]
+  {:getBearerToken f})
+
+(defn copilot-request-handler
+  "Wrap a function as a CopilotRequestHandler for outbound HTTP requests.
+  `f` is a (fn [request] ...) returning a response map."
+  [f]
+  {:requestHandler f})
+
+;; Tool defer-loading policies (:auto loads lazily via search, :never pre-loads)
+(def tool-defer-modes
+  {:auto  "auto"
+   :never "never"})
+
+;; GitHub-anchored attachment type discriminators
+(def github-attachment-types
+  {:commit          "GitHubCommit"
+   :release         "GitHubRelease"
+   :actions-job     "GitHubActionsJob"
+   :repository      "GitHubRepository"
+   :file-diff       "GitHubFileDiff"
+   :tree-comparison "GitHubTreeComparison"
+   :url             "GitHubUrl"
+   :file            "GitHubFile"
+   :snippet         "GitHubSnippet"})
 
 ;; ============================================================================
 ;; Session filesystem types
@@ -508,7 +564,9 @@
     :session-idle-timeout-seconds - server-wide idle timeout for sessions in seconds
     :session-fs       - session filesystem provider map (see session-fs-config)
     :copilot-home     - custom path to the copilot home directory
-    :tcp-connection-token - token for TCP connections"
+    :tcp-connection-token - token for TCP connections
+    :bearer-token-provider - BYOK bearer-token provider map (see bearer-token-provider)
+    :request-handler  - CopilotRequestHandler map for outbound HTTP (see copilot-request-handler)"
   [& {:as opts}]
   (or opts {}))
 

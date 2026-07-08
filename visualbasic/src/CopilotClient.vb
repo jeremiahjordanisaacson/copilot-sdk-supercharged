@@ -501,6 +501,40 @@ Namespace GitHub.Copilot.SDK
                 request("attachments") = cfg.Attachments
             End If
 
+            ' --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+            If cfg.EnableCitations.HasValue Then
+                request("enableCitations") = cfg.EnableCitations.Value
+            End If
+
+            If cfg.ExcludedBuiltinAgents IsNot Nothing AndAlso cfg.ExcludedBuiltinAgents.Count > 0 Then
+                request("excludedBuiltinAgents") = cfg.ExcludedBuiltinAgents
+            End If
+
+            If cfg.SessionLimits IsNot Nothing Then
+                request("sessionLimits") = cfg.SessionLimits.ToWire()
+            End If
+
+            If cfg.Memory IsNot Nothing Then
+                request("memory") = cfg.Memory.ToWire()
+            End If
+
+            If Not String.IsNullOrEmpty(cfg.OtlpProtocol) Then
+                request("otlpProtocol") = cfg.OtlpProtocol
+            End If
+
+            If cfg.EnableWebSocketResponses.HasValue Then
+                request("enableWebSocketResponses") = cfg.EnableWebSocketResponses.Value
+            End If
+
+            If cfg.ExpAssignments IsNot Nothing AndAlso cfg.ExpAssignments.Count > 0 Then
+                request("expAssignments") = cfg.ExpAssignments
+            End If
+
+            ' Signal to the runtime that an MCP OAuth host-token handler is registered.
+            If cfg.OnMcpAuthRequest IsNot Nothing Then
+                request("mcpAuthHandler") = True
+            End If
+
             If cfg.Tools IsNot Nothing AndAlso cfg.Tools.Count > 0 Then
                 Dim toolDefs As New List(Of Dictionary(Of String, Object))
                 For Each tool In cfg.Tools

@@ -53,6 +53,19 @@ pub mut:
 	elicitation_handler                 fn (map[string]string) map[string]string = unsafe { nil }
 	idle_timeout                        int    // session idle timeout in seconds
 	instruction_directories             []string // directories to search for instruction files
+	// --- Upstream-sync session configuration (parity with @github/copilot-sdk) ---
+	enable_citations                    bool // emit inline source citations (wire: enableCitations)
+	excluded_builtin_agents             []string // built-in agents to exclude (wire: excludedBuiltinAgents)
+	session_limits                      SessionLimitsConfig // per-session spend/credit limits (wire: sessionLimits)
+	memory                              MemoryConfiguration // persistent session memory (wire: memory)
+	otlp_protocol                       string // OTLP telemetry protocol, e.g. "grpc" (wire: otlpProtocol)
+	enable_web_socket_responses         bool // stream responses over a WebSocket (wire: enableWebSocketResponses)
+	exp_assignments                     map[string]string // experiment assignment overrides (wire: expAssignments)
+	on_mcp_auth_request                 McpAuthHandler = unsafe { nil } // MCP OAuth token handler
+	bearer_token_provider               BearerTokenProvider = unsafe { nil } // BYOK bearer token provider
+	on_post_tool_use                    PostToolUseHandler = unsafe { nil } // post-tool-use hook
+	on_pre_mcp_tool_call                PreMcpToolCallHandler = unsafe { nil } // pre-MCP-tool-call hook
+	request_handler                     CopilotRequestHandler = unsafe { nil } // custom HTTP request handler
 }
 
 // HistoryEntry is a single turn in a conversation.
@@ -65,9 +78,12 @@ pub:
 // SendOptions describes a message to send into a session.
 pub struct SendOptions {
 pub mut:
-	prompt      string            // the user message text
-	attachments []Attachment      // optional file attachments
-	mode        string            // optional mode override
+	prompt          string            // the user message text
+	attachments     []Attachment      // optional file attachments
+	mode            string            // optional mode override
+	agent_mode      string            // agent mode override for this message (wire: agentMode)
+	display_prompt  string            // alternate prompt shown in the UI (wire: displayPrompt)
+	request_headers map[string]string // per-message request headers (wire: requestHeaders)
 }
 
 // Attachment represents a file attached to a message.
@@ -219,3 +235,126 @@ pub fn deny_all(req PermissionRequest) PermissionResponse {
 		reason: 'auto-denied'
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Upstream-sync feature types & constants (parity with @github/copilot-sdk)
+// ---------------------------------------------------------------------------
+
+// SessionLimitsConfig caps resource usage for a single session.
+pub struct SessionLimitsConfig {
+pub:
+	max_ai_credits f64 [json: 'maxAiCredits'] // maximum AI credits to spend
+	max_requests   int [json: 'maxRequests']  // maximum number of model requests
+	max_tokens     int [json: 'maxTokens']    // maximum number of tokens
+}
+
+// MemoryConfiguration controls persistent, cross-turn session memory.
+pub struct MemoryConfiguration {
+pub:
+	enabled     bool   [json: 'enabled']   // enable persistent session memory
+	max_entries int    [json: 'maxEntries'] // maximum retained memory entries
+	directory   string [json: 'directory'] // directory used for memory storage
+}
+
+// ProviderTokenArgs is passed to a BearerTokenProvider (BYOK) callback.
+pub struct ProviderTokenArgs {
+pub:
+	provider string [json: 'provider'] // provider identifier, e.g. "azure-openai"
+	endpoint string [json: 'endpoint'] // provider endpoint URL
+	scope    string [json: 'scope']    // requested token scope
+}
+
+// McpAuthRequest is delivered to the MCP OAuth token handler.
+pub struct McpAuthRequest {
+pub:
+	server_name string   [json: 'serverName'] // MCP server requesting authorization
+	auth_url    string   [json: 'authUrl']    // OAuth authorization URL
+	scopes      []string [json: 'scopes']     // requested OAuth scopes
+}
+
+// McpAuthResponse is returned by the MCP OAuth token handler.
+pub struct McpAuthResponse {
+pub:
+	token string [json: 'token'] // bearer token to present to the MCP server
+}
+
+// PostToolUsePayload is delivered to the post-tool-use hook.
+pub struct PostToolUsePayload {
+pub:
+	tool_name string [json: 'toolName'] // name of the tool that ran
+	result    string [json: 'result']   // JSON-encoded tool result
+}
+
+// PreMcpToolCallPayload is delivered to the pre-MCP-tool-call hook.
+pub struct PreMcpToolCallPayload {
+pub:
+	server_name string [json: 'serverName'] // MCP server name
+	tool_name   string [json: 'toolName']   // tool about to be invoked
+	arguments   string [json: 'arguments']  // JSON-encoded call arguments
+}
+
+// CopilotHttpRequest is passed to a custom HTTP request handler.
+pub struct CopilotHttpRequest {
+pub:
+	method  string            [json: 'method']  // HTTP method
+	url     string            [json: 'url']     // request URL
+	headers map[string]string [json: 'headers'] // request headers
+	body    string            [json: 'body']    // request body
+}
+
+// CopilotHttpResponse is returned by a custom HTTP request handler.
+pub struct CopilotHttpResponse {
+pub:
+	status  int               [json: 'status']  // HTTP status code
+	headers map[string]string [json: 'headers'] // response headers
+	body    string            [json: 'body']    // response body
+}
+
+// GitHubAttachment references GitHub content attached to a message.
+pub struct GitHubAttachment {
+pub:
+	kind string [json: 'kind'] // one of the github_*_attachment variants below
+	ref  string [json: 'ref']  // the reference value (SHA, owner/repo, number, ...)
+}
+
+// SystemMessageSection is a named, individually-configurable part of the
+// system message (e.g. a preamble that is preserved across compaction).
+pub struct SystemMessageSection {
+pub:
+	name     string [json: 'name']     // section name, e.g. "preamble"
+	content  string [json: 'content']  // section content
+	preserve bool   [json: 'preserve'] // preserve this section across compaction
+}
+
+// McpAuthHandler resolves an OAuth bearer token for an MCP server (MCP OAuth).
+pub type McpAuthHandler = fn (McpAuthRequest) McpAuthResponse
+
+// BearerTokenProvider supplies a bearer token for BYOK model providers.
+pub type BearerTokenProvider = fn (ProviderTokenArgs) string
+
+// PostToolUseHandler is invoked after a tool has finished executing.
+pub type PostToolUseHandler = fn (PostToolUsePayload)
+
+// PreMcpToolCallHandler is invoked before an MCP tool call is dispatched.
+pub type PreMcpToolCallHandler = fn (PreMcpToolCallPayload)
+
+// CopilotRequestHandler intercepts outbound Copilot HTTP requests.
+pub type CopilotRequestHandler = fn (CopilotHttpRequest) CopilotHttpResponse
+
+// System message section name constants.
+pub const system_message_preamble = 'preamble'
+pub const system_message_preserve = 'preserve'
+
+// Tool defer-loading strategy constants.
+pub const tool_defer_eager = 'eager'
+pub const tool_defer_lazy = 'lazy'
+
+// GitHub attachment variant identifiers.
+pub const github_commit_attachment = 'GitHubCommit'
+pub const github_repository_attachment = 'GitHubRepository'
+pub const github_pull_request_attachment = 'GitHubPullRequest'
+pub const github_issue_attachment = 'GitHubIssue'
+
+// OTLP telemetry protocol constants.
+pub const otlp_protocol_grpc = 'grpc'
+pub const otlp_protocol_http = 'http/protobuf'

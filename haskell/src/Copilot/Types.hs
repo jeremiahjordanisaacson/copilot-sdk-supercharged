@@ -51,6 +51,29 @@ module Copilot.Types
   , ResumeSessionConfig (..)
   , defaultResumeSessionConfig
 
+    -- * Upstream-sync feature types & constants
+  , SessionLimitsConfig (..)
+  , MemoryConfiguration (..)
+  , ProviderTokenArgs (..)
+  , BearerTokenProvider
+  , McpAuthHandler
+  , CopilotRequestHandler
+  , toolDeferAuto
+  , toolDeferNever
+  , systemMessageSectionPreamble
+  , systemMessageSectionIdentity
+  , systemMessageSectionToolInstructions
+  , systemMessageSectionPreserve
+  , attachmentGitHubCommit
+  , attachmentGitHubRelease
+  , attachmentGitHubActionsJob
+  , attachmentGitHubRepository
+  , attachmentGitHubFileDiff
+  , attachmentGitHubTreeComparison
+  , attachmentGitHubUrl
+  , attachmentGitHubFile
+  , attachmentGitHubSnippet
+
     -- * Response format & image types
   , ResponseFormat (..)
   , ImageOptions (..)
@@ -711,6 +734,15 @@ data SessionConfig = SessionConfig
   , scCommands                       :: !(Maybe [CommandDefinition])  -- ^ Slash commands registered for this session
   , scOnElicitationRequest           :: !(Maybe ElicitationHandler)  -- ^ Handler for elicitation requests from the server
   , scInstructionDirectories         :: !(Maybe [Text])  -- ^ Directories to search for instruction files
+  -- --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+  , scEnableCitations                :: !(Maybe Bool)  -- ^ Emit source citations for grounded responses
+  , scExcludedBuiltinAgents          :: !(Maybe [Text])  -- ^ Built-in agents to exclude from this session
+  , scSessionLimits                  :: !(Maybe SessionLimitsConfig)  -- ^ Per-session AI-credit spend limits
+  , scMemory                         :: !(Maybe MemoryConfiguration)  -- ^ Opt-in persistent session memory
+  , scOtlpProtocol                   :: !(Maybe Text)  -- ^ OTLP telemetry protocol ("grpc" or "http/protobuf")
+  , scEnableWebSocketResponses       :: !(Maybe Bool)  -- ^ Stream model responses over a WebSocket transport
+  , scExpAssignments                 :: !(Maybe (Map.Map Text Value))  -- ^ Experiment assignment overrides
+  , scOnMcpAuthRequest               :: !(Maybe McpAuthHandler)  -- ^ MCP OAuth host token handler
   }
 
 -- | Default (empty) session configuration.
@@ -742,6 +774,14 @@ defaultSessionConfig = SessionConfig
   , scCommands                       = Nothing
   , scOnElicitationRequest           = Nothing
   , scInstructionDirectories         = Nothing
+  , scEnableCitations                = Nothing
+  , scExcludedBuiltinAgents          = Nothing
+  , scSessionLimits                  = Nothing
+  , scMemory                         = Nothing
+  , scOtlpProtocol                   = Nothing
+  , scEnableWebSocketResponses       = Nothing
+  , scExpAssignments                 = Nothing
+  , scOnMcpAuthRequest               = Nothing
   }
 
 -- | Configuration for resuming a session.
@@ -804,6 +844,72 @@ defaultResumeSessionConfig = ResumeSessionConfig
   , rscDisableResume                  = Nothing
   , rscInstructionDirectories         = Nothing
   }
+
+-- ============================================================================
+-- Upstream-sync Feature Types & Constants (parity with @github/copilot-sdk)
+-- ============================================================================
+
+-- | Per-session AI-credit budget; set 'slcMaxAiCredits' to cap spend.
+newtype SessionLimitsConfig = SessionLimitsConfig
+  { slcMaxAiCredits :: Maybe Double
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON SessionLimitsConfig where
+  toJSON SessionLimitsConfig{..} = object $ filter ((/= Null) . snd)
+    [ "maxAiCredits" .= slcMaxAiCredits ]
+
+-- | Opt-in persistent session memory.
+newtype MemoryConfiguration = MemoryConfiguration
+  { mcEnabled :: Maybe Bool
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON MemoryConfiguration where
+  toJSON MemoryConfiguration{..} = object $ filter ((/= Null) . snd)
+    [ "enabled" .= mcEnabled ]
+
+-- | Arguments passed to a BYOK bearer-token provider (per-session scoping).
+newtype ProviderTokenArgs = ProviderTokenArgs
+  { ptaSessionId :: Text
+  } deriving (Show, Eq, Generic)
+
+-- | BYOK bearer-token provider: mints a fresh bearer token per session.
+type BearerTokenProvider = ProviderTokenArgs -> IO Text
+
+-- | MCP OAuth host token handler: supplies an OAuth token for an MCP auth request.
+type McpAuthHandler = Value -> IO Value
+
+-- | Intercepts outbound LLM inference HTTP/WebSocket requests. Receives the
+-- request and a context value and returns the (possibly mutated) request.
+type CopilotRequestHandler = Value -> Value -> IO Value
+
+-- | Tool "defer" loading policy: lazy via search ('toolDeferAuto') or eager
+-- pre-load ('toolDeferNever').
+toolDeferAuto, toolDeferNever :: Text
+toolDeferAuto  = "auto"
+toolDeferNever = "never"
+
+-- | System-message section identifiers. The @preamble@ section targets only the
+-- identity preamble; @preserve@ protects an addressable section from removal.
+systemMessageSectionPreamble, systemMessageSectionIdentity,
+  systemMessageSectionToolInstructions, systemMessageSectionPreserve :: Text
+systemMessageSectionPreamble         = "preamble"
+systemMessageSectionIdentity         = "identity"
+systemMessageSectionToolInstructions = "tool_instructions"
+systemMessageSectionPreserve         = "preserve"
+
+-- | GitHub-anchored attachment variants.
+attachmentGitHubCommit, attachmentGitHubRelease, attachmentGitHubActionsJob,
+  attachmentGitHubRepository, attachmentGitHubFileDiff, attachmentGitHubTreeComparison,
+  attachmentGitHubUrl, attachmentGitHubFile, attachmentGitHubSnippet :: Text
+attachmentGitHubCommit         = "GitHubCommit"
+attachmentGitHubRelease        = "GitHubRelease"
+attachmentGitHubActionsJob     = "GitHubActionsJob"
+attachmentGitHubRepository     = "GitHubRepository"
+attachmentGitHubFileDiff       = "GitHubFileDiff"
+attachmentGitHubTreeComparison = "GitHubTreeComparison"
+attachmentGitHubUrl            = "GitHubUrl"
+attachmentGitHubFile           = "GitHubFile"
+attachmentGitHubSnippet        = "GitHubSnippet"
 
 -- ============================================================================
 -- Response Format & Image Types
@@ -934,6 +1040,8 @@ data MessageOptions = MessageOptions
   , moResponseFormat :: !(Maybe ResponseFormat)
   , moImageOptions   :: !(Maybe ImageOptions)
   , moRequestHeaders :: !(Maybe (Map.Map Text Text))  -- ^ Custom HTTP headers for outbound model requests
+  , moAgentMode      :: !(Maybe Text)  -- ^ Agent mode override for this message
+  , moDisplayPrompt  :: !(Maybe Text)  -- ^ Prompt text to display in transcripts (may differ from the model prompt)
   } deriving (Show, Eq, Generic)
 
 -- ============================================================================
@@ -1233,6 +1341,7 @@ instance ToJSON ErrorOccurredHookOutput where
 data SessionHooks = SessionHooks
   { shOnPreToolUse          :: !(Maybe (PreToolUseHookInput -> HookInvocation -> IO (Maybe PreToolUseHookOutput)))
   , shOnPostToolUse         :: !(Maybe (PostToolUseHookInput -> HookInvocation -> IO (Maybe PostToolUseHookOutput)))
+  , shOnPreMcpToolCall      :: !(Maybe (PreToolUseHookInput -> HookInvocation -> IO (Maybe PreToolUseHookOutput)))
   , shOnUserPromptSubmitted :: !(Maybe (UserPromptSubmittedHookInput -> HookInvocation -> IO (Maybe UserPromptSubmittedHookOutput)))
   , shOnSessionStart        :: !(Maybe (SessionStartHookInput -> HookInvocation -> IO (Maybe SessionStartHookOutput)))
   , shOnSessionEnd          :: !(Maybe (SessionEndHookInput -> HookInvocation -> IO (Maybe SessionEndHookOutput)))
@@ -1241,7 +1350,7 @@ data SessionHooks = SessionHooks
 
 -- | Default (empty) session hooks.
 defaultSessionHooks :: SessionHooks
-defaultSessionHooks = SessionHooks Nothing Nothing Nothing Nothing Nothing Nothing
+defaultSessionHooks = SessionHooks Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 -- ============================================================================
 -- Session Events
@@ -1641,6 +1750,8 @@ data CopilotClientOptions = CopilotClientOptions
   , ccoSessionFs                 :: !(Maybe SessionFsConfig)  -- ^ Custom session filesystem provider configuration
   , ccoCopilotHome               :: !(Maybe Text)  -- ^ Custom path to the copilot home directory
   , ccoTcpConnectionToken        :: !(Maybe Text)  -- ^ Token for TCP connections
+  , ccoRequestHandler            :: !(Maybe CopilotRequestHandler)  -- ^ Intercept outbound LLM inference requests
+  , ccoBearerTokenProvider       :: !(Maybe BearerTokenProvider)  -- ^ BYOK bearer-token provider (per-session)
   }
 
 -- | Default client options.
@@ -1659,4 +1770,6 @@ defaultClientOptions = CopilotClientOptions
   , ccoSessionFs                 = Nothing
   , ccoCopilotHome               = Nothing
   , ccoTcpConnectionToken        = Nothing
+  , ccoRequestHandler            = Nothing
+  , ccoBearerTokenProvider       = Nothing
   }

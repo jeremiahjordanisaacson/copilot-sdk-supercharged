@@ -131,6 +131,17 @@ begin
   Params.AddPair('message', Options.Prompt);
   if Options.Model <> '' then
     Params.AddPair('model', Options.Model);
+  if Options.AgentMode <> '' then
+    Params.AddPair('agentMode', Options.AgentMode);
+  if Options.DisplayPrompt <> '' then
+    Params.AddPair('displayPrompt', Options.DisplayPrompt);
+  if Assigned(Options.RequestHeaders) and (Options.RequestHeaders.Count > 0) then
+  begin
+    var HeadersObj := TJSONObject.Create;
+    for var H in Options.RequestHeaders do
+      HeadersObj.AddPair(H.Key, H.Value);
+    Params.AddPair('requestHeaders', HeadersObj);
+  end;
 
   FRpc.SendNotification('session.send', Params);
 end;
@@ -145,6 +156,17 @@ begin
   Params.AddPair('message', Options.Prompt);
   if Options.Model <> '' then
     Params.AddPair('model', Options.Model);
+  if Options.AgentMode <> '' then
+    Params.AddPair('agentMode', Options.AgentMode);
+  if Options.DisplayPrompt <> '' then
+    Params.AddPair('displayPrompt', Options.DisplayPrompt);
+  if Assigned(Options.RequestHeaders) and (Options.RequestHeaders.Count > 0) then
+  begin
+    var HeadersObj := TJSONObject.Create;
+    for var H in Options.RequestHeaders do
+      HeadersObj.AddPair(H.Key, H.Value);
+    Params.AddPair('requestHeaders', HeadersObj);
+  end;
 
   Result := FRpc.SendRequest('session.send', Params, TimeoutMs);
 end;

@@ -29,6 +29,10 @@ public class CopilotClientOptions {
     private String copilotHome;
     /** Auth token for TCP server connections. */
     private String tcpConnectionToken;
+    /** Intercepts outbound LLM inference HTTP/WebSocket requests. */
+    private Types.CopilotRequestHandler requestHandler;
+    /** BYOK provider that supplies per-session bearer tokens. */
+    private Types.BearerTokenProvider bearerTokenProvider;
 
     public CopilotClientOptions() {}
 
@@ -49,6 +53,8 @@ public class CopilotClientOptions {
     public CopilotClientOptions sessionFs(Types.SessionFsConfig sessionFs) { this.sessionFs = sessionFs; return this; }
     public CopilotClientOptions copilotHome(String copilotHome) { this.copilotHome = copilotHome; return this; }
     public CopilotClientOptions tcpConnectionToken(String tcpConnectionToken) { this.tcpConnectionToken = tcpConnectionToken; return this; }
+    public CopilotClientOptions requestHandler(Types.CopilotRequestHandler handler) { this.requestHandler = handler; return this; }
+    public CopilotClientOptions bearerTokenProvider(Types.BearerTokenProvider provider) { this.bearerTokenProvider = provider; return this; }
 
     // Getters
     public String getCliPath() { return cliPath; }
@@ -67,4 +73,6 @@ public class CopilotClientOptions {
     public Types.SessionFsConfig getSessionFs() { return sessionFs; }
     public String getCopilotHome() { return copilotHome; }
     public String getTcpConnectionToken() { return tcpConnectionToken; }
+    public Types.CopilotRequestHandler getRequestHandler() { return requestHandler; }
+    public Types.BearerTokenProvider getBearerTokenProvider() { return bearerTokenProvider; }
 }

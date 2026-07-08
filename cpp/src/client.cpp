@@ -916,6 +916,16 @@ nlohmann::json CopilotClient::buildCreateSessionParams(const SessionConfig& conf
     if (config.disabledSkills) params["disabledSkills"] = *config.disabledSkills;
     if (config.infiniteSessions) params["infiniteSessions"] = *config.infiniteSessions;
 
+    // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+    if (config.enableCitations) params["enableCitations"] = *config.enableCitations;
+    if (config.excludedBuiltinAgents) params["excludedBuiltinAgents"] = *config.excludedBuiltinAgents;
+    if (config.sessionLimits) params["sessionLimits"] = *config.sessionLimits;
+    if (config.memory) params["memory"] = *config.memory;
+    if (config.otlpProtocol) params["otlpProtocol"] = *config.otlpProtocol;
+    if (config.enableWebSocketResponses) params["enableWebSocketResponses"] = *config.enableWebSocketResponses;
+    if (config.expAssignments) params["expAssignments"] = *config.expAssignments;
+    if (config.onMcpAuthRequest) params["mcpAuthHandler"] = true;
+
     return params;
 }
 

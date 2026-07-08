@@ -331,7 +331,6 @@ pub const CopilotClient = struct {
     }
 
     fn populateSessionParams(self: *CopilotClient, params: *std.json.ObjectMap, config: SessionConfig) SdkError!void {
-        _ = self;
         if (config.model) |m| {
             params.put("model", .{ .string = m }) catch return SdkError.AllocationFailed;
         }
@@ -340,6 +339,41 @@ pub const CopilotClient = struct {
         }
         if (config.streaming) {
             params.put("streaming", .{ .bool = true }) catch return SdkError.AllocationFailed;
+        }
+
+        // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+        if (config.enable_citations) |ec| {
+            params.put("enableCitations", .{ .bool = ec }) catch return SdkError.AllocationFailed;
+        }
+        if (config.otlp_protocol) |op| {
+            params.put("otlpProtocol", .{ .string = op }) catch return SdkError.AllocationFailed;
+        }
+        if (config.enable_web_socket_responses) |ws| {
+            params.put("enableWebSocketResponses", .{ .bool = ws }) catch return SdkError.AllocationFailed;
+        }
+        if (config.excluded_builtin_agents) |agents| {
+            var arr = std.json.Array.init(self.allocator);
+            for (agents) |agent| {
+                arr.append(.{ .string = agent }) catch return SdkError.AllocationFailed;
+            }
+            params.put("excludedBuiltinAgents", .{ .array = arr }) catch return SdkError.AllocationFailed;
+        }
+        if (config.session_limits) |sl| {
+            var slobj = std.json.ObjectMap.init(self.allocator);
+            if (sl.max_ai_credits) |credits| {
+                slobj.put("maxAiCredits", .{ .float = credits }) catch return SdkError.AllocationFailed;
+            }
+            params.put("sessionLimits", .{ .object = slobj }) catch return SdkError.AllocationFailed;
+        }
+        if (config.memory) |mem| {
+            var memobj = std.json.ObjectMap.init(self.allocator);
+            if (mem.enabled) |en| {
+                memobj.put("enabled", .{ .bool = en }) catch return SdkError.AllocationFailed;
+            }
+            params.put("memory", .{ .object = memobj }) catch return SdkError.AllocationFailed;
+        }
+        if (config.mcp_auth_handler) {
+            params.put("mcpAuthHandler", .{ .bool = true }) catch return SdkError.AllocationFailed;
         }
     }
 

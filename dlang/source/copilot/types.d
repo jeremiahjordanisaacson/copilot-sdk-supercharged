@@ -62,6 +62,12 @@ struct CopilotClientOptions
 
     /// Token for TCP connection authentication.
     Nullable!string tcpConnectionToken;
+
+    /// Custom handler used to intercept outbound CAPI HTTP requests.
+    CopilotRequestHandler requestHandler;
+
+    /// BYOK bearer-token provider invoked for authenticated model requests.
+    BearerTokenProvider bearerTokenProvider;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +160,97 @@ enum ImageResponseFormat : string
 }
 
 // ---------------------------------------------------------------------------
+// Upstream-sync feature types (parity with @github/copilot-sdk)
+// ---------------------------------------------------------------------------
+
+/// Context passed to a bearer-token / MCP-auth provider callback.
+struct ProviderTokenArgs
+{
+    string sessionId;
+    string serverUrl;
+    string[] scopes;
+}
+
+/// Per-session spending / usage guardrails.
+struct SessionLimitsConfig
+{
+    /// Maximum number of AI credits this session may consume.
+    Nullable!double maxAiCredits;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        if (!maxAiCredits.isNull)
+            obj["maxAiCredits"] = maxAiCredits.get;
+        return obj;
+    }
+}
+
+/// Persistent session-memory settings.
+struct MemoryConfiguration
+{
+    /// Whether persistent session memory is enabled.
+    bool enabled = false;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["enabled"] = enabled;
+        return obj;
+    }
+}
+
+/// Custom handler used to intercept outbound CAPI HTTP requests.
+alias CopilotRequestHandler = JSONValue delegate(JSONValue);
+
+/// BYOK bearer-token provider invoked for authenticated model requests.
+alias BearerTokenProvider = string delegate(ProviderTokenArgs);
+
+/// Handler invoked to satisfy an MCP OAuth authorization request.
+alias McpAuthHandler = string delegate(ProviderTokenArgs);
+
+/// Controls when a tool definition is materialised for the model.
+enum ToolDefer : string
+{
+    auto_ = "auto",
+    never = "never",
+}
+
+/// Named sections of the composed system message.
+enum SystemMessageSection : string
+{
+    preamble = "preamble",
+    identity = "identity",
+    toolInstructions = "tool_instructions",
+    preserve = "preserve",
+}
+
+/// Hook-type identifiers (the "hookType" field of a hooks.invoke request).
+enum HookType : string
+{
+    preToolUse          = "preToolUse",
+    postToolUse         = "postToolUse",
+    userPromptSubmitted = "userPromptSubmitted",
+    sessionStart        = "sessionStart",
+    sessionEnd          = "sessionEnd",
+    errorOccurred       = "errorOccurred",
+    preMcpToolCall      = "preMcpToolCall",
+}
+
+/// GitHub-anchored attachment type identifiers.
+enum GitHubAttachmentType : string
+{
+    commit         = "GitHubCommit",
+    release        = "GitHubRelease",
+    actionsJob     = "GitHubActionsJob",
+    repository     = "GitHubRepository",
+    fileDiff       = "GitHubFileDiff",
+    treeComparison = "GitHubTreeComparison",
+    pullRequest    = "GitHubPullRequest",
+    issue          = "GitHubIssue",
+}
+
+// ---------------------------------------------------------------------------
 // Session configuration
 // ---------------------------------------------------------------------------
 
@@ -234,6 +331,33 @@ struct SessionConfig
 
     /// Directories containing instruction files for the session.
     string[] instructionDirectories;
+
+    /// Enable inline source citations in assistant responses.
+    bool enableCitations = false;
+
+    /// Built-in agents to exclude from this session.
+    string[] excludedBuiltinAgents;
+
+    /// Per-session spending / usage limits.
+    Nullable!SessionLimitsConfig sessionLimits;
+
+    /// Persistent session-memory configuration.
+    Nullable!MemoryConfiguration memory;
+
+    /// OTLP telemetry protocol ("grpc" or "http/protobuf").
+    Nullable!string otlpProtocol;
+
+    /// Stream responses over a WebSocket transport.
+    bool enableWebSocketResponses = false;
+
+    /// Experiment (feature-flag) assignments forwarded to the CLI.
+    JSONValue expAssignments;
+
+    /// Handler invoked to satisfy MCP OAuth authorization requests.
+    McpAuthHandler onMcpAuthRequest;
+
+    /// When true, the client handles MCP OAuth authorization requests.
+    bool mcpAuthHandler = false;
 
     JSONValue toJson() const @safe
     {
@@ -329,6 +453,34 @@ struct SessionConfig
             foreach (s; instructionDirectories) arr ~= JSONValue(s);
             obj["instructionDirectories"] = JSONValue(arr);
         }
+
+        if (enableCitations)
+            obj["enableCitations"] = true;
+
+        if (excludedBuiltinAgents.length > 0)
+        {
+            JSONValue[] arr;
+            foreach (a; excludedBuiltinAgents) arr ~= JSONValue(a);
+            obj["excludedBuiltinAgents"] = JSONValue(arr);
+        }
+
+        if (!sessionLimits.isNull)
+            obj["sessionLimits"] = sessionLimits.get.toJson();
+
+        if (!memory.isNull)
+            obj["memory"] = memory.get.toJson();
+
+        if (!otlpProtocol.isNull)
+            obj["otlpProtocol"] = otlpProtocol.get;
+
+        if (enableWebSocketResponses)
+            obj["enableWebSocketResponses"] = true;
+
+        if (expAssignments.type == JSONType.object)
+            obj["expAssignments"] = expAssignments;
+
+        if (mcpAuthHandler || onMcpAuthRequest !is null)
+            obj["mcpAuthHandler"] = true;
 
         return obj;
     }
@@ -434,6 +586,15 @@ struct MessageOptions
 
     /// Desired response format.
     Nullable!string responseFormat;
+
+    /// Agent mode override for this message (e.g. "agent" or "ask").
+    Nullable!string agentMode;
+
+    /// Prompt text shown to the user in place of the raw message.
+    Nullable!string displayPrompt;
+
+    /// Additional HTTP headers sent with this message request.
+    string[string] requestHeaders;
 }
 
 // ---------------------------------------------------------------------------

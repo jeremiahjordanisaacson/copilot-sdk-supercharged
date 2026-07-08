@@ -285,6 +285,15 @@ defmodule Copilot.Types do
   @type permission_handler ::
           (PermissionRequest.t(), %{session_id: String.t()} -> PermissionRequestResult.t())
 
+  @typedoc "MCP OAuth host token handler: supplies an OAuth token for an MCP auth request."
+  @type mcp_auth_handler :: (map() -> map() | String.t())
+
+  @typedoc "BYOK bearer-token provider: mints a fresh bearer token per session."
+  @type bearer_token_provider :: (ProviderTokenArgs.t() -> String.t())
+
+  @typedoc "Intercepts outbound LLM inference HTTP/WebSocket requests."
+  @type copilot_request_handler :: (map(), map() -> map())
+
   # ---------------------------------------------------------------------------
   # User Input Types
   # ---------------------------------------------------------------------------
@@ -335,6 +344,7 @@ defmodule Copilot.Types do
     @type t :: %__MODULE__{
             on_pre_tool_use: (map(), map() -> map() | nil) | nil,
             on_post_tool_use: (map(), map() -> map() | nil) | nil,
+            on_pre_mcp_tool_call: (map(), map() -> map() | nil) | nil,
             on_user_prompt_submitted: (map(), map() -> map() | nil) | nil,
             on_session_start: (map(), map() -> map() | nil) | nil,
             on_session_end: (map(), map() -> map() | nil) | nil,
@@ -343,6 +353,7 @@ defmodule Copilot.Types do
     defstruct [
       :on_pre_tool_use,
       :on_post_tool_use,
+      :on_pre_mcp_tool_call,
       :on_user_prompt_submitted,
       :on_session_start,
       :on_session_end,
@@ -354,6 +365,7 @@ defmodule Copilot.Types do
     def any_set?(%__MODULE__{} = h) do
       h.on_pre_tool_use != nil or
         h.on_post_tool_use != nil or
+        h.on_pre_mcp_tool_call != nil or
         h.on_user_prompt_submitted != nil or
         h.on_session_start != nil or
         h.on_session_end != nil or
@@ -366,6 +378,7 @@ defmodule Copilot.Types do
       case hook_type do
         "preToolUse" -> h.on_pre_tool_use
         "postToolUse" -> h.on_post_tool_use
+        "preMcpToolCall" -> h.on_pre_mcp_tool_call
         "userPromptSubmitted" -> h.on_user_prompt_submitted
         "sessionStart" -> h.on_session_start
         "sessionEnd" -> h.on_session_end
@@ -448,6 +461,60 @@ defmodule Copilot.Types do
             buffer_exhaustion_threshold: float() | nil
           }
     defstruct [:enabled, :background_compaction_threshold, :buffer_exhaustion_threshold]
+  end
+
+  # ---------------------------------------------------------------------------
+  # Upstream-sync Feature Types & Constants (parity with @github/copilot-sdk)
+  # ---------------------------------------------------------------------------
+
+  defmodule SessionLimitsConfig do
+    @moduledoc "Per-session AI-credit budget; set `max_ai_credits` to cap spend."
+    @type t :: %__MODULE__{max_ai_credits: number() | nil}
+    defstruct [:max_ai_credits]
+  end
+
+  defmodule MemoryConfiguration do
+    @moduledoc "Opt-in persistent session memory."
+    @type t :: %__MODULE__{enabled: boolean() | nil}
+    defstruct [:enabled]
+  end
+
+  defmodule ProviderTokenArgs do
+    @moduledoc "Arguments passed to a BYOK bearer-token provider (per-session scoping)."
+    @type t :: %__MODULE__{session_id: String.t()}
+    defstruct [:session_id]
+  end
+
+  defmodule ToolDefer do
+    @moduledoc ~S(Tool "defer" loading policy: `auto/0` (lazy via search) or `never/0` (eager pre-load).)
+    @spec auto() :: String.t()
+    def auto, do: "auto"
+    @spec never() :: String.t()
+    def never, do: "never"
+  end
+
+  defmodule SystemMessageSection do
+    @moduledoc """
+    System-message section identifiers. The `preamble/0` section targets only the
+    identity preamble; `preserve/0` protects an addressable section from removal.
+    """
+    def preamble, do: "preamble"
+    def identity, do: "identity"
+    def tool_instructions, do: "tool_instructions"
+    def preserve, do: "preserve"
+  end
+
+  defmodule GitHubAttachment do
+    @moduledoc "GitHub-anchored attachment variants."
+    def github_commit, do: "GitHubCommit"
+    def github_release, do: "GitHubRelease"
+    def github_actions_job, do: "GitHubActionsJob"
+    def github_repository, do: "GitHubRepository"
+    def github_file_diff, do: "GitHubFileDiff"
+    def github_tree_comparison, do: "GitHubTreeComparison"
+    def github_url, do: "GitHubUrl"
+    def github_file, do: "GitHubFile"
+    def github_snippet, do: "GitHubSnippet"
   end
 
   # ---------------------------------------------------------------------------
@@ -558,7 +625,15 @@ defmodule Copilot.Types do
             commands: [Copilot.Types.CommandDefinition.t()] | nil,
             on_elicitation_request: Copilot.Types.elicitation_handler() | nil,
             session_fs: Copilot.Types.SessionFsConfig.t() | nil,
-            instruction_directories: [String.t()] | nil
+            instruction_directories: [String.t()] | nil,
+            enable_citations: boolean() | nil,
+            excluded_builtin_agents: [String.t()] | nil,
+            session_limits: Copilot.Types.SessionLimitsConfig.t() | nil,
+            memory: Copilot.Types.MemoryConfiguration.t() | nil,
+            otlp_protocol: String.t() | nil,
+            enable_web_socket_responses: boolean() | nil,
+            exp_assignments: map() | nil,
+            on_mcp_auth_request: Copilot.Types.mcp_auth_handler() | nil
           }
     defstruct [
       :session_id,
@@ -595,7 +670,23 @@ defmodule Copilot.Types do
       # Custom session filesystem provider configuration
       :session_fs,
       # Directories to search for instruction files
-      :instruction_directories
+      :instruction_directories,
+      # Emit source citations for grounded responses
+      :enable_citations,
+      # Built-in agents to exclude from this session
+      :excluded_builtin_agents,
+      # Per-session AI-credit spend limits
+      :session_limits,
+      # Opt-in persistent session memory
+      :memory,
+      # OTLP telemetry protocol ("grpc" or "http/protobuf")
+      :otlp_protocol,
+      # Stream model responses over a WebSocket transport
+      :enable_web_socket_responses,
+      # Experiment assignment overrides
+      :exp_assignments,
+      # MCP OAuth host token handler
+      :on_mcp_auth_request
     ]
   end
 
@@ -710,6 +801,8 @@ defmodule Copilot.Types do
             prompt: String.t(),
             attachments: [map()] | nil,
             mode: String.t() | nil,
+            agent_mode: String.t() | nil,
+            display_prompt: String.t() | nil,
             response_format: Copilot.Types.response_format() | nil,
             image_options: Copilot.Types.image_options() | nil,
             request_headers: %{optional(String.t()) => String.t()} | nil
@@ -718,6 +811,10 @@ defmodule Copilot.Types do
       :prompt,
       :attachments,
       :mode,
+      # Agent mode override for this message
+      :agent_mode,
+      # Prompt text to display in transcripts (may differ from the model prompt)
+      :display_prompt,
       :response_format,
       :image_options,
       # Custom HTTP headers for outbound model requests
@@ -785,7 +882,9 @@ defmodule Copilot.Types do
             session_idle_timeout_seconds: integer() | nil,
             session_fs: Copilot.Types.SessionFsConfig.t() | nil,
             copilot_home: String.t() | nil,
-            tcp_connection_token: String.t() | nil
+            tcp_connection_token: String.t() | nil,
+            request_handler: Copilot.Types.copilot_request_handler() | nil,
+            bearer_token_provider: Copilot.Types.bearer_token_provider() | nil
           }
     defstruct [
       cli_path: nil,
@@ -804,7 +903,11 @@ defmodule Copilot.Types do
       # Custom path to the copilot home directory
       copilot_home: nil,
       # Token for TCP connections
-      tcp_connection_token: nil
+      tcp_connection_token: nil,
+      # Intercept outbound LLM inference requests
+      request_handler: nil,
+      # BYOK bearer-token provider (per-session)
+      bearer_token_provider: nil
     ]
   end
 

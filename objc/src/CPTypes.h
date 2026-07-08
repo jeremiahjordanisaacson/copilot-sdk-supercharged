@@ -90,6 +90,80 @@ typedef void (^CPElicitationHandler)(NSDictionary<NSString *, id> *request,
                                      NSString *sessionId,
                                      void (^completion)(NSDictionary<NSString *, id> *result));
 
+#pragma mark - Provider Token / Request Handlers
+
+/// Provider bearer-token request arguments (bring-your-own-key).
+@interface CPProviderTokenArgs : NSObject
+@property (nonatomic, copy) NSString *sessionId;
+@end
+
+/// Block that supplies a bearer token for outbound model requests (BYOK).
+typedef void (^CPBearerTokenProvider)(CPProviderTokenArgs *args,
+                                      void (^completion)(NSString * _Nullable token));
+
+/// Block that handles an MCP OAuth authorization request, returning an access token.
+typedef void (^CPMcpAuthHandler)(CPProviderTokenArgs *args,
+                                 void (^completion)(NSString * _Nullable token));
+
+/// Block providing a custom transport for outbound Copilot HTTP requests.
+typedef void (^CPCopilotRequestHandler)(NSDictionary<NSString *, id> *request,
+                                        void (^completion)(NSDictionary<NSString *, id> * _Nullable response));
+
+#pragma mark - Session Limits / Memory
+
+/// Per-session resource limits.
+@interface CPSessionLimitsConfig : NSObject
+@property (nonatomic, copy, nullable) NSNumber *maxAiCredits;
+- (NSDictionary<NSString *, id> *)toDictionary;
+@end
+
+/// Long-term memory configuration for a session.
+@interface CPMemoryConfiguration : NSObject
+@property (nonatomic, assign) BOOL enabled;
+- (NSDictionary<NSString *, id> *)toDictionary;
+@end
+
+#pragma mark - Constant Identifiers
+
+/// Tool deferral policies for a tool's "defer" field.
+FOUNDATION_EXPORT NSString * const CPToolDeferAuto;
+FOUNDATION_EXPORT NSString * const CPToolDeferNever;
+
+/// Known system message section identifiers for section overrides.
+FOUNDATION_EXPORT NSString * const CPSystemMessageSectionPreamble;
+FOUNDATION_EXPORT NSString * const CPSystemMessageSectionIdentity;
+FOUNDATION_EXPORT NSString * const CPSystemMessageSectionToolInstructions;
+FOUNDATION_EXPORT NSString * const CPSystemMessageSectionPreserve;
+
+/// GitHub attachment type constants.
+FOUNDATION_EXPORT NSString * const CPGitHubAttachmentCommit;
+FOUNDATION_EXPORT NSString * const CPGitHubAttachmentRepository;
+FOUNDATION_EXPORT NSString * const CPGitHubAttachmentPullRequest;
+FOUNDATION_EXPORT NSString * const CPGitHubAttachmentIssue;
+
+#pragma mark - Session Hooks
+
+/// Block type for a session hook handler.
+typedef void (^CPHookHandler)(NSDictionary<NSString *, id> *input,
+                              NSString *sessionId,
+                              void (^completion)(NSDictionary<NSString *, id> * _Nullable output));
+
+/// Registers hook handlers for a session's lifecycle and tool events.
+@interface CPSessionHooks : NSObject
+@property (nonatomic, copy, nullable) CPHookHandler onPreToolUse;
+@property (nonatomic, copy, nullable) CPHookHandler onPostToolUse;
+@property (nonatomic, copy, nullable) CPHookHandler onPreMcpToolCall;
+@property (nonatomic, copy, nullable) CPHookHandler onUserPromptSubmitted;
+@property (nonatomic, copy, nullable) CPHookHandler onSessionStart;
+@property (nonatomic, copy, nullable) CPHookHandler onSessionEnd;
+@property (nonatomic, copy, nullable) CPHookHandler onErrorOccurred;
+
+/// Returns YES if at least one hook handler is registered.
+- (BOOL)hasAnyHandler;
+/// Returns the wire identifiers of the registered hook types.
+- (NSArray<NSString *> *)hookTypes;
+@end
+
 #pragma mark - Session Event
 
 /// An event received from the session.
@@ -168,6 +242,12 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, copy) NSString *prompt;
 @property (nonatomic, copy, nullable) NSArray<CPAttachment *> *attachments;
 @property (nonatomic, copy, nullable) NSString *mode;
+/// Custom HTTP headers to include in outbound model requests for this turn.
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *requestHeaders;
+/// Agent execution mode for this turn (e.g. "agent", "chat").
+@property (nonatomic, copy, nullable) NSString *agentMode;
+/// Prompt text to display in the UI in place of the actual prompt.
+@property (nonatomic, copy, nullable) NSString *displayPrompt;
 
 - (NSDictionary<NSString *, id> *)toDictionary;
 
@@ -202,6 +282,25 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, copy, nullable) NSString *authToken;
 @property (nonatomic, copy, nullable) NSArray<NSString *> *instructionDirectories;
 
+/// Hook handlers for this session's lifecycle and tool events.
+@property (nonatomic, strong, nullable) CPSessionHooks *hooks;
+/// Enable inline source citations in assistant responses.
+@property (nonatomic, copy, nullable) NSNumber *enableCitations;
+/// Names of built-in agents to exclude from this session.
+@property (nonatomic, copy, nullable) NSArray<NSString *> *excludedBuiltinAgents;
+/// Per-session resource limits (e.g. max AI credits).
+@property (nonatomic, strong, nullable) CPSessionLimitsConfig *sessionLimits;
+/// Long-term memory configuration.
+@property (nonatomic, strong, nullable) CPMemoryConfiguration *memory;
+/// OTLP export protocol for telemetry ("grpc" or "http/protobuf").
+@property (nonatomic, copy, nullable) NSString *otlpProtocol;
+/// Stream model responses over WebSocket transport.
+@property (nonatomic, copy, nullable) NSNumber *enableWebSocketResponses;
+/// Experiment assignment overrides.
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *expAssignments;
+/// Handler invoked when an MCP server requires OAuth authorization.
+@property (nonatomic, copy, nullable) CPMcpAuthHandler onMcpAuthRequest;
+
 - (NSDictionary<NSString *, id> *)toDictionary;
 
 @end
@@ -224,6 +323,10 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, assign) NSInteger sessionIdleTimeoutSeconds;
 @property (nonatomic, copy, nullable) NSString *copilotHome;
 @property (nonatomic, copy, nullable) NSString *tcpConnectionToken;
+/// Custom transport for outbound Copilot HTTP requests.
+@property (nonatomic, copy, nullable) CPCopilotRequestHandler requestHandler;
+/// Supplies bearer tokens for outbound model requests (bring-your-own-key).
+@property (nonatomic, copy, nullable) CPBearerTokenProvider bearerTokenProvider;
 
 + (instancetype)defaultOptions;
 

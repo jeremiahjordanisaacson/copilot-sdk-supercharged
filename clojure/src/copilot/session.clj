@@ -135,7 +135,8 @@
   "Register session hooks.
 
   `hooks` - map with optional keys:
-    :on-pre-tool-use, :on-post-tool-use, :on-user-prompt-submitted,
+    :on-pre-tool-use, :on-post-tool-use, :on-pre-mcp-tool-call,
+    :on-user-prompt-submitted,
     :on-session-start, :on-session-end, :on-error-occurred"
   [session-atom hooks]
   (swap! session-atom assoc :hooks hooks))
@@ -156,6 +157,7 @@
     (when hooks
       (let [handler-map {"preToolUse"            :on-pre-tool-use
                          "postToolUse"           :on-post-tool-use
+                         "preMcpToolCall"        :on-pre-mcp-tool-call
                          "userPromptSubmitted"   :on-user-prompt-submitted
                          "sessionStart"          :on-session-start
                          "sessionEnd"            :on-session-end
@@ -175,7 +177,8 @@
   "Send a message to this session.
 
   `options` - message options map with :prompt and optional :attachments, :mode,
-              :response-format, :image-options
+              :response-format, :image-options, :agent-mode, :display-prompt,
+              :request-headers
 
   Returns the message ID string."
   [session-atom options]
@@ -188,7 +191,13 @@
                      (:response-format options)
                      (assoc :responseFormat (:response-format options))
                      (:image-options options)
-                     (assoc :imageOptions (:image-options options)))
+                     (assoc :imageOptions (:image-options options))
+                     (:agent-mode options)
+                     (assoc :agentMode (:agent-mode options))
+                     (:display-prompt options)
+                     (assoc :displayPrompt (:display-prompt options))
+                     (:request-headers options)
+                     (assoc :requestHeaders (:request-headers options)))
         response   (rpc/request! rpc-client "session.send" params)]
     (:messageId response)))
 

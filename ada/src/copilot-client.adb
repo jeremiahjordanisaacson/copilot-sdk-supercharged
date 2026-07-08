@@ -238,6 +238,42 @@ package body Copilot.Client is
          end;
       end if;
 
+      --  --- Upstream-sync session config passthroughs (camelCase wire keys) ---
+      if Config.Enable_Citations then
+         Append (Params, """enableCitations"":true,");
+      end if;
+      if Length (Config.Excluded_Builtin_Agents_Json) > 0 then
+         Append (Params, """excludedBuiltinAgents"":"
+                       & To_String (Config.Excluded_Builtin_Agents_Json) & ",");
+      end if;
+      if Config.Session_Limits.Max_Ai_Credits > 0 then
+         declare
+            Img : constant String :=
+              Natural'Image (Config.Session_Limits.Max_Ai_Credits);
+         begin
+            Append (Params, """sessionLimits"":{""maxAiCredits"":"
+                          & Img (Img'First + 1 .. Img'Last) & "},");
+         end;
+      end if;
+      if Config.Memory.Enabled then
+         Append (Params, """memory"":{""enabled"":true},");
+      end if;
+      if Length (Config.Otlp_Protocol) > 0 then
+         Append (Params, """otlpProtocol"":"""
+                       & Escape (To_String (Config.Otlp_Protocol)) & """,");
+      end if;
+      if Config.Enable_Web_Socket_Responses then
+         Append (Params, """enableWebSocketResponses"":true,");
+      end if;
+      if Length (Config.Exp_Assignments_Json) > 0 then
+         Append (Params, """expAssignments"":"
+                       & To_String (Config.Exp_Assignments_Json) & ",");
+      end if;
+      --  MCP OAuth host token handler: signal the runtime that a handler exists.
+      if Config.On_Mcp_Auth_Request /= null then
+         Append (Params, """mcpAuthHandler"":true,");
+      end if;
+
       --  Strip trailing comma (if any) and close brace.
       --  Session config supports: authToken / auth_token, excludedTools / excluded_tools,
       --  requestHeaders / request_headers, modelCapabilities / model_capabilities,

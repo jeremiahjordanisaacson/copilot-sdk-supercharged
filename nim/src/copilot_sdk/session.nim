@@ -116,6 +116,10 @@ proc buildSendParams(session: CopilotSession; opts: MessageOptions): JsonNode =
   }
   if opts.streaming:
     result["streaming"] = %true
+  if opts.agentMode.len > 0:
+    result["agentMode"] = %opts.agentMode
+  if opts.displayPrompt.len > 0:
+    result["displayPrompt"] = %opts.displayPrompt
   if opts.requestHeaders.len > 0:
     let headers = newJObject()
     for k, v in opts.requestHeaders:

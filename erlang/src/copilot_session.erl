@@ -149,10 +149,12 @@ handle_call({send, Options}, _From, #state{rpc = Rpc, session_id = SessionId} = 
     },
     Req1 = maybe_add(<<"attachments">>, attachments, Options, Req),
     Req2 = maybe_add(<<"mode">>, mode, Options, Req1),
-    Req3 = maybe_add(<<"responseFormat">>, response_format, Options, Req2),
-    Req4 = maybe_add(<<"imageOptions">>, image_options, Options, Req3),
-    Req5 = maybe_add(<<"requestHeaders">>, request_headers, Options, Req4),
-    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req5) of
+    Req3 = maybe_add(<<"agentMode">>, agent_mode, Options, Req2),
+    Req4 = maybe_add(<<"displayPrompt">>, display_prompt, Options, Req3),
+    Req5 = maybe_add(<<"responseFormat">>, response_format, Options, Req4),
+    Req6 = maybe_add(<<"imageOptions">>, image_options, Options, Req5),
+    Req7 = maybe_add(<<"requestHeaders">>, request_headers, Options, Req6),
+    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req7) of
         {ok, #{<<"messageId">> := MsgId}} ->
             {reply, {ok, MsgId}, State};
         {ok, _} ->
@@ -169,10 +171,12 @@ handle_call({send_and_wait, Options, Timeout}, From, State) ->
     },
     Req1 = maybe_add(<<"attachments">>, attachments, Options, Req),
     Req2 = maybe_add(<<"mode">>, mode, Options, Req1),
-    Req3 = maybe_add(<<"responseFormat">>, response_format, Options, Req2),
-    Req4 = maybe_add(<<"imageOptions">>, image_options, Options, Req3),
-    Req5 = maybe_add(<<"requestHeaders">>, request_headers, Options, Req4),
-    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req5) of
+    Req3 = maybe_add(<<"agentMode">>, agent_mode, Options, Req2),
+    Req4 = maybe_add(<<"displayPrompt">>, display_prompt, Options, Req3),
+    Req5 = maybe_add(<<"responseFormat">>, response_format, Options, Req4),
+    Req6 = maybe_add(<<"imageOptions">>, image_options, Options, Req5),
+    Req7 = maybe_add(<<"requestHeaders">>, request_headers, Options, Req6),
+    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req7) of
         {ok, _} ->
             TimerRef = erlang:send_after(Timeout, self(), {wait_timeout, From}),
             Waiting = [{From, TimerRef, undefined} | State#state.waiting],
@@ -288,6 +292,10 @@ maybe_invoke_hook(<<"tool.execution_start">>, Data, #state{hooks = Hooks})
     case maps:get(on_pre_tool_use, Hooks, undefined) of
         undefined -> ok;
         Hook      -> catch Hook(Data)
+    end,
+    case maps:get(on_pre_mcp_tool_call, Hooks, undefined) of
+        undefined -> ok;
+        McpHook   -> catch McpHook(Data)
     end;
 maybe_invoke_hook(<<"tool.execution_complete">>, Data, #state{hooks = Hooks})
   when Hooks =/= undefined ->

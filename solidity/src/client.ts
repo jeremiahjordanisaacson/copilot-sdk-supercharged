@@ -34,6 +34,9 @@ import type {
     GasReport,
     GeneratedTestSuite,
     SoliditySessionConfig,
+    SolidityMessageOptions,
+    SolidityUpstreamSessionOptions,
+    SessionEventEnvelope,
     TestFramework,
 } from "./types.js";
 
@@ -185,7 +188,7 @@ export class CopilotSolidityClient {
      * Any extra tools or config from `config` are merged on top.
      */
     async createSession(
-        config: Partial<SoliditySessionConfig> = {},
+        config: Partial<SoliditySessionConfig> & SolidityUpstreamSessionOptions = {},
     ): Promise<CopilotSession> {
         const builtInTools = createSolidityTools({
             solidityVersion: this.solidityVersion,
@@ -206,9 +209,64 @@ export class CopilotSolidityClient {
                 mode: "append" as const,
                 content: SOLIDITY_SYSTEM_PROMPT,
             },
+            ...this.buildUpstreamSessionOptions(config),
         };
 
         return this.client.createSession(sessionConfig);
+    }
+
+    /**
+     * Build the upstream-sync session options forwarded to the base SDK:
+     * citations, excluded built-in agents, spending limits, session memory,
+     * OTLP telemetry protocol, WebSocket transport, experiment assignments,
+     * and the MCP OAuth host token handler signal.
+     */
+    private buildUpstreamSessionOptions(
+        options: SolidityUpstreamSessionOptions,
+    ): Record<string, unknown> {
+        const params: Record<string, unknown> = {};
+        if (options.enableCitations !== undefined)
+            params.enableCitations = options.enableCitations;
+        if (options.excludedBuiltinAgents !== undefined)
+            params.excludedBuiltinAgents = options.excludedBuiltinAgents;
+        if (options.sessionLimits !== undefined)
+            params.sessionLimits = options.sessionLimits;
+        if (options.memory !== undefined) params.memory = options.memory;
+        if (options.otlpProtocol !== undefined)
+            params.otlpProtocol = options.otlpProtocol;
+        if (options.enableWebSocketResponses !== undefined)
+            params.enableWebSocketResponses = options.enableWebSocketResponses;
+        if (options.expAssignments !== undefined)
+            params.expAssignments = options.expAssignments;
+        if (options.bearerTokenProvider !== undefined)
+            params.bearerTokenProvider = options.bearerTokenProvider;
+        if (options.onMcpAuthRequest !== undefined) params.mcpAuthHandler = true;
+        return params;
+    }
+
+    /**
+     * Send a message to a session, forwarding upstream message options
+     * (agent mode, display prompt, and per-message request headers).
+     */
+    async sendMessage(
+        session: CopilotSession,
+        options: SolidityMessageOptions,
+    ): Promise<SessionEventEnvelope | undefined> {
+        const sendOptions: Record<string, unknown> = { prompt: options.prompt };
+        if (options.attachments !== undefined)
+            sendOptions.attachments = options.attachments;
+        if (options.mode !== undefined) sendOptions.mode = options.mode;
+        if (options.agentMode !== undefined) sendOptions.agentMode = options.agentMode;
+        if (options.displayPrompt !== undefined)
+            sendOptions.displayPrompt = options.displayPrompt;
+        if (options.requestHeaders !== undefined)
+            sendOptions.requestHeaders = options.requestHeaders;
+        if (options.responseFormat !== undefined)
+            sendOptions.responseFormat = options.responseFormat;
+        const response = await session.sendAndWait(
+            sendOptions as unknown as Parameters<CopilotSession["sendAndWait"]>[0],
+        );
+        return response as SessionEventEnvelope | undefined;
     }
 
     // -----------------------------------------------------------------------

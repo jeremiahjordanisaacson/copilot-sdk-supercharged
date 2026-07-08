@@ -78,14 +78,7 @@ class CopilotSession(
    * @return A Future with the message ID
    */
   def send(options: MessageOptions): Future[String] =
-    val params = Json.obj(
-      "sessionId" -> sessionId.asJson,
-      "prompt" -> options.prompt.asJson,
-      "attachments" -> options.attachments.asJson,
-      "mode" -> options.mode.asJson,
-      "responseFormat" -> options.responseFormat.asJson,
-      "imageOptions" -> options.imageOptions.asJson,
-    ).dropNullValues
+    val params = buildSendPayload(sessionId, options)
 
     connection.sendRequest("session.send", params).map { result =>
       result.hcursor.get[String]("messageId").getOrElse(

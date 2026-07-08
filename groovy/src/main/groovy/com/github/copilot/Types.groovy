@@ -65,6 +65,7 @@ final class Types {
         String description
         Map<String, Object> parameters
         Closure handler
+        String defer
 
         Tool(String name, String description, Map<String, Object> parameters, Closure handler) {
             this.name = name
@@ -72,6 +73,24 @@ final class Types {
             this.parameters = parameters
             this.handler = handler
         }
+    }
+
+    /** Provider bearer-token request arguments (BYOK). */
+    @ToString(includeNames = true)
+    static class ProviderTokenArgs {
+        String sessionId
+    }
+
+    /** Per-session resource limits. */
+    @ToString(includeNames = true)
+    static class SessionLimitsConfig {
+        Double maxAiCredits
+    }
+
+    /** Long-term memory configuration for a session. */
+    @ToString(includeNames = true)
+    static class MemoryConfiguration {
+        boolean enabled = true
     }
 
     /** Permission request from the server. */

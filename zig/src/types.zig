@@ -51,6 +51,10 @@ pub const ClientOptions = struct {
     session_fs: ?SessionFsConfig = null,
     copilot_home: ?[]const u8 = null,
     tcp_connection_token: ?[]const u8 = null,
+    /// Interceptor for outbound LLM inference HTTP/WebSocket requests.
+    request_handler: ?CopilotRequestHandler = null,
+    /// BYOK bearer-token provider used to mint fresh tokens for outbound model requests.
+    bearer_token_provider: ?BearerTokenProvider = null,
 };
 
 pub const SessionFsConfig = struct {
@@ -91,6 +95,24 @@ pub const SessionConfig = struct {
     commands_json: ?[]const u8 = null,
     github_token: ?[]const u8 = null,
     instruction_directories: ?[]const []const u8 = null,
+
+    // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+    /// Enable inline source citations in assistant responses.
+    enable_citations: ?bool = null,
+    /// Built-in agents to exclude from this session.
+    excluded_builtin_agents: ?[]const []const u8 = null,
+    /// Per-session spending limits (e.g. AI-credit budget).
+    session_limits: ?SessionLimitsConfig = null,
+    /// Opt-in persistent session memory configuration.
+    memory: ?MemoryConfiguration = null,
+    /// OTLP telemetry export protocol (e.g. "grpc" or "http/protobuf").
+    otlp_protocol: ?[]const u8 = null,
+    /// Enable the WebSocket transport for streamed responses.
+    enable_web_socket_responses: ?bool = null,
+    /// Experiment (feature-flag) assignment overrides, as a JSON object string.
+    exp_assignments_json: ?[]const u8 = null,
+    /// Set true to signal a registered MCP OAuth host-token handler (mcpAuthHandler wire flag).
+    mcp_auth_handler: bool = false,
 };
 
 pub const ProviderConfig = struct {
@@ -226,6 +248,12 @@ pub const MessageOptions = struct {
     prompt: []const u8,
     attachments: ?[]const u8 = null,
     mode: ?[]const u8 = null,
+    /// Agent mode to run this turn under (e.g. a custom agent name).
+    agent_mode: ?[]const u8 = null,
+    /// Alternate prompt text to show in the transcript in place of `prompt`.
+    display_prompt: ?[]const u8 = null,
+    /// Custom HTTP headers for outbound model requests this turn, as a JSON object string.
+    request_headers_json: ?[]const u8 = null,
     response_format: ?ResponseFormat = null,
     image_options: ?ImageOptions = null,
 };
@@ -280,6 +308,74 @@ pub const SdkError = error{
     WriteFailed,
     ReadFailed,
     ParseError,
+};
+
+// ---------------------------------------------------------------------------
+// Upstream-sync feature types (parity with @github/copilot-sdk)
+// ---------------------------------------------------------------------------
+
+/// Per-session AI-credit budget; set max_ai_credits to cap spend.
+pub const SessionLimitsConfig = struct {
+    max_ai_credits: ?f64 = null,
+};
+
+/// Opt-in persistent session memory configuration.
+pub const MemoryConfiguration = struct {
+    enabled: ?bool = null,
+};
+
+/// Arguments passed to a BYOK bearer-token provider / MCP auth handler (per-session scoping).
+pub const ProviderTokenArgs = struct {
+    session_id: []const u8,
+};
+
+/// BYOK bearer-token provider: returns a fresh token for outbound model requests.
+pub const BearerTokenProvider = *const fn (args: ProviderTokenArgs) anyerror![]const u8;
+
+/// Handler invoked when an MCP server requests an OAuth host token.
+pub const McpAuthHandler = *const fn (args: ProviderTokenArgs) anyerror![]const u8;
+
+/// Interceptor for outbound LLM inference HTTP/WebSocket requests.
+pub const CopilotRequestHandler = *const fn (request_json: []const u8) anyerror![]const u8;
+
+/// Tool "defer" loading policy: eager pre-load (.never) or lazy via search (.auto).
+pub const ToolDefer = enum {
+    auto,
+    never,
+};
+
+/// System-message section identifiers used with section overrides.
+/// `preamble` targets only the identity preamble; `preserve` protects an
+/// individually-addressable section from a group-level remove.
+pub const SystemMessageSection = enum {
+    preamble,
+    identity,
+    tool_instructions,
+    preserve,
+};
+
+/// Hook type identifiers (the `hookType` field of a hooks.invoke request).
+pub const HookType = struct {
+    pub const pre_tool_use = "preToolUse";
+    pub const post_tool_use = "postToolUse";
+    pub const user_prompt_submitted = "userPromptSubmitted";
+    pub const session_start = "sessionStart";
+    pub const session_end = "sessionEnd";
+    pub const error_occurred = "errorOccurred";
+    pub const pre_mcp_tool_call = "preMcpToolCall";
+};
+
+/// GitHub-anchored attachment type identifiers.
+pub const GitHubAttachment = struct {
+    pub const github_commit = "GitHubCommit";
+    pub const github_release = "GitHubRelease";
+    pub const github_actions_job = "GitHubActionsJob";
+    pub const github_repository = "GitHubRepository";
+    pub const github_file_diff = "GitHubFileDiff";
+    pub const github_tree_comparison = "GitHubTreeComparison";
+    pub const github_url = "GitHubUrl";
+    pub const github_file = "GitHubFile";
+    pub const github_snippet = "GitHubSnippet";
 };
 
 // ---------------------------------------------------------------------------

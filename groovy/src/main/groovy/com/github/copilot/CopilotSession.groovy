@@ -75,13 +75,7 @@ class CopilotSession {
      */
     @SuppressWarnings('unchecked')
     String send(Map<String, Object> options) throws Exception {
-        Map<String, Object> params = [sessionId: sessionId] as Map<String, Object>
-        params.prompt = options.prompt
-        if (options.attachments) params.attachments = options.attachments
-        if (options.mode) params.mode = options.mode
-        if (options.responseFormat) params.responseFormat = options.responseFormat
-        if (options.imageOptions) params.imageOptions = options.imageOptions
-        if (options.requestHeaders) params.requestHeaders = options.requestHeaders
+        Map<String, Object> params = CopilotClient.buildSendPayload(sessionId, options)
 
         Map<String, Object> response = client.request('session.send', params)
         (String) response.messageId

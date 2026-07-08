@@ -109,16 +109,20 @@ public struct Tool: Sendable {
     public let description: String?
     public let parameters: [String: Any]?
     public let handler: ToolHandler
+    /// Tool deferral policy: `ToolDefer.auto` (default) or `ToolDefer.never`.
+    public let deferMode: String?
 
     public init(
         name: String,
         description: String? = nil,
         parameters: [String: Any]? = nil,
+        deferMode: String? = nil,
         handler: @escaping ToolHandler
     ) {
         self.name = name
         self.description = description
         self.parameters = parameters
+        self.deferMode = deferMode
         self.handler = handler
     }
 
@@ -131,8 +135,17 @@ public struct Tool: Sendable {
         if let parameters = parameters {
             dict["parameters"] = parameters
         }
+        if let deferMode = deferMode {
+            dict["defer"] = deferMode
+        }
         return dict
     }
+}
+
+/// Tool deferral policies for `Tool.deferMode`.
+public struct ToolDefer {
+    public static let auto = "auto"
+    public static let never = "never"
 }
 
 // MARK: - System Message Configuration
@@ -149,6 +162,22 @@ public struct SystemPromptSection {
     public static let toolInstructions = "tool_instructions"
     public static let customInstructions = "custom_instructions"
     public static let lastInstructions = "last_instructions"
+}
+
+/// Known system message section identifiers for section overrides.
+public struct SystemMessageSection {
+    public static let preamble = "preamble"
+    public static let identity = "identity"
+    public static let toolInstructions = "tool_instructions"
+    public static let preserve = "preserve"
+}
+
+/// GitHub attachment type constants.
+public struct GitHubAttachment {
+    public static let gitHubCommit = "GitHubCommit"
+    public static let gitHubRepository = "GitHubRepository"
+    public static let gitHubPullRequest = "GitHubPullRequest"
+    public static let gitHubIssue = "GitHubIssue"
 }
 
 /// Override action for a system prompt section.
@@ -475,6 +504,7 @@ public typealias ErrorOccurredHandler = @Sendable (ErrorOccurredHookInput, Strin
 public struct SessionHooks: Sendable {
     public var onPreToolUse: PreToolUseHandler?
     public var onPostToolUse: PostToolUseHandler?
+    public var onPreMcpToolCall: PostToolUseHandler?
     public var onUserPromptSubmitted: UserPromptSubmittedHandler?
     public var onSessionStart: SessionStartHandler?
     public var onSessionEnd: SessionEndHandler?
@@ -483,6 +513,7 @@ public struct SessionHooks: Sendable {
     public init(
         onPreToolUse: PreToolUseHandler? = nil,
         onPostToolUse: PostToolUseHandler? = nil,
+        onPreMcpToolCall: PostToolUseHandler? = nil,
         onUserPromptSubmitted: UserPromptSubmittedHandler? = nil,
         onSessionStart: SessionStartHandler? = nil,
         onSessionEnd: SessionEndHandler? = nil,
@@ -490,6 +521,7 @@ public struct SessionHooks: Sendable {
     ) {
         self.onPreToolUse = onPreToolUse
         self.onPostToolUse = onPostToolUse
+        self.onPreMcpToolCall = onPreMcpToolCall
         self.onUserPromptSubmitted = onUserPromptSubmitted
         self.onSessionStart = onSessionStart
         self.onSessionEnd = onSessionEnd
@@ -498,7 +530,8 @@ public struct SessionHooks: Sendable {
 
     /// Returns true if any hook handler is set.
     public var hasAnyHandler: Bool {
-        onPreToolUse != nil || onPostToolUse != nil || onUserPromptSubmitted != nil
+        onPreToolUse != nil || onPostToolUse != nil || onPreMcpToolCall != nil
+            || onUserPromptSubmitted != nil
             || onSessionStart != nil || onSessionEnd != nil || onErrorOccurred != nil
     }
 }
@@ -755,6 +788,44 @@ public typealias ElicitationHandler = @Sendable (ElicitationContext) async throw
 // MARK: - Session Configuration
 
 /// Configuration for creating a new session.
+/// Provider bearer-token request arguments (bring-your-own-key).
+public struct ProviderTokenArgs: Sendable {
+    public let sessionId: String
+
+    public init(sessionId: String) {
+        self.sessionId = sessionId
+    }
+}
+
+/// Supplies a bearer token for outbound model requests (bring-your-own-key).
+public typealias BearerTokenProvider = @Sendable (ProviderTokenArgs) async throws -> String
+
+/// Handles an MCP OAuth authorization request, returning an access token.
+public typealias McpAuthHandler = @Sendable (ProviderTokenArgs) async throws -> String
+
+/// Custom transport for outbound Copilot HTTP requests.
+public protocol CopilotRequestHandler: Sendable {
+    func sendRequest(_ request: [String: Any]) async throws -> [String: Any]
+}
+
+/// Per-session resource limits.
+public struct SessionLimitsConfig: Sendable {
+    public var maxAiCredits: Double?
+
+    public init(maxAiCredits: Double? = nil) {
+        self.maxAiCredits = maxAiCredits
+    }
+}
+
+/// Long-term memory configuration for a session.
+public struct MemoryConfiguration: Sendable {
+    public var enabled: Bool
+
+    public init(enabled: Bool = true) {
+        self.enabled = enabled
+    }
+}
+
 public struct SessionConfig: Sendable {
     public var sessionId: String?
     public var model: String?
@@ -791,6 +862,23 @@ public struct SessionConfig: Sendable {
     /// Directories to search for instruction files.
     public var instructionDirectories: [String]?
 
+    /// Enable inline source citations in assistant responses.
+    public var enableCitations: Bool?
+    /// Names of built-in agents to exclude from this session.
+    public var excludedBuiltinAgents: [String]?
+    /// Per-session resource limits (e.g. max AI credits).
+    public var sessionLimits: SessionLimitsConfig?
+    /// Long-term memory configuration.
+    public var memory: MemoryConfiguration?
+    /// OTLP export protocol for telemetry ("grpc" or "http/protobuf").
+    public var otlpProtocol: String?
+    /// Stream model responses over WebSocket transport.
+    public var enableWebSocketResponses: Bool?
+    /// Experiment assignment overrides.
+    public var expAssignments: [String: AnyCodable]?
+    /// Handler invoked when an MCP server requires OAuth authorization.
+    public var onMcpAuthRequest: McpAuthHandler?
+
     public init(
         sessionId: String? = nil,
         model: String? = nil,
@@ -817,7 +905,15 @@ public struct SessionConfig: Sendable {
         gitHubToken: String? = nil,
         commands: [CommandDefinition]? = nil,
         onElicitationRequest: ElicitationHandler? = nil,
-        instructionDirectories: [String]? = nil
+        instructionDirectories: [String]? = nil,
+        enableCitations: Bool? = nil,
+        excludedBuiltinAgents: [String]? = nil,
+        sessionLimits: SessionLimitsConfig? = nil,
+        memory: MemoryConfiguration? = nil,
+        otlpProtocol: String? = nil,
+        enableWebSocketResponses: Bool? = nil,
+        expAssignments: [String: AnyCodable]? = nil,
+        onMcpAuthRequest: McpAuthHandler? = nil
     ) {
         self.sessionId = sessionId
         self.model = model
@@ -845,6 +941,14 @@ public struct SessionConfig: Sendable {
         self.commands = commands
         self.onElicitationRequest = onElicitationRequest
         self.instructionDirectories = instructionDirectories
+        self.enableCitations = enableCitations
+        self.excludedBuiltinAgents = excludedBuiltinAgents
+        self.sessionLimits = sessionLimits
+        self.memory = memory
+        self.otlpProtocol = otlpProtocol
+        self.enableWebSocketResponses = enableWebSocketResponses
+        self.expAssignments = expAssignments
+        self.onMcpAuthRequest = onMcpAuthRequest
     }
 }
 
@@ -1074,6 +1178,10 @@ public struct MessageOptions: Sendable {
     public var imageOptions: ImageOptions?
     /// Custom HTTP headers to include in outbound model requests for this turn.
     public var requestHeaders: [String: String]?
+    /// Agent execution mode for this turn (e.g. "agent", "chat").
+    public var agentMode: String?
+    /// Prompt text to display in the UI in place of the actual prompt.
+    public var displayPrompt: String?
 
     public init(
         prompt: String,
@@ -1081,7 +1189,9 @@ public struct MessageOptions: Sendable {
         mode: String? = nil,
         responseFormat: ResponseFormat? = nil,
         imageOptions: ImageOptions? = nil,
-        requestHeaders: [String: String]? = nil
+        requestHeaders: [String: String]? = nil,
+        agentMode: String? = nil,
+        displayPrompt: String? = nil
     ) {
         self.prompt = prompt
         self.attachments = attachments
@@ -1089,6 +1199,8 @@ public struct MessageOptions: Sendable {
         self.responseFormat = responseFormat
         self.imageOptions = imageOptions
         self.requestHeaders = requestHeaders
+        self.agentMode = agentMode
+        self.displayPrompt = displayPrompt
     }
 }
 
@@ -1364,6 +1476,12 @@ public struct CopilotClientOptions: Sendable {
     /// Token for TCP connection authentication.
     public var tcpConnectionToken: String?
 
+    /// Custom transport for outbound Copilot HTTP requests.
+    public var requestHandler: CopilotRequestHandler?
+
+    /// Supplies bearer tokens for outbound model requests (bring-your-own-key).
+    public var bearerTokenProvider: BearerTokenProvider?
+
     public init(
         cliPath: String? = nil,
         cliArgs: [String]? = nil,
@@ -1380,7 +1498,9 @@ public struct CopilotClientOptions: Sendable {
         sessionIdleTimeoutSeconds: Int? = nil,
         sessionFs: SessionFsConfig? = nil,
         copilotHome: String? = nil,
-        tcpConnectionToken: String? = nil
+        tcpConnectionToken: String? = nil,
+        requestHandler: CopilotRequestHandler? = nil,
+        bearerTokenProvider: BearerTokenProvider? = nil
     ) {
         self.cliPath = cliPath
         self.cliArgs = cliArgs
@@ -1398,6 +1518,8 @@ public struct CopilotClientOptions: Sendable {
         self.sessionFs = sessionFs
         self.copilotHome = copilotHome
         self.tcpConnectionToken = tcpConnectionToken
+        self.requestHandler = requestHandler
+        self.bearerTokenProvider = bearerTokenProvider
     }
 }
 

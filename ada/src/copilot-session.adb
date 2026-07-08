@@ -68,13 +68,30 @@ package body Copilot.Session is
      (Self    : in out Copilot_Session;
       Options : Message_Options)
    is
-      Params : constant String :=
-        "{""sessionId"":""" & Escape (To_String (Self.Sid)) & ""","
-        & """prompt"":""" & Escape (To_String (Options.Prompt)) & """}";
-      Ignore : constant String :=
-        Send_Request (Self.Conn.all, "session/send", Params);
+      Params : Unbounded_String :=
+        To_Unbounded_String
+          ("{""sessionId"":""" & Escape (To_String (Self.Sid)) & ""","
+           & """prompt"":""" & Escape (To_String (Options.Prompt)) & """");
    begin
-      null;
+      if Length (Options.Agent_Mode) > 0 then
+         Append (Params, ",""agentMode"":"""
+                       & Escape (To_String (Options.Agent_Mode)) & """");
+      end if;
+      if Length (Options.Display_Prompt) > 0 then
+         Append (Params, ",""displayPrompt"":"""
+                       & Escape (To_String (Options.Display_Prompt)) & """");
+      end if;
+      if Length (Options.Request_Headers_Json) > 0 then
+         Append (Params, ",""requestHeaders"":"
+                       & To_String (Options.Request_Headers_Json));
+      end if;
+      Append (Params, "}");
+      declare
+         Ignore : constant String :=
+           Send_Request (Self.Conn.all, "session/send", To_String (Params));
+      begin
+         null;
+      end;
    end Send;
 
    function Send_And_Wait
@@ -82,17 +99,35 @@ package body Copilot.Session is
       Options : Message_Options;
       Timeout : Duration := 60.0) return Session_Event
    is
-      Params : constant String :=
-        "{""sessionId"":""" & Escape (To_String (Self.Sid)) & ""","
-        & """prompt"":""" & Escape (To_String (Options.Prompt)) & """}";
-      Resp   : constant String :=
-        Send_Request (Self.Conn.all, "session/sendAndWait", Params);
+      Params : Unbounded_String :=
+        To_Unbounded_String
+          ("{""sessionId"":""" & Escape (To_String (Self.Sid)) & ""","
+           & """prompt"":""" & Escape (To_String (Options.Prompt)) & """");
       Evt    : Session_Event;
    begin
-      Evt.Session_Id := Self.Sid;
-      Evt.Event_Type := +"assistant.message";
-      Evt.Content    := To_Unbounded_String (Json_Get (Resp, "content"));
-      Evt.Raw_Json   := To_Unbounded_String (Resp);
+      if Length (Options.Agent_Mode) > 0 then
+         Append (Params, ",""agentMode"":"""
+                       & Escape (To_String (Options.Agent_Mode)) & """");
+      end if;
+      if Length (Options.Display_Prompt) > 0 then
+         Append (Params, ",""displayPrompt"":"""
+                       & Escape (To_String (Options.Display_Prompt)) & """");
+      end if;
+      if Length (Options.Request_Headers_Json) > 0 then
+         Append (Params, ",""requestHeaders"":"
+                       & To_String (Options.Request_Headers_Json));
+      end if;
+      Append (Params, "}");
+      declare
+         Resp : constant String :=
+           Send_Request
+             (Self.Conn.all, "session/sendAndWait", To_String (Params));
+      begin
+         Evt.Session_Id := Self.Sid;
+         Evt.Event_Type := +"assistant.message";
+         Evt.Content    := To_Unbounded_String (Json_Get (Resp, "content"));
+         Evt.Raw_Json   := To_Unbounded_String (Resp);
+      end;
       return Evt;
    end Send_And_Wait;
 

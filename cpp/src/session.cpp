@@ -36,6 +36,15 @@ std::string CopilotSession::send(const MessageOptions& options) {
     if (options.mode) {
         params["mode"] = *options.mode;
     }
+    if (options.agentMode) {
+        params["agentMode"] = *options.agentMode;
+    }
+    if (options.displayPrompt) {
+        params["displayPrompt"] = *options.displayPrompt;
+    }
+    if (options.requestHeaders) {
+        params["requestHeaders"] = *options.requestHeaders;
+    }
     if (options.responseFormat) {
         params["responseFormat"] = responseFormatToString(*options.responseFormat);
     }

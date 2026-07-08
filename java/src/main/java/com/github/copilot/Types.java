@@ -75,6 +75,8 @@ public final class Types {
         public String description;
         public Map<String, Object> parameters;
         public ToolHandler handler;
+        /** Tool "defer" loading policy: {@code "auto"} (lazy via search) or {@code "never"} (eager pre-load). */
+        public String defer;
 
         public Tool(String name, String description, Map<String, Object> parameters, ToolHandler handler) {
             this.name = name;
@@ -478,5 +480,53 @@ public final class Types {
         List<SessionFsFileInfo> readdirWithTypes(String sessionId, String path) throws Exception;
         void rm(String sessionId, String path, boolean recursive) throws Exception;
         void rename(String sessionId, String oldPath, String newPath) throws Exception;
+    }
+
+    // --- Upstream-sync feature types (parity with @github/copilot-sdk) ---
+
+    /** Per-session AI-credit budget; set {@code maxAiCredits} to cap spend. */
+    public static class SessionLimitsConfig {
+        @JsonProperty("maxAiCredits") public Integer maxAiCredits;
+
+        public SessionLimitsConfig() {}
+        public SessionLimitsConfig(Integer maxAiCredits) { this.maxAiCredits = maxAiCredits; }
+    }
+
+    /** Opt-in persistent session memory configuration. */
+    public static class MemoryConfiguration {
+        @JsonProperty("enabled") public Boolean enabled;
+
+        public MemoryConfiguration() {}
+        public MemoryConfiguration(Boolean enabled) { this.enabled = enabled; }
+    }
+
+    /** Arguments passed to a BYOK bearer-token provider (per-session scoping). */
+    public static class ProviderTokenArgs {
+        @JsonProperty("sessionId") public String sessionId;
+
+        public ProviderTokenArgs() {}
+        public ProviderTokenArgs(String sessionId) { this.sessionId = sessionId; }
+    }
+
+    /** Supplies a per-session bearer token for BYOK model providers. */
+    @FunctionalInterface
+    public interface BearerTokenProvider {
+        String getBearerToken(ProviderTokenArgs args) throws Exception;
+    }
+
+    /**
+     * Intercepts outbound LLM inference HTTP/WebSocket requests. Assign an instance to
+     * {@link CopilotClientOptions#requestHandler(CopilotRequestHandler)} to mutate, replace,
+     * or forward the request before it is sent.
+     */
+    @FunctionalInterface
+    public interface CopilotRequestHandler {
+        Map<String, Object> sendRequest(Map<String, Object> request, Map<String, Object> context) throws Exception;
+    }
+
+    /** Handler invoked when an MCP server requests an OAuth host token. */
+    @FunctionalInterface
+    public interface McpAuthHandler {
+        String handle(Map<String, Object> request, String sessionId) throws Exception;
     }
 }

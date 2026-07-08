@@ -595,12 +595,44 @@ pub struct SessionConfig {
     /// Set by the SDK based on whether hooks are registered (not user-set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hooks: Option<bool>,
+
+    // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+    /// Enable inline source citations in assistant responses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_citations: Option<bool>,
+    /// Built-in agents to exclude from this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excluded_builtin_agents: Option<Vec<String>>,
+    /// Per-session spending limits (e.g. AI-credit budget).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_limits: Option<SessionLimitsConfig>,
+    /// Opt-in persistent session memory configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryConfiguration>,
+    /// OTLP telemetry export protocol (e.g. "grpc" or "http/protobuf").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub otlp_protocol: Option<String>,
+    /// Enable the WebSocket transport for streamed responses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_web_socket_responses: Option<bool>,
+    /// Experiment (feature-flag) assignment overrides.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exp_assignments: Option<HashMap<String, serde_json::Value>>,
+    /// Set by the SDK to signal a registered MCP OAuth host-token handler (not user-set).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_auth_handler: Option<bool>,
+
     /// Slash commands registered for this session (not serialized).
     #[serde(skip)]
     pub commands: Option<Vec<CommandDefinition>>,
     /// Handler for elicitation requests from the server (not serialized).
     #[serde(skip)]
     pub on_elicitation_request: Option<ElicitationHandlerFn>,
+    /// Handler invoked when an MCP server requests an OAuth host token (not serialized).
+    ///
+    /// When present, the SDK sets the `mcpAuthHandler` wire flag on `session.create`.
+    #[serde(skip)]
+    pub on_mcp_auth_request: Option<McpAuthHandlerFn>,
 }
 
 // ============================================================================
@@ -856,6 +888,12 @@ pub struct MessageOptions {
     pub attachments: Option<Vec<Attachment>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    /// Agent mode to run this turn under (e.g. a custom agent name).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<String>,
+    /// Alternate prompt text to show in the transcript in place of `prompt`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_prompt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<ResponseFormat>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1160,6 +1198,119 @@ pub trait SessionFsProvider: Send + Sync {
 }
 
 // ============================================================================
+// Upstream-sync feature types (parity with @github/copilot-sdk)
+// ============================================================================
+
+/// Per-session AI-credit budget; set `max_ai_credits` to cap spend.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionLimitsConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_ai_credits: Option<f64>,
+}
+
+/// Opt-in persistent session memory configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryConfiguration {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// Arguments passed to a BYOK bearer-token provider / MCP auth handler (per-session scoping).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderTokenArgs {
+    pub session_id: String,
+}
+
+/// Tool "defer" loading policy: eager pre-load (`Never`) or lazy via search (`Auto`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolDefer {
+    Auto,
+    Never,
+}
+
+/// System-message section identifiers used with system-message section overrides.
+///
+/// The `Preamble` section targets only the identity preamble; the `Preserve` action
+/// protects an individually-addressable section from a group-level remove.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemMessageSection {
+    Preamble,
+    Identity,
+    ToolInstructions,
+    Preserve,
+}
+
+/// GitHub-anchored attachment type identifiers.
+pub mod github_attachment {
+    pub const GITHUB_COMMIT: &str = "GitHubCommit";
+    pub const GITHUB_RELEASE: &str = "GitHubRelease";
+    pub const GITHUB_ACTIONS_JOB: &str = "GitHubActionsJob";
+    pub const GITHUB_REPOSITORY: &str = "GitHubRepository";
+    pub const GITHUB_FILE_DIFF: &str = "GitHubFileDiff";
+    pub const GITHUB_TREE_COMPARISON: &str = "GitHubTreeComparison";
+    pub const GITHUB_URL: &str = "GitHubUrl";
+    pub const GITHUB_FILE: &str = "GitHubFile";
+    pub const GITHUB_SNIPPET: &str = "GitHubSnippet";
+}
+
+/// Input for the pre-MCP-tool-call hook (`on_pre_mcp_tool_call`), invoked before an
+/// MCP-server tool is executed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreMcpToolCallHookInput {
+    pub timestamp: f64,
+    pub cwd: String,
+    pub server_name: String,
+    pub tool_name: String,
+    pub tool_args: serde_json::Value,
+}
+
+/// Clonable, debuggable interceptor for outbound LLM inference HTTP/WebSocket requests.
+///
+/// Assign an instance to `CopilotClientOptions::request_handler` to mutate, replace,
+/// or forward the outbound request payload.
+#[derive(Clone)]
+pub struct CopilotRequestHandler(
+    pub Arc<dyn Fn(serde_json::Value) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> + Send + Sync>,
+);
+
+impl std::fmt::Debug for CopilotRequestHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<copilot_request_handler>")
+    }
+}
+
+/// Clonable, debuggable BYOK bearer-token provider. Receives `ProviderTokenArgs` and
+/// returns a fresh bearer token for outbound model requests (per-session rotation).
+#[derive(Clone)]
+pub struct BearerTokenProviderFn(
+    pub Arc<dyn Fn(ProviderTokenArgs) -> Result<String, Box<dyn std::error::Error + Send + Sync>> + Send + Sync>,
+);
+
+impl std::fmt::Debug for BearerTokenProviderFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<bearer_token_provider>")
+    }
+}
+
+/// Clonable, debuggable handler invoked when an MCP server requests an OAuth host token.
+#[derive(Clone)]
+pub struct McpAuthHandlerFn(
+    pub Arc<dyn Fn(ProviderTokenArgs) -> Result<String, Box<dyn std::error::Error + Send + Sync>> + Send + Sync>,
+);
+
+impl std::fmt::Debug for McpAuthHandlerFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<mcp_auth_handler>")
+    }
+}
+
+// ============================================================================
 // Client Options
 // ============================================================================
 
@@ -1198,6 +1349,10 @@ pub struct CopilotClientOptions {
     pub copilot_home: Option<String>,
     /// Token for TCP connection authentication.
     pub tcp_connection_token: Option<String>,
+    /// Interceptor for outbound LLM inference HTTP/WebSocket requests.
+    pub request_handler: Option<CopilotRequestHandler>,
+    /// BYOK bearer-token provider used to mint fresh tokens for outbound model requests.
+    pub bearer_token_provider: Option<BearerTokenProviderFn>,
 }
 
 impl Default for CopilotClientOptions {
@@ -1219,6 +1374,8 @@ impl Default for CopilotClientOptions {
             session_fs: None,
             copilot_home: None,
             tcp_connection_token: None,
+            request_handler: None,
+            bearer_token_provider: None,
         }
     }
 }

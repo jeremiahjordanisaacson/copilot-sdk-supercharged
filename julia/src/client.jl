@@ -170,6 +170,40 @@ function create_session(client::CopilotClient, config::SessionConfig)
     if config.response_format !== nothing
         params["responseFormat"] = get(IMAGE_RESPONSE_FORMAT_STRINGS, config.response_format, "text")
     end
+    # --- Upstream-sync session configuration passthroughs ---
+    if config.enable_citations
+        params["enableCitations"] = true
+    end
+    if !isempty(config.excluded_builtin_agents)
+        params["excludedBuiltinAgents"] = config.excluded_builtin_agents
+    end
+    if config.session_limits !== nothing
+        sl = config.session_limits
+        sl_dict = Dict{String, Any}()
+        sl.max_ai_credits !== nothing && (sl_dict["maxAiCredits"] = sl.max_ai_credits)
+        sl.max_requests !== nothing && (sl_dict["maxRequests"] = sl.max_requests)
+        sl.max_tokens !== nothing && (sl_dict["maxTokens"] = sl.max_tokens)
+        params["sessionLimits"] = sl_dict
+    end
+    if config.memory !== nothing
+        mem = config.memory
+        mem_dict = Dict{String, Any}("enabled" => mem.enabled)
+        mem.max_entries !== nothing && (mem_dict["maxEntries"] = mem.max_entries)
+        mem.directory !== nothing && (mem_dict["directory"] = mem.directory)
+        params["memory"] = mem_dict
+    end
+    if config.otlp_protocol !== nothing
+        params["otlpProtocol"] = config.otlp_protocol
+    end
+    if config.enable_web_socket_responses
+        params["enableWebSocketResponses"] = true
+    end
+    if config.exp_assignments !== nothing
+        params["expAssignments"] = config.exp_assignments
+    end
+    if config.on_mcp_auth_request !== nothing
+        params["mcpAuthHandler"] = true
+    end
 
     # Convert tools
     tool_list = Tool[]

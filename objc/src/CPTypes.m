@@ -4,6 +4,73 @@
 
 #import "CPTypes.h"
 
+#pragma mark - Constant Identifiers
+
+NSString * const CPToolDeferAuto = @"auto";
+NSString * const CPToolDeferNever = @"never";
+
+NSString * const CPSystemMessageSectionPreamble = @"preamble";
+NSString * const CPSystemMessageSectionIdentity = @"identity";
+NSString * const CPSystemMessageSectionToolInstructions = @"tool_instructions";
+NSString * const CPSystemMessageSectionPreserve = @"preserve";
+
+NSString * const CPGitHubAttachmentCommit = @"GitHubCommit";
+NSString * const CPGitHubAttachmentRepository = @"GitHubRepository";
+NSString * const CPGitHubAttachmentPullRequest = @"GitHubPullRequest";
+NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
+
+#pragma mark - CPProviderTokenArgs
+
+@implementation CPProviderTokenArgs
+@end
+
+#pragma mark - CPSessionLimitsConfig
+
+@implementation CPSessionLimitsConfig
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    if (self.maxAiCredits) dict[@"maxAiCredits"] = self.maxAiCredits;
+    return [dict copy];
+}
+
+@end
+
+#pragma mark - CPMemoryConfiguration
+
+@implementation CPMemoryConfiguration
+
+- (NSDictionary<NSString *, id> *)toDictionary {
+    return @{@"enabled": @(self.enabled)};
+}
+
+@end
+
+#pragma mark - CPSessionHooks
+
+@implementation CPSessionHooks
+
+- (BOOL)hasAnyHandler {
+    return self.onPreToolUse != nil || self.onPostToolUse != nil
+        || self.onPreMcpToolCall != nil || self.onUserPromptSubmitted != nil
+        || self.onSessionStart != nil || self.onSessionEnd != nil
+        || self.onErrorOccurred != nil;
+}
+
+- (NSArray<NSString *> *)hookTypes {
+    NSMutableArray<NSString *> *types = [NSMutableArray array];
+    if (self.onPreToolUse) [types addObject:@"preToolUse"];
+    if (self.onPostToolUse) [types addObject:@"postToolUse"];
+    if (self.onPreMcpToolCall) [types addObject:@"preMcpToolCall"];
+    if (self.onUserPromptSubmitted) [types addObject:@"userPromptSubmitted"];
+    if (self.onSessionStart) [types addObject:@"sessionStart"];
+    if (self.onSessionEnd) [types addObject:@"sessionEnd"];
+    if (self.onErrorOccurred) [types addObject:@"errorOccurred"];
+    return [types copy];
+}
+
+@end
+
 #pragma mark - CPToolInvocation
 
 @implementation CPToolInvocation
@@ -153,6 +220,9 @@
     }
 
     if (self.mode) dict[@"mode"] = self.mode;
+    if (self.requestHeaders) dict[@"requestHeaders"] = self.requestHeaders;
+    if (self.agentMode) dict[@"agentMode"] = self.agentMode;
+    if (self.displayPrompt) dict[@"displayPrompt"] = self.displayPrompt;
     return [dict copy];
 }
 
@@ -174,6 +244,19 @@
     if (self.systemMessage) dict[@"systemMessage"] = self.systemMessage;
     if (self.githubToken) dict[@"githubToken"] = self.githubToken;
     if (self.instructionDirectories) dict[@"instructionDirectories"] = self.instructionDirectories;
+
+    if (self.hooks && [self.hooks hasAnyHandler]) {
+        dict[@"hooks"] = @YES;
+        dict[@"hookTypes"] = [self.hooks hookTypes];
+    }
+    if (self.enableCitations) dict[@"enableCitations"] = self.enableCitations;
+    if (self.excludedBuiltinAgents) dict[@"excludedBuiltinAgents"] = self.excludedBuiltinAgents;
+    if (self.sessionLimits) dict[@"sessionLimits"] = [self.sessionLimits toDictionary];
+    if (self.memory) dict[@"memory"] = [self.memory toDictionary];
+    if (self.otlpProtocol) dict[@"otlpProtocol"] = self.otlpProtocol;
+    if (self.enableWebSocketResponses) dict[@"enableWebSocketResponses"] = self.enableWebSocketResponses;
+    if (self.expAssignments) dict[@"expAssignments"] = self.expAssignments;
+    if (self.onMcpAuthRequest) dict[@"mcpAuthHandler"] = @YES;
 
     return [dict copy];
 }

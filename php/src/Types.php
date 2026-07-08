@@ -685,6 +685,113 @@ class ElicitationResult
 }
 
 // ============================================================================
+// Upstream-sync feature types (parity with @github/copilot-sdk)
+// ============================================================================
+
+/**
+ * Per-session AI-credit budget; set $maxAiCredits to cap spend.
+ */
+class SessionLimitsConfig
+{
+    public function __construct(
+        public readonly ?int $maxAiCredits = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [];
+        if ($this->maxAiCredits !== null) {
+            $result['maxAiCredits'] = $this->maxAiCredits;
+        }
+        return $result;
+    }
+}
+
+/**
+ * Opt-in persistent session memory.
+ */
+class MemoryConfiguration
+{
+    public function __construct(
+        public readonly bool $enabled = false,
+    ) {}
+
+    public function toArray(): array
+    {
+        return ['enabled' => $this->enabled];
+    }
+}
+
+/**
+ * Arguments passed to a BYOK bearer-token provider (per-session scoping).
+ */
+class ProviderTokenArgs
+{
+    public function __construct(
+        public readonly string $sessionId,
+    ) {}
+}
+
+/**
+ * Intercepts outbound LLM inference HTTP/WebSocket requests. Extend this class
+ * and override sendRequest() to mutate, replace, or forward the request, then
+ * assign an instance to CopilotClientOptions::$requestHandler. BYOK providers
+ * may also set CopilotClientOptions::$bearerTokenProvider.
+ */
+class CopilotRequestHandler
+{
+    /**
+     * Transform an outbound request; override in a subclass.
+     *
+     * @param mixed $request
+     * @param mixed $context
+     * @return mixed
+     */
+    public function sendRequest($request, $context = null)
+    {
+        return $request;
+    }
+}
+
+/**
+ * Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto").
+ */
+class ToolDefer
+{
+    public const AUTO = 'auto';
+    public const NEVER = 'never';
+}
+
+/**
+ * System-message section identifiers (used with system-message overrides).
+ * The "preamble" section targets the identity preamble; the "preserve" action
+ * protects an individually-addressable section from a group-level remove.
+ */
+class SystemMessageSection
+{
+    public const PREAMBLE = 'preamble';
+    public const IDENTITY = 'identity';
+    public const TOOL_INSTRUCTIONS = 'tool_instructions';
+    public const PRESERVE = 'preserve';
+}
+
+/**
+ * GitHub-anchored attachment variants.
+ */
+class GitHubAttachment
+{
+    public const GITHUB_COMMIT = 'GitHubCommit';
+    public const GITHUB_RELEASE = 'GitHubRelease';
+    public const GITHUB_ACTIONS_JOB = 'GitHubActionsJob';
+    public const GITHUB_REPOSITORY = 'GitHubRepository';
+    public const GITHUB_FILE_DIFF = 'GitHubFileDiff';
+    public const GITHUB_TREE_COMPARISON = 'GitHubTreeComparison';
+    public const GITHUB_URL = 'GitHubUrl';
+    public const GITHUB_FILE = 'GitHubFile';
+    public const GITHUB_SNIPPET = 'GitHubSnippet';
+}
+
+// ============================================================================
 // Session Configuration
 // ============================================================================
 
@@ -745,6 +852,22 @@ class SessionConfig
         public /* readonly */ $onElicitationRequest = null,
         /** @var string[]|null $instructionDirectories Instruction directories for prompt customization */
         public readonly ?array $instructionDirectories = null,
+        /** Enable inline source citations in assistant responses. */
+        public readonly ?bool $enableCitations = null,
+        /** @var string[]|null $excludedBuiltinAgents Built-in agents to exclude from this session */
+        public readonly ?array $excludedBuiltinAgents = null,
+        /** Per-session AI-credit spending limits. */
+        public readonly ?SessionLimitsConfig $sessionLimits = null,
+        /** Persistent session memory configuration. */
+        public readonly ?MemoryConfiguration $memory = null,
+        /** OTLP telemetry protocol ("grpc" or "http/protobuf"). */
+        public readonly ?string $otlpProtocol = null,
+        /** Stream assistant responses over a WebSocket transport. */
+        public readonly ?bool $enableWebSocketResponses = null,
+        /** @var array<string,mixed>|null $expAssignments Experiment assignments forwarded to the runtime */
+        public readonly ?array $expAssignments = null,
+        /** @var callable|null $onMcpAuthRequest MCP OAuth host-token handler fn(ProviderTokenArgs): string */
+        public /* readonly */ $onMcpAuthRequest = null,
     ) {}
 
     public function toServerParams(): array
@@ -825,6 +948,32 @@ class SessionConfig
         }
         if ($this->instructionDirectories !== null) {
             $params['instructionDirectories'] = $this->instructionDirectories;
+        }
+        // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+        if ($this->enableCitations !== null) {
+            $params['enableCitations'] = $this->enableCitations;
+        }
+        if ($this->excludedBuiltinAgents !== null) {
+            $params['excludedBuiltinAgents'] = $this->excludedBuiltinAgents;
+        }
+        if ($this->sessionLimits !== null) {
+            $params['sessionLimits'] = $this->sessionLimits->toArray();
+        }
+        if ($this->memory !== null) {
+            $params['memory'] = $this->memory->toArray();
+        }
+        if ($this->otlpProtocol !== null) {
+            $params['otlpProtocol'] = $this->otlpProtocol;
+        }
+        if ($this->enableWebSocketResponses !== null) {
+            $params['enableWebSocketResponses'] = $this->enableWebSocketResponses;
+        }
+        if ($this->expAssignments !== null) {
+            $params['expAssignments'] = $this->expAssignments;
+        }
+        // Signal to the runtime that an MCP OAuth host-token handler is registered.
+        if ($this->onMcpAuthRequest !== null) {
+            $params['mcpAuthHandler'] = true;
         }
         return $params;
     }
@@ -1173,6 +1322,8 @@ class MessageOptions
      * @param string|null $responseFormat Response format (see ResponseFormat constants)
      * @param ImageOptions|null $imageOptions Image generation options
      * @param array<string,string>|null $requestHeaders Custom HTTP headers for outbound model requests
+     * @param string|null $agentMode Agent-mode override for this message
+     * @param string|null $displayPrompt Alternate prompt text shown to the user (the model still sees $prompt)
      */
     public function __construct(
         public readonly string $prompt,
@@ -1181,6 +1332,8 @@ class MessageOptions
         public readonly ?string $responseFormat = null,
         public readonly ?ImageOptions $imageOptions = null,
         public readonly ?array $requestHeaders = null,
+        public readonly ?string $agentMode = null,
+        public readonly ?string $displayPrompt = null,
     ) {}
 
     public function toArray(): array
@@ -1203,6 +1356,12 @@ class MessageOptions
         }
         if ($this->requestHeaders !== null) {
             $result['requestHeaders'] = $this->requestHeaders;
+        }
+        if ($this->agentMode !== null) {
+            $result['agentMode'] = $this->agentMode;
+        }
+        if ($this->displayPrompt !== null) {
+            $result['displayPrompt'] = $this->displayPrompt;
         }
         return $result;
     }
@@ -1498,6 +1657,7 @@ class SessionHooks
      * @param callable|null $onSessionStart fn(SessionStartHookInput, array{sessionId:string}): ?SessionStartHookOutput
      * @param callable|null $onSessionEnd fn(SessionEndHookInput, array{sessionId:string}): ?SessionEndHookOutput
      * @param callable|null $onErrorOccurred fn(ErrorOccurredHookInput, array{sessionId:string}): ?ErrorOccurredHookOutput
+     * @param callable|null $onPreMcpToolCall fn(array, array{sessionId:string}): mixed Pre-MCP-tool-call hook
      */
     public function __construct(
         public /* readonly */ $onPreToolUse = null,
@@ -1506,6 +1666,7 @@ class SessionHooks
         public /* readonly */ $onSessionStart = null,
         public /* readonly */ $onSessionEnd = null,
         public /* readonly */ $onErrorOccurred = null,
+        public /* readonly */ $onPreMcpToolCall = null,
     ) {}
 
     public function hasAnyHandler(): bool
@@ -1515,7 +1676,8 @@ class SessionHooks
             || $this->onUserPromptSubmitted !== null
             || $this->onSessionStart !== null
             || $this->onSessionEnd !== null
-            || $this->onErrorOccurred !== null;
+            || $this->onErrorOccurred !== null
+            || $this->onPreMcpToolCall !== null;
     }
 }
 
@@ -1923,5 +2085,9 @@ class CopilotClientOptions
         public readonly ?SessionFsConfig $sessionFs = null,
         public readonly ?string $copilotHome = null,
         public readonly ?string $tcpConnectionToken = null,
+        /** HTTP request handler for intercepting outbound LLM inference requests. */
+        public readonly ?CopilotRequestHandler $requestHandler = null,
+        /** @var callable|null $bearerTokenProvider BYOK bearer-token provider fn(ProviderTokenArgs): string */
+        public /* readonly */ $bearerTokenProvider = null,
     ) {}
 }

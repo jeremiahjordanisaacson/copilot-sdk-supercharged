@@ -54,6 +54,9 @@ type
     Description: string;
     Parameters: TJSONObject;
     Handler: TToolHandler;
+    // Defer loading policy: '' (default), 'auto' (lazy) or 'never' (eager).
+    // See the ToolDefer* constants below.
+    Defer: string;
   end;
 
   // Hook types
@@ -77,9 +80,22 @@ type
   TPostToolUseHandler = reference to function(const Input: TPostToolUseHookInput;
     const SessionId: string): TPostToolUseHookOutput;
 
+  // Pre-MCP-tool-call hook (runs before an MCP server tool is invoked)
+  TPreMcpToolCallHookInput = record
+    ServerName: string;
+    ToolName: string;
+    ToolArgs: TJSONObject;
+  end;
+  TPreMcpToolCallHookOutput = record
+    PermissionDecision: string;
+  end;
+  TPreMcpToolCallHandler = reference to function(const Input: TPreMcpToolCallHookInput;
+    const SessionId: string): TPreMcpToolCallHookOutput;
+
   TSessionHooks = record
     OnPreToolUse: TPreToolUseHandler;
     OnPostToolUse: TPostToolUseHandler;
+    OnPreMcpToolCall: TPreMcpToolCallHandler;
   end;
 
   // Session event
@@ -177,6 +193,38 @@ type
     Model: string;
     ResponseFormat: TResponseFormat;
     ImageOptions: TImageOptions;
+    // Per-send agent mode override (wire key: agentMode)
+    AgentMode: string;
+    // Prompt text shown to the user instead of the real prompt (wire key: displayPrompt)
+    DisplayPrompt: string;
+    // Custom HTTP headers for this send's outbound model requests (wire key: requestHeaders)
+    RequestHeaders: TDictionary<string, string>;
+  end;
+
+  // BYOK bearer token provider: mint a per-session bearer token on demand.
+  TProviderTokenArgs = record
+    SessionId: string;
+  end;
+  TBearerTokenProvider = reference to function(const Args: TProviderTokenArgs): string;
+
+  // MCP OAuth host token handler: supply an OAuth token for an MCP server.
+  TMcpAuthRequest = record
+    SessionId: string;
+    ServerUrl: string;
+  end;
+  TMcpAuthHandler = reference to function(const Request: TMcpAuthRequest): string;
+
+  // HTTP request handler: intercept/mutate outbound LLM inference requests.
+  TCopilotRequestHandler = reference to function(const Request: TJSONObject): TJSONObject;
+
+  // Per-session AI-credit spending limits (SessionLimitsConfig).
+  TSessionLimitsConfig = record
+    MaxAiCredits: Integer;
+  end;
+
+  // Persistent session memory configuration (MemoryConfiguration).
+  TMemoryConfiguration = record
+    Enabled: Boolean;
   end;
 
   // Session configuration
@@ -205,6 +253,15 @@ type
     ImageOptions: TImageOptions;
     AuthToken: string;
     InstructionDirectories: TArray<string>;
+    // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+    EnableCitations: Boolean;
+    ExcludedBuiltinAgents: TArray<string>;
+    SessionLimits: TSessionLimitsConfig;
+    Memory: TMemoryConfiguration;
+    OtlpProtocol: string;
+    EnableWebSocketResponses: Boolean;
+    ExpAssignments: TDictionary<string, string>;
+    OnMcpAuthRequest: TMcpAuthHandler;
   end;
 
   // Resume session config
@@ -266,10 +323,38 @@ type
     SessionFs: TSessionFsConfig;
     CopilotHome: string;
     TcpConnectionToken: string;
+    // HTTP request handler for outbound LLM inference requests (CopilotRequestHandler).
+    RequestHandler: TCopilotRequestHandler;
+    // BYOK bearer token provider (per-session token minting).
+    BearerTokenProvider: TBearerTokenProvider;
   end;
 
   // Unsubscribe token
   TUnsubscribeProc = reference to procedure;
+
+const
+  // Tool "defer" loading policy (ToolDefer): eager pre-load or lazy search.
+  ToolDeferAuto = 'auto';   // lazy: discovered on demand
+  ToolDeferNever = 'never'; // eager: always pre-loaded
+
+  // System-message section identifiers (used with system_message overrides).
+  // 'preamble' targets the identity preamble; 'preserve' shields a section
+  // from a group-level remove.
+  SectionPreamble = 'preamble';
+  SectionIdentity = 'identity';
+  SectionToolInstructions = 'tool_instructions';
+  SectionPreserve = 'preserve';
+
+  // GitHub-anchored attachment variants.
+  GitHubCommit = 'GitHubCommit';
+  GitHubRelease = 'GitHubRelease';
+  GitHubActionsJob = 'GitHubActionsJob';
+  GitHubRepository = 'GitHubRepository';
+  GitHubFileDiff = 'GitHubFileDiff';
+  GitHubTreeComparison = 'GitHubTreeComparison';
+  GitHubUrl = 'GitHubUrl';
+  GitHubFile = 'GitHubFile';
+  GitHubSnippet = 'GitHubSnippet';
 
   // Helper functions for tool results
   function ToolSuccess(const Text: string): TToolResultObject;

@@ -71,6 +71,8 @@ class CopilotClient(
     private val resolvedEnv: Map<String, String>?
     private val resolvedGithubToken: String?
     private val resolvedUseLoggedInUser: Boolean
+    private val resolvedRequestHandler: CopilotRequestHandler?
+    private val resolvedBearerTokenProvider: BearerTokenProvider?
 
     companion object {
         private val PORT_PATTERN = Pattern.compile("listening on port (\\d+)", Pattern.CASE_INSENSITIVE)
@@ -110,6 +112,9 @@ class CopilotClient(
         resolvedEnv = options.env
         resolvedGithubToken = options.githubToken
         resolvedUseLoggedInUser = options.useLoggedInUser ?: (if (options.githubToken != null) false else true)
+        // Upstream-sync client-side interceptors: consulted by the runtime transport when present.
+        resolvedRequestHandler = options.requestHandler
+        resolvedBearerTokenProvider = options.bearerTokenProvider
     }
 
     /**
@@ -512,6 +517,7 @@ class CopilotClient(
                             put("name", tool.name)
                             tool.description?.let { put("description", it) }
                             tool.parameters?.let { put("parameters", json.encodeToJsonElement(it)) }
+                            tool.defer?.let { put("defer", it) }
                         })
                     }
                 })
@@ -522,7 +528,21 @@ class CopilotClient(
             config.provider?.let { put("provider", json.encodeToJsonElement(ProviderConfig.serializer(), it)) }
             if (config.onPermissionRequest != null) put("requestPermission", true)
             if (config.onUserInputRequest != null) put("requestUserInput", true)
-            if (config.hooks?.hasAnyHook() == true) put("hooks", true)
+            config.hooks?.let { hooks ->
+                if (hooks.hasAnyHook()) {
+                    put("hooks", true)
+                    // Surface the specific lifecycle hooks the runtime should invoke.
+                    put("hookTypes", buildJsonArray {
+                        if (hooks.onPreToolUse != null) add(JsonPrimitive("preToolUse"))
+                        if (hooks.onPostToolUse != null) add(JsonPrimitive("postToolUse"))
+                        if (hooks.onPreMcpToolCall != null) add(JsonPrimitive("preMcpToolCall"))
+                        if (hooks.onUserPromptSubmitted != null) add(JsonPrimitive("userPromptSubmitted"))
+                        if (hooks.onSessionStart != null) add(JsonPrimitive("sessionStart"))
+                        if (hooks.onSessionEnd != null) add(JsonPrimitive("sessionEnd"))
+                        if (hooks.onErrorOccurred != null) add(JsonPrimitive("errorOccurred"))
+                    })
+                }
+            }
             config.workingDirectory?.let { put("workingDirectory", it) }
             config.streaming?.let { put("streaming", it) }
             config.mcpServers?.let { put("mcpServers", json.encodeToJsonElement(it)) }
@@ -539,6 +559,25 @@ class CopilotClient(
             // Wire sessionIdleTimeoutSeconds (idleTimeout), requestHeaders, imageGeneration / responseFormat
             config.requestHeaders?.let { put("requestHeaders", json.encodeToJsonElement(it)) }
             config.responseFormat?.let { put("responseFormat", JsonPrimitive(it)) }
+
+            // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+            config.enableCitations?.let { put("enableCitations", JsonPrimitive(it)) }
+            config.excludedBuiltinAgents?.let { put("excludedBuiltinAgents", json.encodeToJsonElement(it)) }
+            config.sessionLimits?.let { limits ->
+                put("sessionLimits", buildJsonObject {
+                    limits.maxAiCredits?.let { put("maxAiCredits", JsonPrimitive(it)) }
+                })
+            }
+            config.memory?.let { mem: MemoryConfiguration ->
+                put("memory", buildJsonObject {
+                    mem.enabled?.let { put("enabled", JsonPrimitive(it)) }
+                })
+            }
+            config.otlpProtocol?.let { put("otlpProtocol", JsonPrimitive(it)) }
+            config.enableWebSocketResponses?.let { put("enableWebSocketResponses", JsonPrimitive(it)) }
+            config.expAssignments?.let { put("expAssignments", json.encodeToJsonElement(it)) }
+            // MCP OAuth host token handler: signal to the runtime that a handler is registered.
+            if (config.onMcpAuthRequest != null) put("mcpAuthHandler", true)
         }
     }
 
@@ -913,4 +952,47 @@ class CopilotClient(
             put("toolTelemetry", JsonObject(emptyMap()))
         }
     }
+}
+
+/**
+ * Builds the `session.send` JSON-RPC payload, including the upstream-sync
+ * message options (agentMode, displayPrompt, requestHeaders).
+ */
+internal fun buildSendPayload(sessionId: String, options: MessageOptions, json: Json): JsonObject = buildJsonObject {
+    put("sessionId", sessionId)
+    put("prompt", options.prompt)
+    options.attachments?.let { put("attachments", json.encodeToJsonElement(it)) }
+    options.mode?.let { put("mode", it) }
+    options.agentMode?.let { put("agentMode", it) }
+    options.displayPrompt?.let { put("displayPrompt", it) }
+    options.requestHeaders?.let { put("requestHeaders", json.encodeToJsonElement(it)) }
+    options.responseFormat?.let { put("responseFormat", json.encodeToJsonElement(it)) }
+    options.imageOptions?.let { put("imageOptions", json.encodeToJsonElement(it)) }
+}
+
+/** Tool "defer" loading policy values. */
+object ToolDefer {
+    const val AUTO = "auto"
+    const val NEVER = "never"
+}
+
+/** System-message section identifiers (used with system-message section overrides). */
+object SystemMessageSection {
+    const val PREAMBLE = "preamble"
+    const val IDENTITY = "identity"
+    const val TOOL_INSTRUCTIONS = "tool_instructions"
+    const val PRESERVE = "preserve"
+}
+
+/** GitHub-anchored attachment type identifiers. */
+object GitHubAttachment {
+    const val GITHUB_COMMIT = "GitHubCommit"
+    const val GITHUB_RELEASE = "GitHubRelease"
+    const val GITHUB_ACTIONS_JOB = "GitHubActionsJob"
+    const val GITHUB_REPOSITORY = "GitHubRepository"
+    const val GITHUB_FILE_DIFF = "GitHubFileDiff"
+    const val GITHUB_TREE_COMPARISON = "GitHubTreeComparison"
+    const val GITHUB_URL = "GitHubUrl"
+    const val GITHUB_FILE = "GitHubFile"
+    const val GITHUB_SNIPPET = "GitHubSnippet"
 }

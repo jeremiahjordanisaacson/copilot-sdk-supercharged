@@ -273,11 +273,16 @@ impl CopilotClient {
     /// Creates a new conversation session with the Copilot CLI.
     pub async fn create_session(
         &self,
-        config: SessionConfig,
+        mut config: SessionConfig,
     ) -> Result<Arc<CopilotSession>, CopilotError> {
         self.ensure_connected().await?;
 
         let rpc = self.get_rpc_client().await?;
+
+        // Signal to the runtime that an MCP OAuth host-token handler is registered.
+        if config.on_mcp_auth_request.is_some() {
+            config.mcp_auth_handler = Some(true);
+        }
 
         let params = serde_json::to_value(&config)
             .map_err(|e| CopilotError::Serialization(e.to_string()))?;

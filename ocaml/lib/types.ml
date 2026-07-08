@@ -198,6 +198,9 @@ let reasoning_effort_to_string = function
 type message_options = {
   prompt : string;
   mode : string option;
+  agent_mode : string option;
+  display_prompt : string option;
+  request_headers : (string * string) list;
 }
 
 let message_options_to_yojson (m : message_options) : Yojson.Safe.t =
@@ -206,6 +209,23 @@ let message_options_to_yojson (m : message_options) : Yojson.Safe.t =
     match m.mode with
     | Some v -> ("mode", `String v) :: fields
     | None -> fields
+  in
+  let fields =
+    match m.agent_mode with
+    | Some v -> ("agentMode", `String v) :: fields
+    | None -> fields
+  in
+  let fields =
+    match m.display_prompt with
+    | Some v -> ("displayPrompt", `String v) :: fields
+    | None -> fields
+  in
+  let fields =
+    match m.request_headers with
+    | [] -> fields
+    | hdrs ->
+      ("requestHeaders", `Assoc (List.map (fun (k, v) -> (k, `String v)) hdrs))
+      :: fields
   in
   `Assoc fields
 
@@ -228,6 +248,68 @@ let tool_definition_to_yojson (td : tool_definition) : Yojson.Safe.t =
   in
   `Assoc fields
 
+(* ========================================================================== *)
+(* Upstream-sync Feature Types & Constants                                    *)
+(* ========================================================================== *)
+
+(** Per-session AI-credit budget; set [max_ai_credits] to cap spend. *)
+type session_limits_config = { max_ai_credits : float option }
+
+let session_limits_config_to_yojson (s : session_limits_config) : Yojson.Safe.t =
+  match s.max_ai_credits with
+  | Some c -> `Assoc [ ("maxAiCredits", `Float c) ]
+  | None -> `Assoc []
+
+(** Opt-in persistent session memory. *)
+type memory_configuration = { memory_enabled : bool }
+
+let memory_configuration_to_yojson (m : memory_configuration) : Yojson.Safe.t =
+  `Assoc [ ("enabled", `Bool m.memory_enabled) ]
+
+(** Arguments passed to a BYOK bearer-token provider (per-session scoping). *)
+type provider_token_args = { pta_session_id : string }
+
+let provider_token_args_session_id (a : provider_token_args) : string =
+  a.pta_session_id
+
+(** BYOK bearer-token provider: mints a fresh bearer token per session. *)
+type bearer_token_provider = provider_token_args -> string
+
+(** Intercepts outbound LLM inference HTTP/WebSocket requests. Receives the
+    request and a context value and returns the (possibly mutated) request. *)
+type copilot_request_handler = Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
+
+(** Tool "defer" loading policy: lazy via search ([DeferAuto]) or eager
+    pre-load ([DeferNever]). *)
+type tool_defer = DeferAuto | DeferNever
+
+let tool_defer_to_string = function
+  | DeferAuto -> "auto"
+  | DeferNever -> "never"
+
+(** System-message section identifiers. The [preamble] section targets only the
+    identity preamble; [preserve] protects an addressable section from removal. *)
+let system_message_section_preamble = "preamble"
+let system_message_section_identity = "identity"
+let system_message_section_tool_instructions = "tool_instructions"
+let system_message_section_preserve = "preserve"
+
+(** GitHub-anchored attachment variants. *)
+let attachment_github_commit = "GitHubCommit"
+let attachment_github_release = "GitHubRelease"
+let attachment_github_actions_job = "GitHubActionsJob"
+let attachment_github_repository = "GitHubRepository"
+let attachment_github_file_diff = "GitHubFileDiff"
+let attachment_github_tree_comparison = "GitHubTreeComparison"
+let attachment_github_url = "GitHubUrl"
+let attachment_github_file = "GitHubFile"
+let attachment_github_snippet = "GitHubSnippet"
+
+(** Hook names (include [on_post_tool_use] and [on_pre_mcp_tool_call]). *)
+let hook_on_pre_tool_use = "onPreToolUse"
+let hook_on_post_tool_use = "onPostToolUse"
+let hook_on_pre_mcp_tool_call = "onPreMcpToolCall"
+
 type session_config = {
   model : string option;
   system_prompt : string option;
@@ -248,6 +330,15 @@ type session_config = {
   request_headers : (string * string) list;
   on_elicitation_request : bool;
   instruction_directories : string list;
+  (* Upstream-sync session options (parity with @github/copilot-sdk) *)
+  enable_citations : bool;
+  excluded_builtin_agents : string list;
+  session_limits : session_limits_config option;
+  memory : memory_configuration option;
+  otlp_protocol : string option;
+  enable_web_socket_responses : bool;
+  exp_assignments : (string * Yojson.Safe.t) list;
+  on_mcp_auth_request : bool;
 }
 
 let default_session_config () =
@@ -270,6 +361,14 @@ let default_session_config () =
   ; request_headers = []
   ; on_elicitation_request = false
   ; instruction_directories = []
+  ; enable_citations = false
+  ; excluded_builtin_agents = []
+  ; session_limits = None
+  ; memory = None
+  ; otlp_protocol = None
+  ; enable_web_socket_responses = false
+  ; exp_assignments = []
+  ; on_mcp_auth_request = false
   }
 
 let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
@@ -372,6 +471,45 @@ let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
     match c.instruction_directories with
     | [] -> fields
     | dirs -> ("instructionDirectories", `List (List.map (fun s -> `String s) dirs)) :: fields
+  in
+  let fields =
+    if c.enable_citations then ("enableCitations", `Bool true) :: fields
+    else fields
+  in
+  let fields =
+    match c.excluded_builtin_agents with
+    | [] -> fields
+    | agents ->
+      ("excludedBuiltinAgents", `List (List.map (fun s -> `String s) agents)) :: fields
+  in
+  let fields =
+    match c.session_limits with
+    | Some sl -> ("sessionLimits", session_limits_config_to_yojson sl) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.memory with
+    | Some mem -> ("memory", memory_configuration_to_yojson mem) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.otlp_protocol with
+    | Some p -> ("otlpProtocol", `String p) :: fields
+    | None -> fields
+  in
+  let fields =
+    if c.enable_web_socket_responses then
+      ("enableWebSocketResponses", `Bool true) :: fields
+    else fields
+  in
+  let fields =
+    match c.exp_assignments with
+    | [] -> fields
+    | assigns -> ("expAssignments", `Assoc assigns) :: fields
+  in
+  let fields =
+    if c.on_mcp_auth_request then ("mcpAuthHandler", `Bool true) :: fields
+    else fields
   in
   `Assoc fields
 
@@ -502,6 +640,8 @@ type client_options = {
   session_fs : session_fs_config option;
   copilot_home : string option;
   tcp_connection_token : string option;
+  request_handler : copilot_request_handler option;
+  bearer_token_provider : bearer_token_provider option;
 }
 
 let default_client_options () =
@@ -514,13 +654,16 @@ let default_client_options () =
   ; session_fs = None
   ; copilot_home = None
   ; tcp_connection_token = None
+  ; request_handler = None
+  ; bearer_token_provider = None
   }
 
 (* ========================================================================== *)
 (* Helper Constructors                                                        *)
 (* ========================================================================== *)
 
-let make_message ?mode prompt = { prompt; mode }
+let make_message ?mode ?agent_mode ?display_prompt ?(request_headers = []) prompt =
+  { prompt; mode; agent_mode; display_prompt; request_headers }
 
 let make_tool_definition ?parameters name description =
   { tool_name = name; tool_description = description; tool_parameters = parameters }

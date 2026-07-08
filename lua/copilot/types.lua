@@ -164,6 +164,8 @@ function M.ClientOptions(fields)
         sessionFs                  = fields.sessionFs,                  -- optional table, session filesystem provider
         copilotHome                = fields.copilotHome,                -- optional string, copilot home directory path
         tcpConnectionToken         = fields.tcpConnectionToken,         -- optional string, TCP connection token
+        requestHandler             = fields.requestHandler,            -- optional CopilotRequestHandler, intercepts outbound LLM requests
+        bearerTokenProvider        = fields.bearerTokenProvider,       -- optional function(ProviderTokenArgs) -> string, BYOK bearer token
     }
 end
 
@@ -330,6 +332,15 @@ function M.SessionConfig(fields)
         commands                        = fields.commands,                        -- array of CommandDefinition
         onElicitationRequest            = fields.onElicitationRequest,            -- function(ElicitationContext) -> ElicitationResult
         instructionDirectories          = fields.instructionDirectories,          -- array of strings, instruction directories
+        -- Upstream-sync session options (parity with @github/copilot-sdk)
+        enableCitations                 = fields.enableCitations,                 -- boolean, enable inline source citations
+        excludedBuiltinAgents           = fields.excludedBuiltinAgents,           -- array of strings, built-in agents to exclude
+        sessionLimits                   = fields.sessionLimits,                   -- SessionLimitsConfig, per-session AI-credit limits
+        memory                          = fields.memory,                         -- MemoryConfiguration, persistent session memory
+        otlpProtocol                    = fields.otlpProtocol,                    -- string, OTLP telemetry protocol
+        enableWebSocketResponses        = fields.enableWebSocketResponses,        -- boolean, stream responses over WebSocket
+        expAssignments                  = fields.expAssignments,                  -- table, experiment assignments
+        onMcpAuthRequest                = fields.onMcpAuthRequest,                -- function(ProviderTokenArgs) -> string, MCP OAuth host token handler
     }
 end
 
@@ -370,7 +381,7 @@ function M.ResumeSessionConfig(fields)
 end
 
 --- Create a MessageOptions table.
--- @param fields table with keys: prompt, attachments, mode, responseFormat, imageOptions, requestHeaders
+-- @param fields table with keys: prompt, attachments, mode, agentMode, displayPrompt, responseFormat, imageOptions, requestHeaders
 -- @return table MessageOptions
 function M.MessageOptions(fields)
     fields = fields or {}
@@ -378,6 +389,8 @@ function M.MessageOptions(fields)
         prompt         = fields.prompt or "",
         attachments    = fields.attachments,      -- optional array
         mode           = fields.mode,             -- optional string
+        agentMode      = fields.agentMode,        -- optional string, agent-mode override for this message
+        displayPrompt  = fields.displayPrompt,    -- optional string, alternate prompt text shown to the user
         responseFormat = fields.responseFormat,    -- optional string (ResponseFormat constant)
         imageOptions   = fields.imageOptions,     -- optional table (from image_options())
         requestHeaders = fields.requestHeaders,   -- optional table of string->string, custom HTTP headers
@@ -509,6 +522,7 @@ function M.SessionHooks(fields)
         onSessionStart        = fields.onSessionStart,
         onSessionEnd          = fields.onSessionEnd,
         onErrorOccurred       = fields.onErrorOccurred,
+        onPreMcpToolCall      = fields.onPreMcpToolCall,  -- function, pre-MCP-tool-call hook
     }
 end
 
@@ -728,5 +742,81 @@ end
 --   rename(sessionId, oldPath, newPath) → nil
 --
 -- Each function should return nil, err_string on error.
+
+-- ---------------------------------------------------------------------------
+-- Upstream-sync feature types (parity with @github/copilot-sdk)
+-- ---------------------------------------------------------------------------
+
+--- Create a SessionLimitsConfig table (per-session AI-credit budget).
+-- @param fields table with keys: maxAiCredits
+-- @return table SessionLimitsConfig
+function M.SessionLimitsConfig(fields)
+    fields = fields or {}
+    return {
+        maxAiCredits = fields.maxAiCredits,   -- optional integer, cap on AI credits spent
+    }
+end
+
+--- Create a MemoryConfiguration table (opt-in persistent session memory).
+-- @param fields table with keys: enabled
+-- @return table MemoryConfiguration
+function M.MemoryConfiguration(fields)
+    fields = fields or {}
+    return {
+        enabled = fields.enabled or false,    -- boolean, whether persistent memory is enabled
+    }
+end
+
+--- Create a ProviderTokenArgs table (passed to a BYOK bearer_token_provider).
+-- @param fields table with keys: sessionId
+-- @return table ProviderTokenArgs
+function M.ProviderTokenArgs(fields)
+    fields = fields or {}
+    return {
+        sessionId = fields.sessionId or "",   -- the session the token is requested for
+    }
+end
+
+--- Create a CopilotRequestHandler table.
+-- Intercepts outbound LLM inference HTTP/WebSocket requests. Assign to
+-- ClientOptions.requestHandler. Override send_request to mutate, replace, or
+-- forward the request. BYOK providers may also set ClientOptions.bearerTokenProvider.
+-- @param fields table with optional key: send_request (function(request, context) -> request)
+-- @return table CopilotRequestHandler
+function M.CopilotRequestHandler(fields)
+    fields = fields or {}
+    return {
+        send_request = fields.send_request or function(request, _context) return request end,
+    }
+end
+
+--- Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto").
+M.ToolDefer = {
+    AUTO  = "auto",
+    NEVER = "never",
+}
+
+--- System-message section identifiers (used with system-message overrides).
+-- The "preamble" section targets the identity preamble; the "preserve" action
+-- protects an individually-addressable section from a group-level remove.
+M.SystemMessageSection = {
+    PREAMBLE          = "preamble",
+    IDENTITY          = "identity",
+    TOOL_INSTRUCTIONS = "tool_instructions",
+    PRESERVE          = "preserve",
+}
+
+--- GitHub-anchored attachment variants.
+M.GitHubAttachment = {
+    GITHUB_COMMIT          = "GitHubCommit",
+    GITHUB_RELEASE         = "GitHubRelease",
+    GITHUB_ACTIONS_JOB     = "GitHubActionsJob",
+    GITHUB_REPOSITORY      = "GitHubRepository",
+    GITHUB_FILE_DIFF       = "GitHubFileDiff",
+    GITHUB_TREE_COMPARISON = "GitHubTreeComparison",
+    GITHUB_URL             = "GitHubUrl",
+    GITHUB_FILE            = "GitHubFile",
+    GITHUB_SNIPPET         = "GitHubSnippet",
+}
 
 return M

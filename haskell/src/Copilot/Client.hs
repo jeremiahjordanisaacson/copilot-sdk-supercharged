@@ -312,6 +312,15 @@ createSession client config = do
         , "skillDirectories"   .= scSkillDirectories config
         , "disabledSkills"     .= scDisabledSkills config
         , "infiniteSessions"   .= scInfiniteSessions config
+        -- Upstream-sync session options (parity with @github/copilot-sdk)
+        , "enableCitations"          .= scEnableCitations config
+        , "excludedBuiltinAgents"    .= scExcludedBuiltinAgents config
+        , "sessionLimits"            .= scSessionLimits config
+        , "memory"                   .= scMemory config
+        , "otlpProtocol"             .= scOtlpProtocol config
+        , "enableWebSocketResponses" .= scEnableWebSocketResponses config
+        , "expAssignments"           .= scExpAssignments config
+        , "mcpAuthHandler"           .= (if isJust (scOnMcpAuthRequest config) then Just True else Nothing)
         ]
 
   result <- sendRequest rpc "session.create" reqParams
@@ -570,6 +579,7 @@ hasHooks :: Maybe SessionHooks -> Bool
 hasHooks Nothing = False
 hasHooks (Just sh) = isJust (shOnPreToolUse sh)
                   || isJust (shOnPostToolUse sh)
+                  || isJust (shOnPreMcpToolCall sh)
                   || isJust (shOnUserPromptSubmitted sh)
                   || isJust (shOnSessionStart sh)
                   || isJust (shOnSessionEnd sh)

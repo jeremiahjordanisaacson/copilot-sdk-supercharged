@@ -97,6 +97,15 @@ function send(session::CopilotSession, opts::MessageOptions)
     if opts.mode !== nothing
         params["mode"] = opts.mode
     end
+    if opts.agent_mode !== nothing
+        params["agentMode"] = opts.agent_mode
+    end
+    if opts.display_prompt !== nothing
+        params["displayPrompt"] = opts.display_prompt
+    end
+    if opts.request_headers !== nothing
+        params["requestHeaders"] = opts.request_headers
+    end
     send_request(session.rpc, "session/send", params)
     return nothing
 end

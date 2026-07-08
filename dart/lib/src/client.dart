@@ -295,7 +295,31 @@ class CopilotClient {
       if (config.disabledSkills != null) 'disabledSkills': config.disabledSkills,
       if (config.infiniteSessions != null)
         'infiniteSessions': config.infiniteSessions!.toJson(),
+      // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+      if (config.enableCitations != null)
+        'enableCitations': config.enableCitations,
+      if (config.excludedBuiltinAgents != null)
+        'excludedBuiltinAgents': config.excludedBuiltinAgents,
+      if (config.sessionLimits != null)
+        'sessionLimits': config.sessionLimits!.toJson(),
+      if (config.memory != null) 'memory': config.memory!.toJson(),
+      if (config.otlpProtocol != null) 'otlpProtocol': config.otlpProtocol,
+      if (config.enableWebSocketResponses != null)
+        'enableWebSocketResponses': config.enableWebSocketResponses,
+      if (config.expAssignments != null)
+        'expAssignments': config.expAssignments,
+      if (config.onMcpAuthRequest != null) 'mcpAuthHandler': true,
     };
+
+    // BYOK: resolve a per-session bearer token for the provider, if requested.
+    if (config.bearerTokenProvider != null && params['provider'] is Map) {
+      final token = await config.bearerTokenProvider!(
+        ProviderTokenArgs(sessionId: config.sessionId),
+      );
+      if (token != null) {
+        (params['provider'] as Map<String, dynamic>)['bearerToken'] = token;
+      }
+    }
 
     final response =
         await _connection!.sendRequest('session.create', params) as Map<String, dynamic>;

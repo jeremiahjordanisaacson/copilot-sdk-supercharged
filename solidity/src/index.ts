@@ -35,4 +35,22 @@ export type {
     SoliditySessionConfig,
     TestFramework,
     TestGenToolParams,
+    // Upstream-sync feature types
+    SessionLimitsConfig,
+    MemoryConfiguration,
+    ProviderTokenArgs,
+    BearerTokenProvider,
+    McpAuthHandler,
+    PostToolUseHandler,
+    PreMcpToolCallHandler,
+    SolidityHooks,
+    CopilotRequestHandler,
+    SolidityMessageOptions,
+    SolidityUpstreamSessionOptions,
+    ToolDeferMode,
+    SystemMessageSectionName,
+    GitHubAttachmentType,
 } from "./types.js";
+
+// Upstream-sync feature constants
+export { ToolDefer, SystemMessageSection, GitHubAttachment } from "./types.js";

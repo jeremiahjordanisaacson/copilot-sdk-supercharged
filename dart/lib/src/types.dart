@@ -695,6 +695,7 @@ typedef ErrorOccurredHandler = Future<ErrorOccurredHookOutput?> Function(
 class SessionHooks {
   final PreToolUseHandler? onPreToolUse;
   final PostToolUseHandler? onPostToolUse;
+  final PreMcpToolCallHandler? onPreMcpToolCall;
   final UserPromptSubmittedHandler? onUserPromptSubmitted;
   final SessionStartHandler? onSessionStart;
   final SessionEndHandler? onSessionEnd;
@@ -703,6 +704,7 @@ class SessionHooks {
   const SessionHooks({
     this.onPreToolUse,
     this.onPostToolUse,
+    this.onPreMcpToolCall,
     this.onUserPromptSubmitted,
     this.onSessionStart,
     this.onSessionEnd,
@@ -713,6 +715,7 @@ class SessionHooks {
   bool get hasAny =>
       onPreToolUse != null ||
       onPostToolUse != null ||
+      onPreMcpToolCall != null ||
       onUserPromptSubmitted != null ||
       onSessionStart != null ||
       onSessionEnd != null ||
@@ -1289,6 +1292,12 @@ class MessageOptions {
   /// Options for image generation (used when [responseFormat] is image).
   final ImageOptions? imageOptions;
 
+  /// Agent mode to use for this message.
+  final String? agentMode;
+
+  /// Alternate prompt text to display in place of [prompt].
+  final String? displayPrompt;
+
   /// Custom HTTP headers to include in outbound model requests for this turn.
   final Map<String, String>? requestHeaders;
 
@@ -1298,6 +1307,8 @@ class MessageOptions {
     this.mode,
     this.responseFormat,
     this.imageOptions,
+    this.agentMode,
+    this.displayPrompt,
     this.requestHeaders,
   });
 }
@@ -1452,6 +1463,33 @@ class SessionConfig {
   /// Directories to search for instruction files.
   final List<String>? instructionDirectories;
 
+  /// Enable response citations for this session.
+  final bool? enableCitations;
+
+  /// Names of built-in agents to exclude from this session.
+  final List<String>? excludedBuiltinAgents;
+
+  /// Per-session AI-credit spending limits.
+  final SessionLimitsConfig? sessionLimits;
+
+  /// Persistent session memory configuration.
+  final MemoryConfiguration? memory;
+
+  /// OTLP telemetry protocol ("grpc" or "http/protobuf").
+  final String? otlpProtocol;
+
+  /// Use the WebSocket response transport instead of stdio streaming.
+  final bool? enableWebSocketResponses;
+
+  /// Experiment assignment overrides.
+  final Map<String, dynamic>? expAssignments;
+
+  /// Handler for MCP OAuth host token requests.
+  final McpAuthRequestHandler? onMcpAuthRequest;
+
+  /// BYOK callback resolving a bearer token from [ProviderTokenArgs].
+  final BearerTokenProvider? bearerTokenProvider;
+
   const SessionConfig({
     this.sessionId,
     this.model,
@@ -1479,6 +1517,15 @@ class SessionConfig {
     this.commands,
     this.onElicitationRequest,
     this.instructionDirectories,
+    this.enableCitations,
+    this.excludedBuiltinAgents,
+    this.sessionLimits,
+    this.memory,
+    this.otlpProtocol,
+    this.enableWebSocketResponses,
+    this.expAssignments,
+    this.onMcpAuthRequest,
+    this.bearerTokenProvider,
   });
 }
 
@@ -1768,4 +1815,91 @@ class GetAuthStatusResponse {
       statusMessage: json['statusMessage'] as String?,
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Upstream-sync feature types & constants (parity with @github/copilot-sdk)
+// ---------------------------------------------------------------------------
+
+/// Per-session AI-credit budget. Set [maxAiCredits] to cap spend.
+class SessionLimitsConfig {
+  final num? maxAiCredits;
+
+  const SessionLimitsConfig({this.maxAiCredits});
+
+  Map<String, dynamic> toJson() => {
+        if (maxAiCredits != null) 'maxAiCredits': maxAiCredits,
+      };
+}
+
+/// Opt-in persistent session memory.
+class MemoryConfiguration {
+  final bool? enabled;
+
+  const MemoryConfiguration({this.enabled});
+
+  Map<String, dynamic> toJson() => {
+        if (enabled != null) 'enabled': enabled,
+      };
+}
+
+/// Arguments passed to a BYOK [BearerTokenProvider] callback.
+class ProviderTokenArgs {
+  final String? sessionId;
+
+  const ProviderTokenArgs({this.sessionId});
+}
+
+/// Resolves a bearer token for BYOK providers (per-session scoping).
+typedef BearerTokenProvider = Future<String?> Function(ProviderTokenArgs args);
+
+/// Handler for MCP OAuth host token requests.
+typedef McpAuthRequestHandler = Future<String?> Function(
+  Map<String, dynamic> request,
+  SessionInvocationContext context,
+);
+
+/// Handler invoked before an MCP tool call is dispatched.
+typedef PreMcpToolCallHandler = Future<dynamic> Function(
+  Map<String, dynamic> input,
+  SessionInvocationContext context,
+);
+
+/// Intercept outbound LLM inference HTTP/WebSocket requests. Subclass and
+/// override [sendRequest] to mutate, replace, or forward the request. BYOK
+/// providers may also supply a [BearerTokenProvider].
+abstract class CopilotRequestHandler {
+  Future<dynamic> sendRequest(dynamic request, SessionInvocationContext context);
+}
+
+/// Tool "defer" loading policy: eager pre-load ([never]) or lazy via search ([auto]).
+enum ToolDefer {
+  auto('auto'),
+  never('never');
+
+  final String value;
+  const ToolDefer(this.value);
+}
+
+/// System-message section identifiers. The [preamble] section targets only the
+/// identity preamble; the [preserve] action protects an individually-addressable
+/// section from a group-level remove.
+class SystemMessageSection {
+  static const String preamble = 'preamble';
+  static const String identity = 'identity';
+  static const String toolInstructions = 'tool_instructions';
+  static const String preserve = 'preserve';
+}
+
+/// GitHub-anchored attachment variants.
+class GitHubAttachment {
+  static const String gitHubCommit = 'GitHubCommit';
+  static const String gitHubRelease = 'GitHubRelease';
+  static const String gitHubActionsJob = 'GitHubActionsJob';
+  static const String gitHubRepository = 'GitHubRepository';
+  static const String gitHubFileDiff = 'GitHubFileDiff';
+  static const String gitHubTreeComparison = 'GitHubTreeComparison';
+  static const String gitHubUrl = 'GitHubUrl';
+  static const String gitHubFile = 'GitHubFile';
+  static const String gitHubSnippet = 'GitHubSnippet';
 }

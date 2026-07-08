@@ -16,7 +16,8 @@ package body Copilot.Tools is
    begin
       return (Name        => To_Unbounded_String (Name),
               Description => To_Unbounded_String (Description),
-              Parameters  => Params);
+              Parameters  => Params,
+              Defer       => Null_UString);
    end Define_Tool;
 
    function String_Param

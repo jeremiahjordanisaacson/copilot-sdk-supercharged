@@ -433,6 +433,10 @@ has response_format => (is => 'ro', default => sub { undef });
 has image_options   => (is => 'ro', default => sub { undef });
 # Custom HTTP headers for outbound model requests
 has request_headers => (is => 'ro', default => sub { undef });
+# Per-message agent mode override (maps to agentMode on wire)
+has agent_mode      => (is => 'ro', default => sub { undef });
+# Display-only prompt shown to the user, distinct from the model prompt
+has display_prompt  => (is => 'ro', default => sub { undef });
 
 sub TO_JSON {
     my ($self) = @_;
@@ -442,6 +446,8 @@ sub TO_JSON {
     $h{responseFormat} = $self->response_format if defined $self->response_format;
     $h{imageOptions}   = $self->image_options   if defined $self->image_options;
     $h{requestHeaders} = $self->request_headers if defined $self->request_headers;
+    $h{agentMode}      = $self->agent_mode      if defined $self->agent_mode;
+    $h{displayPrompt}  = $self->display_prompt  if defined $self->display_prompt;
     return \%h;
 }
 
@@ -583,6 +589,27 @@ has request_headers         => (is => 'ro', default => sub { undef });
 has response_format         => (is => 'ro', default => sub { undef });
 # Idle timeout in seconds for this session
 has idle_timeout            => (is => 'ro', default => sub { undef });
+# --- Upstream sync: additional session configuration ---------------------
+# Enable inline citations in assistant responses
+has enable_citations        => (is => 'ro', default => sub { undef });
+# List of builtin agent names to exclude from this session
+has excluded_builtin_agents => (is => 'ro', default => sub { undef });
+# Spending / usage limits (SessionLimitsConfig object or hashref)
+has session_limits          => (is => 'ro', default => sub { undef });
+# Persistent memory configuration (MemoryConfiguration object or hashref)
+has memory                  => (is => 'ro', default => sub { undef });
+# OpenTelemetry export protocol (e.g. 'grpc', 'http/protobuf')
+has otlp_protocol           => (is => 'ro', default => sub { undef });
+# Stream responses over a WebSocket transport when true
+has enable_web_socket_responses => (is => 'ro', default => sub { undef });
+# Experiment assignment overrides (hashref)
+has exp_assignments         => (is => 'ro', default => sub { undef });
+# MCP OAuth authorization handler (code ref); sets mcpAuthHandler flag on wire
+has on_mcp_auth_request     => (is => 'ro', default => sub { undef });
+# Post-tool-use hook (code ref)
+has on_post_tool_use        => (is => 'ro', default => sub { undef });
+# Pre-MCP-tool-call hook (code ref)
+has on_pre_mcp_tool_call    => (is => 'ro', default => sub { undef });
 
 sub to_wire {
     my ($self) = @_;
@@ -636,6 +663,32 @@ sub to_wire {
     if (defined $self->instruction_directories) {
         $payload{instructionDirectories} = $self->instruction_directories;
     }
+
+    # --- Upstream sync: additional session configuration passthroughs ------
+    if (defined $self->enable_citations) {
+        $payload{enableCitations} = $self->enable_citations ? \1 : \0;
+    }
+    if (defined $self->excluded_builtin_agents) {
+        $payload{excludedBuiltinAgents} = $self->excluded_builtin_agents;
+    }
+    if (defined $self->session_limits) {
+        $payload{sessionLimits} = $self->session_limits;
+    }
+    if (defined $self->memory) {
+        $payload{memory} = $self->memory;
+    }
+    if (defined $self->otlp_protocol) {
+        $payload{otlpProtocol} = $self->otlp_protocol;
+    }
+    if (defined $self->enable_web_socket_responses) {
+        $payload{enableWebSocketResponses} = $self->enable_web_socket_responses ? \1 : \0;
+    }
+    if (defined $self->exp_assignments) {
+        $payload{expAssignments} = $self->exp_assignments;
+    }
+    $payload{mcpAuthHandler} = \1 if defined $self->on_mcp_auth_request;
+    $payload{onPostToolUse}  = \1 if defined $self->on_post_tool_use;
+    $payload{onPreMcpToolCall} = \1 if defined $self->on_pre_mcp_tool_call;
 
     $payload{requestPermission} = \1 if defined $self->on_permission_request;
     $payload{requestUserInput}  = \1 if defined $self->on_user_input_request;
@@ -872,6 +925,102 @@ sub TO_JSON {
 #   readdir_with_types => sub { my ($session_id, $path) = @_; ... }
 #   rm                => sub { my ($session_id, $path, $recursive) = @_; ... }
 #   rename            => sub { my ($session_id, $old_path, $new_path) = @_; ... }
+
+# ============================================================================
+# Upstream sync: additional configuration types & constants
+# ============================================================================
+
+# SessionLimitsConfig - spending / usage limits for a session.
+package GitHub::Copilot::Types::SessionLimitsConfig;
+use Moo;
+
+# Maximum AI credits this session may consume before it is halted.
+has max_ai_credits => (is => 'ro', default => sub { undef });
+# Maximum number of model requests permitted for this session.
+has max_requests   => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{maxAiCredits} = $self->max_ai_credits if defined $self->max_ai_credits;
+    $h{maxRequests}  = $self->max_requests   if defined $self->max_requests;
+    return \%h;
+}
+
+# MemoryConfiguration - persistent memory settings for a session.
+package GitHub::Copilot::Types::MemoryConfiguration;
+use Moo;
+
+# Enable persistent memory for this session.
+has enabled => (is => 'ro', default => sub { undef });
+# Filesystem path used to store memory state.
+has path    => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{enabled} = $self->enabled ? \1 : \0 if defined $self->enabled;
+    $h{path}    = $self->path              if defined $self->path;
+    return \%h;
+}
+
+# ProviderTokenArgs - arguments passed to a bearer-token provider callback.
+package GitHub::Copilot::Types::ProviderTokenArgs;
+use Moo;
+
+# Model provider identifier requesting the token (e.g. 'openai').
+has provider => (is => 'ro', default => sub { undef });
+# Target request URL the token will authorize.
+has url      => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{provider} = $self->provider if defined $self->provider;
+    $h{url}      = $self->url      if defined $self->url;
+    return \%h;
+}
+
+# CopilotRequestHandler - base class for custom outbound HTTP handling (BYOK).
+# Subclass and override send_request to intercept model requests.
+package GitHub::Copilot::Types::CopilotRequestHandler;
+use Moo;
+use Carp qw(croak);
+
+sub send_request {
+    my ($self, $request) = @_;
+    croak "CopilotRequestHandler->send_request must be implemented by a subclass";
+}
+
+# ToolDefer - tool permission deferral modes.
+package GitHub::Copilot::Types::ToolDefer;
+
+use constant {
+    DEFER => 'defer',
+    AUTO  => 'auto',
+    NEVER => 'never',
+};
+
+# SystemMessageSection - known system message section identifiers.
+package GitHub::Copilot::Types::SystemMessageSection;
+
+use constant {
+    PREAMBLE          => 'preamble',
+    IDENTITY          => 'identity',
+    TOOL_INSTRUCTIONS => 'tool_instructions',
+    PRESERVE          => 'preserve',
+};
+
+# GitHubAttachment - GitHub attachment reference kinds.
+package GitHub::Copilot::Types::GitHubAttachment;
+
+use constant {
+    GITHUB_COMMIT       => 'github_commit',
+    GITHUB_REPOSITORY   => 'github_repository',
+    GITHUB_PULL_REQUEST => 'github_pull_request',
+    GITHUB_ISSUE        => 'github_issue',
+    GITHUB_FILE         => 'github_file',
+};
 
 1;
 

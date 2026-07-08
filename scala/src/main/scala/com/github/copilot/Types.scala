@@ -92,7 +92,10 @@ case class Tool(
   name: String,
   description: Option[String] = None,
   parameters: Option[JsonObject] = None,
-  handler: ToolHandler
+  handler: ToolHandler,
+
+  /** Tool deferral policy: "auto" (default) or "never". See [[ToolDefer]]. */
+  defer: Option[String] = None
 )
 
 // ============================================================================
@@ -342,6 +345,43 @@ object ElicitationResult:
 type ElicitationHandler = ElicitationContext => Future[ElicitationResult]
 
 /** Configuration for creating a new session. */
+/** Provider bearer-token request arguments (BYOK). */
+case class ProviderTokenArgs(
+  sessionId: String
+)
+
+object ProviderTokenArgs:
+  given Encoder[ProviderTokenArgs] = deriveEncoder
+  given Decoder[ProviderTokenArgs] = deriveDecoder
+
+/** Supplies a bearer token for outbound model requests (bring-your-own-key). */
+type BearerTokenProvider = ProviderTokenArgs => Future[String]
+
+/** Handles an MCP OAuth authorization request, returning an access token. */
+type McpAuthHandler = ProviderTokenArgs => Future[String]
+
+/** Custom transport for outbound Copilot HTTP requests. */
+trait CopilotRequestHandler:
+  def sendRequest(request: Json): Future[Json]
+
+/** Per-session resource limits. */
+case class SessionLimitsConfig(
+  maxAiCredits: Option[Double] = None
+)
+
+object SessionLimitsConfig:
+  given Encoder[SessionLimitsConfig] = deriveEncoder
+  given Decoder[SessionLimitsConfig] = deriveDecoder
+
+/** Long-term memory configuration for a session. */
+case class MemoryConfiguration(
+  enabled: Boolean = true
+)
+
+object MemoryConfiguration:
+  given Encoder[MemoryConfiguration] = deriveEncoder
+  given Decoder[MemoryConfiguration] = deriveDecoder
+
 case class SessionConfig(
   sessionId: Option[String] = None,
   model: Option[String] = None,
@@ -390,6 +430,30 @@ case class SessionConfig(
   idleTimeout: Option[Int] = None,
   /** Custom instruction directory paths. */
   instructionDirectories: Option[Seq[String]] = None,
+
+  /** Enable inline source citations in assistant responses. */
+  enableCitations: Option[Boolean] = None,
+
+  /** Names of built-in agents to exclude from this session. */
+  excludedBuiltinAgents: Option[List[String]] = None,
+
+  /** Per-session resource limits (e.g. max AI credits). */
+  sessionLimits: Option[SessionLimitsConfig] = None,
+
+  /** Long-term memory configuration. */
+  memory: Option[MemoryConfiguration] = None,
+
+  /** OTLP export protocol for telemetry ("grpc" or "http/protobuf"). */
+  otlpProtocol: Option[String] = None,
+
+  /** Stream model responses over WebSocket transport. */
+  enableWebSocketResponses: Option[Boolean] = None,
+
+  /** Experiment assignment overrides. */
+  expAssignments: Option[Map[String, Json]] = None,
+
+  /** Handler invoked when an MCP server requires OAuth authorization. */
+  onMcpAuthRequest: Option[McpAuthHandler] = None,
 )
 
 /** Configuration for resuming an existing session. */
@@ -742,6 +806,7 @@ type ErrorOccurredHandler = (ErrorOccurredHookInput, HookInvocation) => Future[O
 case class SessionHooks(
   onPreToolUse: Option[PreToolUseHandler] = None,
   onPostToolUse: Option[PostToolUseHandler] = None,
+  onPreMcpToolCall: Option[PostToolUseHandler] = None,
   onUserPromptSubmitted: Option[UserPromptSubmittedHandler] = None,
   onSessionStart: Option[SessionStartHandler] = None,
   onSessionEnd: Option[SessionEndHandler] = None,
@@ -750,6 +815,7 @@ case class SessionHooks(
   /** Returns true if at least one hook handler is registered. */
   def hasAny: Boolean =
     onPreToolUse.isDefined || onPostToolUse.isDefined ||
+      onPreMcpToolCall.isDefined ||
       onUserPromptSubmitted.isDefined || onSessionStart.isDefined ||
       onSessionEnd.isDefined || onErrorOccurred.isDefined
 
@@ -1076,7 +1142,13 @@ case class MessageOptions(
   imageOptions: Option[ImageOptions] = None,
 
   /** Custom HTTP headers to include in outbound model requests for this turn. */
-  requestHeaders: Option[Map[String, String]] = None
+  requestHeaders: Option[Map[String, String]] = None,
+
+  /** Agent execution mode for this turn (e.g. "agent", "chat"). */
+  agentMode: Option[String] = None,
+
+  /** Prompt text to display in the UI in place of the actual prompt. */
+  displayPrompt: Option[String] = None
 )
 
 // ============================================================================
@@ -1165,5 +1237,11 @@ case class CopilotClientOptions(
   copilotHome: Option[String] = None,
 
   /** Auth token for TCP server connections. */
-  tcpConnectionToken: Option[String] = None
+  tcpConnectionToken: Option[String] = None,
+
+  /** Custom transport for outbound Copilot HTTP requests. */
+  requestHandler: Option[CopilotRequestHandler] = None,
+
+  /** Supplies bearer tokens for outbound model requests (bring-your-own-key). */
+  bearerTokenProvider: Option[BearerTokenProvider] = None
 )

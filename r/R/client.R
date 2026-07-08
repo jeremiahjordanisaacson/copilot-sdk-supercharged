@@ -210,6 +210,19 @@ CopilotClient <- R6::R6Class(
     #' @param enable_config_discovery Logical or NULL. Auto-discover MCP server configs.
     #' @param include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events.
     #' @param commands List of CommandDefinition or NULL. Slash commands for this session.
+    #' @param request_headers Named list or NULL. Extra HTTP headers for runtime requests.
+    #' @param response_format Character or NULL. Response format ("text", "image", "json_object").
+    #' @param enable_citations Logical or NULL. Enable response citations.
+    #' @param excluded_builtin_agents Character vector or NULL. Built-in agent names to exclude.
+    #' @param session_limits SessionLimitsConfig or NULL. Per-session AI-credit spending limits.
+    #' @param memory MemoryConfiguration or NULL. Persistent session memory configuration.
+    #' @param otlp_protocol Character or NULL. OTLP telemetry protocol ("grpc" or "http/protobuf").
+    #' @param enable_web_socket_responses Logical or NULL. Use the WebSocket response transport.
+    #' @param exp_assignments Named list or NULL. Experiment assignment overrides.
+    #' @param on_mcp_auth_request Function or NULL. MCP OAuth host token handler.
+    #' @param bearer_token_provider Function or NULL. BYOK callback receiving ProviderTokenArgs.
+    #' @param agent_mode Character or NULL. Default agent mode applied to sent messages.
+    #' @param display_prompt Character or NULL. Default display prompt applied to sent messages.
     #'
     #' @return A CopilotSession R6 object.
     create_session = function(model = NULL, session_id = NULL, tools = NULL,
@@ -226,7 +239,18 @@ CopilotClient <- R6::R6Class(
                               include_sub_agent_streaming_events = NULL,
                               commands = NULL,
                               request_headers = NULL,
-                              response_format = NULL) {
+                              response_format = NULL,
+                              enable_citations = NULL,
+                              excluded_builtin_agents = NULL,
+                              session_limits = NULL,
+                              memory = NULL,
+                              otlp_protocol = NULL,
+                              enable_web_socket_responses = NULL,
+                              exp_assignments = NULL,
+                              on_mcp_auth_request = NULL,
+                              bearer_token_provider = NULL,
+                              agent_mode = NULL,
+                              display_prompt = NULL) {
       if (is.null(private$client)) {
         if (isTRUE(self$options$auto_start)) {
           self$start()
@@ -256,7 +280,15 @@ CopilotClient <- R6::R6Class(
       if (!is.null(on_permission_request)) payload$requestPermission <- TRUE
       if (!is.null(on_user_input_request)) payload$requestUserInput <- TRUE
       if (!is.null(on_elicitation_request)) payload$requestElicitation <- TRUE
-      if (!is.null(hooks) && length(hooks) > 0) payload$hooks <- TRUE
+      if (!is.null(hooks) && length(hooks) > 0) {
+        # Supported hook names: see COPILOT_HOOK_NAMES
+        # (incl. on_post_tool_use and on_pre_mcp_tool_call).
+        unknown_hooks <- setdiff(names(hooks), COPILOT_HOOK_NAMES)
+        if (length(unknown_hooks) > 0) {
+          warning(paste0("Unknown hook name(s): ", paste(unknown_hooks, collapse = ", ")))
+        }
+        payload$hooks <- TRUE
+      }
       if (!is.null(working_directory)) payload$workingDirectory <- working_directory
       if (!is.null(streaming)) payload$streaming <- streaming
       if (!is.null(provider)) payload$provider <- private$convert_provider(provider)
@@ -291,6 +323,35 @@ CopilotClient <- R6::R6Class(
         payload$infiniteSessions <- wire_config
       }
 
+      # --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+      if (!is.null(enable_citations)) payload$enableCitations <- enable_citations
+      if (!is.null(excluded_builtin_agents)) payload$excludedBuiltinAgents <- excluded_builtin_agents
+      if (!is.null(session_limits)) {
+        payload$sessionLimits <- if (inherits(session_limits, "SessionLimitsConfig")) {
+          session_limits$to_list()
+        } else {
+          session_limits
+        }
+      }
+      if (!is.null(memory)) {
+        payload$memory <- if (inherits(memory, "MemoryConfiguration")) memory$to_list() else memory
+      }
+      if (!is.null(otlp_protocol)) payload$otlpProtocol <- otlp_protocol
+      if (!is.null(enable_web_socket_responses)) {
+        payload$enableWebSocketResponses <- enable_web_socket_responses
+      }
+      if (!is.null(exp_assignments)) payload$expAssignments <- exp_assignments
+      # MCP OAuth host token handler: signal the runtime that a handler is registered.
+      if (!is.null(on_mcp_auth_request)) payload$mcpAuthHandler <- TRUE
+      # BYOK: resolve an initial per-session token via the bearer_token_provider callback.
+      if (!is.null(bearer_token_provider)) {
+        token <- bearer_token_provider(ProviderTokenArgs$new(session_id = session_id))
+        if (!is.null(token)) {
+          if (is.null(payload$provider)) payload$provider <- list()
+          payload$provider$bearerToken <- token
+        }
+      }
+
       response <- private$client$request("session.create", payload)
 
       sid <- response$sessionId
@@ -316,6 +377,9 @@ CopilotClient <- R6::R6Class(
       }
       if (!is.null(commands)) {
         session$register_commands(commands)
+      }
+      if (!is.null(agent_mode) || !is.null(display_prompt)) {
+        session$set_default_message_options(agent_mode = agent_mode, display_prompt = display_prompt)
       }
 
       assign(sid, session, envir = private$sessions)
@@ -816,4 +880,158 @@ CopilotClient <- R6::R6Class(
       list(output = output)
     }
   )
+)
+
+
+# ---------------------------------------------------------------------------
+# Upstream-sync feature types & constants (parity with @github/copilot-sdk)
+# ---------------------------------------------------------------------------
+
+#' SessionLimitsConfig
+#'
+#' Per-session AI-credit budget. Set \code{max_ai_credits} to cap spend.
+#'
+#' @field max_ai_credits Numeric or NULL. Maximum AI credits for the session.
+#' @keywords internal
+SessionLimitsConfig <- R6::R6Class(
+  "SessionLimitsConfig",
+  public = list(
+    max_ai_credits = NULL,
+
+    #' @description Create a new SessionLimitsConfig.
+    #' @param max_ai_credits Numeric or NULL.
+    initialize = function(max_ai_credits = NULL) {
+      self$max_ai_credits <- max_ai_credits
+    },
+
+    #' @description Convert to a wire list (camelCase keys).
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$max_ai_credits)) result$maxAiCredits <- self$max_ai_credits
+      result
+    }
+  )
+)
+
+#' MemoryConfiguration
+#'
+#' Opt-in persistent session memory.
+#'
+#' @field enabled Logical or NULL. Whether persistent memory is enabled.
+#' @keywords internal
+MemoryConfiguration <- R6::R6Class(
+  "MemoryConfiguration",
+  public = list(
+    enabled = NULL,
+
+    #' @description Create a new MemoryConfiguration.
+    #' @param enabled Logical or NULL.
+    initialize = function(enabled = NULL) {
+      self$enabled <- enabled
+    },
+
+    #' @description Convert to a wire list.
+    to_list = function() {
+      result <- list()
+      if (!is.null(self$enabled)) result$enabled <- self$enabled
+      result
+    }
+  )
+)
+
+#' ProviderTokenArgs
+#'
+#' Arguments passed to a BYOK \code{bearer_token_provider} callback.
+#'
+#' @field session_id Character or NULL. The session requesting a token.
+#' @keywords internal
+ProviderTokenArgs <- R6::R6Class(
+  "ProviderTokenArgs",
+  public = list(
+    session_id = NULL,
+
+    #' @description Create new ProviderTokenArgs.
+    #' @param session_id Character or NULL.
+    initialize = function(session_id = NULL) {
+      self$session_id <- session_id
+    }
+  )
+)
+
+#' CopilotRequestHandler
+#'
+#' Intercept outbound LLM inference HTTP/WebSocket requests. Subclass and override
+#' \code{send_request} to mutate, replace, or forward the request. BYOK providers may
+#' also supply a \code{bearer_token_provider}.
+#'
+#' @keywords internal
+CopilotRequestHandler <- R6::R6Class(
+  "CopilotRequestHandler",
+  public = list(
+    #' @description Handle an outbound request.
+    #' @param request The request object.
+    #' @param context Named list of contextual data.
+    #' @return The (possibly modified) request.
+    send_request = function(request, context = NULL) {
+      request
+    }
+  )
+)
+
+#' ToolDefer
+#'
+#' Tool "defer" loading policy: eager pre-load (\code{"never"}) or lazy via search (\code{"auto"}).
+#'
+#' @keywords internal
+ToolDefer <- list(
+  AUTO  = "auto",
+  NEVER = "never"
+)
+
+#' SystemMessageSection
+#'
+#' System-message section identifiers. The \code{"preamble"} section targets only the
+#' identity preamble; the \code{"preserve"} action protects an individually-addressable
+#' section from a group-level remove.
+#'
+#' @keywords internal
+SystemMessageSection <- list(
+  PREAMBLE          = "preamble",
+  IDENTITY          = "identity",
+  TOOL_INSTRUCTIONS = "tool_instructions",
+  PRESERVE          = "preserve"
+)
+
+#' GitHubAttachment
+#'
+#' GitHub-anchored attachment variants.
+#'
+#' @keywords internal
+GitHubAttachment <- list(
+  GITHUB_COMMIT          = "GitHubCommit",
+  GITHUB_RELEASE         = "GitHubRelease",
+  GITHUB_ACTIONS_JOB     = "GitHubActionsJob",
+  GITHUB_REPOSITORY      = "GitHubRepository",
+  GITHUB_FILE_DIFF       = "GitHubFileDiff",
+  GITHUB_TREE_COMPARISON = "GitHubTreeComparison",
+  GITHUB_URL             = "GitHubUrl",
+  GITHUB_FILE            = "GitHubFile",
+  GITHUB_SNIPPET         = "GitHubSnippet"
+)
+
+#' COPILOT_HOOK_NAMES
+#'
+#' Supported hook names, including \code{on_post_tool_use} and \code{on_pre_mcp_tool_call}
+#' (and the \code{on_mcp_auth_request} MCP OAuth host token handler).
+#'
+#' @keywords internal
+COPILOT_HOOK_NAMES <- c(
+  "on_pre_tool_use",
+  "on_post_tool_use",
+  "on_user_prompt_submitted",
+  "on_session_start",
+  "on_session_end",
+  "on_error_occurred",
+  "on_pre_mcp_tool_call",
+  "on_mcp_auth_request"
 )

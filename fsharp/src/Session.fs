@@ -137,7 +137,10 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
             {| sessionId = sessionId
                prompt = options.Prompt
                attachments = options.Attachments |> Option.defaultValue []
-               mode = options.Mode |}
+               mode = options.Mode
+               agentMode = options.AgentMode
+               displayPrompt = options.DisplayPrompt
+               requestHeaders = options.RequestHeaders |}
         let! response = rpc.SendRequestAsync<{| messageId: string |}>("session.send", request)
         return response.messageId
     }

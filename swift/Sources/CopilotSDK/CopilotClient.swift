@@ -210,6 +210,30 @@ public actor CopilotClient {
         if let inf = config.infiniteSessions {
             params["infiniteSessions"] = encodeToDictionary(inf)
         }
+        if let enableCitations = config.enableCitations {
+            params["enableCitations"] = enableCitations
+        }
+        if let excluded = config.excludedBuiltinAgents {
+            params["excludedBuiltinAgents"] = excluded
+        }
+        if let limits = config.sessionLimits {
+            var limitsDict: [String: Any] = [:]
+            if let credits = limits.maxAiCredits { limitsDict["maxAiCredits"] = credits }
+            params["sessionLimits"] = limitsDict
+        }
+        if let memory = config.memory {
+            params["memory"] = ["enabled": memory.enabled]
+        }
+        if let otlp = config.otlpProtocol {
+            params["otlpProtocol"] = otlp
+        }
+        if let ws = config.enableWebSocketResponses {
+            params["enableWebSocketResponses"] = ws
+        }
+        if let exp = config.expAssignments {
+            params["expAssignments"] = exp.mapValues { $0.value }
+        }
+        params["mcpAuthHandler"] = config.onMcpAuthRequest != nil
 
         let response = try await rpc.sendRequest(method: "session.create", params: params)
 

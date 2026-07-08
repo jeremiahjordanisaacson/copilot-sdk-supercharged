@@ -866,6 +866,9 @@ static cJSON *build_session_params(const copilot_session_config_t *config)
                     cJSON_AddItemToObject(tool, "parameters", schema);
                 }
             }
+            if (config->tools[i].defer) {
+                cJSON_AddStringToObject(tool, "defer", config->tools[i].defer);
+            }
             cJSON_AddItemToArray(tools, tool);
         }
         cJSON_AddItemToObject(params, "tools", tools);
@@ -951,6 +954,47 @@ static cJSON *build_session_params(const copilot_session_config_t *config)
     }
     if (config->on_hook) {
         cJSON_AddBoolToObject(params, "hooks", true);
+    }
+
+    /* --- Upstream-sync session options (parity with @github/copilot-sdk) --- */
+    if (config->has_enable_citations) {
+        cJSON_AddBoolToObject(params, "enableCitations", config->enable_citations);
+    }
+    if (config->excluded_builtin_agents) {
+        cJSON *arr = cJSON_CreateArray();
+        for (const char **p = config->excluded_builtin_agents; *p; p++) {
+            cJSON_AddItemToArray(arr, cJSON_CreateString(*p));
+        }
+        cJSON_AddItemToObject(params, "excludedBuiltinAgents", arr);
+    }
+    if (config->session_limits) {
+        cJSON *sl = cJSON_CreateObject();
+        if (config->session_limits->has_max_ai_credits) {
+            cJSON_AddNumberToObject(sl, "maxAiCredits", config->session_limits->max_ai_credits);
+        }
+        cJSON_AddItemToObject(params, "sessionLimits", sl);
+    }
+    if (config->memory) {
+        cJSON *mem = cJSON_CreateObject();
+        if (config->memory->has_enabled) {
+            cJSON_AddBoolToObject(mem, "enabled", config->memory->enabled);
+        }
+        cJSON_AddItemToObject(params, "memory", mem);
+    }
+    if (config->otlp_protocol) {
+        cJSON_AddStringToObject(params, "otlpProtocol", config->otlp_protocol);
+    }
+    if (config->has_enable_web_socket_responses) {
+        cJSON_AddBoolToObject(params, "enableWebSocketResponses", config->enable_web_socket_responses);
+    }
+    if (config->exp_assignments_json) {
+        cJSON *exp = cJSON_Parse(config->exp_assignments_json);
+        if (exp) {
+            cJSON_AddItemToObject(params, "expAssignments", exp);
+        }
+    }
+    if (config->on_mcp_auth_request) {
+        cJSON_AddBoolToObject(params, "mcpAuthHandler", true);
     }
 
     return params;
@@ -1754,6 +1798,20 @@ copilot_error_t copilot_session_send(
 
     if (options->mode) {
         cJSON_AddStringToObject(params, "mode", options->mode);
+    }
+    if (options->agent_mode) {
+        cJSON_AddStringToObject(params, "agentMode", options->agent_mode);
+    }
+    if (options->display_prompt) {
+        cJSON_AddStringToObject(params, "displayPrompt", options->display_prompt);
+    }
+    if (options->request_headers_keys && options->request_headers_values) {
+        cJSON *headers = cJSON_CreateObject();
+        for (size_t i = 0; options->request_headers_keys[i] && options->request_headers_values[i]; i++) {
+            cJSON_AddStringToObject(headers, options->request_headers_keys[i],
+                                    options->request_headers_values[i]);
+        }
+        cJSON_AddItemToObject(params, "requestHeaders", headers);
     }
 
     /* Response format */

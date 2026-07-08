@@ -11,6 +11,7 @@ import java.util.Map;
 public class SessionHooks {
     private HookHandler onPreToolUse;
     private HookHandler onPostToolUse;
+    private HookHandler onPreMcpToolCall;
     private HookHandler onUserPromptSubmitted;
     private HookHandler onSessionStart;
     private HookHandler onSessionEnd;
@@ -24,6 +25,7 @@ public class SessionHooks {
 
     public SessionHooks onPreToolUse(HookHandler handler) { this.onPreToolUse = handler; return this; }
     public SessionHooks onPostToolUse(HookHandler handler) { this.onPostToolUse = handler; return this; }
+    public SessionHooks onPreMcpToolCall(HookHandler handler) { this.onPreMcpToolCall = handler; return this; }
     public SessionHooks onUserPromptSubmitted(HookHandler handler) { this.onUserPromptSubmitted = handler; return this; }
     public SessionHooks onSessionStart(HookHandler handler) { this.onSessionStart = handler; return this; }
     public SessionHooks onSessionEnd(HookHandler handler) { this.onSessionEnd = handler; return this; }
@@ -31,13 +33,14 @@ public class SessionHooks {
 
     public HookHandler getOnPreToolUse() { return onPreToolUse; }
     public HookHandler getOnPostToolUse() { return onPostToolUse; }
+    public HookHandler getOnPreMcpToolCall() { return onPreMcpToolCall; }
     public HookHandler getOnUserPromptSubmitted() { return onUserPromptSubmitted; }
     public HookHandler getOnSessionStart() { return onSessionStart; }
     public HookHandler getOnSessionEnd() { return onSessionEnd; }
     public HookHandler getOnErrorOccurred() { return onErrorOccurred; }
 
     public boolean hasAnyHook() {
-        return onPreToolUse != null || onPostToolUse != null || onUserPromptSubmitted != null
+        return onPreToolUse != null || onPostToolUse != null || onPreMcpToolCall != null || onUserPromptSubmitted != null
             || onSessionStart != null || onSessionEnd != null || onErrorOccurred != null;
     }
 
@@ -46,6 +49,7 @@ public class SessionHooks {
         return switch (hookType) {
             case "preToolUse" -> onPreToolUse;
             case "postToolUse" -> onPostToolUse;
+            case "preMcpToolCall" -> onPreMcpToolCall;
             case "userPromptSubmitted" -> onUserPromptSubmitted;
             case "sessionStart" -> onSessionStart;
             case "sessionEnd" -> onSessionEnd;

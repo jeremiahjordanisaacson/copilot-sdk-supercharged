@@ -82,7 +82,10 @@ let runExample () = async {
         session.SendAndWaitAsync(
             { Prompt = "What time is it? Use the current_time tool."
               Attachments = None
-              Mode = None },
+              Mode = None
+              AgentMode = None
+              DisplayPrompt = None
+              RequestHeaders = None },
             timeout = TimeSpan.FromSeconds(30.0))
 
     match reply with
@@ -104,7 +107,10 @@ let runExample () = async {
                 session.SendAndWaitAsync(
                     { Prompt = input.Trim()
                       Attachments = None
-                      Mode = None })
+                      Mode = None
+                      AgentMode = None
+                      DisplayPrompt = None
+                      RequestHeaders = None })
             reply |> Option.iter (fun d -> printfn "Assistant: %s\n" d.Content)
 
     // ---------------------------------------------------------------

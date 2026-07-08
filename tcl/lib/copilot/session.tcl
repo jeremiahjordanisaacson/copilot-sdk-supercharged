@@ -60,6 +60,38 @@ proc ::copilot::session::create_session {write_ch read_ch config} {
         dict set params streaming true
     }
 
+    # Upstream-sync session options (parity with @github/copilot-sdk)
+    if {[dict get $config enable_citations]} {
+        dict set params enableCitations true
+    }
+    set excluded_agents [dict get $config excluded_builtin_agents]
+    if {[llength $excluded_agents] > 0} {
+        dict set params excludedBuiltinAgents $excluded_agents
+    }
+    set session_limits [dict get $config session_limits]
+    if {[dict size $session_limits] > 0} {
+        dict set params sessionLimits $session_limits
+    }
+    set memory [dict get $config memory]
+    if {[dict size $memory] > 0} {
+        dict set params memory $memory
+    }
+    set otlp_protocol [dict get $config otlp_protocol]
+    if {$otlp_protocol ne ""} {
+        dict set params otlpProtocol $otlp_protocol
+    }
+    if {[dict get $config enable_web_socket_responses]} {
+        dict set params enableWebSocketResponses true
+    }
+    set exp_assignments [dict get $config exp_assignments]
+    if {[dict size $exp_assignments] > 0} {
+        dict set params expAssignments $exp_assignments
+    }
+    # Signal to the runtime that an MCP OAuth host-token handler is registered.
+    if {[dict get $config on_mcp_auth_request] ne ""} {
+        dict set params mcpAuthHandler true
+    }
+
     # Include tools in session creation
     set wire_tools [::copilot::tools::tools_to_wire]
     if {[llength $wire_tools] > 0} {
@@ -135,6 +167,17 @@ proc ::copilot::session::send_and_wait {handle opts} {
     }
 
     set params [dict create sessionId $sid message $message]
+
+    # Upstream-sync message-send options (parity with @github/copilot-sdk)
+    if {[dict exists $opts agent_mode] && [dict get $opts agent_mode] ne ""} {
+        dict set params agentMode [dict get $opts agent_mode]
+    }
+    if {[dict exists $opts display_prompt] && [dict get $opts display_prompt] ne ""} {
+        dict set params displayPrompt [dict get $opts display_prompt]
+    }
+    if {[dict exists $opts request_headers] && [llength [dict get $opts request_headers]] > 0} {
+        dict set params requestHeaders [dict get $opts request_headers]
+    }
 
     set req_id [::copilot::jsonrpc::send_request $write_ch "session/sendMessage" $params]
     ::copilot::jsonrpc::register_pending $req_id

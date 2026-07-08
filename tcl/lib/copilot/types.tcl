@@ -11,7 +11,10 @@ namespace eval ::copilot::types {
     namespace export make_client_options make_session_config make_tool \
                      make_send_options make_session_event validate_dict \
                      make_session_fs_config make_mcp_server_config \
-                     make_command_definition
+                     make_command_definition \
+                     make_session_limits_config make_memory_configuration \
+                     make_provider_token_args make_copilot_request_handler \
+                     tool_defer system_message_section github_attachment
 }
 
 # -- Client options -----------------------------------------------------------
@@ -28,6 +31,8 @@ proc ::copilot::types::make_client_options {args} {
         session_fs                      {} \
         copilot_home                    "" \
         tcp_connection_token            "" \
+        request_handler                 "" \
+        bearer_token_provider           "" \
     ]
     set opts $defaults
     foreach {key value} $args {
@@ -65,6 +70,16 @@ proc ::copilot::types::make_session_config {args} {
         request_headers                     {} \
         elicitation_handler                 "" \
         instruction_directories             {} \
+        enable_citations                    0 \
+        excluded_builtin_agents             {} \
+        session_limits                      {} \
+        memory                              {} \
+        otlp_protocol                       "" \
+        enable_web_socket_responses         0 \
+        exp_assignments                     {} \
+        on_mcp_auth_request                 "" \
+        on_post_tool_use                    "" \
+        on_pre_mcp_tool_call                "" \
     ]
     set cfg $defaults
     foreach {key value} $args {
@@ -97,9 +112,12 @@ proc ::copilot::types::make_tool {name description handler {parameters {}}} {
 
 proc ::copilot::types::make_send_options {args} {
     set defaults [dict create \
-        message  "" \
-        prompt   "" \
-        timeout  0 \
+        message         "" \
+        prompt          "" \
+        timeout         0 \
+        agent_mode      "" \
+        display_prompt  "" \
+        request_headers {} \
     ]
     set opts $defaults
     foreach {key value} $args {
@@ -224,6 +242,87 @@ proc ::copilot::types::make_mcp_server_config {args} {
 
 proc ::copilot::types::make_command_definition {name description} {
     return [dict create name $name description $description]
+}
+
+# -- Upstream-sync feature types (parity with @github/copilot-sdk) ------------
+
+# Per-session AI-credit budget; set max_ai_credits to cap spend.
+proc ::copilot::types::make_session_limits_config {args} {
+    set defaults [dict create \
+        max_ai_credits "" \
+    ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown session_limits config key: $key"
+        }
+        dict set cfg $key $value
+    }
+    # Build the camelCase JSON-RPC wire dict.
+    set wire [dict create]
+    if {[dict get $cfg max_ai_credits] ne ""} {
+        dict set wire maxAiCredits [dict get $cfg max_ai_credits]
+    }
+    return $wire
+}
+
+# Opt-in persistent session memory.
+proc ::copilot::types::make_memory_configuration {args} {
+    set defaults [dict create \
+        enabled 0 \
+    ]
+    set cfg $defaults
+    foreach {key value} $args {
+        if {![dict exists $defaults $key]} {
+            error "Unknown memory config key: $key"
+        }
+        dict set cfg $key $value
+    }
+    return [dict create enabled [dict get $cfg enabled]]
+}
+
+# Arguments passed to a BYOK bearer_token_provider (per-session scoping).
+proc ::copilot::types::make_provider_token_args {session_id} {
+    return [dict create sessionId $session_id]
+}
+
+# CopilotRequestHandler: intercepts outbound LLM inference HTTP/WebSocket
+# requests. Provide a send_request proc/lambda; assign to the client option
+# request_handler. BYOK providers may also set bearer_token_provider.
+proc ::copilot::types::make_copilot_request_handler {{send_request ""}} {
+    return [dict create send_request $send_request]
+}
+
+# Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto").
+proc ::copilot::types::tool_defer {} {
+    return [dict create AUTO "auto" NEVER "never"]
+}
+
+# System-message section identifiers (used with system-message overrides).
+# The "preamble" section targets the identity preamble; the "preserve" action
+# protects an individually-addressable section from a group-level remove.
+proc ::copilot::types::system_message_section {} {
+    return [dict create \
+        PREAMBLE          "preamble" \
+        IDENTITY          "identity" \
+        TOOL_INSTRUCTIONS "tool_instructions" \
+        PRESERVE          "preserve" \
+    ]
+}
+
+# GitHub-anchored attachment variants.
+proc ::copilot::types::github_attachment {} {
+    return [dict create \
+        GITHUB_COMMIT          "GitHubCommit" \
+        GITHUB_RELEASE         "GitHubRelease" \
+        GITHUB_ACTIONS_JOB     "GitHubActionsJob" \
+        GITHUB_REPOSITORY      "GitHubRepository" \
+        GITHUB_FILE_DIFF       "GitHubFileDiff" \
+        GITHUB_TREE_COMPARISON "GitHubTreeComparison" \
+        GITHUB_URL             "GitHubUrl" \
+        GITHUB_FILE            "GitHubFile" \
+        GITHUB_SNIPPET         "GitHubSnippet" \
+    ]
 }
 
 package provide copilot::types 2.0.0

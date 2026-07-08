@@ -553,6 +553,26 @@ inline void to_json(nlohmann::json& j, const ErrorOccurredHookOutput& o) {
 using ErrorOccurredHandler = std::function<std::optional<ErrorOccurredHookOutput>(
     const ErrorOccurredHookInput& input, const std::string& sessionId)>;
 
+/// Input for the pre-MCP-tool-call hook, invoked before an MCP-server tool runs.
+struct PreMcpToolCallHookInput {
+    int64_t timestamp = 0;
+    std::string cwd;
+    std::string serverName;
+    std::string toolName;
+    nlohmann::json toolArgs;
+};
+
+inline void from_json(const nlohmann::json& j, PreMcpToolCallHookInput& i) {
+    if (j.contains("timestamp")) j["timestamp"].get_to(i.timestamp);
+    if (j.contains("cwd")) j["cwd"].get_to(i.cwd);
+    if (j.contains("serverName")) j["serverName"].get_to(i.serverName);
+    if (j.contains("toolName")) j["toolName"].get_to(i.toolName);
+    if (j.contains("toolArgs")) i.toolArgs = j["toolArgs"];
+}
+
+using PreMcpToolCallHandler = std::function<void(
+    const PreMcpToolCallHookInput& input, const std::string& sessionId)>;
+
 /// Hook handlers for intercepting session lifecycle events.
 struct SessionHooks {
     PreToolUseHandler onPreToolUse;
@@ -561,11 +581,13 @@ struct SessionHooks {
     SessionStartHandler onSessionStart;
     SessionEndHandler onSessionEnd;
     ErrorOccurredHandler onErrorOccurred;
+    /// Invoked before an MCP-server tool call is executed.
+    PreMcpToolCallHandler onPreMcpToolCall;
 
     /// Returns true if any hook handler is registered.
     bool hasAny() const {
         return onPreToolUse || onPostToolUse || onUserPromptSubmitted ||
-               onSessionStart || onSessionEnd || onErrorOccurred;
+               onSessionStart || onSessionEnd || onErrorOccurred || onPreMcpToolCall;
     }
 };
 
@@ -679,6 +701,74 @@ struct ElicitationResult {
 using ElicitationHandler = std::function<ElicitationResult(const ElicitationContext&)>;
 
 // ============================================================================
+// Upstream-sync feature types (parity with @github/copilot-sdk)
+// ============================================================================
+
+/// Per-session AI-credit budget; set maxAiCredits to cap spend.
+struct SessionLimitsConfig {
+    std::optional<double> maxAiCredits;
+};
+
+inline void to_json(nlohmann::json& j, const SessionLimitsConfig& c) {
+    j = nlohmann::json::object();
+    if (c.maxAiCredits) j["maxAiCredits"] = *c.maxAiCredits;
+}
+
+/// Opt-in persistent session memory configuration.
+struct MemoryConfiguration {
+    std::optional<bool> enabled;
+};
+
+inline void to_json(nlohmann::json& j, const MemoryConfiguration& c) {
+    j = nlohmann::json::object();
+    if (c.enabled) j["enabled"] = *c.enabled;
+}
+
+/// Arguments passed to a BYOK bearer-token provider / MCP auth handler (per-session scoping).
+struct ProviderTokenArgs {
+    std::string sessionId;
+};
+
+/// Handler invoked when an MCP server requests an OAuth host token.
+/// Returns the token string to use for the given session.
+using McpAuthHandler = std::function<std::string(const ProviderTokenArgs&)>;
+
+/// BYOK bearer-token provider: mints a fresh token for outbound model requests.
+using BearerTokenProvider = std::function<std::string(const ProviderTokenArgs&)>;
+
+/// Interceptor for outbound LLM inference HTTP/WebSocket requests.
+using CopilotRequestHandler = std::function<nlohmann::json(const nlohmann::json&)>;
+
+/// Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto").
+namespace ToolDefer {
+    inline constexpr const char* Auto = "auto";
+    inline constexpr const char* Never = "never";
+}
+
+/// System-message section identifiers used with section overrides.
+/// "preamble" targets only the identity preamble; "preserve" protects an
+/// individually-addressable section from a group-level remove.
+namespace SystemMessageSection {
+    inline constexpr const char* Preamble = "preamble";
+    inline constexpr const char* Identity = "identity";
+    inline constexpr const char* ToolInstructions = "tool_instructions";
+    inline constexpr const char* Preserve = "preserve";
+}
+
+/// GitHub-anchored attachment type identifiers.
+namespace GitHubAttachment {
+    inline constexpr const char* GitHubCommit = "GitHubCommit";
+    inline constexpr const char* GitHubRelease = "GitHubRelease";
+    inline constexpr const char* GitHubActionsJob = "GitHubActionsJob";
+    inline constexpr const char* GitHubRepository = "GitHubRepository";
+    inline constexpr const char* GitHubFileDiff = "GitHubFileDiff";
+    inline constexpr const char* GitHubTreeComparison = "GitHubTreeComparison";
+    inline constexpr const char* GitHubUrl = "GitHubUrl";
+    inline constexpr const char* GitHubFile = "GitHubFile";
+    inline constexpr const char* GitHubSnippet = "GitHubSnippet";
+}
+
+// ============================================================================
 // Session Configuration
 // ============================================================================
 
@@ -723,6 +813,25 @@ struct SessionConfig {
     std::vector<CommandDefinition> commands;
     /// Handler for elicitation requests from the server.
     ElicitationHandler onElicitationRequest;
+
+    // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+    /// Enable inline source citations in assistant responses.
+    std::optional<bool> enableCitations;
+    /// Built-in agents to exclude from this session.
+    std::optional<std::vector<std::string>> excludedBuiltinAgents;
+    /// Per-session spending limits (e.g. AI-credit budget).
+    std::optional<SessionLimitsConfig> sessionLimits;
+    /// Opt-in persistent session memory configuration.
+    std::optional<MemoryConfiguration> memory;
+    /// OTLP telemetry export protocol (e.g. "grpc" or "http/protobuf").
+    std::optional<std::string> otlpProtocol;
+    /// Enable the WebSocket transport for streamed responses.
+    std::optional<bool> enableWebSocketResponses;
+    /// Experiment (feature-flag) assignment overrides.
+    std::optional<nlohmann::json> expAssignments;
+    /// Handler invoked when an MCP server requests an OAuth host token.
+    /// When set, the SDK sends the mcpAuthHandler wire flag on session.create.
+    McpAuthHandler onMcpAuthRequest;
 };
 
 struct ResumeSessionConfig {
@@ -869,6 +978,11 @@ struct MessageOptions {
 
     /// Custom HTTP headers to include in outbound model requests for this turn.
     std::optional<std::map<std::string, std::string>> requestHeaders;
+
+    /// Agent mode to run this turn under (e.g. a custom agent name).
+    std::optional<std::string> agentMode;
+    /// Alternate prompt text to show in the transcript in place of `prompt`.
+    std::optional<std::string> displayPrompt;
 };
 
 // ============================================================================
@@ -1160,6 +1274,12 @@ struct CopilotClientOptions {
 
     /// Token for TCP connection authentication.
     std::optional<std::string> tcpConnectionToken;
+
+    /// Interceptor for outbound LLM inference HTTP/WebSocket requests.
+    CopilotRequestHandler requestHandler;
+
+    /// BYOK bearer-token provider used to mint fresh tokens for outbound model requests.
+    BearerTokenProvider bearerTokenProvider;
 };
 
 } // namespace copilot

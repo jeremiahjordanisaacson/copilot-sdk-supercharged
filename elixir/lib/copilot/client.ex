@@ -855,6 +855,34 @@ defmodule Copilot.Client do
         params
       end
 
+    # Upstream-sync session options (parity with @github/copilot-sdk)
+    params = put_if(params, "enableCitations", c.enable_citations)
+    params = put_if(params, "excludedBuiltinAgents", c.excluded_builtin_agents)
+    params = put_if(params, "otlpProtocol", c.otlp_protocol)
+    params = put_if(params, "enableWebSocketResponses", c.enable_web_socket_responses)
+    params = put_if(params, "expAssignments", c.exp_assignments)
+
+    params =
+      if c.session_limits do
+        Map.put(params, "sessionLimits", session_limits_to_map(c.session_limits))
+      else
+        params
+      end
+
+    params =
+      if c.memory do
+        Map.put(params, "memory", memory_config_to_map(c.memory))
+      else
+        params
+      end
+
+    params =
+      if c.on_mcp_auth_request do
+        Map.put(params, "mcpAuthHandler", true)
+      else
+        params
+      end
+
     params
   end
 
@@ -956,5 +984,13 @@ defmodule Copilot.Client do
     m = put_if(m, "backgroundCompactionThreshold", c.background_compaction_threshold)
     m = put_if(m, "bufferExhaustionThreshold", c.buffer_exhaustion_threshold)
     m
+  end
+
+  defp session_limits_to_map(%Types.SessionLimitsConfig{} = s) do
+    put_if(%{}, "maxAiCredits", s.max_ai_credits)
+  end
+
+  defp memory_config_to_map(%Types.MemoryConfiguration{} = m) do
+    put_if(%{}, "enabled", m.enabled)
   end
 end

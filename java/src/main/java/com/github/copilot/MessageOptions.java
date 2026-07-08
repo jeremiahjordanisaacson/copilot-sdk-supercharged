@@ -17,6 +17,10 @@ public class MessageOptions {
     private Types.ImageOptions imageOptions;
     /** Custom HTTP headers to include in outbound model requests for this turn. */
     private Map<String, String> requestHeaders;
+    /** Agent execution mode for this turn (e.g. "agent", "chat"). */
+    private String agentMode;
+    /** Prompt text to display in the UI, when it differs from the model prompt. */
+    private String displayPrompt;
 
     public MessageOptions(String prompt) {
         this.prompt = prompt;
@@ -28,6 +32,8 @@ public class MessageOptions {
     public MessageOptions responseFormat(String responseFormat) { this.responseFormat = responseFormat; return this; }
     public MessageOptions imageOptions(Types.ImageOptions imageOptions) { this.imageOptions = imageOptions; return this; }
     public MessageOptions requestHeaders(Map<String, String> headers) { this.requestHeaders = headers; return this; }
+    public MessageOptions agentMode(String agentMode) { this.agentMode = agentMode; return this; }
+    public MessageOptions displayPrompt(String displayPrompt) { this.displayPrompt = displayPrompt; return this; }
 
     public String getPrompt() { return prompt; }
     public List<Map<String, Object>> getAttachments() { return attachments; }
@@ -35,4 +41,6 @@ public class MessageOptions {
     public String getResponseFormat() { return responseFormat; }
     public Types.ImageOptions getImageOptions() { return imageOptions; }
     public Map<String, String> getRequestHeaders() { return requestHeaders; }
+    public String getAgentMode() { return agentMode; }
+    public String getDisplayPrompt() { return displayPrompt; }
 }

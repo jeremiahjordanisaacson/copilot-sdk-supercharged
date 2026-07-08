@@ -107,6 +107,20 @@ Base.@kwdef mutable struct CopilotClientOptions
     tcp_connection_token::Union{String, Nothing} = nothing
 end
 
+"""Per-session spending / credit limits."""
+Base.@kwdef struct SessionLimitsConfig
+    max_ai_credits::Union{Float64, Nothing} = nothing
+    max_requests::Union{Int, Nothing} = nothing
+    max_tokens::Union{Int, Nothing} = nothing
+end
+
+"""Persistent cross-turn session memory configuration."""
+Base.@kwdef struct MemoryConfiguration
+    enabled::Bool = false
+    max_entries::Union{Int, Nothing} = nothing
+    directory::Union{String, Nothing} = nothing
+end
+
 """Configuration for creating a session."""
 Base.@kwdef mutable struct SessionConfig
     model::String = "gpt-4"
@@ -132,6 +146,19 @@ Base.@kwdef mutable struct SessionConfig
     request_headers::Union{Dict{String, String}, Nothing} = nothing
     on_elicitation_request::Union{Function, Nothing} = nothing
     instruction_directories::Vector{String} = String[]
+    # --- Upstream-sync session configuration (parity with @github/copilot-sdk) ---
+    enable_citations::Bool = false
+    excluded_builtin_agents::Vector{String} = String[]
+    session_limits::Union{SessionLimitsConfig, Nothing} = nothing
+    memory::Union{MemoryConfiguration, Nothing} = nothing
+    otlp_protocol::Union{String, Nothing} = nothing
+    enable_web_socket_responses::Bool = false
+    exp_assignments::Union{Dict{String, String}, Nothing} = nothing
+    on_mcp_auth_request::Union{Function, Nothing} = nothing
+    bearer_token_provider::Union{Function, Nothing} = nothing
+    on_post_tool_use::Union{Function, Nothing} = nothing
+    on_pre_mcp_tool_call::Union{Function, Nothing} = nothing
+    request_handler::Union{Function, Nothing} = nothing
 end
 
 """Payload for sending a message to a session."""
@@ -139,6 +166,9 @@ Base.@kwdef struct MessageOptions
     prompt::String
     attachments::Union{Vector{Dict{String, Any}}, Nothing} = nothing
     mode::Union{String, Nothing} = nothing
+    agent_mode::Union{String, Nothing} = nothing
+    display_prompt::Union{String, Nothing} = nothing
+    request_headers::Union{Dict{String, String}, Nothing} = nothing
 end
 
 """Result returned from a tool handler."""
@@ -231,3 +261,47 @@ function PermissionRequest(d::Dict)
         arguments     = get(d, "arguments", Dict{String, Any}()),
     )
 end
+
+# ------------------------------------------------------------------------------------
+#  Upstream-sync feature types & constants (parity with @github/copilot-sdk, 2026-07)
+# ------------------------------------------------------------------------------------
+
+"""Arguments passed to a BYOK bearer-token provider callback."""
+Base.@kwdef struct ProviderTokenArgs
+    provider::String = ""
+    endpoint::Union{String, Nothing} = nothing
+    scope::Union{String, Nothing} = nothing
+end
+
+"""A named, individually-configurable section of the system message."""
+Base.@kwdef struct SystemMessageSection
+    name::String = ""       # e.g. "preamble"
+    content::String = ""
+    preserve::Bool = false  # preserve this section across compaction
+end
+
+"""GitHub content (commit, repository, PR, issue) attached to a message."""
+Base.@kwdef struct GitHubAttachment
+    kind::String = ""  # one of the GITHUB_*_ATTACHMENT variants
+    ref::String = ""
+end
+
+"""Tool defer-loading strategy: load eagerly or lazily on first use."""
+@enum ToolDefer TOOL_DEFER_EAGER TOOL_DEFER_LAZY
+
+# System message section names.
+const SYSTEM_MESSAGE_PREAMBLE = "preamble"
+const SYSTEM_MESSAGE_PRESERVE = "preserve"
+
+# GitHub attachment variant identifiers.
+const GITHUB_COMMIT_ATTACHMENT = "GitHubCommit"
+const GITHUB_REPOSITORY_ATTACHMENT = "GitHubRepository"
+const GITHUB_PULL_REQUEST_ATTACHMENT = "GitHubPullRequest"
+const GITHUB_ISSUE_ATTACHMENT = "GitHubIssue"
+
+# OTLP telemetry protocols.
+const OTLP_PROTOCOL_GRPC = "grpc"
+const OTLP_PROTOCOL_HTTP = "http/protobuf"
+
+"""Signature alias for a custom Copilot HTTP request handler."""
+const CopilotRequestHandler = Function

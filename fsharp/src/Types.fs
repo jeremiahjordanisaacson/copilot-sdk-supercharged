@@ -77,6 +77,94 @@ type SessionFsConfig =
       Conventions: string }
 
 // ---------------------------------------------------------------------------
+// Upstream-sync feature types (parity with @github/copilot-sdk)
+// ---------------------------------------------------------------------------
+
+/// Per-session AI-credit budget; set MaxAiCredits to cap spend.
+type SessionLimitsConfig =
+    { /// Maximum AI credits the session may consume.
+      MaxAiCredits: int option }
+
+module SessionLimitsConfig =
+    /// Build the camelCase JSON-RPC wire payload.
+    let toWire (config: SessionLimitsConfig) =
+        {| maxAiCredits = config.MaxAiCredits |}
+
+/// Opt-in persistent session memory.
+type MemoryConfiguration =
+    { /// Whether persistent memory is enabled for the session.
+      Enabled: bool }
+
+module MemoryConfiguration =
+    /// Build the camelCase JSON-RPC wire payload.
+    let toWire (config: MemoryConfiguration) =
+        {| enabled = config.Enabled |}
+
+/// Arguments passed to a BYOK bearer-token provider (per-session scoping).
+type ProviderTokenArgs =
+    { /// The session the token is being requested for.
+      SessionId: string }
+
+/// Intercepts outbound LLM inference HTTP/WebSocket requests. Assign an
+/// instance to CopilotClientOptions.RequestHandler and override SendRequest
+/// to mutate, replace, or forward the request. BYOK providers may also set
+/// BearerTokenProvider on the client options.
+type CopilotRequestHandler() =
+    /// Transform an outbound request; override in a derived type.
+    abstract member SendRequest: request: JsonElement * context: JsonElement option -> JsonElement
+    default _.SendRequest(request, _context) = request
+
+/// Handler for an MCP OAuth host-token request; returns an OAuth access token.
+type McpAuthRequestHandler = JsonElement option -> Async<string>
+
+/// Hook invoked after a tool completes (post-tool-use).
+type PostToolUseHandler = JsonElement option -> Async<unit>
+
+/// Hook invoked before an MCP tool call (pre-MCP-tool-call).
+type PreMcpToolCallHandler = JsonElement option -> Async<unit>
+
+/// Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto").
+module ToolDefer =
+    [<Literal>]
+    let Auto = "auto"
+    [<Literal>]
+    let Never = "never"
+
+/// System-message section identifiers (used with system-message overrides).
+/// The "preamble" section targets the identity preamble; the "preserve" action
+/// protects an individually-addressable section from a group-level remove.
+module SystemMessageSection =
+    [<Literal>]
+    let Preamble = "preamble"
+    [<Literal>]
+    let Identity = "identity"
+    [<Literal>]
+    let ToolInstructions = "tool_instructions"
+    [<Literal>]
+    let Preserve = "preserve"
+
+/// GitHub-anchored attachment variants.
+module GitHubAttachment =
+    [<Literal>]
+    let GitHubCommit = "GitHubCommit"
+    [<Literal>]
+    let GitHubRelease = "GitHubRelease"
+    [<Literal>]
+    let GitHubActionsJob = "GitHubActionsJob"
+    [<Literal>]
+    let GitHubRepository = "GitHubRepository"
+    [<Literal>]
+    let GitHubFileDiff = "GitHubFileDiff"
+    [<Literal>]
+    let GitHubTreeComparison = "GitHubTreeComparison"
+    [<Literal>]
+    let GitHubUrl = "GitHubUrl"
+    [<Literal>]
+    let GitHubFile = "GitHubFile"
+    [<Literal>]
+    let GitHubSnippet = "GitHubSnippet"
+
+// ---------------------------------------------------------------------------
 // Client options
 // ---------------------------------------------------------------------------
 
@@ -113,7 +201,11 @@ type CopilotClientOptions =
       /// Override the Copilot home directory.
       CopilotHome: string option
       /// Token for TCP connection authentication.
-      TcpConnectionToken: string option }
+      TcpConnectionToken: string option
+      /// HTTP request handler for intercepting outbound LLM inference requests.
+      RequestHandler: CopilotRequestHandler option
+      /// BYOK bearer-token provider invoked per session (receives ProviderTokenArgs).
+      BearerTokenProvider: (ProviderTokenArgs -> Async<string>) option }
 
 module CopilotClientOptions =
     /// Default client options (stdio, auto-start, info log level).
@@ -133,7 +225,9 @@ module CopilotClientOptions =
           SessionIdleTimeoutSeconds = None
           SessionFs = None
           CopilotHome = None
-          TcpConnectionToken = None }
+          TcpConnectionToken = None
+          RequestHandler = None
+          BearerTokenProvider = None }
 
 // ---------------------------------------------------------------------------
 // MCP server configuration
@@ -202,7 +296,13 @@ type MessageOptions =
       /// Optional file attachments.
       Attachments: Attachment list option
       /// Optional mode override.
-      Mode: string option }
+      Mode: string option
+      /// Optional agent-mode override for this message.
+      AgentMode: string option
+      /// Alternate prompt text shown to the user (the model still sees Prompt).
+      DisplayPrompt: string option
+      /// Per-message request headers forwarded with the turn.
+      RequestHeaders: IDictionary<string, string> option }
 
 // ---------------------------------------------------------------------------
 // Elicitation handling
@@ -264,7 +364,27 @@ type SessionConfig =
       /// Per-session GitHub token.
       GitHubToken: string option
       /// Directories to search for instruction files.
-      InstructionDirectories: string list option }
+      InstructionDirectories: string list option
+      /// Enable inline source citations in assistant responses.
+      EnableCitations: bool option
+      /// Built-in agents to exclude from this session.
+      ExcludedBuiltinAgents: string list option
+      /// Per-session AI-credit spending limits.
+      SessionLimits: SessionLimitsConfig option
+      /// Persistent session memory configuration.
+      Memory: MemoryConfiguration option
+      /// OTLP telemetry protocol ("grpc" or "http/protobuf").
+      OtlpProtocol: string option
+      /// Stream assistant responses over a WebSocket transport.
+      EnableWebSocketResponses: bool option
+      /// Experiment assignments forwarded to the runtime.
+      ExpAssignments: IDictionary<string, obj> option
+      /// Handler for MCP OAuth host-token requests.
+      OnMcpAuthRequest: McpAuthRequestHandler option
+      /// Hook invoked after a tool completes (post-tool-use).
+      OnPostToolUse: PostToolUseHandler option
+      /// Hook invoked before an MCP tool call (pre-MCP-tool-call).
+      OnPreMcpToolCall: PreMcpToolCallHandler option }
 
 module SessionConfig =
     /// Approve all permission requests automatically.
@@ -294,7 +414,17 @@ module SessionConfig =
           ImageOptions = None
           OnElicitationRequest = None
           GitHubToken = None
-          InstructionDirectories = None }
+          InstructionDirectories = None
+          EnableCitations = None
+          ExcludedBuiltinAgents = None
+          SessionLimits = None
+          Memory = None
+          OtlpProtocol = None
+          EnableWebSocketResponses = None
+          ExpAssignments = None
+          OnMcpAuthRequest = None
+          OnPostToolUse = None
+          OnPreMcpToolCall = None }
 
 // ---------------------------------------------------------------------------
 // Resume session configuration

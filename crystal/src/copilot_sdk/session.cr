@@ -101,6 +101,9 @@ module CopilotSDK
           json.field "prompt", options.prompt
           json.field "attachments", options.attachments if options.attachments
           json.field "mode", options.mode if options.mode
+          json.field "agentMode", options.agent_mode if options.agent_mode
+          json.field "displayPrompt", options.display_prompt if options.display_prompt
+          json.field "requestHeaders", options.request_headers if options.request_headers
           json.field "tools", @tool_definitions if @tool_definitions.any?
         end
       })

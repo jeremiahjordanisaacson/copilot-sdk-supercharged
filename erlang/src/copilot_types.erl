@@ -17,7 +17,13 @@
     user_input_response/2,
     image_options/1,
     elicitation_result/1,
-    elicitation_result/2
+    elicitation_result/2,
+    tool_defer/1,
+    system_message_section/1,
+    github_attachment/1,
+    hook_type/1,
+    session_limits/1,
+    memory_configuration/1
 ]).
 
 %% ---------------------------------------------------------------------------
@@ -48,7 +54,9 @@
     session_idle_timeout_seconds :: non_neg_integer() | undefined,
     session_fs       :: #session_fs_config{} | undefined,
     copilot_home     :: binary() | undefined,
-    tcp_connection_token :: binary() | undefined
+    tcp_connection_token :: binary() | undefined,
+    request_handler       :: fun() | undefined,
+    bearer_token_provider :: fun() | undefined
 }).
 
 -record(session_config, {
@@ -74,7 +82,16 @@
     github_token         :: binary() | undefined,
     commands             :: [#command_definition{}] | undefined,
     on_elicitation_request :: fun() | undefined,
-    instruction_directories :: [binary()] | undefined
+    instruction_directories :: [binary()] | undefined,
+    %% Upstream-sync session options (parity with @github/copilot-sdk)
+    enable_citations         :: boolean() | undefined,
+    excluded_builtin_agents  :: [binary()] | undefined,
+    session_limits           :: map() | undefined,
+    memory_config            :: map() | undefined,
+    otlp_protocol            :: binary() | undefined,
+    enable_web_socket_responses :: boolean() | undefined,
+    exp_assignments          :: map() | undefined,
+    on_mcp_auth_request      :: fun() | undefined
 }).
 
 -record(command_context, {
@@ -286,3 +303,55 @@ elicitation_result(Action, Content) ->
         undefined -> Base;
         _         -> Base#{<<"content">> => Content}
     end.
+
+%% ---------------------------------------------------------------------------
+%% Upstream-sync feature constants & helpers (parity with @github/copilot-sdk)
+%% ---------------------------------------------------------------------------
+
+%% @doc Tool "defer" loading policy: lazy via search (auto) or eager pre-load (never).
+-spec tool_defer(auto | never) -> binary().
+tool_defer(auto)  -> <<"auto">>;
+tool_defer(never) -> <<"never">>.
+
+%% @doc System-message section identifiers. The preamble section targets only the
+%% identity preamble; preserve protects an addressable section from removal.
+-spec system_message_section(atom()) -> binary().
+system_message_section(preamble)          -> <<"preamble">>;
+system_message_section(identity)          -> <<"identity">>;
+system_message_section(tool_instructions) -> <<"tool_instructions">>;
+system_message_section(preserve)          -> <<"preserve">>.
+
+%% @doc GitHub-anchored attachment variants.
+-spec github_attachment(atom()) -> binary().
+github_attachment(github_commit)          -> <<"GitHubCommit">>;
+github_attachment(github_release)         -> <<"GitHubRelease">>;
+github_attachment(github_actions_job)     -> <<"GitHubActionsJob">>;
+github_attachment(github_repository)      -> <<"GitHubRepository">>;
+github_attachment(github_file_diff)       -> <<"GitHubFileDiff">>;
+github_attachment(github_tree_comparison) -> <<"GitHubTreeComparison">>;
+github_attachment(github_url)             -> <<"GitHubUrl">>;
+github_attachment(github_file)            -> <<"GitHubFile">>;
+github_attachment(github_snippet)         -> <<"GitHubSnippet">>.
+
+%% @doc Hook name constants (include post_tool_use and pre_mcp_tool_call).
+-spec hook_type(atom()) -> binary().
+hook_type(pre_tool_use)          -> <<"preToolUse">>;
+hook_type(post_tool_use)         -> <<"postToolUse">>;
+hook_type(pre_mcp_tool_call)     -> <<"preMcpToolCall">>;
+hook_type(user_prompt_submitted) -> <<"userPromptSubmitted">>;
+hook_type(session_start)         -> <<"sessionStart">>;
+hook_type(session_end)           -> <<"sessionEnd">>.
+
+%% @doc Build a sessionLimits wire map from a per-session AI-credit budget.
+-spec session_limits(map()) -> map().
+session_limits(Opts) ->
+    maps:filter(fun(_K, V) -> V =/= undefined end, #{
+        <<"maxAiCredits">> => maps:get(max_ai_credits, Opts, undefined)
+    }).
+
+%% @doc Build a memory configuration wire map (opt-in persistent session memory).
+-spec memory_configuration(map()) -> map().
+memory_configuration(Opts) ->
+    maps:filter(fun(_K, V) -> V =/= undefined end, #{
+        <<"enabled">> => maps:get(enabled, Opts, undefined)
+    }).

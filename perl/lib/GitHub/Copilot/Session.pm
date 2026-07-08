@@ -62,17 +62,26 @@ sub send {
     my $mode;
     my $response_format;
     my $image_options;
+    my $agent_mode;
+    my $display_prompt;
+    my $request_headers;
 
     if (ref($options) && blessed($options)) {
         $attachments     = $options->attachments;
         $mode            = $options->mode;
         $response_format = $options->response_format if $options->can('response_format');
         $image_options   = $options->image_options   if $options->can('image_options');
+        $agent_mode      = $options->agent_mode      if $options->can('agent_mode');
+        $display_prompt  = $options->display_prompt   if $options->can('display_prompt');
+        $request_headers = $options->request_headers  if $options->can('request_headers');
     } else {
         $attachments     = $options->{attachments};
         $mode            = $options->{mode};
         $response_format = $options->{response_format};
         $image_options   = $options->{image_options};
+        $agent_mode      = $options->{agent_mode};
+        $display_prompt  = $options->{display_prompt};
+        $request_headers = $options->{request_headers};
     }
 
     my %payload = (
@@ -83,6 +92,10 @@ sub send {
     $payload{mode}           = $mode            if defined $mode;
     $payload{responseFormat} = $response_format if defined $response_format;
     $payload{imageOptions}   = $image_options   if defined $image_options;
+    # Per-message overrides (upstream sync)
+    $payload{agentMode}      = $agent_mode      if defined $agent_mode;
+    $payload{displayPrompt}  = $display_prompt  if defined $display_prompt;
+    $payload{requestHeaders} = $request_headers if defined $request_headers;
 
     my $response = $self->{_client}->request('session.send', \%payload);
     return $response->{messageId};

@@ -141,6 +141,7 @@ typedef struct {
     const char *name;
     const char *description;         /**< Optional (NULL for none) */
     const char *parameters_json;     /**< Optional JSON Schema string (NULL for none) */
+    const char *defer;               /**< Tool loading policy: "auto" (lazy) or "never" (eager), or NULL */
     copilot_tool_handler_fn handler;
     void *user_data;                 /**< Passed to handler on invocation */
 } copilot_tool_t;
@@ -315,6 +316,85 @@ typedef struct {
     bool has_background_threshold;
     bool has_buffer_threshold;
 } copilot_infinite_session_config_t;
+
+/* ============================================================================
+ * Upstream-sync feature types (parity with @github/copilot-sdk)
+ * ============================================================================ */
+
+/** Hook type identifiers passed to copilot_hook_handler_fn (hook_type argument). */
+#define COPILOT_HOOK_PRE_TOOL_USE          "preToolUse"
+#define COPILOT_HOOK_POST_TOOL_USE         "postToolUse"
+#define COPILOT_HOOK_USER_PROMPT_SUBMITTED "userPromptSubmitted"
+#define COPILOT_HOOK_SESSION_START         "sessionStart"
+#define COPILOT_HOOK_SESSION_END           "sessionEnd"
+#define COPILOT_HOOK_ERROR_OCCURRED        "errorOccurred"
+#define COPILOT_HOOK_PRE_MCP_TOOL_CALL     "preMcpToolCall"
+
+/** System-message section identifiers. "preamble" targets the identity preamble;
+ *  "preserve" protects an individually-addressable section from a group-level remove. */
+#define COPILOT_SECTION_PREAMBLE "preamble"
+#define COPILOT_SECTION_PRESERVE "preserve"
+
+/** Tool "defer" loading policy (a tool's `defer` field): eager pre-load ("never")
+ *  or lazy load via search ("auto"). */
+#define COPILOT_TOOL_DEFER_AUTO  "auto"
+#define COPILOT_TOOL_DEFER_NEVER "never"
+
+/** GitHub-anchored attachment type identifiers. */
+#define COPILOT_GITHUB_COMMIT           "GitHubCommit"
+#define COPILOT_GITHUB_RELEASE          "GitHubRelease"
+#define COPILOT_GITHUB_ACTIONS_JOB      "GitHubActionsJob"
+#define COPILOT_GITHUB_REPOSITORY       "GitHubRepository"
+#define COPILOT_GITHUB_FILE_DIFF        "GitHubFileDiff"
+#define COPILOT_GITHUB_TREE_COMPARISON  "GitHubTreeComparison"
+#define COPILOT_GITHUB_URL              "GitHubUrl"
+#define COPILOT_GITHUB_FILE             "GitHubFile"
+#define COPILOT_GITHUB_SNIPPET          "GitHubSnippet"
+
+/** Per-session AI-credit budget; set has_max_ai_credits + max_ai_credits to cap spend. */
+typedef struct {
+    double max_ai_credits;      /**< Maximum AI credits for the session */
+    bool has_max_ai_credits;    /**< Whether max_ai_credits was explicitly set */
+} copilot_session_limits_config_t;
+
+/** Opt-in persistent session memory configuration. */
+typedef struct {
+    bool enabled;               /**< Whether persistent memory is enabled */
+    bool has_enabled;           /**< Whether 'enabled' was explicitly set */
+} copilot_memory_config_t;
+
+/** Arguments passed to a bearer-token provider / MCP auth handler (per-session scoping). */
+typedef struct {
+    const char *session_id;     /**< The session the token is requested for */
+} copilot_provider_token_args_t;
+
+/**
+ * Handler invoked when an MCP server requests an OAuth host token.
+ * Returns a newly-allocated token string (caller frees), or NULL.
+ */
+typedef char * (*copilot_mcp_auth_handler_fn)(
+    const copilot_provider_token_args_t *args,
+    void *user_data
+);
+
+/**
+ * BYOK bearer-token provider: returns a newly-allocated token string
+ * (caller frees) for outbound model requests, or NULL.
+ */
+typedef char * (*copilot_bearer_token_provider_fn)(
+    const copilot_provider_token_args_t *args,
+    void *user_data
+);
+
+/**
+ * Interceptor for outbound LLM inference HTTP/WebSocket requests. Receives the
+ * request payload as a JSON string and returns a (possibly modified) JSON string
+ * (caller frees), or NULL to forward the request unchanged.
+ */
+typedef char * (*copilot_request_handler_fn)(
+    const char *request_json,
+    void *user_data
+);
 
 /* ============================================================================
  * Attachment types
@@ -506,6 +586,10 @@ typedef struct {
     const copilot_session_fs_config_t *session_fs; /**< Session filesystem config, or NULL */
     const char *copilot_home;  /**< Override the Copilot home directory (NULL = default) */
     const char *tcp_connection_token; /**< Token for TCP connection authentication (NULL = none) */
+    copilot_request_handler_fn request_handler; /**< Interceptor for outbound model requests, or NULL */
+    void *request_handler_user_data;            /**< User data passed to request_handler */
+    copilot_bearer_token_provider_fn bearer_token_provider; /**< BYOK bearer-token provider, or NULL */
+    void *bearer_token_user_data;               /**< User data passed to bearer_token_provider */
 } copilot_client_options_t;
 
 /**
@@ -581,6 +665,19 @@ typedef struct {
     /* Elicitation */
     copilot_elicitation_handler_fn on_elicitation_request;
     void *elicitation_user_data;
+
+    /* --- Upstream-sync session options (parity with @github/copilot-sdk) --- */
+    bool enable_citations;                  /**< Enable inline source citations in responses */
+    bool has_enable_citations;              /**< Whether enable_citations was explicitly set */
+    const char **excluded_builtin_agents;   /**< NULL-terminated list of built-in agents to exclude, or NULL */
+    const copilot_session_limits_config_t *session_limits; /**< Per-session spending limits, or NULL */
+    const copilot_memory_config_t *memory;  /**< Persistent session memory config, or NULL */
+    const char *otlp_protocol;              /**< OTLP telemetry protocol ("grpc" or "http/protobuf"), or NULL */
+    bool enable_web_socket_responses;       /**< Enable the WebSocket transport for streamed responses */
+    bool has_enable_web_socket_responses;   /**< Whether enable_web_socket_responses was explicitly set */
+    const char *exp_assignments_json;       /**< Experiment (feature-flag) assignment overrides as JSON, or NULL */
+    copilot_mcp_auth_handler_fn on_mcp_auth_request; /**< MCP OAuth host-token handler, or NULL */
+    void *mcp_auth_user_data;               /**< User data passed to on_mcp_auth_request */
 } copilot_session_config_t;
 
 /**
@@ -632,6 +729,8 @@ typedef struct {
     const copilot_attachment_t *attachments; /**< Array of attachments, or NULL */
     size_t attachments_count;
     const char *mode;                       /**< "enqueue" (default) or "immediate" */
+    const char *agent_mode;                 /**< Agent mode to run this turn under, or NULL */
+    const char *display_prompt;             /**< Alternate prompt text to show in the transcript, or NULL */
     copilot_response_format_t response_format;        /**< Response format (default: TEXT) */
     const copilot_image_options_t *image_options;      /**< Image generation options, or NULL */
     const char **request_headers_keys;   /**< Keys for custom HTTP headers (NULL-terminated), or NULL */

@@ -33,6 +33,66 @@ type
     data*: JsonNode
 
 # ---------------------------------------------------------------------------
+# Upstream-sync feature types (parity with @github/copilot-sdk)
+# ---------------------------------------------------------------------------
+
+type
+  # Context passed to a bearer-token / MCP-auth provider callback.
+  ProviderTokenArgs* = object
+    sessionId*: string
+    serverUrl*: string
+    scopes*: seq[string]
+
+  # Per-session spending / usage guardrails.
+  SessionLimitsConfig* = object
+    maxAiCredits*: float
+
+  # Persistent session-memory settings.
+  MemoryConfiguration* = object
+    enabled*: bool
+
+  # Custom handler used to intercept outbound CAPI HTTP requests.
+  CopilotRequestHandler* = proc(requestJson: string): string {.closure.}
+
+  # BYOK bearer-token provider invoked for authenticated model requests.
+  BearerTokenProvider* = proc(args: ProviderTokenArgs): string {.closure.}
+
+  # Handler invoked to satisfy an MCP OAuth authorization request.
+  McpAuthHandler* = proc(args: ProviderTokenArgs): string {.closure.}
+
+  # Controls when a tool definition is materialised for the model.
+  ToolDefer* = enum
+    tdAuto = "auto"
+    tdNever = "never"
+
+  # Named sections of the composed system message.
+  SystemMessageSection* = enum
+    smsPreamble = "preamble"
+    smsIdentity = "identity"
+    smsToolInstructions = "tool_instructions"
+    smsPreserve = "preserve"
+
+const
+  # Hook-type identifiers (the "hookType" field of a hooks.invoke request).
+  HookPreToolUse* = "preToolUse"
+  HookPostToolUse* = "postToolUse"
+  HookUserPromptSubmitted* = "userPromptSubmitted"
+  HookSessionStart* = "sessionStart"
+  HookSessionEnd* = "sessionEnd"
+  HookErrorOccurred* = "errorOccurred"
+  HookPreMcpToolCall* = "preMcpToolCall"
+
+  # GitHub-anchored attachment type identifiers.
+  GitHubCommit* = "GitHubCommit"
+  GitHubRelease* = "GitHubRelease"
+  GitHubActionsJob* = "GitHubActionsJob"
+  GitHubRepository* = "GitHubRepository"
+  GitHubFileDiff* = "GitHubFileDiff"
+  GitHubTreeComparison* = "GitHubTreeComparison"
+  GitHubPullRequest* = "GitHubPullRequest"
+  GitHubIssue* = "GitHubIssue"
+
+# ---------------------------------------------------------------------------
 # Client configuration
 # ---------------------------------------------------------------------------
 
@@ -45,6 +105,8 @@ type
     sessionFs*: SessionFsConfig
     copilotHome*: string
     tcpConnectionToken*: string
+    requestHandler*: CopilotRequestHandler
+    bearerTokenProvider*: BearerTokenProvider
 
   SessionFsConfig* = object
     initialCwd*: string
@@ -74,6 +136,15 @@ type
     includeSubAgentStreamingEvents*: bool
     authToken*: string
     instructionDirectories*: seq[string]
+    enableCitations*: bool
+    excludedBuiltinAgents*: seq[string]
+    sessionLimits*: SessionLimitsConfig
+    memory*: MemoryConfiguration
+    otlpProtocol*: string
+    enableWebSocketResponses*: bool
+    expAssignmentsJson*: string
+    onMcpAuthRequest*: McpAuthHandler
+    mcpAuthHandler*: bool
 
   ResumeSessionConfig* = object
     sessionId*: string
@@ -99,6 +170,8 @@ type
   MessageOptions* = object
     message*: string
     streaming*: bool
+    agentMode*: string
+    displayPrompt*: string
     requestHeaders*: Table[string, string]
 
   SendResult* = object
@@ -234,7 +307,16 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
                        imageStyle = "";
                        includeSubAgentStreamingEvents = false;
                        authToken = "";
-                       instructionDirectories: seq[string] = @[]): SessionConfig =
+                       instructionDirectories: seq[string] = @[];
+                       enableCitations = false;
+                       excludedBuiltinAgents: seq[string] = @[];
+                       sessionLimits = SessionLimitsConfig();
+                       memory = MemoryConfiguration();
+                       otlpProtocol = "";
+                       enableWebSocketResponses = false;
+                       expAssignmentsJson = "";
+                       onMcpAuthRequest: McpAuthHandler = nil;
+                       mcpAuthHandler = false): SessionConfig =
   SessionConfig(
     systemPrompt: systemPrompt,
     githubToken: githubToken,
@@ -253,6 +335,15 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
     includeSubAgentStreamingEvents: includeSubAgentStreamingEvents,
     authToken: authToken,
     instructionDirectories: instructionDirectories,
+    enableCitations: enableCitations,
+    excludedBuiltinAgents: excludedBuiltinAgents,
+    sessionLimits: sessionLimits,
+    memory: memory,
+    otlpProtocol: otlpProtocol,
+    enableWebSocketResponses: enableWebSocketResponses,
+    expAssignmentsJson: expAssignmentsJson,
+    onMcpAuthRequest: onMcpAuthRequest,
+    mcpAuthHandler: mcpAuthHandler,
   )
 
 proc newResumeSessionConfig*(sessionId: string; systemPrompt = "";
@@ -266,9 +357,12 @@ proc newResumeSessionConfig*(sessionId: string; systemPrompt = "";
   )
 
 proc newMessageOptions*(message: string; streaming = false;
+                        agentMode = ""; displayPrompt = "";
                         requestHeaders = initTable[string, string]()): MessageOptions =
   MessageOptions(
     message: message,
     streaming: streaming,
+    agentMode: agentMode,
+    displayPrompt: displayPrompt,
     requestHeaders: requestHeaders,
   )

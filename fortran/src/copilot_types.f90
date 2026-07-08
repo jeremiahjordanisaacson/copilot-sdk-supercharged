@@ -20,6 +20,15 @@ module copilot_types
   public :: COPILOT_STATE_DISCONNECTED, COPILOT_STATE_CONNECTING
   public :: COPILOT_STATE_CONNECTED, COPILOT_STATE_ERROR
   public :: tool_callback_interface
+  ! --- Upstream-sync feature surface (parity with @github/copilot-sdk) ---
+  public :: session_limits_config, memory_configuration, provider_token_args
+  public :: bearer_token_provider_interface, copilot_request_handler_interface
+  public :: mcp_auth_handler_interface, post_tool_use_hook_interface
+  public :: pre_mcp_tool_call_hook_interface
+  public :: TOOL_DEFER_AUTO, TOOL_DEFER_NEVER
+  public :: SECTION_PREAMBLE, SECTION_IDENTITY, SECTION_TOOL_INSTRUCTIONS, SECTION_PRESERVE
+  public :: GITHUB_COMMIT, GITHUB_RELEASE, GITHUB_ACTIONS_JOB, GITHUB_REPOSITORY
+  public :: GITHUB_FILE_DIFF, GITHUB_TREE_COMPARISON, GITHUB_URL, GITHUB_FILE, GITHUB_SNIPPET
 
   ! --------------------------------------------------------------------------
   ! Connection state enum
@@ -28,6 +37,31 @@ module copilot_types
   integer, parameter :: COPILOT_STATE_CONNECTING   = 1
   integer, parameter :: COPILOT_STATE_CONNECTED    = 2
   integer, parameter :: COPILOT_STATE_ERROR        = 3
+
+  ! --------------------------------------------------------------------------
+  ! Upstream-sync string constants
+  ! --------------------------------------------------------------------------
+  !> Tool "defer" loading policy (ToolDefer): eager pre-load or lazy search.
+  character(len=*), parameter :: TOOL_DEFER_AUTO  = 'auto'   ! lazy: discovered on demand
+  character(len=*), parameter :: TOOL_DEFER_NEVER = 'never'  ! eager: always pre-loaded
+
+  !> System-message section identifiers ('preamble' targets the identity preamble;
+  !! 'preserve' shields a section from a group-level remove).
+  character(len=*), parameter :: SECTION_PREAMBLE          = 'preamble'
+  character(len=*), parameter :: SECTION_IDENTITY          = 'identity'
+  character(len=*), parameter :: SECTION_TOOL_INSTRUCTIONS = 'tool_instructions'
+  character(len=*), parameter :: SECTION_PRESERVE          = 'preserve'
+
+  !> GitHub-anchored attachment variants.
+  character(len=*), parameter :: GITHUB_COMMIT          = 'GitHubCommit'
+  character(len=*), parameter :: GITHUB_RELEASE         = 'GitHubRelease'
+  character(len=*), parameter :: GITHUB_ACTIONS_JOB     = 'GitHubActionsJob'
+  character(len=*), parameter :: GITHUB_REPOSITORY      = 'GitHubRepository'
+  character(len=*), parameter :: GITHUB_FILE_DIFF       = 'GitHubFileDiff'
+  character(len=*), parameter :: GITHUB_TREE_COMPARISON = 'GitHubTreeComparison'
+  character(len=*), parameter :: GITHUB_URL             = 'GitHubUrl'
+  character(len=*), parameter :: GITHUB_FILE            = 'GitHubFile'
+  character(len=*), parameter :: GITHUB_SNIPPET         = 'GitHubSnippet'
 
   type :: copilot_connection_state
     integer :: value = COPILOT_STATE_DISCONNECTED
@@ -50,6 +84,11 @@ module copilot_types
     type(session_fs_config), allocatable :: session_fs
     character(len=:), allocatable :: copilot_home
     character(len=:), allocatable :: tcp_connection_token
+    !> HTTP request handler to intercept/mutate outbound LLM inference requests
+    !! (CopilotRequestHandler).
+    procedure(copilot_request_handler_interface), pointer, nopass :: request_handler => null()
+    !> BYOK bearer token provider (per-session token minting).
+    procedure(bearer_token_provider_interface), pointer, nopass :: bearer_token_provider => null()
   contains
     procedure :: set_defaults => client_options_set_defaults
   end type copilot_client_options
@@ -100,6 +139,27 @@ module copilot_types
   end type image_options
 
   ! --------------------------------------------------------------------------
+  ! Per-session AI-credit spending limits (SessionLimitsConfig)
+  ! --------------------------------------------------------------------------
+  type :: session_limits_config
+    integer :: max_ai_credits = 0
+  end type session_limits_config
+
+  ! --------------------------------------------------------------------------
+  ! Persistent session memory configuration (MemoryConfiguration)
+  ! --------------------------------------------------------------------------
+  type :: memory_configuration
+    logical :: enabled = .false.
+  end type memory_configuration
+
+  ! --------------------------------------------------------------------------
+  ! Arguments passed to a BYOK bearer_token_provider (per-session scoping)
+  ! --------------------------------------------------------------------------
+  type :: provider_token_args
+    character(len=:), allocatable :: session_id
+  end type provider_token_args
+
+  ! --------------------------------------------------------------------------
   ! Session configuration
   ! --------------------------------------------------------------------------
   type :: session_config
@@ -124,6 +184,20 @@ module copilot_types
     type(image_options) :: img_options
     character(len=:), allocatable :: response_format
     character(len=:), allocatable :: instruction_directories(:)
+    ! --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+    logical :: enable_citations = .false.
+    character(len=:), allocatable :: excluded_builtin_agents(:)
+    type(session_limits_config) :: session_limits
+    type(memory_configuration) :: memory
+    character(len=:), allocatable :: otlp_protocol
+    logical :: enable_web_socket_responses = .false.
+    character(len=:), allocatable :: exp_assignments_json
+    !> Post-tool-use hook (inspect/override a tool result).
+    procedure(post_tool_use_hook_interface), pointer, nopass :: on_post_tool_use => null()
+    !> Pre-MCP-tool-call hook (gate an MCP server tool call).
+    procedure(pre_mcp_tool_call_hook_interface), pointer, nopass :: on_pre_mcp_tool_call => null()
+    !> MCP OAuth host token handler; when set, session.create signals mcpAuthHandler=true.
+    procedure(mcp_auth_handler_interface), pointer, nopass :: on_mcp_auth_request => null()
   end type session_config
 
   ! --------------------------------------------------------------------------
@@ -158,6 +232,12 @@ module copilot_types
     character(len=:), allocatable :: message
     character(len=:), allocatable :: command
     character(len=:), allocatable :: model
+    !> Per-send agent mode override (wire key: agentMode)
+    character(len=:), allocatable :: agent_mode
+    !> Prompt text shown to the user instead of the real prompt (wire key: displayPrompt)
+    character(len=:), allocatable :: display_prompt
+    !> Custom HTTP headers for this send as a JSON object string (wire key: requestHeaders)
+    character(len=:), allocatable :: request_headers_json
   end type send_options
 
   ! --------------------------------------------------------------------------
@@ -194,6 +274,8 @@ module copilot_types
     character(len=:), allocatable :: name
     character(len=:), allocatable :: description
     character(len=:), allocatable :: input_schema_json
+    !> Defer loading policy: 'auto' (lazy) or 'never' (eager). See TOOL_DEFER_* constants.
+    character(len=:), allocatable :: defer
     procedure(tool_callback_interface), pointer, nopass :: callback => null()
   end type copilot_tool
 
@@ -237,6 +319,38 @@ module copilot_types
       type(tool_invocation), intent(in) :: invocation
       type(tool_result) :: res
     end function tool_callback_interface
+
+    !> BYOK bearer token provider: mint a per-session bearer token.
+    function bearer_token_provider_interface(args) result(token)
+      import :: provider_token_args
+      type(provider_token_args), intent(in) :: args
+      character(len=:), allocatable :: token
+    end function bearer_token_provider_interface
+
+    !> HTTP request handler: intercept/mutate an outbound LLM inference request
+    !! (JSON string in, possibly-modified JSON string out).
+    function copilot_request_handler_interface(request_json) result(modified_json)
+      character(len=*), intent(in) :: request_json
+      character(len=:), allocatable :: modified_json
+    end function copilot_request_handler_interface
+
+    !> MCP OAuth host token handler: return an OAuth token for an MCP server request.
+    function mcp_auth_handler_interface(session_id, server_url) result(token)
+      character(len=*), intent(in) :: session_id, server_url
+      character(len=:), allocatable :: token
+    end function mcp_auth_handler_interface
+
+    !> Post-tool-use hook: inspect a tool result and optionally return an override.
+    function post_tool_use_hook_interface(tool_name, tool_result_json, session_id) result(override)
+      character(len=*), intent(in) :: tool_name, tool_result_json, session_id
+      character(len=:), allocatable :: override
+    end function post_tool_use_hook_interface
+
+    !> Pre-MCP-tool-call hook: gate an MCP server tool call, returning a decision.
+    function pre_mcp_tool_call_hook_interface(server_name, tool_name, tool_args, session_id) result(decision)
+      character(len=*), intent(in) :: server_name, tool_name, tool_args, session_id
+      character(len=:), allocatable :: decision
+    end function pre_mcp_tool_call_hook_interface
   end interface
 
 contains

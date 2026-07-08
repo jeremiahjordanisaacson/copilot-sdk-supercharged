@@ -102,6 +102,15 @@ pub const CopilotSession = struct {
 
         obj.put("sessionId", .{ .string = self.session_id }) catch return SdkError.AllocationFailed;
         obj.put("prompt", .{ .string = opts.prompt }) catch return SdkError.AllocationFailed;
+        if (opts.mode) |m| {
+            obj.put("mode", .{ .string = m }) catch return SdkError.AllocationFailed;
+        }
+        if (opts.agent_mode) |am| {
+            obj.put("agentMode", .{ .string = am }) catch return SdkError.AllocationFailed;
+        }
+        if (opts.display_prompt) |dp| {
+            obj.put("displayPrompt", .{ .string = dp }) catch return SdkError.AllocationFailed;
+        }
 
         const params = JsonValue{ .object = obj };
         const result = try self.transport.sendRequest("session.send", params);

@@ -67,6 +67,11 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
   private val resolvedUseLoggedInUser: Boolean =
     options.useLoggedInUser.getOrElse(!options.githubToken.isDefined)
 
+  /** Custom transport for outbound Copilot HTTP requests, if configured. */
+  private val resolvedRequestHandler: Option[CopilotRequestHandler] = options.requestHandler
+  /** Bring-your-own-key bearer token provider, if configured. */
+  private val resolvedBearerTokenProvider: Option[BearerTokenProvider] = options.bearerTokenProvider
+
   // Validate options
   if options.cliUrl.isDefined && (options.useStdio || options.cliPath.isDefined) then
     throw new IllegalArgumentException("cliUrl is mutually exclusive with useStdio and cliPath")
@@ -206,8 +211,21 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
       val toolDefs = config.tools.map(t => Json.obj(
         "name" -> t.name.asJson,
         "description" -> t.description.asJson,
-        "parameters" -> t.parameters.map(Json.fromJsonObject).asJson
+        "parameters" -> t.parameters.map(Json.fromJsonObject).asJson,
+        "defer" -> t.defer.asJson
       ))
+
+      val hookTypes: Option[List[String]] = config.hooks.map { h =>
+        List(
+          Option.when(h.onPreToolUse.isDefined)("preToolUse"),
+          Option.when(h.onPostToolUse.isDefined)("postToolUse"),
+          Option.when(h.onPreMcpToolCall.isDefined)("preMcpToolCall"),
+          Option.when(h.onUserPromptSubmitted.isDefined)("userPromptSubmitted"),
+          Option.when(h.onSessionStart.isDefined)("sessionStart"),
+          Option.when(h.onSessionEnd.isDefined)("sessionEnd"),
+          Option.when(h.onErrorOccurred.isDefined)("errorOccurred")
+        ).flatten
+      }
 
       val params = Json.obj(
         "model" -> config.model.asJson,
@@ -221,6 +239,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "requestPermission" -> config.onPermissionRequest.isDefined.asJson,
         "requestUserInput" -> config.onUserInputRequest.isDefined.asJson,
         "hooks" -> config.hooks.exists(_.hasAny).asJson,
+        "hookTypes" -> hookTypes.asJson,
         "workingDirectory" -> config.workingDirectory.asJson,
         "streaming" -> config.streaming.asJson,
         "mcpServers" -> config.mcpServers.map(m => Json.fromJsonObject(
@@ -236,6 +255,19 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         // Wire idleTimeout, requestHeaders, modelCapabilities, elicitation, Command, imageGeneration
         "requestHeaders" -> config.requestHeaders.asJson,
         "modelCapabilities" -> config.modelCapabilities.asJson,
+        // Additional session-config passthroughs.
+        "enableCitations" -> config.enableCitations.asJson,
+        "excludedBuiltinAgents" -> config.excludedBuiltinAgents.asJson,
+        "sessionLimits" -> config.sessionLimits.map { (sl: SessionLimitsConfig) =>
+          Json.obj("maxAiCredits" -> sl.maxAiCredits.asJson).dropNullValues
+        }.asJson,
+        "memory" -> config.memory.map { (m: MemoryConfiguration) =>
+          Json.obj("enabled" -> m.enabled.asJson)
+        }.asJson,
+        "otlpProtocol" -> config.otlpProtocol.asJson,
+        "enableWebSocketResponses" -> config.enableWebSocketResponses.asJson,
+        "expAssignments" -> config.expAssignments.asJson,
+        "mcpAuthHandler" -> config.onMcpAuthRequest.isDefined.asJson,
       ).dropNullValues
 
       client.sendRequest("session.create", params).map { result =>
@@ -740,3 +772,40 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         )
       case _ =>
         Future.failed(new RuntimeException("Client not connected. Call start() first."))
+
+// ============================================================================
+// Message payload builder + wire constants
+// ============================================================================
+
+/** Builds the JSON-RPC `session.send` payload from [[MessageOptions]]. */
+private[copilot] def buildSendPayload(sessionId: String, options: MessageOptions): Json =
+  Json.obj(
+    "sessionId" -> sessionId.asJson,
+    "prompt" -> options.prompt.asJson,
+    "attachments" -> options.attachments.asJson,
+    "mode" -> options.mode.asJson,
+    "responseFormat" -> options.responseFormat.asJson,
+    "imageOptions" -> options.imageOptions.asJson,
+    "requestHeaders" -> options.requestHeaders.asJson,
+    "agentMode" -> options.agentMode.asJson,
+    "displayPrompt" -> options.displayPrompt.asJson,
+  ).dropNullValues
+
+/** Tool deferral policies for [[Tool.defer]]. */
+object ToolDefer:
+  val Auto  = "auto"
+  val Never = "never"
+
+/** Known system message section identifiers for section overrides. */
+object SystemMessageSection:
+  val Preamble         = "preamble"
+  val Identity         = "identity"
+  val ToolInstructions = "tool_instructions"
+  val Preserve         = "preserve"
+
+/** GitHub attachment type constants. */
+object GitHubAttachment:
+  val GitHubCommit      = "GitHubCommit"
+  val GitHubRepository  = "GitHubRepository"
+  val GitHubPullRequest = "GitHubPullRequest"
+  val GitHubIssue       = "GitHubIssue"

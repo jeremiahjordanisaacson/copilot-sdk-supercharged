@@ -23,7 +23,7 @@ open System.Threading.Tasks
 ///       let! session =
 ///           client.CreateSessionAsync(SessionConfig.defaults)
 ///       let! reply =
-///           session.SendAndWaitAsync({ Prompt = "Hello!"; Attachments = None; Mode = None })
+///           session.SendAndWaitAsync({ Prompt = "Hello!"; Attachments = None; Mode = None; AgentMode = None; DisplayPrompt = None; RequestHeaders = None })
 ///       reply |> Option.iter (fun data -> printfn "%s" data.Content)
 ///       do! client.StopAsync()
 ///   } |> Async.RunSynchronously
@@ -223,7 +223,17 @@ type CopilotClient(options: CopilotClientOptions) =
                streaming = config.Streaming
                agent = config.Agent
                sdkProtocolVersion = SdkProtocolVersion.getVersion ()
-               includeSubAgentStreamingEvents = config.IncludeSubAgentStreamingEvents |}
+               includeSubAgentStreamingEvents = config.IncludeSubAgentStreamingEvents
+               // --- Upstream-sync session options (parity with @github/copilot-sdk) ---
+               enableCitations = config.EnableCitations
+               excludedBuiltinAgents = config.ExcludedBuiltinAgents
+               sessionLimits = (config.SessionLimits |> Option.map SessionLimitsConfig.toWire)
+               memory = (config.Memory |> Option.map MemoryConfiguration.toWire)
+               otlpProtocol = config.OtlpProtocol
+               enableWebSocketResponses = config.EnableWebSocketResponses
+               expAssignments = config.ExpAssignments
+               // Signal to the runtime that an MCP OAuth host-token handler is registered.
+               mcpAuthHandler = (config.OnMcpAuthRequest |> Option.map (fun _ -> true)) |}
 
         let! response = t.SendRequestAsync<{| sessionId: string; workspacePath: string option |}>("session.create", request)
 

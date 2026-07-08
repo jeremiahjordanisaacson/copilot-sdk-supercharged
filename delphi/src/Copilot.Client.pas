@@ -376,6 +376,8 @@ begin
     var ToolObj := TJSONObject.Create;
     ToolObj.AddPair('name', Tool.Name);
     ToolObj.AddPair('description', Tool.Description);
+    if Tool.Defer <> '' then
+      ToolObj.AddPair('defer', Tool.Defer);
     if Assigned(Tool.Parameters) then
       ToolObj.AddPair('parameters', Tool.Parameters.Clone as TJSONObject);
     Result.AddElement(ToolObj);
@@ -444,6 +446,50 @@ begin
       FsObj.AddPair('pathStyle', FOptions.SessionFs.PathStyle);
     Params.AddPair('sessionFs', FsObj);
   end;
+
+  // --- Upstream-sync session config passthroughs (camelCase wire keys) ---
+  if Config.EnableCitations then
+    Params.AddPair('enableCitations', TJSONBool.Create(True));
+
+  if Length(Config.ExcludedBuiltinAgents) > 0 then
+  begin
+    var AgentsArr := TJSONArray.Create;
+    for var A in Config.ExcludedBuiltinAgents do
+      AgentsArr.Add(A);
+    Params.AddPair('excludedBuiltinAgents', AgentsArr);
+  end;
+
+  if Config.SessionLimits.MaxAiCredits > 0 then
+  begin
+    var LimitsObj := TJSONObject.Create;
+    LimitsObj.AddPair('maxAiCredits', TJSONNumber.Create(Config.SessionLimits.MaxAiCredits));
+    Params.AddPair('sessionLimits', LimitsObj);
+  end;
+
+  if Config.Memory.Enabled then
+  begin
+    var MemObj := TJSONObject.Create;
+    MemObj.AddPair('enabled', TJSONBool.Create(True));
+    Params.AddPair('memory', MemObj);
+  end;
+
+  if Config.OtlpProtocol <> '' then
+    Params.AddPair('otlpProtocol', Config.OtlpProtocol);
+
+  if Config.EnableWebSocketResponses then
+    Params.AddPair('enableWebSocketResponses', TJSONBool.Create(True));
+
+  if Assigned(Config.ExpAssignments) and (Config.ExpAssignments.Count > 0) then
+  begin
+    var ExpObj := TJSONObject.Create;
+    for var ExpPair in Config.ExpAssignments do
+      ExpObj.AddPair(ExpPair.Key, ExpPair.Value);
+    Params.AddPair('expAssignments', ExpObj);
+  end;
+
+  // MCP OAuth host token handler: signal the runtime that a handler is registered.
+  if Assigned(Config.OnMcpAuthRequest) then
+    Params.AddPair('mcpAuthHandler', TJSONBool.Create(True));
 
   ResultVal := FRpc.SendRequest('session.create', Params);
   try

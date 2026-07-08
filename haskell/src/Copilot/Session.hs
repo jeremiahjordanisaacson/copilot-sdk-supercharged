@@ -129,6 +129,9 @@ send session opts = do
         , "prompt"         .= moPrompt opts
         , "attachments"    .= moAttachments opts
         , "mode"           .= moMode opts
+        , "agentMode"      .= moAgentMode opts
+        , "displayPrompt"  .= moDisplayPrompt opts
+        , "requestHeaders" .= moRequestHeaders opts
         , "responseFormat" .= moResponseFormat opts
         , "imageOptions"   .= moImageOptions opts
         ]
@@ -313,6 +316,15 @@ handleSessionHooksInvoke session hookType input sid = do
               Aeson.Error _ -> pure Nothing
 
         "postToolUse" -> case shOnPostToolUse hooks of
+          Nothing -> pure Nothing
+          Just handler -> do
+            case Aeson.fromJSON input of
+              Aeson.Success inp -> do
+                result <- handler inp inv
+                pure $ fmap Aeson.toJSON result
+              Aeson.Error _ -> pure Nothing
+
+        "preMcpToolCall" -> case shOnPreMcpToolCall hooks of
           Nothing -> pure Nothing
           Just handler -> do
             case Aeson.fromJSON input of

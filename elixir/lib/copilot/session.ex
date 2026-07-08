@@ -245,6 +245,9 @@ defmodule Copilot.Session do
 
     params = if options.attachments, do: Map.put(params, "attachments", options.attachments), else: params
     params = if options.mode, do: Map.put(params, "mode", options.mode), else: params
+    params = if options.agent_mode, do: Map.put(params, "agentMode", options.agent_mode), else: params
+    params = if options.display_prompt, do: Map.put(params, "displayPrompt", options.display_prompt), else: params
+    params = if options.request_headers, do: Map.put(params, "requestHeaders", options.request_headers), else: params
     params = if options.response_format, do: Map.put(params, "responseFormat", Types.response_format_to_string(options.response_format)), else: params
     params = if options.image_options, do: Map.put(params, "imageOptions", options.image_options), else: params
 
@@ -279,6 +282,9 @@ defmodule Copilot.Session do
 
     params = if options.attachments, do: Map.put(params, "attachments", options.attachments), else: params
     params = if options.mode, do: Map.put(params, "mode", options.mode), else: params
+    params = if options.agent_mode, do: Map.put(params, "agentMode", options.agent_mode), else: params
+    params = if options.display_prompt, do: Map.put(params, "displayPrompt", options.display_prompt), else: params
+    params = if options.request_headers, do: Map.put(params, "requestHeaders", options.request_headers), else: params
     params = if options.response_format, do: Map.put(params, "responseFormat", Types.response_format_to_string(options.response_format)), else: params
     params = if options.image_options, do: Map.put(params, "imageOptions", options.image_options), else: params
 
