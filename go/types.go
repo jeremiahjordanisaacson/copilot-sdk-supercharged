@@ -1899,6 +1899,42 @@ type ToolBinaryResult struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ResponseFormat selects the response format for a message (Supercharged extension).
+type ResponseFormat string
+
+const (
+	ResponseFormatText       ResponseFormat = "text"
+	ResponseFormatImage      ResponseFormat = "image"
+	ResponseFormatJSONObject ResponseFormat = "json_object"
+)
+
+// ImageOptions configures image generation parameters (Supercharged extension).
+type ImageOptions struct {
+	// Size is the image dimensions (e.g. "1024x1024")
+	Size string `json:"size,omitempty"`
+	// Quality is the image quality ("hd" or "standard")
+	Quality string `json:"quality,omitempty"`
+	// Style is the image style ("natural" or "vivid")
+	Style string `json:"style,omitempty"`
+}
+
+// AssistantImageData contains image data from an assistant image response.
+type AssistantImageData struct {
+	Format        string `json:"format"`
+	Base64        string `json:"base64"`
+	URL           string `json:"url,omitempty"`
+	RevisedPrompt string `json:"revisedPrompt,omitempty"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+}
+
+// ContentBlock represents a block in a mixed text+image response.
+type ContentBlock struct {
+	Type  string              `json:"type"`
+	Text  string              `json:"text,omitempty"`
+	Image *AssistantImageData `json:"image,omitempty"`
+}
+
 // MessageOptions configures a message to send
 type MessageOptions struct {
 	// Prompt is the message to send
@@ -1915,6 +1951,10 @@ type MessageOptions struct {
 	RequestHeaders map[string]string
 	// DisplayPrompt, if provided, is shown in the timeline instead of Prompt.
 	DisplayPrompt string
+	// ResponseFormat selects the desired response format (Supercharged extension).
+	ResponseFormat ResponseFormat
+	// ImageOptions configures image generation (used when ResponseFormat is image).
+	ImageOptions *ImageOptions
 }
 
 // AgentMode is the UI mode the agent is in for a given turn. See
