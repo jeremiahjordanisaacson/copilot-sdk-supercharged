@@ -5,10 +5,20 @@
 
 import type { MessageConnection } from "vscode-jsonrpc/node.js";
 
-import type { AbortReason, Attachment, ContextTier, EmbeddedBlobResourceContents, EmbeddedTextResourceContents, McpServerSource, McpServerStatus, PermissionPromptRequest, PermissionRule, ReasoningSummary, SessionEvent, SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, UserToolSessionApproval } from "./session-events.js";
+import type { AbortReason, Attachment, ContextTier, EmbeddedBlobResourceContents, EmbeddedTextResourceContents, McpOauthHttpResponse, McpOauthWWWAuthenticateParams, McpServerSource, McpServerStatus, ModelChangeSource, PermissionMode, PermissionPromptRequest, PermissionRule, ReasoningSummary, SessionEvent, SessionLimitsConfig, SessionMode, ShutdownType, SkillSource, TaskCompleteData, TaskCompletionOutcome, UserToolSessionApproval, Verbosity } from "./session-events.js";
+
+/** A value that can be represented losslessly on the SDK JSON wire. */
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 /**
- * Initial authentication info for the session.
+ * A value that lives only in this process and never crosses the JSON-RPC
+ * boundary, such as a callback or a host object handle.
+ * @internal
+ */
+export type OpaqueInProcessValue = unknown;
+
+/**
+ * Authentication credentials accepted only at native protocol ingress. Runtime outputs use credential-free `AuthIdentity` metadata.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "AuthInfo".
@@ -22,6 +32,16 @@ export type AuthInfo =
   | UserAuthInfo
   | GhCliAuthInfo
   | ApiKeyAuthInfo;
+/**
+ * User to log out
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AccountLogoutRequest".
+ */
+/** @experimental */
+export type AccountLogoutRequest = {
+  [k: string]: unknown | undefined;
+};
 /**
  * Resolved Anthropic adaptive-thinking capability for a model.
  *
@@ -68,6 +88,27 @@ export type AgentInfoSource =
   | "plugin"
   /** Agent built into the Copilot runtime. */
   | "builtin";
+/**
+ * Controls whether built-in agents and authored prompt text are included.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentListRequest".
+ */
+/** @experimental */
+export type AgentListRequest =
+  | {
+      [k: string]: unknown | undefined;
+    }
+  | {
+      /**
+       * When true, request the session's configured built-in agents alongside custom agents. Listing applies feature, context, inclusion, exclusion, and user-disabled-agent policy, but does not evaluate transient invocation requirements such as model availability. Built-in metadata may be omitted when the session cannot project it, such as a relay session.
+       */
+      includeBuiltInAgents?: boolean;
+      /**
+       * When true, request authored base prompt text on each AgentInfo. Prompt text may be omitted when unavailable, such as for agents projected through a relay session.
+       */
+      includePrompt?: boolean;
+    };
 /**
  * Process kind tag for the registry entry
  *
@@ -203,20 +244,6 @@ export type AgentRegistrySpawnValidationErrorField =
   /** The permissionMode parameter */
   | "permissionMode";
 /**
- * Current or requested allow-all mode.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "PermissionsAllowAllMode".
- */
-/** @experimental */
-export type PermissionsAllowAllMode =
-  /** Permission requests follow the normal approval flow. */
-  | "off"
-  /** Tool, path, and URL permission requests are automatically approved. */
-  | "on"
-  /** Permission requests follow the normal approval flow with an LLM advisory recommendation attached; clients may choose to auto-approve requests the judge evaluated as acceptable. */
-  | "auto";
-/**
  * Authentication type
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -239,6 +266,395 @@ export type AuthInfoType =
   /** Authentication from a Copilot API token. */
   | "copilot-api-token";
 /**
+ * Validation errors from the most recent authentication attempt.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AuthValidationErrors".
+ */
+/** @experimental */
+export type AuthValidationErrors = AuthValidationError[];
+/**
+ * Root JSON Schema type for a built-in tool input.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "BuiltinToolInputSchemaType".
+ */
+/** @experimental */
+export type BuiltinToolInputSchemaType = /** The tool accepts a JSON object. */ "object";
+/**
+ * Custom input-format kind.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "BuiltinToolFormatType".
+ */
+/** @experimental */
+export type BuiltinToolFormatType = /** The tool input is parsed with the supplied grammar. */ "grammar";
+/**
+ * Telemetry-safety policy for a built-in tool.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "BuiltinToolSafeForTelemetry".
+ */
+/** @experimental */
+export type BuiltinToolSafeForTelemetry = boolean | BuiltinToolSafeTelemetryFields;
+/**
+ * JSON Schema for canvas open input
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CanvasJsonSchema".
+ */
+/** @experimental */
+export type CanvasJsonSchema = JsonValue;
+/**
+ * Provider-supplied action result.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CanvasActionInvokeResult".
+ */
+/** @experimental */
+export type CanvasActionInvokeResult = JsonValue;
+/**
+ * Canonical digest algorithm for a validated MCP card
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CardDigestAlgorithm".
+ */
+/** @experimental */
+export type CardDigestAlgorithm = /** SHA-256 over RFC 8785 canonical JSON encoded as UTF-8. */ "sha256-rfc8785";
+/**
+ * SHA-256 digest encoded as exactly 64 lowercase hexadecimal characters.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CardDigestValue".
+ */
+/** @experimental */
+export type CardDigestValue = string;
+/**
+ * Where a candidate's card came from. Exactly one of a URL or embedded data: the union has no variant carrying both, and no variant carrying neither, so the rule holds structurally rather than by validation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogCandidateSource".
+ */
+/** @experimental */
+export type CatalogCandidateSource = CatalogCandidateSourceUrl | CatalogCandidateSourceEmbedded;
+/**
+ * Why the catalog authority did not accept the caller's identity
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogAuthenticationRequiredReason".
+ */
+/** @experimental */
+export type CatalogAuthenticationRequiredReason =
+  /** No credential was presented, so there is nothing to refresh and the caller must sign in. */
+  | "no-credential"
+  /** A credential was presented and its lifetime has elapsed. A silent refresh is worth attempting before prompting anyone. */
+  | "credential-expired"
+  /** A credential was presented and the authority refused it, for example because it was revoked, malformed, or issued for another audience. Refreshing the same rejected credential is not useful; the caller must sign in again. */
+  | "credential-rejected";
+/**
+ * One inert catalog result, represented as an MCP server or discovery-only AI skill variant so kind, media type, provenance, and installability cannot contradict each other.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogCandidate".
+ */
+/** @experimental */
+export type CatalogCandidate = CatalogMcpServerCandidate | CatalogAiSkillCandidate;
+/**
+ * JSON MCP card media type accepted for install planning
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpServerCardMediaType".
+ */
+/** @experimental */
+export type McpServerCardMediaType =
+  /** The current MCP server card media type. */
+  | "application/mcp-server-card+json"
+  /** The legacy MCP server card media type, accepted for compatibility. */
+  | "application/mcp-server+json";
+/**
+ * Whether an MCP server candidate can be planned for installation
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogMcpServerInstallability".
+ */
+/** @experimental */
+export type CatalogMcpServerInstallability =
+  /** An install plan can be computed for this MCP server candidate. */
+  | "installable"
+  /** Policy forbids installing this MCP server candidate. */
+  | "not-installable-policy";
+/**
+ * What kind of resource a catalog candidate describes
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogCandidateKind".
+ */
+/** @experimental */
+export type CatalogCandidateKind =
+  /** An MCP server, which can be planned for installation. */
+  | "mcp-server"
+  /** An AI skill, which is discoverable but not installable through this surface. */
+  | "ai-skill";
+/**
+ * A wire feature a caller can require of the catalog surface, negotiated per request. A grant means the runtime understands the feature's contract, not that the deployment has enabled the operation; typed unavailable results report availability separately.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogCapability".
+ */
+/** @experimental */
+export type CatalogCapability =
+  /** Understands the current `application/mcp-server-card+json` media type. */
+  | "mcp-server-card"
+  /** Understands the legacy `application/mcp-server+json` media type. */
+  | "legacy-mcp-server-card"
+  /** Understands `application/ai-skill` candidates as discovery-only and typed non-installable. */
+  | "ai-skill-discovery"
+  /** Understands side-effect-free MCP install-plan requests, results, and plan handles; `planning-unavailable` separately reports that planning is not enabled. */
+  | "mcp-install-planning"
+  /** Understands plans that enumerate every eligible transport rather than a single preferred one. */
+  | "multiple-transport-choice";
+/**
+ * Bounded extensible wire-feature identifier. Known values are described by `CatalogCapability`; newer callers may send future identifiers so an older runtime can return a typed negotiation refusal instead of failing schema validation. Capability negotiation establishes contract understanding, while each operation's result separately reports runtime availability.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogCapabilityId".
+ */
+/** @experimental */
+export type CatalogCapabilityId = string;
+/**
+ * Which wire-contract rule an upstream response broke
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogContractViolationReason".
+ */
+/** @experimental */
+export type CatalogContractViolationReason =
+  /** A result carried both a URL and embedded data, when exactly one is permitted. */
+  | "both-url-and-data"
+  /** A result carried neither a URL nor embedded data, when exactly one is required. */
+  | "neither-url-nor-data"
+  /** Two results claimed the same normalised identity. */
+  | "duplicate-identity"
+  /** A result declared no media type, or one this contract does not model. */
+  | "unknown-media-type";
+/**
+ * Which kind of opaque handle was presented
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogHandleType".
+ */
+/** @experimental */
+export type CatalogHandleType =
+  /** A search candidate handle. */
+  | "candidate"
+  /** An install plan handle. */
+  | "plan";
+/**
+ * Why a presented handle was rejected
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogHandleRejectionReason".
+ */
+/** @experimental */
+export type CatalogHandleRejectionReason =
+  /** The handle is unparseable, unknown, or was issued for a different operation. */
+  | "invalid"
+  /** The handle's time to live has elapsed. */
+  | "stale"
+  /** The handle has already been used, and handles are single-use. */
+  | "replayed"
+  /** The handle was issued by a different runtime instance. */
+  | "foreign";
+/**
+ * Which request field was rejected before any work was done
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogInvalidRequestField".
+ */
+/** @experimental */
+export type CatalogInvalidRequestField =
+  /** The search query was empty or longer than permitted. */
+  | "query"
+  /** The requested result count fell outside its permitted range. */
+  | "limit"
+  /** The requested candidate kinds were empty or contained a duplicate. */
+  | "kinds"
+  /** The negotiation block was missing or malformed. */
+  | "contract"
+  /** The plan source was missing or malformed. */
+  | "source"
+  /** The supplied card was missing its media type, URL, or data. */
+  | "card"
+  /** The requested configuration scope is not one this runtime writes. */
+  | "scope";
+/**
+ * How a card failed validation
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogMalformedCardReason".
+ */
+/** @experimental */
+export type CatalogMalformedCardReason =
+  /** The document is not well-formed JSON. */
+  | "invalid-json"
+  /** The document does not satisfy its media type's schema. */
+  | "schema-violation"
+  /** The declared media type is not one this runtime understands. */
+  | "unsupported-media-type"
+  /** A field the media type requires is absent. */
+  | "missing-required-field"
+  /** The document exceeded the permitted size. */
+  | "size-limit-exceeded";
+/**
+ * Media type a catalog card is interpreted as
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogMediaType".
+ */
+/** @experimental */
+export type CatalogMediaType =
+  /** The current MCP server card media type. */
+  | "application/mcp-server-card+json"
+  /** The legacy MCP server card media type, accepted for compatibility. */
+  | "application/mcp-server+json"
+  /** An AI skill card. Representable and searchable, but typed non-installable. */
+  | "application/ai-skill";
+/**
+ * Why capability and protocol-version negotiation refused a caller
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogNegotiationRefusedReason".
+ */
+/** @experimental */
+export type CatalogNegotiationRefusedReason =
+  /** The caller's protocol version is below the lowest this runtime serves. */
+  | "unsupported-protocol-version"
+  /** The caller requires at least one capability this runtime cannot honour. */
+  | "unsupported-capability";
+/**
+ * Categorised network failure, low cardinality so it can be aggregated without carrying a URL
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogNetworkFailureReason".
+ */
+/** @experimental */
+export type CatalogNetworkFailureReason =
+  /** No network is available, so nothing was attempted. */
+  | "offline"
+  /** The authority's name could not be resolved. */
+  | "dns"
+  /** The request exceeded its time budget. */
+  | "timeout"
+  /** The TLS handshake or certificate validation failed. */
+  | "tls"
+  /** The connection was refused or reset. */
+  | "connection-refused"
+  /** The authority returned a status the runtime treats as a failure. */
+  | "http-status"
+  /** The response exceeded the permitted size. */
+  | "response-too-large"
+  /** A redirect was refused by the runtime's redirect policy. */
+  | "redirect-rejected";
+/**
+ * Why a discoverable candidate cannot be installed
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogNotInstallableReason".
+ */
+/** @experimental */
+export type CatalogNotInstallableReason =
+  /** This kind of resource is not installable through this surface. */
+  | "kind-not-installable"
+  /** AI skills are discoverable but have no typed importer in this phase. */
+  | "ai-skill-not-installable"
+  /** Policy forbids installing this candidate. */
+  | "policy-forbids";
+/**
+ * Which authority produced a policy decision
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanPolicySource".
+ */
+/** @experimental */
+export type McpPlanPolicySource =
+  /** No policy applied, so the server is permitted by default. */
+  | "none"
+  /** An enterprise allowlist evaluated the server. */
+  | "enterprise-allowlist"
+  /** The registry the card came from evaluated the server. */
+  | "registry-policy"
+  /** Local trust settings evaluated the server. */
+  | "local-trust";
+/**
+ * Outcome of a catalog.search call: either bounded inert candidates, or one typed refusal. Never a partial success.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogSearchResult".
+ */
+/** @experimental */
+export type CatalogSearchResult =
+  | CatalogSearchSucceeded
+  | CatalogNegotiationRefusedError
+  | CatalogUnsupportedKindError
+  | CatalogInvalidRequestError
+  | CatalogAuthenticationRequiredError
+  | CatalogPolicyRejectedError
+  | CatalogNetworkFailureError
+  | CatalogUnsafeRetrievalError
+  | CatalogMalformedCardError
+  | CatalogContractViolationError
+  | CatalogUnavailableError;
+/**
+ * Which hardened-fetch control refused a retrieval
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogUnsafeRetrievalReason".
+ */
+/** @experimental */
+export type CatalogUnsafeRetrievalReason =
+  /** The URL used a scheme the runtime refuses to fetch. */
+  | "blocked-scheme"
+  /** The URL embedded credentials. */
+  | "credentials-in-url"
+  /** The URL resolved to a loopback, private, link-local, or cloud metadata address. */
+  | "blocked-address"
+  /** A redirect target resolved to a blocked address. */
+  | "redirect-to-blocked-address"
+  /** The configured proxy policy refused the request. */
+  | "proxy-rejected"
+  /** The authority is not permitted for card retrieval. */
+  | "host-not-permitted";
+/**
+ * Why a catalog operation is not available on this runtime
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogUnavailableReason".
+ */
+/** @experimental */
+export type CatalogUnavailableReason =
+  /** Bounded search is not wired up on this runtime build. */
+  | "search-unavailable"
+  /** Install planning is not wired up on this runtime build. */
+  | "planning-unavailable"
+  /** No catalog authority is configured for this runtime. */
+  | "authority-not-configured"
+  /** The surface is disabled by policy on this runtime. */
+  | "disabled-by-policy";
+/**
+ * Why no usable transport could be offered
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogUnavailableTransportReason".
+ */
+/** @experimental */
+export type CatalogUnavailableTransportReason =
+  /** The card advertises no transport this runtime can use. */
+  | "no-eligible-transport"
+  /** Every advertised transport is of a kind this runtime does not implement. */
+  | "transport-not-supported"
+  /** Eligible remotes could not be enumerated, so no explicit choice can be offered. */
+  | "remote-enumeration-unavailable";
+/**
  * Coarse command category for grouping and behavior: runtime built-in, skill-backed command, or SDK/client-owned command
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -260,6 +676,46 @@ export type SlashCommandKind =
  */
 /** @experimental */
 export type SlashCommandInputCompletion = /** Input should complete filesystem directories. */ "directory";
+/**
+ * Whether a pending slash-command invocation effect was applied or cancelled by the host.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CommandsInvocationEffectOutcome".
+ */
+/** @experimental */
+export type CommandsInvocationEffectOutcome =
+  /** The host applied the pending invocation effect. */
+  | "applied"
+  /** The host cancelled the pending invocation effect, so any provisional state must be reverted. */
+  | "cancelled";
+
+/** @experimental */
+export type CommandsInvocationOrigin = "settings";
+/**
+ * Optional filters controlling which command sources to include in the listing.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CommandsListRequest".
+ */
+/** @experimental */
+export type CommandsListRequest =
+  | {
+      [k: string]: unknown | undefined;
+    }
+  | {
+      /**
+       * Include runtime built-in commands
+       */
+      includeBuiltins?: boolean;
+      /**
+       * Include enabled user-invocable skills and commands
+       */
+      includeSkills?: boolean;
+      /**
+       * Include commands registered by protocol clients, including SDK clients and extensions
+       */
+      includeClientCommands?: boolean;
+    };
 /**
  * Result of the queued command execution.
  *
@@ -327,6 +783,9 @@ export type DebugCollectLogsDestination =
        * When true, create the archive atomically without overwriting an existing file by appending ` (N)` before the extension as needed. Defaults to false.
        */
       noOverwrite?: boolean;
+      /**
+       * Destination variant discriminator.
+       */
       kind: "archive";
     }
   | {
@@ -334,6 +793,9 @@ export type DebugCollectLogsDestination =
        * Directory where redacted files should be staged. The directory is created if needed.
        */
       outputDirectory: string;
+      /**
+       * Destination variant discriminator.
+       */
       kind: "directory";
     };
 /**
@@ -372,6 +834,35 @@ export type DebugCollectLogsResultKind =
   | "archive"
   /** A directory containing redacted files was written. */
   | "directory";
+
+/** @experimental */
+export type DisableBypassPermissionsMode = "disable";
+/**
+ * Persisted extension discovery source
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "DiscoveredExtensionSource".
+ */
+/** @experimental */
+export type DiscoveredExtensionSource =
+  /** Extension discovered from the user's extensions directory. */
+  | "user"
+  /** Extension contributed by an installed plugin. */
+  | "plugin";
+/**
+ * Effective extension loading and agent-management mode
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "DiscoveredExtensionMode".
+ */
+/** @experimental */
+export type DiscoveredExtensionMode =
+  /** Extensions are not loaded. */
+  | "disabled"
+  /** Extensions are loaded, but the agent cannot create, reload, or manage them. */
+  | "load_only"
+  /** Extensions are loaded and the agent can create, reload, and manage them. */
+  | "load_and_augment";
 /**
  * Server transport type: stdio, http, sse (deprecated), or memory
  *
@@ -409,7 +900,19 @@ export type EventsAgentScope =
   /** Return events from all agents. */
   | "all";
 /**
- * Cursor status: 'ok' means the cursor was applied successfully; 'expired' means the cursor referred to an event that no longer exists in history (e.g. truncated or compacted away) and the read started from the beginning of the remaining history.
+ * Direction to page through the session's persisted event history. 'forward' pages from the cursor toward newer events; 'backward' returns the newest window first (tail-first) and pages toward older events. Events within a returned batch are always chronological (oldest-to-newest), even for a backward read.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "EventsReadDirection".
+ */
+/** @experimental */
+export type EventsReadDirection =
+  /** Page from the cursor toward newer events (default). */
+  | "forward"
+  /** Tail-first: return the newest events and page toward older events. */
+  | "backward";
+/**
+ * Cursor status: 'ok' means the cursor was applied successfully; 'expired' means the cursor referred to an event that no longer exists in history (e.g. truncated or compacted away) and the read fell back to a boundary of the remaining history (the beginning for a forward read, the tail for a backward read). The fallback page is a fresh boundary snapshot, not a continuation of the requested cursor, so it may overlap already-rendered events; on 'expired' a consumer should reset/rebase its pagination state (or deduplicate by event id) before continuing from the returned cursor.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "EventsCursorStatus".
@@ -510,6 +1013,164 @@ export type ExternalToolTextResultForLlmContentResourceDetails =
   | EmbeddedTextResourceContents
   | EmbeddedBlobResourceContents;
 /**
+ * Execution-critical factory storage operation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryDurableOperation".
+ */
+/** @experimental */
+export type FactoryDurableOperation =
+  /** Creating the durable run and declared phases. */
+  | "createRun"
+  /** Persisting the transition to running. */
+  | "markRunStarted"
+  /** Persisting the terminal run envelope. */
+  | "finishRun"
+  /** Persisting subagent admission accounting. */
+  | "reserveAgent"
+  /** Rolling back an uncommitted subagent admission. */
+  | "releaseAgent"
+  /** Persisting an idempotent model-usage charge. */
+  | "chargeCredit"
+  /** Persisting active execution time. */
+  | "addElapsed"
+  /** Reading the authoritative AI-credit total. */
+  | "reconcileCreditTotal"
+  /** Reading a journal entry without treating storage failure as a cache miss. */
+  | "journalGet"
+  /** Persisting a journal entry before reporting success. */
+  | "journalPut"
+  /** Renewing the durable owner lease that proves this process still owns the run. */
+  | "refreshLease";
+/**
+ * Current or terminal state of a factory run.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryRunStatus".
+ */
+/** @experimental */
+export type FactoryRunStatus =
+  /** The run was minted and is awaiting approval. */
+  | "pending"
+  /** The run is executing. */
+  | "running"
+  /** The run completed successfully. */
+  | "completed"
+  /** The run was interrupted while resource budget remained. */
+  | "halted"
+  /** The run was cancelled before completion. */
+  | "cancelled"
+  /** The factory body failed or reached a cumulative resource ceiling. */
+  | "error";
+/**
+ * Machine-readable factory run failure.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryRunFailure".
+ */
+/** @experimental */
+export type FactoryRunFailure =
+  | {
+      kind: FactoryRunFailureKind;
+      /**
+       * Approved effective ceiling that was reached.
+       */
+      value: number;
+      /**
+       * Factory run identifier.
+       */
+      runId: string;
+      /**
+       * Factory failure variant discriminator.
+       */
+      type: "factory_limit_reached";
+    }
+  | {
+      /**
+       * Factory run identifier whose changed limits were declined.
+       */
+      runId: string;
+      /**
+       * Human-readable reason the resume did not proceed.
+       */
+      reason: string;
+      /**
+       * Factory failure variant discriminator.
+       */
+      type: "factory_resume_declined";
+    }
+  | {
+      /**
+       * Stable failure code.
+       */
+      code: string;
+      operation: FactoryDurableOperation;
+      /**
+       * Factory run identifier.
+       */
+      runId: string;
+      /**
+       * Factory failure variant discriminator.
+       */
+      type: "factory_durable_failure";
+    }
+  | {
+      /**
+       * Factory run identifier.
+       */
+      runId: string;
+      /**
+       * Confirmed usage in nano-AIU, representing the floor of what the run spent.
+       */
+      drainedNanoAiu: number;
+      /**
+       * Factory failure variant discriminator.
+       */
+      type: "factory_accounting_incomplete";
+    };
+/**
+ * Cumulative resource ceiling that stopped a factory run.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryRunFailureKind".
+ */
+/** @experimental */
+export type FactoryRunFailureKind =
+  /** The run admitted the approved maximum total number of subagents. */
+  | "maxTotalSubagents"
+  /** The run reached the approved accumulated active-execution time in seconds. */
+  | "timeoutSeconds"
+  /** The run's settled subagent model usage exceeded the approved AI-credit ceiling, or no headroom remained for another subagent. */
+  | "maxAiCredits";
+/**
+ * Kind of factory progress line.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryLogLineKind".
+ */
+/** @experimental */
+export type FactoryLogLineKind =
+  /** A narrator log line. */
+  | "log"
+  /** A named factory phase marker. */
+  | "phase";
+/**
+ * Derived lifecycle state of a factory phase.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryPhaseStatus".
+ */
+/** @experimental */
+export type FactoryPhaseStatus =
+  /** The phase has not been entered yet. */
+  | "pending"
+  /** The phase is currently entered and accumulating active time. */
+  | "active"
+  /** The phase was entered and has since been closed. */
+  | "completed"
+  /** The phase was never entered because a later phase was entered or the run reached a terminal state. */
+  | "skipped";
+/**
  * Content filtering mode to apply to all tools, or a map of tool name to content filtering mode.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -521,6 +1182,155 @@ export type FilterMapping =
       [k: string]: ContentFilterMode;
     }
   | ContentFilterMode;
+/**
+ * Optional compaction parameters.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryCompactRequest".
+ */
+/** @experimental */
+export type HistoryCompactRequest =
+  | {
+      [k: string]: unknown | undefined;
+    }
+  | {
+      /**
+       * Optional user-provided instructions to focus the compaction summary
+       */
+      customInstructions?: string;
+      /**
+       * What initiated this compaction request, recorded as the `trigger` on the persisted `session.compaction_start` / `session.compaction_complete` events. When absent, the compaction is persisted without trigger attribution (initiator unknown).
+       */
+      trigger?: /** User-requested compaction, e.g. the /compact command or a direct history.compact call. */
+        | "manual"
+        /** Compaction requested while switching to a model with a smaller context window. */
+        | "model_switch";
+      /**
+       * Context window token limit this compaction is targeting, recorded as the `tokenLimit` on the persisted `session.compaction_start` / `session.compaction_complete` events. Set it when the compaction targets a window other than the compacting model's own, e.g. switching to a model with a smaller context window: the compaction still runs on the current model, so the limit that motivated it would otherwise be lost. When absent, the events record the compacting model's own resolved limit. Attribution metadata only - it does not change how much the compaction removes.
+       */
+      tokenLimit?: number;
+    };
+/**
+ * Reason a captured file was not restored.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryFileRestoreSkipReason".
+ */
+/** @experimental */
+export type HistoryFileRestoreSkipReason =
+  /** The file changed after Copilot's last captured write. */
+  | "user-modified"
+  /** A faithful preimage was not captured. */
+  | "skipped-capture";
+/**
+ * Reason a rewind read (rewind points, file-restore preview, or session diff) could not be answered from the session's file-change captures.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryRewindUnavailableReason".
+ */
+/** @experimental */
+export type HistoryRewindUnavailableReason =
+  /** The session did not opt into file-change tracking before its first turn. */
+  | "file-change-tracking-disabled"
+  /** The session still has work that may mutate files or history. Transient: the same request succeeds once the session settles, so callers should retry rather than treat it as a failure. */
+  | "session-busy"
+  /** Remote-backed rewind routing is not supported. */
+  | "unsupported-remote-session";
+/**
+ * Aggregate file change represented by a rewind preview.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryRewindChangeType".
+ */
+/** @experimental */
+export type HistoryRewindChangeType =
+  /** The discarded turns created the file. */
+  | "created"
+  /** The discarded turns deleted the file. */
+  | "deleted"
+  /** The discarded turns modified the file. */
+  | "modified";
+/**
+ * Scope of a rewind operation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryRewindMode".
+ */
+/** @experimental */
+export type HistoryRewindMode =
+  /** Discard conversation events while leaving files unchanged. */
+  | "conversation"
+  /** Discard conversation events and restore captured files changed by those turns. */
+  | "conversation-and-files";
+/**
+ * Outcome of a rewind request.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryRewindOutcome".
+ */
+/** @experimental */
+export type HistoryRewindOutcome =
+  /** The requested rewind completed; reachable in either mode. */
+  | "success"
+  /** The session still has work that may mutate files or history; reachable in either mode. */
+  | "session-busy"
+  /** A conversation-and-files rewind was requested for a session that did not enable capture; conversation-only rewinds never produce this. */
+  | "file-change-tracking-disabled"
+  /** Remote-backed rewind routing is not supported; reachable in either mode. */
+  | "unsupported-remote-session"
+  /** File restore failed and all applied file changes were rolled back; only conversation-and-files rewinds produce this. */
+  | "files-rolled-back"
+  /** File restore failed and its rollback could not fully restore the pre-rewind state; only conversation-and-files rewinds produce this. */
+  | "rollback-incomplete"
+  /** Conversation truncation failed. In conversation-and-files mode any files that were restored are left in place because conversation history cannot be un-truncated; in conversation-only mode no files are restored. Consult restoredFiles for what, if anything, was applied. */
+  | "truncation-failed"
+  /** The conversation was rewound (and, in conversation-and-files mode, captured files were restored), but persisted checkpoints could not be cleaned up; reachable in either mode. */
+  | "checkpoint-cleanup-failed"
+  /** Files and conversation were rewound, but obsolete file snapshots could not be removed; only conversation-and-files rewinds produce this. */
+  | "snapshot-prune-failed";
+/**
+ * Hook event name dispatched through the SDK callback transport.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HookType".
+ */
+/** @experimental */
+/** @internal */
+export type HookType =
+  /** Runs before a tool is invoked. */
+  | "preToolUse"
+  /** Runs before an MCP tool is invoked. */
+  | "preMcpToolCall"
+  /** Runs after a tool completes successfully. */
+  | "postToolUse"
+  /** Runs after a tool fails. */
+  | "postToolUseFailure"
+  /** Runs after the user submits a prompt. */
+  | "userPromptSubmitted"
+  /** Runs after the runtime transforms the submitted prompt for the model, before it is added to session history. */
+  | "userPromptTransformed"
+  /** Runs when a session starts. */
+  | "sessionStart"
+  /** Runs when a session ends. */
+  | "sessionEnd"
+  /** Runs after an agent result is produced. */
+  | "postResult"
+  /** Runs before a pull request description is generated. */
+  | "prePRDescription"
+  /** Runs when the agent encounters an error. */
+  | "errorOccurred"
+  /** Runs when the agent stops. */
+  | "agentStop"
+  /** Runs when a subagent starts. */
+  | "subagentStart"
+  /** Runs when a subagent stops. */
+  | "subagentStop"
+  /** Runs before conversation context is compacted. */
+  | "preCompact"
+  /** Runs when the agent requests permission. */
+  | "permissionRequest"
+  /** Runs when the agent emits a notification. */
+  | "notification";
 /**
  * Source for direct repo installs (when marketplace is empty)
  *
@@ -746,13 +1556,21 @@ export type McpAppsSetHostContextDetailsPlatform =
   /** Host runs on a mobile device */
   | "mobile";
 /**
- * MCP server configuration (stdio process or remote HTTP/SSE)
+ * Serializable MCP server configuration (stdio process or remote HTTP/SSE)
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "McpServerConfig".
+ * via the `definition` "McpSerializableServerConfig".
  */
 /** @experimental */
-export type McpServerConfig = McpServerConfigStdio | McpServerConfigHttp;
+export type McpSerializableServerConfig = McpServerConfigStdio | McpServerConfigHttp;
+/**
+ * Telemetry-obfuscation policy for an MCP server's tools.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpSafeForTelemetry".
+ */
+/** @experimental */
+export type McpSafeForTelemetry = boolean | McpSafeForTelemetryFields;
 /**
  * Set to `true` to use defaults, or provide an object with additional auth or OIDC settings.
  *
@@ -773,6 +1591,18 @@ export type McpServerConfigDeferTools =
   | "auto"
   /** Tools are always included in the initial tool list, even when tool search is enabled. */
   | "never";
+/**
+ * Local MCP transport type.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpServerConfigStdioType".
+ */
+/** @experimental */
+export type McpServerConfigStdioType =
+  /** Legacy alias for the local stdio transport. */
+  | "local"
+  /** Server communicates over stdio with a local child process. */
+  | "stdio";
 /**
  * Remote transport type. Defaults to "http" when omitted.
  *
@@ -798,6 +1628,14 @@ export type McpServerConfigHttpOauthGrantType =
   /** Headless client credentials flow using the configured OAuth client. */
   | "client_credentials";
 /**
+ * Structured MCP elicitation mode.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpElicitationFormMode".
+ */
+/** @experimental */
+export type McpElicitationFormMode = "form";
+/**
  * Host response: supply dynamic headers or decline this refresh.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -812,11 +1650,185 @@ export type McpHeadersHandlePendingHeadersRefreshRequest =
       headers: {
         [k: string]: string | undefined;
       };
+      /**
+       * Headers-refresh response variant discriminator.
+       */
       kind: "headers";
     }
   | {
+      /**
+       * Headers-refresh response variant discriminator.
+       */
       kind: "none";
     };
+/**
+ * One eligible way to run the server, represented as a tagged package or remote variant so package identity and endpoint states cannot contradict the install method.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanTransportChoice".
+ */
+/** @experimental */
+export type McpPlanTransportChoice = McpPlanTransportChoicePackage | McpPlanTransportChoiceRemote;
+/**
+ * Transport exposed by a locally launched package
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanPackageTransport".
+ */
+/** @experimental */
+export type McpPlanPackageTransport =
+  /** A locally launched process spoken to over standard input and output. */
+  "stdio";
+/**
+ * Discriminator for a package-backed transport choice
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanPackageInstallMethod".
+ */
+/** @experimental */
+export type McpPlanPackageInstallMethod = /** Install and run a local package. */ "package";
+/**
+ * One non-secret value a transport choice needs, represented as a scalar or enumerated variant so enum values cannot be missing or attached to another type.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanRequiredValue".
+ */
+/** @experimental */
+export type McpPlanRequiredValue = McpPlanRequiredValueScalar | McpPlanRequiredValueEnum;
+/**
+ * Discriminator for a scalar required value
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanRequiredValueScalarKind".
+ */
+/** @experimental */
+export type McpPlanRequiredValueScalarKind = /** The value uses one scalar type. */ "scalar";
+/**
+ * Where a required value is applied when the planned server is launched
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanValueCategory".
+ */
+/** @experimental */
+export type McpPlanValueCategory =
+  /** Set as an environment variable on the launched process. */
+  | "environment-variable"
+  /** Passed to the runtime that launches the package. */
+  | "runtime-argument"
+  /** Passed to the packaged server itself. */
+  | "package-argument"
+  /** Sent as a request header to a remote endpoint. */
+  | "header"
+  /** Substituted into the remote endpoint URL. */
+  | "url-variable";
+/**
+ * Scalar type a required value must conform to
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanScalarValueType".
+ */
+/** @experimental */
+export type McpPlanScalarValueType =
+  /** Free text. */
+  | "string"
+  /** A number. */
+  | "number"
+  /** A boolean. */
+  | "boolean"
+  /** A filesystem path. */
+  | "path";
+/**
+ * Discriminator for an enumerated required value
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanRequiredValueEnumKind".
+ */
+/** @experimental */
+export type McpPlanRequiredValueEnumKind = /** The value uses a fixed non-empty enumeration. */ "enum";
+/**
+ * Discriminator for an enumerated required value
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanEnumValueType".
+ */
+/** @experimental */
+export type McpPlanEnumValueType = /** One of a fixed, non-empty set of permitted values. */ "enum";
+/**
+ * A runtime-assigned secret placeholder. The identifier is carried once, inside the placeholder, so it cannot contradict a separate secret-id field.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanSecretReference".
+ */
+/** @experimental */
+export type McpPlanSecretReference = string;
+/**
+ * Transport exposed by a remote endpoint
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanRemoteTransport".
+ */
+/** @experimental */
+export type McpPlanRemoteTransport =
+  /** An HTTP endpoint. */
+  | "http"
+  /** A streamable HTTP endpoint. */
+  | "streamable-http"
+  /** A server-sent events endpoint. */
+  | "sse";
+/**
+ * Discriminator for a remote-endpoint transport choice
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanRemoteInstallMethod".
+ */
+/** @experimental */
+export type McpPlanRemoteInstallMethod = /** Connect to a remote endpoint. */ "remote";
+/**
+ * Configuration scope an MCP install plan targets
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanScope".
+ */
+/** @experimental */
+export type McpPlanScope = /** The user's own MCP configuration. */ "user";
+/**
+ * What policy decided for a planned server
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanPolicyDecision".
+ */
+/** @experimental */
+export type McpPlanPolicyDecision =
+  /** Policy permits the server. */
+  | "allowed"
+  /** Policy forbids the server, so the plan cannot be applied. */
+  | "blocked"
+  /** Policy permits the server only after an explicit approval. */
+  | "requires-approval";
+/**
+ * Whether a planned configuration change would create or modify an entry
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanConfigurationOperation".
+ */
+/** @experimental */
+export type McpPlanConfigurationOperation =
+  /** Creates a configuration entry that does not exist yet. */
+  | "add"
+  /** Modifies a configuration entry that already exists. */
+  | "update";
+/**
+ * Consumer allowed to call an MCP tool.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpToolUiVisibility".
+ */
+/** @experimental */
+export type McpToolUiVisibility =
+  /** The model may call the tool. */
+  | "model"
+  /** An MCP App view may call the tool. */
+  | "app";
 /**
  * Host response to the pending OAuth request.
  *
@@ -838,9 +1850,15 @@ export type McpOauthPendingRequestResponse =
        * Token lifetime in seconds, if known.
        */
       expiresIn?: number;
+      /**
+       * OAuth response variant discriminator.
+       */
       kind: "token";
     }
   | {
+      /**
+       * OAuth response variant discriminator.
+       */
       kind: "cancelled";
     };
 /**
@@ -856,6 +1874,139 @@ export type McpOauthLoginGrantType =
   /** Headless OAuth flow where a confidential client authenticates directly with a client secret. */
   | "client_credentials";
 /**
+ * Why a passive MCP OAuth probe determined authentication is needed.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpOauthProbeNeedsAuthReason".
+ */
+/** @experimental */
+export type McpOauthProbeNeedsAuthReason =
+  /** No token was sent and the server requires authentication. */
+  | "initial"
+  /** A cached token was sent and rejected. */
+  | "refresh"
+  /** The server returned a 403 insufficient_scope challenge, indicating additional scopes or audience are needed. */
+  | "upscope";
+/**
+ * Passive MCP OAuth probe result. `authenticated` means the server accepted the probe request while an OAuth-origin access token was attached; it does not prove the server required or independently validated that token. The probe does not make a second unauthenticated request. Failed is an expected probe-domain outcome; JSON-RPC errors are reserved for API-call failures.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpOauthProbeResult".
+ */
+/** @experimental */
+export type McpOauthProbeResult =
+  | {
+      httpResponse: McpOauthHttpResponse;
+      /**
+       * Probe outcome variant discriminator.
+       */
+      status: "no-auth-required";
+    }
+  | {
+      httpResponse: McpOauthHttpResponse;
+      /**
+       * Probe outcome variant discriminator.
+       */
+      status: "authenticated";
+    }
+  | {
+      httpResponse: McpOauthHttpResponse;
+      reason: McpOauthProbeNeedsAuthReason;
+      wwwAuthenticateParams?: McpOauthWWWAuthenticateParams;
+      /**
+       * Probe outcome variant discriminator.
+       */
+      status: "needs-auth";
+    }
+  | {
+      /**
+       * Human-readable probe failure detail.
+       */
+      error: string;
+      httpResponse?: McpOauthHttpResponse;
+      /**
+       * Probe outcome variant discriminator.
+       */
+      status: "failed";
+    };
+/**
+ * What an install plan is computed from: a candidate handle from a previous search, or a card supplied directly.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanInstallSource".
+ */
+/** @experimental */
+export type McpPlanInstallSource = McpPlanInstallSourceCandidate | McpPlanInstallSourceCard;
+/**
+ * Discriminator for a candidate-backed install-plan source
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanInstallSourceCandidateKind".
+ */
+/** @experimental */
+export type McpPlanInstallSourceCandidateKind = /** Plan from a candidate returned by catalog search. */ "candidate";
+/**
+ * Discriminator for a caller-supplied-card install-plan source
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanInstallSourceCardKind".
+ */
+/** @experimental */
+export type McpPlanInstallSourceCardKind = /** Plan directly from a caller-supplied card. */ "card";
+/**
+ * A card supplied directly by the caller. Exactly one of a URL or embedded data, encoded structurally so neither both nor neither can be expressed.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpServerCardReference".
+ */
+/** @experimental */
+export type McpServerCardReference = McpServerCardUrl | McpServerCardEmbedded;
+/**
+ * Discriminator for a URL-backed MCP server card
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpServerCardUrlKind".
+ */
+/** @experimental */
+export type McpServerCardUrlKind = /** Retrieve the card from its URL. */ "url";
+/**
+ * Discriminator for an embedded MCP server card
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpServerCardEmbeddedKind".
+ */
+/** @experimental */
+export type McpServerCardEmbeddedKind = /** Use the embedded card document. */ "embedded";
+/**
+ * Outcome of an mcp.planInstall call: either a normalised plan, or one typed refusal. Nothing is written in either case.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanInstallResult".
+ */
+/** @experimental */
+export type McpPlanInstallResult =
+  | McpPlanInstallPlanned
+  | CatalogNegotiationRefusedError
+  | CatalogHandleRejectedError
+  | CatalogInvalidRequestError
+  | CatalogAuthenticationRequiredError
+  | CatalogPolicyRejectedError
+  | CatalogNetworkFailureError
+  | CatalogUnsafeRetrievalError
+  | CatalogMalformedCardError
+  | CatalogContractViolationError
+  | CatalogUnavailableTransportError
+  | CatalogNotInstallableError
+  | CatalogUnavailableError;
+/**
+ * MCP server configuration (stdio, remote HTTP/SSE, or in-process)
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpServerConfig".
+ */
+/** @experimental */
+export type McpServerConfig = (McpServerConfigStdio | McpServerConfigHttp) | undefined;
+/**
  * Outcome of the sampling inference. 'success' produced a response; 'failure' encountered an error (including agent-side rejection by content filter or criteria); 'cancelled' the caller cancelled this execution via cancelSamplingExecution.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -869,6 +2020,15 @@ export type McpSamplingExecutionAction =
   | "failure"
   /** The sampling inference was cancelled before completion. */
   | "cancelled";
+/**
+ * In-process MCP transport type.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpServerConfigMemoryType".
+ */
+/** @experimental */
+/** @internal */
+export type McpServerConfigMemoryType = "memory";
 /**
  * How environment-variable values supplied to MCP servers are resolved. "direct" passes literal string values; "indirect" treats values as references (e.g. names of environment variables on the host) that the runtime resolves before launch. Defaults to the runtime's startup mode; clients that intentionally launch MCP servers with literal values (e.g. CLI prompt mode and ACP) set this to "direct".
  *
@@ -893,6 +2053,63 @@ export type SessionContextAttribution = {
    * Total token count of the current context window the entries are measured against (system message + conversation messages + tool definitions — the same total reported by /context). Divide an entry's `tokens` by this to derive its share.
    */
   totalTokens: number;
+  /**
+   * The concrete model id the entire breakdown was tokenized against (feeds the per-model token multiplier). Under `Auto` (Free/Student) this is the resolved model, not the literal `auto` sentinel, so totals are not undercounted. A single-model approximation of a potentially multi-model Auto session.
+   */
+  modelId: string;
+  /**
+   * How `modelId` was chosen. Not a closed set — tolerate unknown values. Known values today: `autoResolved` (the model Auto resolved to), `selected` (the user's explicitly selected model), `default` (a fallback before any model is known).
+   */
+  modelSource: string;
+  /**
+   * Maximum prompt tokens the resolved model accepts — the denominator for a `##k/###k` context-usage display. Mirrors `SessionContextInfo.promptTokenLimit`.
+   */
+  promptTokenLimit: number;
+  /**
+   * Prompt limit plus the model's output reserve: the full context window `categories.freeSpace` and `categories.buffer` are measured against. Mirrors `SessionContextInfo.limit`.
+   */
+  limit: number;
+  /**
+   * Output reserve plus the tokens past the buffer-exhaustion blocking threshold. Mirrors `SessionContextInfo.bufferTokens`.
+   */
+  bufferTokens: number;
+  /**
+   * Token count at which background compaction starts. Mirrors `SessionContextInfo.compactionThreshold`.
+   */
+  compactionThreshold: number;
+  /**
+   * The six normalized `/context` header buckets, computed from the same tokenization as `entries` so the two never disagree. Convenience rollups: `freeSpace` and `buffer` describe window capacity rather than occupied context, so the values do not sum to `totalTokens`.
+   */
+  categories: {
+    /**
+     * System prompt tokens, excluding custom instructions.
+     */
+    systemPrompt: number;
+    /**
+     * Custom-instructions tokens (0 when none are configured).
+     */
+    customInstructions: number;
+    /**
+     * Non-MCP tool-definition tokens.
+     */
+    systemTools: number;
+    /**
+     * MCP tool-definition tokens.
+     */
+    mcpTools: number;
+    /**
+     * Conversation (user/assistant/tool) message tokens.
+     */
+    messages: number;
+    /**
+     * Remaining unused window capacity (clamped at 0).
+     */
+    freeSpace: number;
+    /**
+     * Output reserve plus post-blocking-threshold buffer.
+     */
+    buffer: number;
+  };
   /**
    * Flat list of per-source attribution entries. Group by `kind` and render unrecognized kinds generically. Nesting and rollups are expressed via `parentId`.
    */
@@ -1066,6 +2283,23 @@ export type ModelPickerPriceCategory =
   /** Highest relative token cost tier. */
   | "very_high";
 /**
+ * Optional listing options.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ModelListRequest".
+ */
+/** @experimental */
+export type ModelListRequest =
+  | {
+      [k: string]: unknown | undefined;
+    }
+  | {
+      /**
+       * If true, bypasses the per-session model list cache and re-fetches from CAPI.
+       */
+      skipCache?: boolean;
+    };
+/**
  * Provider type. Defaults to "openai" for generic OpenAI-compatible APIs.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -1204,7 +2438,9 @@ export type PermissionDecisionApproveForSessionApproval =
   | PermissionDecisionApproveForSessionApprovalMemory
   | PermissionDecisionApproveForSessionApprovalCustomTool
   | PermissionDecisionApproveForSessionApprovalExtensionManagement
-  | PermissionDecisionApproveForSessionApprovalExtensionPermissionAccess;
+  | PermissionDecisionApproveForSessionApprovalFactory
+  | PermissionDecisionApproveForSessionApprovalExtensionPermissionAccess
+  | PermissionDecisionApproveForSessionApprovalExtensionEnvAccess;
 /**
  * Approval to persist for this location
  *
@@ -1221,7 +2457,55 @@ export type PermissionDecisionApproveForLocationApproval =
   | PermissionDecisionApproveForLocationApprovalMemory
   | PermissionDecisionApproveForLocationApprovalCustomTool
   | PermissionDecisionApproveForLocationApprovalExtensionManagement
-  | PermissionDecisionApproveForLocationApprovalExtensionPermissionAccess;
+  | PermissionDecisionApproveForLocationApprovalFactory
+  | PermissionDecisionApproveForLocationApprovalExtensionPermissionAccess
+  | PermissionDecisionApproveForLocationApprovalExtensionEnvAccess;
+/**
+ * Disposition of a permission request as observed by the responding client.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionDecisionOutcome".
+ */
+/** @experimental */
+export type PermissionDecisionOutcome =
+  /** The request was approved automatically without a new human decision. */
+  | "auto_approved"
+  /** The request was denied without an interactive user decision; source records why. */
+  | "autopilot_denied"
+  /** The response came from an interactive user prompt. */
+  | "prompted_user";
+/**
+ * Controlled reason or actor responsible for a permission response.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionDecisionSource".
+ */
+/** @experimental */
+export type PermissionDecisionSource =
+  /** The response followed the assisted-approval judge recommendation. */
+  | "assisted_approval"
+  /** A human supplied the response through an interactive prompt. */
+  | "human_response"
+  /** The host applied a standing policy or override rather than a judge recommendation or human decision. */
+  | "host_policy"
+  /** The host denied the request because no interactive user response was available. */
+  | "unattended_fallback";
+/**
+ * Client surface that submitted a permission response.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionDecisionSurface".
+ */
+/** @experimental */
+export type PermissionDecisionSurface =
+  /** The interactive Copilot CLI terminal UI. */
+  | "tui"
+  /** The non-interactive Copilot CLI prompt mode. */
+  | "prompt_mode"
+  /** The Copilot App client. */
+  | "copilot_app"
+  /** A generic Copilot SDK client. */
+  | "sdk";
 /**
  * Tool approval to persist and apply
  *
@@ -1238,7 +2522,9 @@ export type PermissionsLocationsAddToolApprovalDetails =
   | PermissionsLocationsAddToolApprovalDetailsMemory
   | PermissionsLocationsAddToolApprovalDetailsCustomTool
   | PermissionsLocationsAddToolApprovalDetailsExtensionManagement
-  | PermissionsLocationsAddToolApprovalDetailsExtensionPermissionAccess;
+  | PermissionsLocationsAddToolApprovalDetailsFactory
+  | PermissionsLocationsAddToolApprovalDetailsExtensionPermissionAccess
+  | PermissionsLocationsAddToolApprovalDetailsExtensionEnvAccess;
 /**
  * Whether the location is a git repo or directory
  *
@@ -1251,6 +2537,22 @@ export type PermissionLocationType =
   | "repo"
   /** The permission location is persisted at the working directory. */
   | "dir";
+/**
+ * Optional source for permission-mode telemetry. Defaults to `rpc` when omitted for SDK callers.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionModeSource".
+ */
+/** @experimental */
+export type PermissionModeSource =
+  /** The mode was set from a CLI command-line flag. */
+  | "cli_flag"
+  /** The mode was set by a slash command. */
+  | "slash_command"
+  /** The mode was set by confirming autopilot behavior. */
+  | "autopilot_confirmation"
+  /** The mode was set through an RPC caller. */
+  | "rpc";
 /**
  * Allowed values for the `PermissionsConfigureAdditionalContentExclusionPolicyScope` enumeration.
  *
@@ -1279,22 +2581,6 @@ export type PermissionsModifyRulesScope =
  * Optional source for allow-all telemetry. Defaults to `rpc` when omitted for SDK callers.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "PermissionsSetAllowAllSource".
- */
-/** @experimental */
-export type PermissionsSetAllowAllSource =
-  /** Allow-all was enabled from a CLI command-line flag. */
-  | "cli_flag"
-  /** Allow-all was enabled by a slash command. */
-  | "slash_command"
-  /** Allow-all was enabled by confirming autopilot behavior. */
-  | "autopilot_confirmation"
-  /** Allow-all was enabled through an RPC caller. */
-  | "rpc";
-/**
- * Optional source for allow-all telemetry. Defaults to `rpc` when omitted for SDK callers.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "PermissionsSetApproveAllSource".
  */
 /** @experimental */
@@ -1307,6 +2593,51 @@ export type PermissionsSetApproveAllSource =
   | "autopilot_confirmation"
   /** Allow-all was enabled through an RPC caller. */
   | "rpc";
+/**
+ * Optional flags controlling which side effects the reload performs.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginsReloadRequest".
+ */
+/** @experimental */
+export type PluginsReloadRequest =
+  | {
+      [k: string]: unknown | undefined;
+    }
+  | {
+      /**
+       * Reload MCP server connections after refreshing plugins. Defaults to true.
+       */
+      reloadMcp?: boolean;
+      /**
+       * Re-run custom-agent discovery after refreshing plugins. Defaults to true.
+       */
+      reloadCustomAgents?: boolean;
+      /**
+       * Re-load user, plugin, and (subject to `deferRepoHooks`) repo hooks. Defaults to true. Has no effect when the host has not registered a hook reloader (e.g. remote sessions).
+       */
+      reloadHooks?: boolean;
+      /**
+       * Re-discover and relaunch subprocess extensions (including plugin-shipped extensions) after refreshing plugins. Defaults to true. Has no effect when the session has no active extension controller (e.g. extensions were not requested for the session).
+       */
+      reloadExtensions?: boolean;
+      /**
+       * When true, skip repo-level hooks during the hook reload. Use before folder trust is confirmed; load them post-trust via `sessions.loadDeferredRepoHooks`.
+       */
+      deferRepoHooks?: boolean;
+    };
+/**
+ * Controls whether the runtime may defer loading an external tool definition.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ProtocolExternalToolDefer".
+ */
+/** @experimental */
+export type ProtocolExternalToolDefer =
+  /** The runtime may defer the tool according to its tool-loading policy. */
+  | "auto"
+  /** The runtime must include the tool without deferring it. */
+  | "never";
 /**
  * Provider family. Matches the `type` field of a BYOK provider config.
  *
@@ -1346,6 +2677,23 @@ export type ProviderEndpointTransport =
   /** WebSocket transport. */
   | "websockets";
 /**
+ * Optional model identifier to scope the endpoint snapshot to.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ProviderGetEndpointRequest".
+ */
+/** @experimental */
+export type ProviderGetEndpointRequest =
+  | {
+      [k: string]: unknown | undefined;
+    }
+  | {
+      /**
+       * Model identifier the caller intends to use against the returned endpoint. Used to pick the correct wire shape. Omit to use whichever model the session is currently using.
+       */
+      modelId?: string;
+    };
+/**
  * Attachment union accepted by push input, covering files, directories, GitHub objects, blobs, snippets, and extension context.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -1382,6 +2730,34 @@ export type PushAttachmentGitHubReferenceType =
   | "pr"
   /** GitHub discussion reference. */
   | "discussion";
+/**
+ * The UI mode the agent was in when this message was sent. Defaults to the session's current mode.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SendAgentMode".
+ */
+/** @experimental */
+export type SendAgentMode =
+  /** The agent is responding interactively to the user. */
+  | "interactive"
+  /** The agent is preparing a plan before making changes. */
+  | "plan"
+  /** The agent is working autonomously toward task completion. */
+  | "autopilot"
+  /** The agent is in shell-focused UI mode. */
+  | "shell";
+/**
+ * How to deliver the message. `enqueue` (default) appends to the message queue. `immediate` interjects during an in-progress turn.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SendMode".
+ */
+/** @experimental */
+export type SendMode =
+  /** Append the message to the normal session queue. */
+  | "enqueue"
+  /** Interject the message during the in-progress turn. */
+  | "immediate";
 /**
  * Whether this item is a queued user message or a queued slash command / model change
  *
@@ -1421,6 +2797,22 @@ export type RemoteSessionMode =
   /** Enable both remote session export and remote steering. */
   | "on";
 /**
+ * What a remote host says one of its sessions is doing right now. Deliberately coarse: this is what a host can report for EVERY session in a catalogue listing, without a client subscribing to each one. AHP's `SessionSummary.status` is the source today; `input-needed` covers both a permission prompt and an `ask_user` question, since the summary does not say which.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RemoteSessionHostStatus".
+ */
+/** @experimental */
+export type RemoteSessionHostStatus =
+  /** No turn is running. */
+  | "idle"
+  /** A turn is running. */
+  | "working"
+  /** The session is blocked on the user: a permission prompt or an `ask_user` question. */
+  | "input-needed"
+  /** The session ended its last turn in an error. */
+  | "error";
+/**
  * Whether the remote task originated from CCA or CLI `--remote`.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -1433,33 +2825,13 @@ export type RemoteSessionMetadataTaskType =
   /** CLI remote task. */
   | "cli";
 /**
- * The UI mode the agent was in when this message was sent. Defaults to the session's current mode.
+ * Current authentication information, or null when no authentication is active.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SendAgentMode".
+ * via the `definition` "SessionAuthInfoResult".
  */
 /** @experimental */
-export type SendAgentMode =
-  /** The agent is responding interactively to the user. */
-  | "interactive"
-  /** The agent is preparing a plan before making changes. */
-  | "plan"
-  /** The agent is working autonomously toward task completion. */
-  | "autopilot"
-  /** The agent is in shell-focused UI mode. */
-  | "shell";
-/**
- * How to deliver the message. `enqueue` (default) appends to the message queue. `immediate` interjects during an in-progress turn.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "SendMode".
- */
-/** @experimental */
-export type SendMode =
-  /** Append the message to the normal session queue. */
-  | "enqueue"
-  /** Interject the message during the in-progress turn. */
-  | "immediate";
+export type SessionAuthInfoResult = AuthIdentity | null;
 /**
  * Session capability enabled for this session
  *
@@ -1541,6 +2913,20 @@ export type SessionFsSqliteQueryType =
   /** Execute INSERT, UPDATE, or DELETE SQL and return affected-row metadata. */
   | "run";
 /**
+ * SQLite transaction failure classification.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionFsSqliteTransactionErrorClass".
+ */
+/** @experimental */
+export type SessionFsSqliteTransactionErrorClass =
+  /** SQLite reported BUSY or LOCKED before commit; the transaction was rolled back and may be retried. */
+  | "busyOrLocked"
+  /** The statement, database, or provider failed definitively and must not be retried automatically. */
+  | "fatal"
+  /** The transport failed after the provider may have committed; retrying could duplicate effects. */
+  | "postCommitAmbiguous";
+/**
  * Source descriptor for direct repo installs (when marketplace is empty)
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -1552,6 +2938,100 @@ export type SessionInstalledPluginSource =
   | SessionInstalledPluginSourceGitHub
   | SessionInstalledPluginSourceUrl
   | SessionInstalledPluginSourceLocal;
+/**
+ * Client population used for the prediction baseline.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionLimitPredictionClientType".
+ */
+/** @experimental */
+export type SessionLimitPredictionClientType =
+  /** Interactive CLI sessions where a user can accept, edit, or top up the limit. */
+  | "cli-interactive"
+  /** Prompt/non-interactive CLI sessions where the initial limit must cover more of the run. */
+  | "cli-prompt";
+/**
+ * Baseline fallback level used to create the prediction.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionLimitPredictionSource".
+ */
+/** @experimental */
+export type SessionLimitPredictionSource =
+  /** The prediction used the exact resolved model's baseline cell. */
+  | "model"
+  /** The exact model was unavailable, so the prediction used the model family's baseline cell. */
+  | "family"
+  /** No model or family cell was available, so the prediction used the global client-type baseline cell. */
+  | "global";
+/**
+ * Semantic usage tier used for a recommended cap or additional headroom.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionLimitPredictionTier".
+ */
+/** @experimental */
+export type SessionLimitPredictionTier =
+  /** Recommended starting tier. */
+  | "recommended"
+  /** Additional headroom for longer-running sessions. */
+  | "additional_headroom"
+  /** Generous headroom for unusually high usage. */
+  | "generous_headroom"
+  /** Maximum available headroom tier. */
+  | "maximum_headroom";
+/**
+ * Parameters for predicting an AI-credit session limit. Omitting `modelId` uses the session's currently selected model.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionLimitPredictionRequest".
+ */
+/** @experimental */
+export type SessionLimitPredictionRequest =
+  | {
+      [k: string]: unknown | undefined;
+    }
+  | {
+      /**
+       * Optional model identifier override. If omitted, the session's current model is used.
+       */
+      modelId?: string;
+      clientType?: SessionLimitPredictionClientType;
+    };
+/**
+ * Prediction result. Available results include prediction details; unavailable results include an explicit reason.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionLimitPredictionResult".
+ */
+/** @experimental */
+export type SessionLimitPredictionResult =
+  | {
+      prediction: SessionLimitPredictionDetails;
+      /**
+       * Prediction result variant discriminator.
+       */
+      kind: "available";
+    }
+  | {
+      reason: SessionLimitPredictionUnavailableReason;
+      /**
+       * Prediction result variant discriminator.
+       */
+      kind: "unavailable";
+    };
+/**
+ * Reason a prediction could not be computed.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionLimitPredictionUnavailableReason".
+ */
+/** @experimental */
+export type SessionLimitPredictionUnavailableReason =
+  /** The current model is auto and has not resolved to a concrete model yet. */
+  | "auto_unresolved"
+  /** No model was provided and the session does not currently have a selected model. */
+  | "no_model";
 /**
  * Local or remote session metadata entry. Narrow on `isRemote` to access source-specific fields.
  *
@@ -1632,6 +3112,30 @@ export type SessionOpenOptionsReasoningSummary =
   | "concise"
   /** Request a detailed summary of model reasoning. */
   | "detailed";
+/**
+ * Controls automatic non-interactive profile loading where supported. Explicit initScripts are unaffected.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ShellInitProfile".
+ */
+/** @experimental */
+export type ShellInitProfile =
+  /** Disable automatic non-interactive profile loading. Explicit initScripts still run. */
+  | "none"
+  /** Allow automatic non-interactive profile loading when supported. Explicit initScripts still run. */
+  | "non-interactive";
+/**
+ * Supported built-in shells for initialization scripts.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ShellInitScriptShell".
+ */
+/** @experimental */
+export type ShellInitScriptShell =
+  /** Source the script in the built-in Bash shell on macOS and Linux. */
+  | "bash"
+  /** Source the script in the built-in PowerShell shell on Windows. */
+  | "powershell";
 /**
  * How MCP server environment values are interpreted.
  *
@@ -1846,7 +3350,11 @@ export type SlashCommandInvocationResult =
   | SlashCommandTextResult
   | SlashCommandAgentPromptResult
   | SlashCommandCompletedResult
-  | SlashCommandSelectSubcommandResult;
+  | SlashCommandSelectSubcommandResult
+  | SlashCommandAddTimelineEntryResult
+  | SlashCommandShowDialogResult
+  | SlashCommandSetModelResult
+  | SlashCommandSetPlanModelResult;
 /**
  * Subagent settings to apply, or null to clear the live session override
  *
@@ -1946,6 +3454,32 @@ export type TaskShellInfoAttachmentMode =
  */
 /** @experimental */
 export type TaskProgress = (TaskAgentProgress | TaskShellProgress) | null;
+/**
+ * Canonical result returned by a session tool.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolResult".
+ */
+/** @experimental */
+export type ToolResult = string | ToolResultExpanded;
+/**
+ * Execution outcome classification.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolResultType".
+ */
+/** @experimental */
+export type ToolResultType =
+  /** The tool completed successfully. */
+  | "success"
+  /** The tool failed. */
+  | "failure"
+  /** The tool exceeded its execution timeout. */
+  | "timeout"
+  /** The tool request was rejected before execution. */
+  | "rejected"
+  /** Permission policy denied the tool request. */
+  | "denied";
 /**
  * User's choice for auto-mode switching: yes (allow this turn), yes_always (allow + persist as setting), or no (decline).
  *
@@ -2110,6 +3644,38 @@ export type WorkspacesWorkspaceDetailsHostType =
  */
 /** @experimental */
 export type AccountGetAllUsersResult = AccountAllUsers[];
+/**
+ * The number of running background agents (task-registry agents) that were cancelled.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionCancelAllBackgroundAgentsResult".
+ */
+/** @experimental */
+export type SessionCancelAllBackgroundAgentsResult = number;
+/**
+ * Authentication accounts available to the internal session host.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionGitHubAuthGetAllAuthAvailableResult".
+ */
+/** @experimental */
+export type SessionGitHubAuthGetAllAuthAvailableResult = SessionAuthStatus[];
+/**
+ * Whether the current authentication was logged out.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionGitHubAuthLogoutResult".
+ */
+/** @experimental */
+export type SessionGitHubAuthLogoutResult = boolean;
+/**
+ * Whether the requested authentication was logged out.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionGitHubAuthLogoutUserResult".
+ */
+/** @experimental */
+export type SessionGitHubAuthLogoutUserResult = boolean;
 
 /**
  * Parameters for aborting the current turn
@@ -2139,7 +3705,7 @@ export interface AbortResult {
   error?: string;
 }
 /**
- * Authenticated account entry returned by `account.getAllUsers`, with auth info and an optional associated token.
+ * Authenticated account entry returned by `account.getAllUsers`.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "AccountAllUsers".
@@ -2148,12 +3714,16 @@ export interface AbortResult {
 export interface AccountAllUsers {
   authInfo: AuthInfo;
   /**
+   * Opaque identifier accepted by account and model selection APIs
+   */
+  selectionId?: string;
+  /**
    * Associated token, if available
    */
   token?: string;
 }
 /**
- * Authentication-info variant for GitHub-internal HMAC auth, carrying the public GitHub host and HMAC secret.
+ * Authentication-info input variant for GitHub-internal HMAC auth, carrying the public GitHub host and HMAC secret.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "HMACAuthInfo".
@@ -2235,6 +3805,9 @@ export interface CopilotUserResponse {
             [k: string]: unknown | undefined;
           }
         | ({
+            /**
+             * GitHub login of the organization.
+             */
             login?:
               | (
                   | {
@@ -2243,6 +3816,9 @@ export interface CopilotUserResponse {
                   | string
                 )
               | null;
+            /**
+             * Display name of the organization.
+             */
             name?:
               | (
                   | {
@@ -2331,10 +3907,26 @@ export interface CopilotUserResponse {
  */
 /** @experimental */
 export interface CopilotUserResponseEndpoints {
+  /**
+   * Copilot API endpoint URL.
+   */
   api?: string;
+  /**
+   * Origin-tracker endpoint URL.
+   */
   "origin-tracker"?: string;
+  /**
+   * Copilot proxy endpoint URL.
+   */
   proxy?: string;
+  /**
+   * Copilot telemetry endpoint URL.
+   */
   telemetry?: string;
+  /**
+   * Experimental-service endpoint URL.
+   */
+  exp?: string;
 }
 /**
  * Quota snapshot map from the raw Copilot user-response passthrough, with chat, completions, premium-interactions, and other entries.
@@ -2536,7 +4128,7 @@ export interface CopilotUserResponseQuotaSnapshotsPremiumInteractions {
   token_based_billing?: boolean;
 }
 /**
- * Authentication-info variant for a token sourced from an environment variable, with host, optional login, token, and env var name.
+ * Authentication-info input variant for a token sourced from an environment variable, with host, optional login, token, and env var name.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "EnvAuthInfo".
@@ -2566,7 +4158,7 @@ export interface EnvAuthInfo {
   copilotUser?: CopilotUserResponse;
 }
 /**
- * Authentication-info variant for SDK-configured token authentication, carrying host and the secret token value.
+ * Authentication-info input variant for SDK-configured token authentication, carrying host and the secret token value.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "TokenAuthInfo".
@@ -2628,7 +4220,7 @@ export interface UserAuthInfo {
   copilotUser?: CopilotUserResponse;
 }
 /**
- * Authentication-info variant for GitHub CLI credentials, carrying host, login, and the `gh auth token` value.
+ * Authentication-info input variant for GitHub CLI credentials, carrying host, login, and the `gh auth token` value.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "GhCliAuthInfo".
@@ -2654,7 +4246,7 @@ export interface GhCliAuthInfo {
   copilotUser?: CopilotUserResponse;
 }
 /**
- * Authentication-info variant for API-key authentication to a non-GitHub LLM provider, carrying the secret `apiKey` and host.
+ * Authentication-info input variant for API-key authentication to a non-GitHub LLM provider, carrying the secret `apiKey` and host.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "ApiKeyAuthInfo".
@@ -2693,7 +4285,11 @@ export interface AccountGetCurrentAuthResult {
 /** @experimental */
 export interface AccountGetQuotaRequest {
   /**
-   * GitHub token for per-user quota lookup. When provided, resolves this token to determine the user's quota instead of using the global auth.
+   * Opaque account identifier returned by `account.getAllUsers`. When omitted, the current account is used.
+   */
+  selectionId?: string;
+  /**
+   * GitHub token accepted for compatibility with existing SDK clients. When provided, resolves this token instead of using the current account.
    */
   gitHubToken?: string;
 }
@@ -2788,16 +4384,6 @@ export interface AccountLoginResult {
   storedInVault: boolean;
 }
 /**
- * User to log out
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "AccountLogoutRequest".
- */
-/** @experimental */
-export interface AccountLogoutRequest {
-  authInfo: AuthInfo;
-}
-/**
  * Logout result indicating if more users remain
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -2859,7 +4445,7 @@ export interface AgentGetCurrentResult {
   agent?: AgentInfo | null;
 }
 /**
- * Custom agent metadata, including identifiers, display details, source, tools, model, MCP servers, skills, and file path.
+ * Agent metadata, including identifiers, display details, source, tools, model, MCP servers, skills, and file path.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "AgentInfo".
@@ -2867,7 +4453,7 @@ export interface AgentGetCurrentResult {
 /** @experimental */
 export interface AgentInfo {
   /**
-   * Unique identifier of the custom agent
+   * Name of the agent. Use `id` as the stable selection identifier.
    */
   name: string;
   /**
@@ -2896,7 +4482,7 @@ export interface AgentInfo {
    */
   tools?: string[];
   /**
-   * Preferred model id for this agent. When omitted, inherits the outer agent's model.
+   * Authored preferred model id for this agent. Runtime model selection may choose a different model; omitted means no authored preference.
    */
   model?: string;
   /**
@@ -2905,15 +4491,19 @@ export interface AgentInfo {
    * @experimental
    */
   mcpServers?: {
-    [k: string]: unknown | undefined;
+    [k: string]: JsonValue | undefined;
   };
   /**
    * Skill names preloaded into this agent's context. Omitted means none.
    */
   skills?: string[];
+  /**
+   * Authored base prompt for the agent. Runtime prompt assembly may add dynamic context at invocation time. Omitted from `session.agent.list` unless `includePrompt` is true.
+   */
+  prompt?: string;
 }
 /**
- * Custom agents available to the session.
+ * Agents available to the session.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "AgentList".
@@ -2921,7 +4511,7 @@ export interface AgentInfo {
 /** @experimental */
 export interface AgentList {
   /**
-   * Available custom agents
+   * Available agents
    */
   agents: AgentInfo[];
 }
@@ -2950,12 +4540,6 @@ export interface AgentRegistryLiveTargetEntry {
    * TCP port the entry's JSON-RPC server is listening on
    */
   port: number;
-  /**
-   * Connection token (null when the target is unauthenticated)
-   *
-   * @internal
-   */
-  token?: string | null;
   /**
    * Session ID of the foreground session for this entry
    */
@@ -2995,6 +4579,12 @@ export interface AgentRegistryLiveTargetEntry {
    * Wall-clock milliseconds since the watcher last observed this entry (heartbeat freshness)
    */
   lastSeenMs: number;
+  /**
+   * Connection token (null when the target is unauthenticated)
+   *
+   * @internal
+   */
+  token?: string | null;
 }
 /**
  * Per-spawn log-capture outcome; populated from spawnLiveTarget.
@@ -3183,6 +4773,23 @@ export interface AgentSelectResult {
   agent: AgentInfo;
 }
 /**
+ * An in-memory authored prompt override for an available agent.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AgentSetPromptRequest".
+ */
+/** @experimental */
+export interface AgentSetPromptRequest {
+  /**
+   * Stable effective agent id. Plugin namespace separators are normalized.
+   */
+  id: string;
+  /**
+   * Replacement authored prompt. Empty text is valid.
+   */
+  prompt: string;
+}
+/**
  * Optional project paths to include when enumerating agent discovery directories.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -3200,36 +4807,162 @@ export interface AgentsGetDiscoveryPathsRequest {
   excludeHostAgents?: boolean;
 }
 /**
- * Indicates whether the operation succeeded and reports the post-mutation state.
+ * Credential-free authentication identity safe to expose to hosts and user interfaces.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "AllowAllPermissionSetResult".
+ * via the `definition` "AuthIdentity".
  */
 /** @experimental */
-export interface AllowAllPermissionSetResult {
+export interface AuthIdentity {
+  type: AuthInfoType;
   /**
-   * Whether the operation succeeded
+   * Authentication host
    */
-  success: boolean;
+  host: string;
   /**
-   * Authoritative full allow-all state after the mutation
+   * Authenticated login, when available
    */
-  enabled: boolean;
-  mode?: PermissionsAllowAllMode;
+  login?: string;
+  /**
+   * Name of the environment variable that supplied the credential, when applicable
+   */
+  envVar?: string;
+  copilotUser?: CopilotUserResponse;
 }
 /**
- * Current allow-all permission mode.
+ * Validation error from an authentication attempt.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "AllowAllPermissionState".
+ * via the `definition` "AuthValidationError".
  */
 /** @experimental */
-export interface AllowAllPermissionState {
+export interface AuthValidationError {
   /**
-   * Whether full allow-all permissions are currently active
+   * Authentication validation error message
    */
-  enabled: boolean;
-  mode?: PermissionsAllowAllMode;
+  message: string;
+  /**
+   * Optional message returned by GitHub
+   */
+  githubMessage?: string;
+}
+/**
+ * The running runtime's complete catalog of well-known built-in model IDs, including supported models and additional IDs with built-in metadata.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "BuiltInModelCatalog".
+ */
+/** @experimental */
+export interface BuiltInModelCatalog {
+  /**
+   * Built-in model entries.
+   */
+  models: BuiltInModelCatalogEntry[];
+}
+/**
+ * A well-known model in the runtime's built-in catalog.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "BuiltInModelCatalogEntry".
+ */
+/** @experimental */
+export interface BuiltInModelCatalogEntry {
+  /**
+   * Well-known runtime model ID suitable for provider or provider-model metadata. This is not necessarily the provider-facing deployment or model name and does not indicate CAPI entitlement or provider availability.
+   */
+  id: string;
+}
+/**
+ * Rust-owned metadata and input schema for a built-in tool.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "BuiltinToolDescriptor".
+ */
+/** @experimental */
+export interface BuiltinToolDescriptor {
+  /**
+   * Stable name used to invoke the built-in tool.
+   */
+  name: string;
+  /**
+   * Optional human-readable title for the tool.
+   */
+  title: string | null;
+  /**
+   * Model-facing description of the tool's behavior.
+   */
+  description: string;
+  /**
+   * JSON Schema for the tool input, or null when the tool uses a custom format.
+   */
+  inputSchema: BuiltinToolInputSchema | null;
+  /**
+   * Optional supplemental usage instructions for the tool.
+   */
+  instructions: string | null;
+  /**
+   * Optional tool category discriminator.
+   */
+  type: string | null;
+  /**
+   * Optional custom input format used instead of a JSON Schema.
+   */
+  format: BuiltinToolFormat | null;
+  safeForTelemetry: BuiltinToolSafeForTelemetry;
+  /**
+   * Whether the tool executes commands in a terminal.
+   */
+  isTerminal: boolean;
+  /**
+   * Whether the tool provides a specialized intention summary.
+   */
+  hasSummariseIntention: boolean;
+}
+/**
+ * JSON Schema object accepted by a built-in tool.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "BuiltinToolInputSchema".
+ */
+/** @experimental */
+export interface BuiltinToolInputSchema {
+  type: BuiltinToolInputSchemaType;
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * Custom grammar input format accepted by a built-in tool.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "BuiltinToolFormat".
+ */
+/** @experimental */
+export interface BuiltinToolFormat {
+  type: BuiltinToolFormatType;
+  /**
+   * Grammar syntax used by the format definition.
+   */
+  syntax: string;
+  /**
+   * Grammar definition accepted by the tool.
+   */
+  definition: string;
+}
+/**
+ * Per-field telemetry-safety policy for a built-in tool.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "BuiltinToolSafeTelemetryFields".
+ */
+/** @experimental */
+export interface BuiltinToolSafeTelemetryFields {
+  /**
+   * Whether the tool name may be included in telemetry without obfuscation.
+   */
+  name?: boolean;
+  /**
+   * Whether tool input names may be included in telemetry without obfuscation.
+   */
+  inputsNames?: boolean;
 }
 /**
  * Cancellation result for a user-requested shell command.
@@ -3263,16 +4996,6 @@ export interface CanvasAction {
   inputSchema?: CanvasJsonSchema;
 }
 /**
- * JSON Schema for canvas open input
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "CanvasJsonSchema".
- */
-/** @experimental */
-export interface CanvasJsonSchema {
-  [k: string]: unknown | undefined;
-}
-/**
  * Canvas action invocation parameters.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -3291,19 +5014,7 @@ export interface CanvasActionInvokeRequest {
   /**
    * Action input
    */
-  input?: {
-    [k: string]: unknown | undefined;
-  };
-}
-/**
- * Provider-supplied action result.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "CanvasActionInvokeResult".
- */
-/** @experimental */
-export interface CanvasActionInvokeResult {
-  [k: string]: unknown | undefined;
+  input?: JsonValue;
 }
 /**
  * Canvas close parameters.
@@ -3370,6 +5081,10 @@ export interface DiscoveredCanvas {
    * Short, single-sentence description shown to the agent in canvas catalogs.
    */
   description: string;
+  /**
+   * Host-local PNG path for the canvas icon, when supplied
+   */
+  icon?: string;
   inputSchema?: CanvasJsonSchema;
   /**
    * Actions the agent or host may invoke on an open instance
@@ -3426,6 +5141,10 @@ export interface OpenCanvasInstance {
    */
   canvasId: string;
   /**
+   * Host-local PNG path for the canvas icon, when supplied
+   */
+  icon?: string;
+  /**
    * Rendered title
    */
   title?: string;
@@ -3440,9 +5159,7 @@ export interface OpenCanvasInstance {
   /**
    * Input supplied when the instance was opened
    */
-  input?: {
-    [k: string]: unknown | undefined;
-  };
+  input?: JsonValue;
 }
 /**
  * Canvas open parameters.
@@ -3467,9 +5184,7 @@ export interface CanvasOpenRequest {
   /**
    * Canvas open input
    */
-  input?: {
-    [k: string]: unknown | undefined;
-  };
+  input?: JsonValue;
 }
 /**
  * Canvas close parameters sent to the provider.
@@ -3542,9 +5257,7 @@ export interface CanvasProviderInvokeActionRequest {
   /**
    * Action input
    */
-  input?: {
-    [k: string]: unknown | undefined;
-  };
+  input?: JsonValue;
   host?: CanvasHostContext;
   session?: CanvasSessionContext;
 }
@@ -3575,9 +5288,7 @@ export interface CanvasProviderOpenRequest {
   /**
    * Canvas open input
    */
-  input?: {
-    [k: string]: unknown | undefined;
-  };
+  input?: JsonValue;
   host?: CanvasHostContext;
   session?: CanvasSessionContext;
 }
@@ -3603,6 +5314,40 @@ export interface CanvasProviderOpenResult {
   status?: string;
 }
 /**
+ * Internal canvas provider registration parameters.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CanvasProviderRegisterRequest".
+ */
+/** @experimental */
+export interface CanvasProviderRegisterRequest {
+  /**
+   * Connection identifier for callback routing
+   */
+  connectionId: string;
+  /**
+   * Provider metadata supplied by the host
+   */
+  info: JsonValue;
+  /**
+   * Canvas contributions supplied by the provider
+   */
+  canvases: JsonValue[];
+}
+/**
+ * Internal canvas provider unregistration parameters.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CanvasProviderUnregisterRequest".
+ */
+/** @experimental */
+export interface CanvasProviderUnregisterRequest {
+  /**
+   * Connection identifier to unregister
+   */
+  connectionId: string;
+}
+/**
  * Options scoped to the built-in CAPI (Copilot API) provider.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -3614,6 +5359,520 @@ export interface CapiSessionOptions {
    * Whether to use WebSocket transport for the CAPI Responses API. Enabled by default when the model advertises `ws:/responses` support; set to `false` to force the HTTP Responses transport in environments where WebSockets are blocked (e.g. behind a proxy). Setting this to `false` is equivalent to the `COPILOT_CLI_DISABLE_WEBSOCKET_RESPONSES` environment variable.
    */
   enableWebSocketResponses?: boolean;
+}
+/**
+ * Semantic digest of a strictly parsed and schema-validated JSON MCP card. Both URL-backed and embedded cards are canonicalised with RFC 8785 JSON Canonicalization Scheme, encoded as UTF-8, and hashed with SHA-256.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CardDigest".
+ */
+/** @experimental */
+export interface CardDigest {
+  algorithm: CardDigestAlgorithm;
+  value: CardDigestValue;
+}
+/**
+ * An inert AI skill catalog result. AI skills are discovery-only and cannot be represented as installable through this surface.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogAiSkillCandidate".
+ */
+/** @experimental */
+export interface CatalogAiSkillCandidate {
+  /**
+   * Opaque, runtime-instance scoped, TTL-bound, single-use handle for this candidate. Carries no readable information and is rejected when stale, replayed, or presented to a different runtime instance. Never logged.
+   */
+  handle: string;
+  /**
+   * ISO 8601 timestamp after which the handle is stale and will be rejected.
+   */
+  handleExpiresAt: string;
+  /**
+   * Discriminator: this candidate describes an AI skill
+   */
+  kind: "ai-skill";
+  /**
+   * Media type of the underlying AI skill card
+   */
+  mediaType: "application/ai-skill";
+  /**
+   * AI skills are discovery-only and cannot be installed through this surface
+   */
+  installability: "not-installable-kind";
+  /**
+   * Display name taken verbatim from the card. Inert untrusted text.
+   */
+  displayName: string;
+  /**
+   * Description taken verbatim from the card. Inert untrusted text.
+   */
+  description?: string;
+  /**
+   * Publisher taken verbatim from the card. Inert untrusted text.
+   */
+  publisher?: string;
+  source: CatalogCandidateSource;
+  provenance: CatalogAiSkillCandidateProvenance;
+}
+/**
+ * Candidate whose card is retrieved from a URL through the runtime's hardened fetch boundary.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogCandidateSourceUrl".
+ */
+/** @experimental */
+export interface CatalogCandidateSourceUrl {
+  /**
+   * Discriminator: the card is URL-backed, and carries no embedded data
+   */
+  kind: "url";
+  /**
+   * Card URL as advertised. Inert untrusted data: the runtime retrieves it only through its own hardened boundary, and it is never logged.
+   */
+  url: string;
+}
+/**
+ * Candidate whose card reference arrived inline. The document and its content-derived properties stay behind the runtime boundary.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogCandidateSourceEmbedded".
+ */
+/** @experimental */
+export interface CatalogCandidateSourceEmbedded {
+  /**
+   * Discriminator: the card is embedded, and carries no URL
+   */
+  kind: "embedded";
+}
+/**
+ * Where and when an AI skill catalog reference was observed. Discovery provenance deliberately carries no content digest because search does not establish the exact validated content a later plan will bind.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogAiSkillCandidateProvenance".
+ */
+/** @experimental */
+export interface CatalogAiSkillCandidateProvenance {
+  /**
+   * Host of the catalog authority that advertised the reference, without path, query, or credentials. Inert untrusted data.
+   */
+  authority: string;
+  /**
+   * ISO 8601 timestamp at which the runtime observed the catalog reference. This is not a retrieval or validation timestamp.
+   */
+  observedAt: string;
+  /**
+   * Media type advertised for the referenced AI skill card
+   */
+  mediaType: "application/ai-skill";
+}
+/**
+ * An optional catalog authentication exchange did not establish the caller's identity. Anonymous search remains supported; this refusal is reserved for an operation that cannot continue after the attempted exchange. It is distinct from `policy-rejected` and from a network failure, and the reason identifies the recovery action.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogAuthenticationRequiredError".
+ */
+/** @experimental */
+export interface CatalogAuthenticationRequiredError {
+  /**
+   * Discriminator: the caller is not authenticated
+   */
+  kind: "authentication-required";
+  reason: CatalogAuthenticationRequiredReason;
+  /**
+   * Human-readable explanation, safe to surface. Never contains a credential or token, nor a query, URL, handle, or secret.
+   */
+  message: string;
+}
+/**
+ * An inert MCP server catalog result. Every free-text field is untrusted external data and must never be treated as an instruction, and the handle is the only way to refer to the candidate in a later operation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogMcpServerCandidate".
+ */
+/** @experimental */
+export interface CatalogMcpServerCandidate {
+  /**
+   * Opaque, runtime-instance scoped, TTL-bound, single-use handle for this candidate. Carries no readable information and is rejected when stale, replayed, or presented to a different runtime instance. Never logged.
+   */
+  handle: string;
+  /**
+   * ISO 8601 timestamp after which the handle is stale and will be rejected.
+   */
+  handleExpiresAt: string;
+  /**
+   * Discriminator: this candidate describes an MCP server
+   */
+  kind: "mcp-server";
+  mediaType: McpServerCardMediaType;
+  installability: CatalogMcpServerInstallability;
+  /**
+   * Display name taken verbatim from the card. Inert untrusted text.
+   */
+  displayName: string;
+  /**
+   * Description taken verbatim from the card. Inert untrusted text.
+   */
+  description?: string;
+  /**
+   * Publisher taken verbatim from the card. Inert untrusted text.
+   */
+  publisher?: string;
+  source: CatalogCandidateSource;
+  provenance: CatalogMcpServerCandidateProvenance;
+}
+/**
+ * Where and when an MCP server catalog reference was observed. Discovery provenance deliberately carries no content digest because search does not establish the exact validated content a later plan will bind.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogMcpServerCandidateProvenance".
+ */
+/** @experimental */
+export interface CatalogMcpServerCandidateProvenance {
+  /**
+   * Host of the catalog authority that advertised the reference, without path, query, or credentials. Inert untrusted data.
+   */
+  authority: string;
+  /**
+   * ISO 8601 timestamp at which the runtime observed the catalog reference. This is not a retrieval or validation timestamp.
+   */
+  observedAt: string;
+  mediaType: McpServerCardMediaType;
+}
+/**
+ * The protocol version and capability set a caller requires, supplied on every catalog request so negotiation cannot be skipped by omission.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogClientContract".
+ */
+/** @experimental */
+export interface CatalogClientContract {
+  /**
+   * SDK protocol version the caller was generated against. A caller below the runtime's minimum supported version is refused rather than served a partial result.
+   */
+  protocolVersion: number;
+  /**
+   * Wire features the caller requires the runtime to understand. Identifiers are bounded but extensible so a newer caller can negotiate with an older runtime. Requiring an unknown feature yields a typed refusal listing what is understood, never a partial grant. A grant does not promise that a deployment has enabled the operation; typed unavailable results report that separately.
+   *
+   * @maxItems 32
+   */
+  requiredCapabilities: CatalogCapabilityId[];
+}
+/**
+ * An upstream catalog response broke the wire contract. Most importantly, every result must carry exactly one of a URL or embedded data: a result carrying both, or neither, is refused here rather than being guessed at.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogContractViolationError".
+ */
+/** @experimental */
+export interface CatalogContractViolationError {
+  /**
+   * Discriminator: the upstream response broke the contract
+   */
+  kind: "contract-violation";
+  reason: CatalogContractViolationReason;
+  /**
+   * Human-readable explanation, safe to surface. Never echoes response content, nor a query, URL, handle, or secret.
+   */
+  message: string;
+}
+/**
+ * A presented handle was not accepted. Handles are runtime-instance scoped, TTL-bound, and single-use, so each way of failing is reported distinctly.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogHandleRejectedError".
+ */
+/** @experimental */
+export interface CatalogHandleRejectedError {
+  /**
+   * Discriminator: a handle was rejected
+   */
+  kind: "handle-rejected";
+  handleType: CatalogHandleType;
+  reason: CatalogHandleRejectionReason;
+  /**
+   * Human-readable explanation, safe to surface. Never contains the handle itself, nor a query, URL, or secret.
+   */
+  message: string;
+}
+/**
+ * The request was rejected before any work was done, because a bounded field fell outside its permitted range or a required field was unusable.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogInvalidRequestError".
+ */
+/** @experimental */
+export interface CatalogInvalidRequestError {
+  /**
+   * Discriminator: the request itself was invalid
+   */
+  kind: "invalid-request";
+  field: CatalogInvalidRequestField;
+  /**
+   * Human-readable explanation, safe to surface. Never echoes the offending value, nor a query, URL, handle, or secret.
+   */
+  message: string;
+}
+/**
+ * A card could not be parsed or did not satisfy its declared media type's schema.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogMalformedCardError".
+ */
+/** @experimental */
+export interface CatalogMalformedCardError {
+  /**
+   * Discriminator: the card was malformed
+   */
+  kind: "malformed-card";
+  reason: CatalogMalformedCardReason;
+  mediaType?: CatalogMediaType;
+  /**
+   * Human-readable explanation, safe to surface. Never echoes card content, nor a query, URL, handle, or secret.
+   */
+  message: string;
+}
+/**
+ * The protocol version and capability set the runtime actually honoured for a successful catalog operation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogNegotiatedContract".
+ */
+/** @experimental */
+export interface CatalogNegotiatedContract {
+  /**
+   * Protocol version of the runtime that served the request.
+   */
+  runtimeProtocolVersion: number;
+  /**
+   * Wire features the runtime understood for this operation. Always a superset of the caller's required features, because any shortfall is a refusal instead. Operation availability remains a separate typed result.
+   */
+  grantedCapabilities: CatalogCapability[];
+}
+/**
+ * The caller's protocol version or required capabilities cannot be honoured. Returned instead of a partial or ambiguous success.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogNegotiationRefusedError".
+ */
+/** @experimental */
+export interface CatalogNegotiationRefusedError {
+  /**
+   * Discriminator: capability or protocol-version negotiation failed
+   */
+  kind: "negotiation-refused";
+  reason: CatalogNegotiationRefusedReason;
+  /**
+   * Protocol version of the runtime that refused the request.
+   */
+  runtimeProtocolVersion: number;
+  /**
+   * Lowest caller protocol version this runtime will serve.
+   */
+  minimumSupportedProtocolVersion: number;
+  /**
+   * Every wire feature this runtime understands, so the caller can retry within that contract. This list does not imply that every deployment has enabled every operation.
+   */
+  supportedCapabilities: CatalogCapability[];
+  /**
+   * The subset of the caller's bounded extensible capability identifiers this runtime cannot honour.
+   *
+   * @maxItems 32
+   */
+  unsupportedCapabilities: CatalogCapabilityId[];
+  /**
+   * Human-readable explanation, safe to surface. Never contains a query, URL, handle, or secret.
+   */
+  message: string;
+}
+/**
+ * The runtime could not reach the catalog authority or retrieve a card. Covers being offline as well as transport-level failure.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogNetworkFailureError".
+ */
+/** @experimental */
+export interface CatalogNetworkFailureError {
+  /**
+   * Discriminator: the network operation failed
+   */
+  kind: "network-failure";
+  reason: CatalogNetworkFailureReason;
+  /**
+   * HTTP status code, when the failure was a rejected response.
+   */
+  statusCode?: number;
+  /**
+   * Human-readable explanation, safe to surface. Never contains a query, URL, handle, or secret.
+   */
+  message: string;
+}
+/**
+ * The candidate is discoverable but cannot be installed. `application/ai-skill` resolves here, because it stays searchable while remaining typed non-installable.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogNotInstallableError".
+ */
+/** @experimental */
+export interface CatalogNotInstallableError {
+  /**
+   * Discriminator: the candidate cannot be installed
+   */
+  kind: "not-installable";
+  reason: CatalogNotInstallableReason;
+  /**
+   * Human-readable explanation, safe to surface. Never contains a query, URL, handle, or secret.
+   */
+  message: string;
+}
+/**
+ * Registry or enterprise policy refused the operation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogPolicyRejectedError".
+ */
+/** @experimental */
+export interface CatalogPolicyRejectedError {
+  /**
+   * Discriminator: policy refused the operation
+   */
+  kind: "policy-rejected";
+  source: McpPlanPolicySource;
+  /**
+   * Human-readable explanation, safe to surface. Never contains a query, URL, handle, or secret.
+   */
+  message: string;
+}
+/**
+ * A bounded catalog search. Both the query length and the result count are capped by the schema so a caller cannot request an unbounded scan.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogSearchRequest".
+ */
+/** @experimental */
+export interface CatalogSearchRequest {
+  contract: CatalogClientContract;
+  /**
+   * Free-text search query. Never written to logs or telemetry.
+   */
+  query: string;
+  /**
+   * Maximum number of candidates to return. Defaults to 10 when omitted.
+   */
+  limit?: number;
+  /**
+   * Restrict results to these candidate kinds. When omitted, every kind the runtime supports is searched.
+   *
+   * @minItems 1
+   * @maxItems 2
+   */
+  kinds?: [CatalogCandidateKind] | [CatalogCandidateKind, CatalogCandidateKind];
+}
+/**
+ * A completed catalog search: inert candidate summaries, each carrying a single-use handle.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogSearchSucceeded".
+ */
+/** @experimental */
+export interface CatalogSearchSucceeded {
+  /**
+   * Discriminator: the search completed
+   */
+  kind: "succeeded";
+  /**
+   * Pseudonymous identifier for this search, issued by the runtime or by the catalog authority it queried and never by the caller, so it cannot be forged or replayed to attribute an install to a search that never happened. Always present on a success, so a result set can be tied to the installs it leads to. It identifies a search rather than a person: it is derived from no user, account, device, or query data, and must never be joined with user identity to re-identify anyone.
+   */
+  searchId: string;
+  /**
+   * Matching candidates, never more than the requested limit. All text is inert untrusted data.
+   *
+   * @maxItems 50
+   */
+  candidates: CatalogCandidate[];
+  /**
+   * Whether further matches existed beyond the requested limit.
+   */
+  truncated: boolean;
+  negotiated: CatalogNegotiatedContract;
+}
+/**
+ * The request asked for a candidate kind this runtime does not serve.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogUnsupportedKindError".
+ */
+/** @experimental */
+export interface CatalogUnsupportedKindError {
+  /**
+   * Discriminator: an unsupported candidate kind was requested
+   */
+  kind: "unsupported-kind";
+  /**
+   * The kinds from the request that are not supported.
+   */
+  requestedKinds: CatalogCandidateKind[];
+  /**
+   * Every candidate kind this runtime can serve.
+   */
+  supportedKinds: CatalogCandidateKind[];
+  /**
+   * Human-readable explanation, safe to surface. Never contains a query, URL, handle, or secret.
+   */
+  message: string;
+}
+/**
+ * Retrieval was refused by the runtime's hardened fetch boundary before any request left the process, or before a redirect was followed.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogUnsafeRetrievalError".
+ */
+/** @experimental */
+export interface CatalogUnsafeRetrievalError {
+  /**
+   * Discriminator: retrieval was refused as unsafe
+   */
+  kind: "unsafe-retrieval";
+  reason: CatalogUnsafeRetrievalReason;
+  /**
+   * Human-readable explanation, safe to surface. Never contains the refused URL, nor a query, handle, or secret.
+   */
+  message: string;
+}
+/**
+ * The operation is not available on this runtime. Distinct from a network failure: nothing was attempted.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogUnavailableError".
+ */
+/** @experimental */
+export interface CatalogUnavailableError {
+  /**
+   * Discriminator: the operation is not available
+   */
+  kind: "unavailable";
+  reason: CatalogUnavailableReason;
+  /**
+   * Human-readable explanation, safe to surface. Never contains a query, URL, handle, or secret.
+   */
+  message: string;
+}
+/**
+ * No transport this runtime can use is available for the requested server.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CatalogUnavailableTransportError".
+ */
+/** @experimental */
+export interface CatalogUnavailableTransportError {
+  /**
+   * Discriminator: no usable transport is available
+   */
+  kind: "unavailable-transport";
+  reason: CatalogUnavailableTransportReason;
+  /**
+   * Human-readable explanation, safe to surface. Never contains a query, URL, handle, or secret.
+   */
+  message: string;
 }
 /**
  * Slash commands available in the session, after applying any include/exclude filters.
@@ -3707,6 +5966,37 @@ export interface SlashCommandInputChoice {
   description: string;
 }
 /**
+ * The pending slash-command invocation effect to finalize, plus whether the host applied or cancelled it.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CommandsFinalizeInvocationEffectRequest".
+ */
+/** @experimental */
+export interface CommandsFinalizeInvocationEffectRequest {
+  /**
+   * The slash-command result object that produced the pending effect, echoed back unchanged.
+   */
+  effect: {};
+  outcome: CommandsInvocationEffectOutcome;
+}
+/**
+ * Whether finalizing the invocation effect succeeded, and the failure reason when it did not.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "CommandsFinalizeInvocationEffectResult".
+ */
+/** @experimental */
+export interface CommandsFinalizeInvocationEffectResult {
+  /**
+   * Whether the pending invocation effect was finalized successfully.
+   */
+  success: boolean;
+  /**
+   * Failure reason when the invocation effect could not be finalized.
+   */
+  error?: string;
+}
+/**
  * Pending command request ID and an optional error if the client handler failed.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -3752,27 +6042,7 @@ export interface CommandsInvokeRequest {
    * Raw input after the command name
    */
   input?: string;
-}
-/**
- * Optional filters controlling which command sources to include in the listing.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "CommandsListRequest".
- */
-/** @experimental */
-export interface CommandsListRequest {
-  /**
-   * Include runtime built-in commands
-   */
-  includeBuiltins?: boolean;
-  /**
-   * Include enabled user-invocable skills and commands
-   */
-  includeSkills?: boolean;
-  /**
-   * Include commands registered by protocol clients, including SDK clients and extensions
-   */
-  includeClientCommands?: boolean;
+  origin?: CommandsInvocationOrigin;
 }
 /**
  * Queued-command request ID and the result indicating whether the host executed it (and whether to stop processing further queued commands).
@@ -3923,9 +6193,7 @@ export interface ConfigureSessionExtensionsParams {
    *
    * @internal
    */
-  controller?: {
-    [k: string]: unknown | undefined;
-  };
+  controller?: OpaqueInProcessValue;
 }
 /**
  * Metadata for a connected remote session.
@@ -4009,7 +6277,7 @@ export interface ConnectRemoteSessionParams {
   sessionId: string;
 }
 /**
- * Parameters for the `server.connect` handshake: an optional connection token and optional connection-level opt-ins (e.g. GitHub telemetry forwarding).
+ * Connection-level opt-ins for the `server.connect` handshake. Transport authentication is consumed by the native protocol boundary before dispatch.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "ConnectRequest".
@@ -4018,13 +6286,13 @@ export interface ConnectRemoteSessionParams {
 /** @internal */
 export interface ConnectRequest {
   /**
+   * Opt this connection in to GitHub telemetry forwarding for its lifetime. When set, the runtime forwards every internal telemetry event it emits — across all sessions, plus sessionless events — to this connection over the `gitHubTelemetry.event` notification. Regular events are also written to the runtime's normal GitHub/CTS path (dual-write); host-only compatibility events are forward-only and intentionally skip that path. Intended for first-party hosts that re-emit the events into their own telemetry stores. Both unrestricted and restricted events are forwarded, each tagged with a `restricted` discriminator; a backstop drops restricted events when restricted telemetry is disabled — using the process-global gate for ordinary events and an explicit session-scoped decision for host-only events.
+   */
+  enableGitHubTelemetryForwarding?: boolean;
+  /**
    * Connection token; required when the server was started with COPILOT_CONNECTION_TOKEN
    */
   token?: string;
-  /**
-   * Opt this connection in to GitHub telemetry forwarding for its lifetime. When set, the runtime forwards every internal telemetry event it emits — across all sessions, plus sessionless events — to this connection over the `gitHubTelemetry.event` notification, in addition to the runtime's normal GitHub/CTS emission (dual-write). Intended for first-party hosts that re-emit the events into their own telemetry stores. Both unrestricted and restricted events are forwarded, each tagged with a `restricted` discriminator; a backstop drops restricted events when restricted telemetry is disabled.
-   */
-  enableGitHubTelemetryForwarding?: boolean;
 }
 /**
  * Handshake result reporting the server's protocol version and package version on success.
@@ -4047,6 +6315,53 @@ export interface ConnectResult {
    * Server package version
    */
   version: string;
+}
+/**
+ * Local file system absolute paths within the session working directory to check against its content-exclusion policy.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ContentExclusionCheckPathsRequest".
+ */
+/** @experimental */
+export interface ContentExclusionCheckPathsRequest {
+  /**
+   * Local file system absolute paths within the session working directory to check. Results are returned in the same order, including duplicates.
+   */
+  paths: string[];
+}
+/**
+ * Batch content-exclusion result. Callers must fail closed when policy evaluation is unavailable.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ContentExclusionCheckPathsResult".
+ */
+/** @experimental */
+export interface ContentExclusionCheckPathsResult {
+  /**
+   * Whether the session's policy service was available for the complete batch. When false, checks is empty and callers must treat every requested path as excluded.
+   */
+  available: boolean;
+  /**
+   * Per-path decisions in request order. Empty when available is false.
+   */
+  checks: ContentExclusionPathCheck[];
+}
+/**
+ * Content-exclusion decision for one requested path.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ContentExclusionPathCheck".
+ */
+/** @experimental */
+export interface ContentExclusionPathCheck {
+  /**
+   * The path supplied by the caller.
+   */
+  path: string;
+  /**
+   * Whether the session's complete content-exclusion policy excludes the path.
+   */
+  excluded: boolean;
 }
 /**
  * A single large message currently in context.
@@ -4123,7 +6438,7 @@ export interface CurrentToolMetadata {
    * JSON Schema for tool input
    */
   input_schema?: {
-    [k: string]: unknown | undefined;
+    [k: string]: JsonValue | undefined;
   };
   /**
    * Whether the tool is loaded on demand via tool search
@@ -4267,6 +6582,86 @@ export interface DebugCollectLogsSkippedEntry {
   reason: string;
 }
 /**
+ * Discovered extension metadata and persistent enablement state.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "DiscoveredExtension".
+ */
+/** @experimental */
+export interface DiscoveredExtension {
+  /**
+   * Source-qualified ID accepted by both server and session extension enablement methods
+   */
+  id: string;
+  /**
+   * Human-readable extension name
+   */
+  name: string;
+  /**
+   * Absolute path to the extension entry module, suitable for revealing it in a file manager
+   */
+  path: string;
+  source: DiscoveredExtensionSource;
+  /**
+   * Whether this extension's persistent per-ID preference is enabled
+   */
+  enabled: boolean;
+  plugin?: DiscoveredExtensionPlugin;
+}
+/**
+ * Installed plugin that contributes a discovered extension.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "DiscoveredExtensionPlugin".
+ */
+/** @experimental */
+export interface DiscoveredExtensionPlugin {
+  /**
+   * Installed plugin name
+   */
+  name: string;
+}
+/**
+ * Extensions discovered from persisted Copilot home state and their effective loading mode. Launch-scoped additional plugins are not included.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "DiscoveredExtensions".
+ */
+/** @experimental */
+export interface DiscoveredExtensions {
+  /**
+   * Discovered user and enabled installed-plugin extensions from persisted Copilot home state
+   */
+  extensions: DiscoveredExtension[];
+  mode: DiscoveredExtensionMode;
+}
+/**
+ * Source-qualified extension identifiers to persistently disable for future sessions.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "DiscoveredExtensionsDisableRequest".
+ */
+/** @experimental */
+export interface DiscoveredExtensionsDisableRequest {
+  /**
+   * Source-qualified user or plugin extension IDs to disable
+   */
+  ids: string[];
+}
+/**
+ * Source-qualified extension identifiers to persistently enable for future sessions.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "DiscoveredExtensionsEnableRequest".
+ */
+/** @experimental */
+export interface DiscoveredExtensionsEnableRequest {
+  /**
+   * Source-qualified user or plugin extension IDs to enable
+   */
+  ids: string[];
+}
+/**
  * MCP server discovered by `mcp.discover`, with config source, optional plugin source, transport type, and enabled state.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -4336,11 +6731,22 @@ export interface EventLogReadRequest {
    */
   max?: number;
   /**
-   * Milliseconds to wait for new events when the cursor is at the tail of history. 0 (default) returns immediately even if no events are available. Capped at 30000ms. Ephemeral events that arrive during the wait are delivered in this batch but are NOT replayable on a subsequent read (use a non-zero waitMs in your next call to capture future ephemerals as they happen).
+   * Milliseconds to wait for new events when the cursor is at the tail of history. 0 (default) returns immediately even if no events are available. Capped at 30000ms. Ephemeral events that arrive during the wait are delivered in this batch but are NOT replayable on a subsequent read (use a non-zero waitMs in your next call to capture future ephemerals as they happen). This applies to forward reads only: a backward read always returns immediately and ignores `waitMs`, because backward paging covers persisted history only while new events append at the tail (the opposite end from a backward page), so no blocking or ephemeral delivery can occur.
    */
   waitMs?: number;
   types?: EventLogTypes;
   agentScope?: EventsAgentScope;
+  /**
+   * Optional non-empty list of subagent identifiers. When provided, only events owned by one of these agents are returned; ownership recognizes the event envelope's agentId plus legacy data.agentId and data.parentToolCallId markers. This filter takes precedence over agentScope.
+   *
+   * @minItems 1
+   */
+  agentIds?: [string, ...string[]];
+  direction?: EventsReadDirection;
+  /**
+   * When false, skip ephemeral events entirely and return only durable (persisted) events. History-backfill callers that discard ephemerals anyway should set this so the read is bounded by the durable log length instead of racing the ephemeral ring on a busy session. Defaults to true (ephemerals are interleaved with durable events in creation order). Ignored by backward reads, which always cover persisted history only.
+   */
+  includeEphemeral?: boolean;
 }
 /**
  * Indicates whether the operation succeeded.
@@ -4377,15 +6783,15 @@ export interface EventLogTailResult {
 /** @experimental */
 export interface EventsReadResult {
   /**
-   * Events are delivered in two batches per read: persisted events first (in append order), then ephemeral events (in seq order). When `waitMs > 0` and the catch-up batches were empty, post-wait events follow the same two-batch ordering. Persisted and ephemeral events do not interleave within a single read.
+   * Session events for this batch, merged into a single stream in creation order: durable (persisted) events and ephemeral events interleave exactly as they were emitted. Set `includeEphemeral: false` to receive only durable events. Ephemeral events are never replayable once pruned from the in-memory ring, so a consumer that needs them should keep reading with a non-zero `waitMs`. For a backward (tail-first) read, the returned window contains persisted events only, still in chronological (oldest-to-newest) append order.
    */
   events: SessionEvent[];
   /**
-   * Opaque cursor for the next read. Pass back unchanged in the next read.cursor to continue from where this read left off. Always present, even when no events were returned.
+   * Opaque cursor for the next read. Pass back unchanged in the next read.cursor to continue from where this read left off. Always present, even when no events were returned. For a backward read this cursor pages toward OLDER events; keep passing `direction: backward` with it (the cursor is also self-describing, so backward paging continues correctly).
    */
   cursor: string;
   /**
-   * True when the read returned `max` events and more events are available immediately. When false, the next read with a non-zero `waitMs` will block until a new event arrives or the wait expires.
+   * True when more events are available in the read's direction. For a forward read, true means the batch returned `max` events and more are available immediately. For a backward read, true means older persisted events remain before the returned window.
    */
   hasMore: boolean;
   cursorStatus: EventsCursorStatus;
@@ -4462,9 +6868,62 @@ export interface ExtensionContextPushInput {
   /**
    * Caller-supplied JSON payload (required, may be null but not undefined)
    */
-  payload: {
-    [k: string]: unknown | undefined;
+  payload: JsonValue;
+}
+/**
+ * Opaque integrator-owned process launch profile for one extension entrypoint.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ExtensionLaunchProfile".
+ */
+/** @experimental */
+export interface ExtensionLaunchProfile {
+  /**
+   * Executable used to launch the extension entrypoint.
+   */
+  executable: string;
+  /**
+   * Opaque integrator-defined arguments passed to the executable. The runtime does not append the extension entrypoint.
+   */
+  args: string[];
+  /**
+   * Opaque integrator-defined environment variables. Runtime-owned COPILOT_SDK_PATH, SESSION_ID, and COPILOT_EXTENSION_PARENT_PID values take precedence.
+   */
+  env: {
+    [k: string]: string | undefined;
   };
+}
+/**
+ * A discovered extension entrypoint that the registered integrator may classify and resolve to an opaque launch profile.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ExtensionLaunchProviderResolveRequest".
+ */
+/** @experimental */
+export interface ExtensionLaunchProviderResolveRequest {
+  /**
+   * Source-qualified extension identifier.
+   */
+  id: string;
+  /**
+   * Human-readable extension name.
+   */
+  name: string;
+  /**
+   * Absolute path to the discovered extension entrypoint.
+   */
+  modulePath: string;
+  source: ExtensionSource;
+}
+/**
+ * The launch profile for a supported entrypoint. Omit launch when the provider does not support the entrypoint.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ExtensionLaunchProviderResolveResult".
+ */
+/** @experimental */
+export interface ExtensionLaunchProviderResolveResult {
+  launch?: ExtensionLaunchProfile;
 }
 /**
  * Extensions discovered for the session, with their current status.
@@ -4533,7 +6992,7 @@ export interface ExternalToolTextResultForLlm {
    * Optional tool-specific telemetry
    */
   toolTelemetry?: {
-    [k: string]: unknown | undefined;
+    [k: string]: JsonValue | undefined;
   };
   /**
    * Base64-encoded binary results returned to the model
@@ -4573,7 +7032,7 @@ export interface ExternalToolTextResultForLlmBinaryResultsForLlm {
    * Optional metadata from the producing tool.
    */
   metadata?: {
-    [k: string]: unknown | undefined;
+    [k: string]: JsonValue | undefined;
   };
 }
 /**
@@ -4769,6 +7228,893 @@ export interface ExternalToolTextResultForLlmContentResource {
    */
   type: "resource";
   resource: ExternalToolTextResultForLlmContentResourceDetails;
+}
+/**
+ * Parameters for cooperatively aborting a factory body.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryAbortRequest".
+ */
+/** @experimental */
+export interface FactoryAbortRequest {
+  /**
+   * Target session identifier
+   */
+  sessionId: string;
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+}
+/**
+ * Acknowledgement that a factory request was accepted.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryAckResult".
+ */
+/** @experimental */
+export interface FactoryAckResult {}
+/**
+ * Options for one factory-scoped subagent call.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryAgentOptions".
+ */
+/** @experimental */
+export interface FactoryAgentOptions {
+  /**
+   * Optional label distinguishing otherwise identical memoized agent calls.
+   */
+  label?: string;
+  /**
+   * Optional JSON Schema for structured agent output.
+   */
+  schema?: JsonValue;
+  /**
+   * Optional model identifier for the subagent.
+   */
+  model?: string;
+  /**
+   * Optional reasoning effort for the subagent. This field is accepted but not yet honored.
+   */
+  reasoningEffort?: string;
+  contextTier?: ContextTier;
+  /**
+   * Optional custom agent name for the subagent. This field is accepted but not yet honored.
+   */
+  agent?: string;
+}
+/**
+ * Parameters for one factory-scoped subagent call.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryAgentRequest".
+ */
+/** @experimental */
+export interface FactoryAgentRequest {
+  /**
+   * Factory run identifier that owns the subagent.
+   */
+  factoryRunId: string;
+  /**
+   * Opaque token identifying the current factory execution attempt.
+   */
+  executionToken: string;
+  /**
+   * Prompt to send to the subagent.
+   */
+  prompt: string;
+  opts: FactoryAgentOptions;
+}
+/**
+ * Result of one factory-scoped subagent call.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryAgentResult".
+ */
+/** @experimental */
+export interface FactoryAgentResult {
+  /**
+   * Agent result, omitted when the agent produced no result.
+   */
+  result?: JsonValue;
+}
+/**
+ * Prompt-safe durable identity and live status for a direct factory agent.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryAgentSummary".
+ */
+/** @experimental */
+export interface FactoryAgentSummary {
+  /**
+   * Stable direct-agent identifier.
+   */
+  agentId: string;
+  /**
+   * Tool-call identifier that launched the agent.
+   */
+  toolCallId: string;
+  /**
+   * Owning factory run identifier.
+   */
+  runId: string;
+  /**
+   * Phase identifier active when the agent was launched, or null.
+   */
+  phaseId: string | null;
+  /**
+   * Friendly, non-unique name intended for display
+   */
+  label: string;
+  /**
+   * Friendly, non-unique name intended for display
+   */
+  displayName?: string;
+  /**
+   * Registered agent type.
+   */
+  agentType: string;
+  /**
+   * Current durable or live agent status.
+   */
+  status: string;
+  /**
+   * Model requested when the agent was launched.
+   */
+  requestedModel?: string;
+  /**
+   * Concrete model resolved for the agent.
+   */
+  resolvedModel?: string;
+  /**
+   * Epoch milliseconds when the agent started.
+   */
+  startedAt?: number;
+  /**
+   * Epoch milliseconds when the agent completed.
+   */
+  completedAt?: number;
+  /**
+   * Accumulated active agent time in milliseconds.
+   */
+  activeMs: number;
+  /**
+   * Prompt-safe live activity text.
+   */
+  activity?: string;
+}
+/**
+ * Parameters for cancelling a factory run.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryCancelRequest".
+ */
+/** @experimental */
+export interface FactoryCancelRequest {
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+}
+/**
+ * Current factory phase identity.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryCurrentPhase".
+ */
+/** @experimental */
+export interface FactoryCurrentPhase {
+  /**
+   * Current phase identifier.
+   */
+  id: string;
+  /**
+   * Zero-based declared phase ordinal, or null for an undeclared phase.
+   */
+  ordinal: number | null;
+}
+/**
+ * Declared or approved factory resource ceilings.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryDeclaredLimits".
+ */
+/** @experimental */
+export interface FactoryDeclaredLimits {
+  /**
+   * Maximum concurrently active subagents.
+   */
+  maxConcurrentSubagents?: number;
+  /**
+   * Maximum total subagents spawned by the run.
+   */
+  maxTotalSubagents?: number;
+  /**
+   * Maximum accumulated active execution time in seconds.
+   */
+  timeoutSeconds?: number;
+  /**
+   * Maximum AI credits consumed by subagents and descendants.
+   */
+  maxAiCredits?: number;
+}
+/**
+ * Parameters sent to the owning extension to execute a factory closure.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryExecuteRequest".
+ */
+/** @experimental */
+export interface FactoryExecuteRequest {
+  /**
+   * Target session identifier
+   */
+  sessionId: string;
+  /**
+   * Registered factory name.
+   */
+  name: string;
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+  /**
+   * Opaque token identifying this factory execution attempt.
+   */
+  executionToken: string;
+  /**
+   * Factory input value.
+   */
+  args: JsonValue;
+}
+/**
+ * Result returned by an extension factory closure.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryExecuteResult".
+ */
+/** @experimental */
+export interface FactoryExecuteResult {
+  /**
+   * Factory result value.
+   */
+  result?: JsonValue;
+}
+/**
+ * Parameters for paging factory progress.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryGetRunProgressRequest".
+ */
+/** @experimental */
+export interface FactoryGetRunProgressRequest {
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+  /**
+   * Optional phase identifier used to scope records and cursors.
+   */
+  phaseId?: string;
+  /**
+   * Exclusive forward cursor.
+   */
+  afterSeq?: number;
+  /**
+   * Exclusive backward cursor.
+   */
+  beforeSeq?: number;
+  /**
+   * Maximum records to return. Defaults to 200 and is capped at 500.
+   */
+  limit?: number;
+}
+/**
+ * Parameters for retrieving a factory run.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryGetRunRequest".
+ */
+/** @experimental */
+export interface FactoryGetRunRequest {
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+}
+/**
+ * Parameters for reading a factory journal entry.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryJournalGetRequest".
+ */
+/** @experimental */
+export interface FactoryJournalGetRequest {
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+  /**
+   * Opaque token identifying the current factory execution attempt.
+   */
+  executionToken: string;
+  /**
+   * Namespaced journal key.
+   */
+  key: string;
+}
+/**
+ * Result of reading a factory journal entry.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryJournalGetResult".
+ */
+/** @experimental */
+export interface FactoryJournalGetResult {
+  /**
+   * Whether the journal contained the requested key.
+   */
+  hit: boolean;
+  /**
+   * Cached JSON result. The hit field distinguishes a cached JSON null from a miss.
+   */
+  resultJson?: JsonValue;
+}
+/**
+ * Parameters for storing a factory journal entry.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryJournalPutRequest".
+ */
+/** @experimental */
+export interface FactoryJournalPutRequest {
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+  /**
+   * Opaque token identifying the current factory execution attempt.
+   */
+  executionToken: string;
+  /**
+   * Namespaced journal key.
+   */
+  key: string;
+  /**
+   * JSON result to memoize.
+   */
+  resultJson: JsonValue;
+}
+/**
+ * Parameters for paging factory runs.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryListRunsRequest".
+ */
+/** @experimental */
+export interface FactoryListRunsRequest {
+  /**
+   * Exclusive forward cursor.
+   */
+  afterSeq?: number;
+  /**
+   * Exclusive backward cursor.
+   */
+  beforeSeq?: number;
+  /**
+   * Maximum terminal runs to return. Defaults to 200 and is capped at 500.
+   */
+  limit?: number;
+}
+/**
+ * A page of factory runs in durable creation order.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryListRunsResult".
+ */
+/** @experimental */
+export interface FactoryListRunsResult {
+  /**
+   * Factory run summaries in durable creation order.
+   */
+  runs: FactoryRunSummary[];
+  /**
+   * Oldest terminal-run cursor in this page, or null when the terminal window is empty.
+   */
+  oldestSeq?: number | null;
+  /**
+   * Newest terminal-run cursor in this page, or null when the terminal window is empty.
+   */
+  newestSeq?: number | null;
+  /**
+   * Whether terminal runs newer than this page exist.
+   */
+  hasMoreNewer?: boolean;
+  /**
+   * Number of terminal runs older than this page.
+   */
+  omittedOlder?: number;
+}
+/**
+ * Durable factory run summary with read-time live overlays.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryRunSummary".
+ */
+/** @experimental */
+export interface FactoryRunSummary {
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+  /**
+   * Registered factory name.
+   */
+  factoryName: string;
+  /**
+   * Human-readable factory description.
+   */
+  description: string;
+  status: FactoryRunStatus;
+  /**
+   * Monotonic durable run revision.
+   */
+  revision: number;
+  /**
+   * Epoch milliseconds when the run was created.
+   */
+  createdAt: number;
+  /**
+   * Epoch milliseconds when execution first started, or null before start.
+   */
+  startedAt: number | null;
+  /**
+   * Epoch milliseconds when the durable run was last updated.
+   */
+  updatedAt: number;
+  /**
+   * Epoch milliseconds when the run completed, or null while nonterminal.
+   */
+  completedAt: number | null;
+  /**
+   * Current phase identity, or null before any phase is entered.
+   */
+  currentPhase: FactoryCurrentPhase | null;
+  /**
+   * Number of phases declared by the factory.
+   */
+  declaredPhaseCount: number;
+  /**
+   * Number of direct factory agents currently live.
+   */
+  liveAgentCount: number;
+  /**
+   * Total direct factory agents spawned across all attempts.
+   */
+  totalSpawnedAgentCount: number;
+  consumed: FactoryRunConsumed;
+  declaredLimits: FactoryDeclaredLimits;
+  /**
+   * Approved effective resource ceilings, or null until approved.
+   */
+  approved: FactoryDeclaredLimits | null;
+  /**
+   * Epoch milliseconds when this live-overlay snapshot was observed.
+   */
+  observedAt: number;
+  /**
+   * Epoch milliseconds when the current active segment started, or null while inactive.
+   */
+  activeSegmentStartedAt: number | null;
+  /**
+   * Terminal run outcome, or null while nonterminal.
+   */
+  terminal: FactoryRunTerminal | null;
+}
+/**
+ * Durable factory resource consumption.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryRunConsumed".
+ */
+/** @experimental */
+export interface FactoryRunConsumed {
+  /**
+   * Accumulated active execution time in milliseconds.
+   */
+  activeMs: number;
+  /**
+   * Total subagents spawned by the run.
+   */
+  subagents: number;
+  /**
+   * AI usage consumed by the run in nano-AIU.
+   */
+  nanoAiu: number;
+}
+/**
+ * Prompt-safe terminal factory outcome.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryRunTerminal".
+ */
+/** @experimental */
+export interface FactoryRunTerminal {
+  /**
+   * Human-readable terminal reason.
+   */
+  reason?: string;
+  failure?: FactoryRunFailure;
+  /**
+   * Human-readable terminal error.
+   */
+  error?: string;
+  /**
+   * Prompt-safe preview of the completed result.
+   */
+  resultPreview?: string;
+}
+/**
+ * One ordered factory progress line.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryLogLine".
+ */
+/** @experimental */
+export interface FactoryLogLine {
+  /**
+   * Monotonic sequence number within the factory run.
+   */
+  seq: number;
+  kind: FactoryLogLineKind;
+  /**
+   * Progress text.
+   */
+  text: string;
+}
+/**
+ * Parameters for recording factory progress.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryLogRequest".
+ */
+/** @experimental */
+export interface FactoryLogRequest {
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+  /**
+   * Opaque token identifying the current factory execution attempt.
+   */
+  executionToken: string;
+  /**
+   * Ordered progress lines to append.
+   */
+  lines: FactoryLogLine[];
+}
+/**
+ * Durable lifecycle and timing for one factory phase.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryPhaseObservation".
+ */
+/** @experimental */
+export interface FactoryPhaseObservation {
+  /**
+   * Phase identifier.
+   */
+  id: string;
+  /**
+   * Zero-based declared phase ordinal, or null for an undeclared phase.
+   */
+  ordinal: number | null;
+  /**
+   * Human-readable phase title.
+   */
+  title: string;
+  /**
+   * Optional human-readable phase detail.
+   */
+  detail?: string;
+  status: FactoryPhaseStatus;
+  /**
+   * Most recent run attempt that entered this phase, or `0` if the phase has never been entered.
+   */
+  lastEnteredRunAttempt: number;
+  /**
+   * Number of times execution entered this phase.
+   */
+  entryCount: number;
+  /**
+   * Epoch milliseconds when this phase first started; for a skipped phase, the synthetic skip timestamp (equal to `completedAt`).
+   */
+  startedAt?: number;
+  /**
+   * Epoch milliseconds when this phase completed; for a skipped phase, the synthetic skip timestamp (equal to `startedAt`).
+   */
+  completedAt?: number;
+  /**
+   * Completed active time accumulated by this phase in milliseconds.
+   */
+  accumulatedActiveMs: number;
+  /**
+   * Current live active time for this phase in milliseconds.
+   */
+  currentActiveMs: number;
+  /**
+   * Total direct agents associated with this phase.
+   */
+  totalAgentCount: number;
+  /**
+   * Direct agents in this phase that are currently live.
+   */
+  liveAgentCount: number;
+}
+/**
+ * One durable factory progress record.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryProgressLine".
+ */
+/** @experimental */
+export interface FactoryProgressLine {
+  /**
+   * Global monotonic sequence number within the run.
+   */
+  seq: number;
+  /**
+   * Resume attempt that emitted this record.
+   */
+  attempt: number;
+  /**
+   * Phase active when the record was emitted, or null before any phase.
+   */
+  phaseId: string | null;
+  /**
+   * Epoch milliseconds when the record was persisted.
+   */
+  recordedAt: number;
+  kind: FactoryLogLineKind;
+  /**
+   * Prompt-safe progress text.
+   */
+  text: string;
+}
+/**
+ * A bidirectional page of factory progress.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryProgressPage".
+ */
+/** @experimental */
+export interface FactoryProgressPage {
+  /**
+   * Progress records in sequence order.
+   */
+  records: FactoryProgressLine[];
+  /**
+   * Oldest sequence number in this page, or null when empty.
+   */
+  oldestSeq: number | null;
+  /**
+   * Newest sequence number in this page, or null when empty.
+   */
+  newestSeq: number | null;
+  /**
+   * Whether progress records older than this page exist.
+   */
+  hasMoreOlder: boolean;
+  /**
+   * Whether progress records newer than this page exist.
+   */
+  hasMoreNewer: boolean;
+  /**
+   * Run revision reflected by this page.
+   */
+  revision: number;
+}
+/**
+ * Parameters for resuming a factory run from its persisted identity.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryResumeRequest".
+ */
+/** @experimental */
+export interface FactoryResumeRequest {
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+  limits?: FactoryRunLimits;
+}
+/**
+ * Wire-only per-invocation factory resource ceiling overrides.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryRunLimits".
+ */
+/** @experimental */
+export interface FactoryRunLimits {
+  /**
+   * Maximum number of factory subagents that may run concurrently.
+   */
+  maxConcurrentSubagents?: number;
+  /**
+   * Maximum total number of factory subagents that may be admitted.
+   */
+  maxTotalSubagents?: number;
+  /**
+   * Maximum accumulated active-execution time in seconds. Active execution includes the entire extension body, subprocess waits, queued-agent waits, and sleeps; time between resumed attempts is not counted.
+   */
+  timeoutSeconds?: number;
+  /**
+   * Maximum AI credits consumed by factory subagents and their descendants. The post-paid ceiling is soft: parallel turns can settle beyond it before the run stops.
+   */
+  maxAiCredits?: number;
+}
+/**
+ * Resolved persisted factory identity and resumed run envelope.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryResumeResult".
+ */
+/** @experimental */
+export interface FactoryResumeResult {
+  /**
+   * Persisted factory name resolved for the resumed run.
+   */
+  factoryName: string;
+  run: FactoryRunResult;
+}
+/**
+ * Complete current or terminal factory run envelope.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryRunResult".
+ */
+/** @experimental */
+export interface FactoryRunResult {
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+  status: FactoryRunStatus;
+  /**
+   * Completed factory result.
+   */
+  result?: JsonValue;
+  /**
+   * Error message for an errored run.
+   */
+  error?: string;
+  failure?: FactoryRunFailure;
+  /**
+   * Reason for a halted or cancelled run.
+   */
+  reason?: string;
+  /**
+   * Partial journal and progress snapshot for a halted, cancelled, or errored run.
+   */
+  snapshot?: JsonValue;
+}
+/**
+ * Full factory run observability detail.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryRunDetail".
+ */
+/** @experimental */
+export interface FactoryRunDetail {
+  /**
+   * Factory run identifier.
+   */
+  runId: string;
+  /**
+   * Registered factory name.
+   */
+  factoryName: string;
+  /**
+   * Human-readable factory description.
+   */
+  description: string;
+  status: FactoryRunStatus;
+  /**
+   * Monotonic durable run revision.
+   */
+  revision: number;
+  /**
+   * Epoch milliseconds when the run was created.
+   */
+  createdAt: number;
+  /**
+   * Epoch milliseconds when execution first started, or null before start.
+   */
+  startedAt: number | null;
+  /**
+   * Epoch milliseconds when the durable run was last updated.
+   */
+  updatedAt: number;
+  /**
+   * Epoch milliseconds when the run completed, or null while nonterminal.
+   */
+  completedAt: number | null;
+  /**
+   * Current phase identity, or null before any phase is entered.
+   */
+  currentPhase: FactoryCurrentPhase | null;
+  /**
+   * Number of phases declared by the factory.
+   */
+  declaredPhaseCount: number;
+  /**
+   * Number of direct factory agents currently live.
+   */
+  liveAgentCount: number;
+  /**
+   * Total direct factory agents spawned across all attempts.
+   */
+  totalSpawnedAgentCount: number;
+  consumed: FactoryRunConsumed;
+  declaredLimits: FactoryDeclaredLimits;
+  /**
+   * Approved effective resource ceilings, or null until approved.
+   */
+  approved: FactoryDeclaredLimits | null;
+  /**
+   * Epoch milliseconds when this live-overlay snapshot was observed.
+   */
+  observedAt: number;
+  /**
+   * Epoch milliseconds when the current active segment started, or null while inactive.
+   */
+  activeSegmentStartedAt: number | null;
+  /**
+   * Terminal run outcome, or null while nonterminal.
+   */
+  terminal: FactoryRunTerminal | null;
+  /**
+   * Lifecycle and timing observations for each factory phase.
+   */
+  phases: FactoryPhaseObservation[];
+  /**
+   * Durable identities and live statuses for direct factory agents.
+   */
+  agents: FactoryAgentSummary[];
+  progress: FactoryProgressPage;
+}
+/**
+ * Parameters for invoking a registered factory.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FactoryRunRequest".
+ */
+/** @experimental */
+export interface FactoryRunRequest {
+  /**
+   * Registered factory name.
+   */
+  name: string;
+  /**
+   * Factory input value.
+   */
+  args: JsonValue;
+  options?: RunOptions;
+}
+/**
+ * Options controlling factory invocation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RunOptions".
+ */
+/** @experimental */
+export interface RunOptions {
+  limits?: FactoryRunLimits;
+  /**
+   * Run identifier whose journal and progress should seed this resumed run.
+   */
+  resumeFromRunId?: string;
 }
 /**
  * Optional user prompt to combine with the fleet orchestration instructions.
@@ -5012,6 +8358,32 @@ export interface HistoryCancelBackgroundCompactionResult {
   cancelled: boolean;
 }
 /**
+ * Parameters for clearing the conversation and seeding the window that replaces it.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryClearContextRequest".
+ */
+/** @experimental */
+export interface HistoryClearContextRequest {
+  /**
+   * First user message of the fresh context window. Required: a cleared window holding only system and developer messages is not a conversation a model can answer, so every clear seeds the window it creates. Delivered by the enclosing turn driver once the agentic loop exits, which is why the call must be made from inside a tool handler.
+   */
+  prompt: string;
+}
+/**
+ * What a successful clear removed. A clear that could not be applied rejects instead of reporting a count.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryClearContextResult".
+ */
+/** @experimental */
+export interface HistoryClearContextResult {
+  /**
+   * Number of non-system, non-developer messages that were removed from the conversation. Zero only when the window already held no conversation.
+   */
+  messagesCleared: number;
+}
+/**
  * Post-compaction context window usage breakdown
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -5045,19 +8417,6 @@ export interface HistoryCompactContextWindow {
   toolDefinitionsTokens?: number;
 }
 /**
- * Optional compaction parameters.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "HistoryCompactRequest".
- */
-/** @experimental */
-export interface HistoryCompactRequest {
-  /**
-   * Optional user-provided instructions to focus the compaction summary
-   */
-  customInstructions?: string;
-}
-/**
  * Compaction outcome with the number of tokens and messages removed, summary text, and the resulting context window breakdown.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -5082,6 +8441,180 @@ export interface HistoryCompactResult {
    */
   summaryContent?: string;
   contextWindow?: HistoryCompactContextWindow;
+}
+/**
+ * Rewind points and file-change-tracking availability for the session.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryListRewindPointsResult".
+ */
+/** @experimental */
+export interface HistoryListRewindPointsResult {
+  /**
+   * Whether this session captured file changes from its first turn.
+   */
+  fileChangeTrackingEnabled: boolean;
+  unavailableReason?: HistoryRewindUnavailableReason;
+  /**
+   * Root user turns in chronological order. Empty when `unavailableReason` is set.
+   */
+  points: HistoryRewindPoint[];
+}
+/**
+ * A root user turn that the session can rewind to.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryRewindPoint".
+ */
+/** @experimental */
+export interface HistoryRewindPoint {
+  /**
+   * ID of the user.message event that begins the discarded suffix.
+   */
+  eventId: string;
+  /**
+   * User-visible message text for the turn.
+   */
+  userMessage: string;
+  /**
+   * ISO timestamp of the user turn.
+   */
+  timestamp: string;
+  /**
+   * Whether at least one file in this turn or a later turn can be restored.
+   */
+  canRestoreFiles: boolean;
+  /**
+   * Number of unique files in this turn and all later turns that have captured changes.
+   */
+  fileCount: number;
+  /**
+   * Whether this turn itself captured any file changes.
+   */
+  turnChangedFiles: boolean;
+  /**
+   * Lines added by this turn's captured file changes.
+   */
+  linesAdded: number;
+  /**
+   * Lines removed by this turn's captured file changes.
+   */
+  linesRemoved: number;
+  /**
+   * Whether this turn was an automatically injected autopilot continuation.
+   */
+  isAutopilotContinuation: boolean;
+}
+/**
+ * Event boundary to preview for conversation-and-files rewind.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryPreviewRewindRequest".
+ */
+/** @experimental */
+export interface HistoryPreviewRewindRequest {
+  /**
+   * ID of the user.message event that begins the discarded suffix.
+   */
+  eventId: string;
+}
+/**
+ * Files and aggregate changes for a prospective rewind.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryPreviewRewindResult".
+ */
+/** @experimental */
+export interface HistoryPreviewRewindResult {
+  /**
+   * Whether file restore is available for this session. This is authoritative: switch on it and read `reason` only when it is false.
+   */
+  available: boolean;
+  reason?: HistoryRewindUnavailableReason;
+  /**
+   * Number of unique files in the preview.
+   */
+  fileCount: number;
+  /**
+   * Files ordered by path.
+   */
+  files: HistoryRewindFilePreview[];
+}
+/**
+ * A file that a conversation-and-files rewind would restore.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryRewindFilePreview".
+ */
+/** @experimental */
+export interface HistoryRewindFilePreview {
+  /**
+   * Absolute path of the captured file.
+   */
+  path: string;
+  changeType: HistoryRewindChangeType;
+  /**
+   * Lines added across the discarded turns.
+   */
+  linesAdded: number;
+  /**
+   * Lines removed across the discarded turns.
+   */
+  linesRemoved: number;
+}
+/**
+ * Boundary and mode for rewinding session history.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryRewindRequest".
+ */
+/** @experimental */
+export interface HistoryRewindRequest {
+  /**
+   * ID of the user.message event that begins the discarded suffix.
+   */
+  eventId: string;
+  mode: HistoryRewindMode;
+}
+/**
+ * Structured outcome of a rewind request.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistoryRewindResult".
+ */
+/** @experimental */
+export interface HistoryRewindResult {
+  outcome: HistoryRewindOutcome;
+  /**
+   * Number of persisted events removed by conversation truncation. Present only when truncation succeeded (outcomes `success`, `checkpoint-cleanup-failed`, and `snapshot-prune-failed`); omitted for every unavailable outcome (`session-busy`, `file-change-tracking-disabled`, `unsupported-remote-session`) and for `truncation-failed`, `files-rolled-back`, and `rollback-incomplete`.
+   */
+  eventsRemoved?: number;
+  /**
+   * Absolute paths restored to their captured preimages. Always empty for conversation-only rewinds and for the unavailable outcomes (`session-busy`, `file-change-tracking-disabled`, `unsupported-remote-session`); only conversation-and-files outcomes that reached the file-restore stage populate it.
+   */
+  restoredFiles: string[];
+  /**
+   * Captured files intentionally left unchanged. Always empty for conversation-only rewinds and for the unavailable outcomes (`session-busy`, `file-change-tracking-disabled`, `unsupported-remote-session`); only conversation-and-files outcomes that reached the file-restore stage populate it.
+   */
+  skippedFiles: HistorySkippedFileRestore[];
+  /**
+   * Failure detail. Set only for the failure and partial-failure outcomes (`files-rolled-back`, `rollback-incomplete`, `truncation-failed`, `checkpoint-cleanup-failed`, `snapshot-prune-failed`); omitted for `success` and for the unavailable outcomes (`session-busy`, `file-change-tracking-disabled`, `unsupported-remote-session`).
+   */
+  error?: string;
+}
+/**
+ * A captured file that rewind intentionally left unchanged.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HistorySkippedFileRestore".
+ */
+/** @experimental */
+export interface HistorySkippedFileRestore {
+  /**
+   * Absolute path of the skipped file.
+   */
+  path: string;
+  reason: HistoryFileRestoreSkipReason;
 }
 /**
  * Markdown summary of the conversation context (empty when not available).
@@ -5121,6 +8654,38 @@ export interface HistoryTruncateResult {
    * Number of events that were removed
    */
   eventsRemoved: number;
+  /**
+   * True when conversation truncation succeeded but post-truncation workspace checkpoint cleanup failed. History is already truncated; callers may still prune snapshots but should report a checkpoint-cleanup rather than a truncation failure.
+   */
+  checkpointCleanupFailed?: boolean;
+  /**
+   * Failure detail when checkpointCleanupFailed is true.
+   */
+  checkpointCleanupError?: string;
+}
+/**
+ * Runtime-owned wire payload for a server-to-client hook callback invocation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HookInvokeRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface HookInvokeRequest {
+  sessionId: string;
+  hookType: HookType;
+  input: JsonValue;
+}
+/**
+ * Optional output returned by an SDK callback hook.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "HookInvokeResponse".
+ */
+/** @experimental */
+/** @internal */
+export interface HookInvokeResponse {
+  output?: JsonValue;
 }
 /**
  * Installed plugin record from global state, with marketplace, version, install time, enabled state, cache path, and source.
@@ -5155,9 +8720,13 @@ export interface InstalledPlugin {
    */
   cache_path?: string;
   source?: InstalledPluginSource;
+  /**
+   * Per-plugin source fingerprint (a SHA-256 hash of the plugin's catalog source spec plus its resolved source subtree — NOT a Git commit SHA) captured at marketplace install/update time. Auto-update compares it against the freshly recomputed fingerprint to detect a content change that does not bump the version. Absent for pre-existing installs and for direct (non-marketplace) installs.
+   */
+  source_sha?: string;
 }
 /**
- * Source descriptor for a direct GitHub plugin install, with `owner/repo`, optional ref, and optional subpath.
+ * Source descriptor for a direct GitHub plugin install, with `owner/repo`, optional ref or full commit SHA, and optional subpath.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "InstalledPluginSourceGitHub".
@@ -5168,12 +8737,25 @@ export interface InstalledPluginSourceGitHub {
    * Constant value. Always "github".
    */
   source: "github";
+  /**
+   * GitHub repository in `owner/repo` form.
+   */
   repo: string;
+  /**
+   * Optional Git ref to resolve.
+   */
   ref?: string;
+  /**
+   * Optional full 40-character hexadecimal commit SHA.
+   */
+  sha?: string;
+  /**
+   * Optional repository-relative path to the plugin.
+   */
   path?: string;
 }
 /**
- * Source descriptor for a direct URL plugin install, with URL, optional ref, and optional subpath.
+ * Source descriptor for a direct URL plugin install, with URL, optional ref or full commit SHA, and optional subpath.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "InstalledPluginSourceUrl".
@@ -5184,8 +8766,21 @@ export interface InstalledPluginSourceUrl {
    * Constant value. Always "url".
    */
   source: "url";
+  /**
+   * URL of the plugin source.
+   */
   url: string;
+  /**
+   * Optional Git ref to resolve.
+   */
   ref?: string;
+  /**
+   * Optional full 40-character hexadecimal commit SHA.
+   */
+  sha?: string;
+  /**
+   * Optional source-relative path to the plugin.
+   */
   path?: string;
 }
 /**
@@ -5200,6 +8795,9 @@ export interface InstalledPluginSourceLocal {
    * Constant value. Always "local".
    */
   source: "local";
+  /**
+   * Local filesystem path to the plugin.
+   */
   path: string;
 }
 /**
@@ -5353,9 +8951,35 @@ export interface InstructionSource {
    */
   defaultDisabled?: boolean;
   /**
-   * The project path this source was discovered from. Only set by sessionless discovery for repository/working-directory sources, where it disambiguates same-named files (e.g. .github/copilot-instructions.md) across multiple workspace roots. The session-scoped getSources leaves it unset.
+   * The project path this source was discovered from. Only set by sessionless discovery for repository, working-directory, and project-scoped plugin sources, where it disambiguates sources across multiple workspace roots. The session-scoped getSources leaves it unset.
    */
   projectPath?: string;
+}
+/**
+ * Parameters for interrupting the main agent turn.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "InterruptMainTurnRequest".
+ */
+/** @experimental */
+export interface InterruptMainTurnRequest {
+  /**
+   * When true, the user's queued prompts are preserved and run as the next turn once the interrupted turn unwinds; when false (the default), the queue is cleared like a plain abort.
+   */
+  flushQueued?: boolean;
+}
+/**
+ * Result of interrupting the main agent turn.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "InterruptMainTurnResult".
+ */
+/** @experimental */
+export interface InterruptMainTurnResult {
+  /**
+   * Whether an in-flight main agent turn was interrupted. False when the main loop was not processing.
+   */
+  interrupted: boolean;
 }
 /**
  * HTTP headers as a map from lowercased header name to a list of values. Multi-valued headers (e.g. Set-Cookie) preserve all values.
@@ -5399,6 +9023,10 @@ export interface LlmInferenceHttpRequestChunkRequest {
    * Optional human-readable reason for the cancellation, propagated for logging.
    */
   cancelReason?: string;
+  /**
+   * Identity of the agent invocation (one agentic loop) this body chunk belongs to, matching the `agentInvocationId` semantics on httpRequestStart. Carried per chunk so a persistent transport can attribute successive turns correctly: when a WebSocket connection is reused across turns, the httpRequestStart identity reflects only the turn that opened the connection, so each later turn stamps its own invocation id here. Absent when the runtime has no invocation context for the request, or on the plain-HTTP transport where every request has its own httpRequestStart.
+   */
+  agentInvocationId?: string;
 }
 /**
  * Acknowledgement. The SDK is free to ignore the ack and treat chunk delivery as fire-and-forget.
@@ -5435,13 +9063,17 @@ export interface LlmInferenceHttpRequestStartRequest {
   headers: LlmInferenceHeaders;
   transport?: LlmInferenceHttpRequestStartTransport;
   /**
-   * Stable per-agent-instance id attributing this request to a specific agent trajectory. Present when the request originates from an agent turn; absent for requests issued outside any agent context (e.g. some SDK callers). A request with an `agentId` but no `parentAgentId` is a root-agent request; one carrying both is a subagent request. Sourced from the runtime's per-request agent context and surfaced on the envelope independently of transport, so it is available for both first-party (CAPI) and BYOK/custom-provider requests; on the CAPI transport the runtime derives the upstream `X-Agent-Task-Id` header from this same context. Consumers routing each provider call to a training trajectory should key on this rather than on lifecycle events, since it is available on the request path before sampling.
+   * Stable identity of the agent trajectory that issued this request. Present when the request originates from an agent turn; absent for requests outside any agent context. This is the same identity used by lifecycle and bridged session events and remains constant across turns and retries.
    */
   agentId?: string;
   /**
-   * Id of the parent agent that spawned the agent issuing this request. Present only for subagent requests; absent for root-agent requests and non-agent requests. Combined with `agentId`, this lets consumers attribute a call to a child trajectory versus the root. Like `agentId`, it comes from the runtime's per-request agent context independently of transport; on the CAPI transport the runtime derives the upstream `X-Parent-Agent-Id` header from this same context.
+   * Stable identity of the immediate parent trajectory. Present for child trajectories such as subagents and conversation-sampling requests; absent for root-agent and non-agent requests.
    */
   parentAgentId?: string;
+  /**
+   * Identity of the agent invocation (one agentic loop) that issued this request. It remains fixed across physical retries within the invocation and is distinct from the stable trajectory `agentId`. A caller-supplied invocation id always takes precedence (this covers auxiliary calls that have no model call id). Otherwise, first-party CAPI requests fall back to the runtime's agent task id — the same value the runtime emits as the `X-Agent-Task-Id` header — while custom-provider requests fall back to the model call id.
+   */
+  agentInvocationId?: string;
   /**
    * Coarse classification of the interaction that produced this request. Open string for forward-compatibility; known values include `conversation-agent`, `conversation-subagent`, `conversation-sampling`, `conversation-background`, `conversation-compaction`, and `conversation-user`. Absent when the runtime did not classify the request. Comes from the runtime's per-request agent context independently of transport; on the CAPI transport the runtime derives the upstream `X-Interaction-Type` header from this same context.
    */
@@ -5696,6 +9328,23 @@ export interface LspInitializeRequest {
   force?: boolean;
 }
 /**
+ * Validated device-managed settings discovered before a session exists.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ManagedSettingsReadResult".
+ */
+/** @experimental */
+export interface ManagedSettingsReadResult {
+  /**
+   * Validated, canonical managed-settings JSON. Omitted when no managed settings were discovered or when discovered settings failed validation.
+   */
+  settingsJson?: JsonValue;
+  /**
+   * Discovery or validation error text when managed settings could not be read safely.
+   */
+  errorMessage?: string;
+}
+/**
  * Result of registering a new marketplace.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -5860,7 +9509,7 @@ export interface McpAppsCallToolRequest {
    * Tool arguments
    */
   arguments?: {
-    [k: string]: unknown | undefined;
+    [k: string]: JsonValue | undefined;
   };
   /**
    * **Required.** Server whose ui:// view issued the request. Per SEP-1865 ('callable by the app from this server only'), the call is rejected when this differs from `serverName`, and rejected outright when missing.
@@ -6005,7 +9654,7 @@ export interface McpAppsListToolsResult {
    * App-callable tools from the server
    */
   tools: {
-    [k: string]: unknown | undefined;
+    [k: string]: JsonValue | undefined;
   }[];
 }
 /**
@@ -6066,7 +9715,7 @@ export interface McpAppsResourceContent {
    * Resource-level metadata (CSP, permissions, etc.)
    */
   _meta?: {
-    [k: string]: unknown | undefined;
+    [k: string]: JsonValue | undefined;
   };
 }
 /**
@@ -6146,7 +9795,7 @@ export interface McpConfigAddRequest {
    * Unique name for the MCP server
    */
   name: string;
-  config: McpServerConfig;
+  config: McpSerializableServerConfig;
 }
 /**
  * Stdio MCP server configuration launched as a child process.
@@ -6157,6 +9806,11 @@ export interface McpConfigAddRequest {
 /** @experimental */
 export interface McpServerConfigStdio {
   /**
+   * Optional human-readable server name.
+   */
+  displayName?: string;
+  safeForTelemetry?: McpSafeForTelemetry;
+  /**
    * Tools to include. Defaults to all tools if not specified.
    */
   tools?: string[];
@@ -6166,12 +9820,53 @@ export interface McpServerConfigStdio {
   isDefaultServer?: boolean;
   filterMapping?: FilterMapping;
   /**
-   * Timeout in milliseconds for tool calls to this server.
+   * Timeout in milliseconds for tool discovery and tool calls.
    */
   timeout?: number;
   oidc?: McpServerAuthConfig;
   auth?: McpServerAuthConfig;
   deferTools?: McpServerConfigDeferTools;
+  /**
+   * Set to true to disable persisted MCP tool snapshots for this server. Live tool discovery is unaffected.
+   */
+  disableToolCache?: boolean;
+  /**
+   * Whether secret masking is disabled for calls to this server.
+   */
+  disableSecretMasking?: boolean;
+  /**
+   * Tool names excluded after the include filter is applied.
+   */
+  excludeTools?: string[];
+  /**
+   * Event types this server receives as Copilot notifications.
+   */
+  events?: string[];
+  /**
+   * Copilot notification types this server may send to the host.
+   */
+  notifications?: string[];
+  source?: McpServerSource;
+  /**
+   * Plugin that provided this server.
+   */
+  sourcePlugin?: string;
+  /**
+   * Version of the plugin that provided this server.
+   */
+  sourcePluginVersion?: string;
+  /**
+   * Whether the providing plugin uses the Open Plugin Spec.
+   */
+  sourcePluginSpec?: boolean;
+  /**
+   * Source file path recorded while loading the config.
+   */
+  sourcePath?: string;
+  /**
+   * Configuration warnings recorded while loading the server.
+   */
+  configWarnings?: string[];
   /**
    * Executable command used to start the Stdio MCP server process.
    */
@@ -6190,6 +9885,24 @@ export interface McpServerConfigStdio {
   env?: {
     [k: string]: string | undefined;
   };
+  type?: McpServerConfigStdioType;
+}
+/**
+ * Per-field MCP telemetry-obfuscation policy.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpSafeForTelemetryFields".
+ */
+/** @experimental */
+export interface McpSafeForTelemetryFields {
+  /**
+   * Whether the MCP tool name may be included in telemetry without obfuscation.
+   */
+  name: boolean;
+  /**
+   * Whether MCP tool input names may be included in telemetry without obfuscation.
+   */
+  inputsNames: boolean;
 }
 /**
  * Authentication settings with optional redirect port configuration.
@@ -6213,6 +9926,11 @@ export interface McpServerAuthConfigRedirectPort {
 /** @experimental */
 export interface McpServerConfigHttp {
   /**
+   * Optional human-readable server name.
+   */
+  displayName?: string;
+  safeForTelemetry?: McpSafeForTelemetry;
+  /**
    * Tools to include. Defaults to all tools if not specified.
    */
   tools?: string[];
@@ -6223,12 +9941,53 @@ export interface McpServerConfigHttp {
   isDefaultServer?: boolean;
   filterMapping?: FilterMapping;
   /**
-   * Timeout in milliseconds for tool calls to this server.
+   * Timeout in milliseconds for tool discovery and tool calls.
    */
   timeout?: number;
   oidc?: McpServerAuthConfig;
   auth?: McpServerAuthConfig;
   deferTools?: McpServerConfigDeferTools;
+  /**
+   * Set to true to disable persisted MCP tool snapshots for this server. Live tool discovery is unaffected.
+   */
+  disableToolCache?: boolean;
+  /**
+   * Whether secret masking is disabled for calls to this server.
+   */
+  disableSecretMasking?: boolean;
+  /**
+   * Tool names excluded after the include filter is applied.
+   */
+  excludeTools?: string[];
+  /**
+   * Event types this server receives as Copilot notifications.
+   */
+  events?: string[];
+  /**
+   * Copilot notification types this server may send to the host.
+   */
+  notifications?: string[];
+  source?: McpServerSource;
+  /**
+   * Plugin that provided this server.
+   */
+  sourcePlugin?: string;
+  /**
+   * Version of the plugin that provided this server.
+   */
+  sourcePluginVersion?: string;
+  /**
+   * Whether the providing plugin uses the Open Plugin Spec.
+   */
+  sourcePluginSpec?: boolean;
+  /**
+   * Source file path recorded while loading the config.
+   */
+  sourcePath?: string;
+  /**
+   * Configuration warnings recorded while loading the server.
+   */
+  configWarnings?: string[];
   /**
    * URL of the remote MCP server endpoint.
    */
@@ -6239,6 +9998,10 @@ export interface McpServerConfigHttp {
   headers?: {
     [k: string]: string | undefined;
   };
+  /**
+   * Dynamic-header refresh cache lifetime in milliseconds.
+   */
+  headersRefreshTtlMs?: number;
   /**
    * OAuth client ID for a pre-registered remote MCP OAuth client.
    */
@@ -6287,7 +10050,7 @@ export interface McpConfigList {
    * All MCP servers from user config, keyed by name
    */
   servers: {
-    [k: string]: McpServerConfig;
+    [k: string]: McpSerializableServerConfig;
   };
 }
 /**
@@ -6315,10 +10078,10 @@ export interface McpConfigUpdateRequest {
    * Name of the MCP server to update
    */
   name: string;
-  config: McpServerConfig;
+  config: McpSerializableServerConfig;
 }
 /**
- * Opaque auth info used to configure GitHub MCP.
+ * Credential-free authentication identity used to configure GitHub MCP.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "McpConfigureGitHubRequest".
@@ -6331,9 +10094,7 @@ export interface McpConfigureGitHubRequest {
    *
    * @internal
    */
-  authInfo: {
-    [k: string]: unknown | undefined;
-  };
+  authInfo: OpaqueInProcessValue;
 }
 /**
  * Result of configuring GitHub MCP.
@@ -6419,9 +10180,7 @@ export interface McpExecuteSamplingParams {
   /**
    * The original MCP JSON-RPC request ID (string or number). Used by the runtime to correlate the inference with the originating MCP request for telemetry; this is distinct from `requestId` (which is the schema-level cancellation handle).
    */
-  mcpRequestId: {
-    [k: string]: unknown | undefined;
-  };
+  mcpRequestId: JsonValue;
   request: McpExecuteSamplingRequest;
 }
 /**
@@ -6445,7 +10204,24 @@ export interface McpExecuteSamplingResult {
   [k: string]: unknown | undefined;
 }
 /**
- * MCP server filtered by policy, with name, reason, optional redacted reason, and enterprise login.
+ * MCP server whose connection attempt failed.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpFailedServer".
+ */
+/** @experimental */
+export interface McpFailedServer {
+  /**
+   * The config key of the server that failed to connect.
+   */
+  name: string;
+  /**
+   * The captured connection failure detail.
+   */
+  error?: string;
+}
+/**
+ * MCP server filtered by policy, with name, reason, and optional redacted reason.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "McpFilteredServer".
@@ -6465,7 +10241,8 @@ export interface McpFilteredServer {
    */
   redactedReason?: string;
   /**
-   * Enterprise login associated with an allowlist policy
+   * @deprecated
+   * Deprecated. This field is no longer populated.
    */
   enterpriseName?: string;
 }
@@ -6513,7 +10290,7 @@ export interface McpHostState {
    */
   disabledServers: string[];
   /**
-   * Configured servers filtered out by enterprise allowlist policy.
+   * Configured servers filtered out by MCP server policy.
    */
   filteredServers: string[];
   /**
@@ -6568,6 +10345,300 @@ export interface McpServerNeedsAuthInfo {
   timestamp: number;
 }
 /**
+ * A normalised, inert description of what installing an MCP server would involve. Carries no raw card, no install specification, and no secret value.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpInstallPlan".
+ */
+/** @experimental */
+export interface McpInstallPlan {
+  /**
+   * Opaque, runtime-instance scoped, TTL-bound, single-use handle for this plan. Rejected when stale, replayed, or presented to a different runtime instance. Never logged.
+   */
+  planHandle: string;
+  /**
+   * ISO 8601 timestamp after which the plan handle is stale and will be rejected. Abandoning a plan needs no call: an unused handle simply expires, so cancellation before commit is side-effect free.
+   */
+  planHandleExpiresAt: string;
+  identity: McpPlanResourceIdentity;
+  provenance: McpPlanProvenance;
+  /**
+   * Every eligible transport, so a host can present an explicit choice. A completed plan always has at least one; when none is eligible, planning returns `CatalogUnavailableTransportError` instead.
+   *
+   * @minItems 1
+   * @maxItems 50
+   */
+  transportChoices: [McpPlanTransportChoice, ...McpPlanTransportChoice[]];
+  /**
+   * Identifier of the choice the runtime would pick by default. Omitted when there is no eligible transport, or when the runtime expresses no preference.
+   */
+  recommendedTransportChoiceId?: string;
+  target: McpPlanTarget;
+  policy: McpPlanPolicyResult;
+  /**
+   * The configuration changes installing would make, described rather than serialised, so the mutable configuration payload stays behind the runtime boundary.
+   */
+  configurationChanges: McpPlanConfigurationChange[];
+  /**
+   * Whether applying this plan would require an MCP reload to take effect. Planning itself never reloads.
+   */
+  reloadRequired: boolean;
+  /**
+   * Whether the plan cannot be applied without further input, because a required value has no default or a secret must be supplied.
+   */
+  requiresInteractiveConfiguration: boolean;
+}
+/**
+ * Normalised identity of the MCP server a plan targets, independent of how the card spelled it.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanResourceIdentity".
+ */
+/** @experimental */
+export interface McpPlanResourceIdentity {
+  /**
+   * Canonical, normalised name of the server, for example `io.github.owner/server`.
+   */
+  canonicalName: string;
+  /**
+   * Local configuration key the server would be recorded under.
+   */
+  serverName: string;
+  /**
+   * Version advertised by the card, when it declares one.
+   */
+  version?: string;
+  /**
+   * Registry identifier of the server, when it came from a registry.
+   */
+  registryId?: string;
+}
+/**
+ * Provenance of the exact validated JSON MCP card content bound privately to a completed plan and its opaque handle.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanProvenance".
+ */
+/** @experimental */
+export interface McpPlanProvenance {
+  /**
+   * Authority associated with the validated card, without path, query, or credentials. Inert untrusted data.
+   */
+  authority: string;
+  /**
+   * ISO 8601 timestamp at which the runtime completed strict parsing and schema validation of the card content.
+   */
+  validatedAt: string;
+  cardDigest: CardDigest;
+  mediaType: McpServerCardMediaType;
+}
+/**
+ * An eligible local-package transport choice. Package identity is required and a remote endpoint cannot be represented.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanTransportChoicePackage".
+ */
+/** @experimental */
+export interface McpPlanTransportChoicePackage {
+  /**
+   * Stable identifier for this choice within the plan, used to select it when the plan is applied.
+   */
+  choiceId: string;
+  transport: McpPlanPackageTransport;
+  installMethod: McpPlanPackageInstallMethod;
+  /**
+   * Packaging ecosystem, for example `oci` or `npm`.
+   */
+  packageType: string;
+  /**
+   * Package identifier. Inert untrusted data.
+   */
+  packageIdentifier: string;
+  /**
+   * Typed values this choice requires, excluding secrets.
+   */
+  requiredValues: McpPlanRequiredValue[];
+  /**
+   * Secrets this choice requires, referenced by placeholder only.
+   */
+  secretPlaceholders: McpPlanSecretPlaceholder[];
+}
+/**
+ * One non-secret scalar value a transport choice needs before it can be applied.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanRequiredValueScalar".
+ */
+/** @experimental */
+export interface McpPlanRequiredValueScalar {
+  kind: McpPlanRequiredValueScalarKind;
+  /**
+   * Key the value is supplied under. Inert untrusted data.
+   */
+  key: string;
+  category: McpPlanValueCategory;
+  valueType: McpPlanScalarValueType;
+  /**
+   * Whether the value must be present for the plan to be applicable.
+   */
+  required: boolean;
+  /**
+   * Default supplied by the card, when the value can be resolved without input. Presence is the authoritative indication that a default exists. Inert untrusted data.
+   */
+  defaultValue?: string;
+  /**
+   * Human-readable label from the card. Inert untrusted text.
+   */
+  title?: string;
+  /**
+   * Human-readable explanation from the card. Inert untrusted text.
+   */
+  description?: string;
+  /**
+   * Whether the value may be supplied more than once.
+   */
+  isRepeated: boolean;
+}
+/**
+ * One enumerated non-secret value a transport choice needs before it can be applied. The permitted values are structurally required.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanRequiredValueEnum".
+ */
+/** @experimental */
+export interface McpPlanRequiredValueEnum {
+  kind: McpPlanRequiredValueEnumKind;
+  /**
+   * Key the value is supplied under. Inert untrusted data.
+   */
+  key: string;
+  category: McpPlanValueCategory;
+  valueType: McpPlanEnumValueType;
+  /**
+   * Whether the value must be present for the plan to be applicable.
+   */
+  required: boolean;
+  /**
+   * Default supplied by the card, when the value can be resolved without input. Presence is the authoritative indication that a default exists. Inert untrusted data.
+   */
+  defaultValue?: string;
+  /**
+   * Human-readable label from the card. Inert untrusted text.
+   */
+  title?: string;
+  /**
+   * Human-readable explanation from the card. Inert untrusted text.
+   */
+  description?: string;
+  /**
+   * Non-empty permitted value set. Inert untrusted data.
+   *
+   * @minItems 1
+   */
+  enumValues: [string, ...string[]];
+  /**
+   * Whether the value may be supplied more than once.
+   */
+  isRepeated: boolean;
+}
+/**
+ * A secret a transport choice needs, referenced by placeholder. No secret value ever appears in a plan, and the placeholder resolves against the keychain only when a plan is applied.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanSecretPlaceholder".
+ */
+/** @experimental */
+export interface McpPlanSecretPlaceholder {
+  /**
+   * Key the secret is supplied under. Inert untrusted data.
+   */
+  key: string;
+  placeholder: McpPlanSecretReference;
+  /**
+   * Human-readable label from the card. Inert untrusted text.
+   */
+  title?: string;
+}
+/**
+ * An eligible remote-endpoint transport choice. The endpoint is required and package identity cannot be represented.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanTransportChoiceRemote".
+ */
+/** @experimental */
+export interface McpPlanTransportChoiceRemote {
+  /**
+   * Stable identifier for this choice within the plan, used to select it when the plan is applied.
+   */
+  choiceId: string;
+  transport: McpPlanRemoteTransport;
+  installMethod: McpPlanRemoteInstallMethod;
+  /**
+   * Endpoint URL. Inert untrusted data.
+   */
+  endpoint: string;
+  /**
+   * Typed values this choice requires, excluding secrets.
+   */
+  requiredValues: McpPlanRequiredValue[];
+  /**
+   * Secrets this choice requires, referenced by placeholder only.
+   */
+  secretPlaceholders: McpPlanSecretPlaceholder[];
+}
+/**
+ * Where a plan would be written.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanTarget".
+ */
+/** @experimental */
+export interface McpPlanTarget {
+  scope: McpPlanScope;
+  /**
+   * Configuration key the server would be recorded under within that scope.
+   */
+  configKey: string;
+}
+/**
+ * Outcome of evaluating the planned server against registry and enterprise policy. Evaluation is read-only.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanPolicyResult".
+ */
+/** @experimental */
+export interface McpPlanPolicyResult {
+  decision: McpPlanPolicyDecision;
+  source: McpPlanPolicySource;
+  /**
+   * Human-readable explanation, safe to surface. Never contains a query, URL, handle, or secret.
+   */
+  reason?: string;
+}
+/**
+ * One change applying the plan would make, described rather than serialised so the configuration payload stays behind the runtime boundary.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanConfigurationChange".
+ */
+/** @experimental */
+export interface McpPlanConfigurationChange {
+  operation: McpPlanConfigurationOperation;
+  scope: McpPlanScope;
+  /**
+   * Configuration key the change applies to.
+   */
+  configKey: string;
+  /**
+   * Names of the configuration fields the change would set, without their values.
+   */
+  changedFields: string[];
+  /**
+   * Secret placeholders the written configuration would reference. The constrained placeholder type cannot carry a literal secret value.
+   */
+  secretReferences: McpPlanSecretReference[];
+}
+/**
  * Server name to check running status for.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -6620,7 +10691,7 @@ export interface McpListToolsResult {
   tools: McpTools[];
 }
 /**
- * MCP tool metadata with tool name and optional description.
+ * MCP tool metadata with tool name, optional description, and normalized MCP Apps discovery metadata.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "McpTools".
@@ -6635,6 +10706,41 @@ export interface McpTools {
    * Tool description, when provided.
    */
   description?: string;
+  ui?: McpToolUi;
+}
+/**
+ * Normalized MCP Apps discovery metadata from a tool's `_meta.ui` block.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpToolUi".
+ */
+/** @experimental */
+export interface McpToolUi {
+  /**
+   * URI of the tool's MCP App resource, typically a `ui://` resource identifier. Use `session.mcp.resources.read` to fetch its HTML and resource metadata.
+   */
+  resourceUri?: string;
+  /**
+   * Tool visibility advertised by the server. When absent, MCP Apps defaults apply.
+   */
+  visibility?: McpToolUiVisibility[];
+}
+/**
+ * Identifies the MCP server whose persisted OAuth credentials were updated.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpOauthAuthenticationStateChangedRequest".
+ */
+/** @experimental */
+export interface McpOauthAuthenticationStateChangedRequest {
+  /**
+   * Name of the MCP server whose OAuth credentials were updated. Omit only when the host cannot identify the server.
+   */
+  serverName?: string;
+  /**
+   * Whether the target session must mint a session-scoped access token instead of reusing a shared access token persisted by another session.
+   */
+  refreshSessionToken?: boolean;
 }
 /**
  * Pending MCP OAuth request ID and host-provided token or cancellation response.
@@ -6715,6 +10821,131 @@ export interface McpOauthLoginResult {
   authorizationUrl?: string;
 }
 /**
+ * Remote MCP server name for a passive OAuth status probe.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpOauthProbeRequest".
+ */
+/** @experimental */
+export interface McpOauthProbeRequest {
+  /**
+   * Name of the configured remote MCP server to probe.
+   */
+  serverName: string;
+}
+/**
+ * Pending MCP OAuth request id to respond to.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpOauthRespondRequest".
+ */
+/** @experimental */
+export interface McpOauthRespondRequest {
+  /**
+   * OAuth request identifier from the mcp.oauth_required event
+   */
+  requestId: string;
+}
+/**
+ * Indicates whether the pending MCP OAuth response was accepted.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpOauthRespondResult".
+ */
+/** @experimental */
+export interface McpOauthRespondResult {
+  /**
+   * Whether the response was accepted. False if the request was unknown, timed out, or already resolved.
+   */
+  success: boolean;
+}
+/**
+ * A computed MCP install plan. Nothing has been applied: the plan describes what installing would change, and the plan handle is what a later apply operation would consume.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanInstallPlanned".
+ */
+/** @experimental */
+export interface McpPlanInstallPlanned {
+  /**
+   * Discriminator: a plan was computed and nothing was changed
+   */
+  kind: "planned";
+  plan: McpInstallPlan;
+  negotiated: CatalogNegotiatedContract;
+}
+/**
+ * A side-effect-free request for an MCP install plan. Computing a plan never writes configuration, stores a secret, or reloads MCP servers.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanInstallRequest".
+ */
+/** @experimental */
+export interface McpPlanInstallRequest {
+  contract: CatalogClientContract;
+  source: McpPlanInstallSource;
+  scope?: McpPlanScope;
+}
+/**
+ * Plan from a candidate returned by a previous catalog search.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanInstallSourceCandidate".
+ */
+/** @experimental */
+export interface McpPlanInstallSourceCandidate {
+  kind: McpPlanInstallSourceCandidateKind;
+  /**
+   * Single-use candidate handle. Consumed by this call, so a replay of the same handle is rejected.
+   */
+  candidateHandle: string;
+  /**
+   * The runtime- or authority-minted `searchId` returned with the search that produced this candidate. A search implementation binds it to private candidate-handle context; a planning implementation must verify that context before returning a plan. The unavailable planning implementation in this contract layer validates presence but does not claim the verification has occurred. It identifies a search rather than a person and must never be joined with user identity to re-identify anyone.
+   */
+  searchId: string;
+}
+/**
+ * Plan from a card supplied directly by the caller, without a preceding search.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpPlanInstallSourceCard".
+ */
+/** @experimental */
+export interface McpPlanInstallSourceCard {
+  kind: McpPlanInstallSourceCardKind;
+  card: McpServerCardReference;
+}
+/**
+ * An MCP server card to be retrieved from a URL through the runtime's hardened fetch boundary.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpServerCardUrl".
+ */
+/** @experimental */
+export interface McpServerCardUrl {
+  kind: McpServerCardUrlKind;
+  mediaType: McpServerCardMediaType;
+  /**
+   * Card URL. Retrieved only through the runtime's hardened boundary, with scheme, credential, address-range, redirect, timeout, and response-size controls applied. Never logged.
+   */
+  url: string;
+}
+/**
+ * An MCP server card supplied inline as an inert document.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpServerCardEmbedded".
+ */
+/** @experimental */
+export interface McpServerCardEmbedded {
+  kind: McpServerCardEmbeddedKind;
+  mediaType: McpServerCardMediaType;
+  /**
+   * The card document verbatim, treated as inert untrusted bytes. The runtime parses and validates it; the host is not expected to interpret it. Never logged.
+   */
+  data: string;
+}
+/**
  * Registration parameters for an external MCP client.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -6732,25 +10963,47 @@ export interface McpRegisterExternalClientRequest {
    *
    * @internal
    */
-  client: {
-    [k: string]: unknown | undefined;
-  };
+  client: OpaqueInProcessValue;
   /**
    * In-process MCP Transport instance. Marked internal: cannot be serialized across the JSON-RPC boundary.
    *
    * @internal
    */
-  transport: {
-    [k: string]: unknown | undefined;
-  };
+  transport: OpaqueInProcessValue;
   /**
    * In-process server config (MCPServerConfig) paired with the in-process client/transport. Marked internal alongside its companions.
    *
    * @internal
    */
-  config: {
-    [k: string]: unknown | undefined;
+  config: OpaqueInProcessValue;
+}
+/**
+ * In-process MCP reload configuration.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpReloadConfig".
+ */
+/** @experimental */
+/** @internal */
+export interface McpReloadConfig {
+  mcpServers: {
+    [k: string]: McpServerConfig | undefined;
   };
+  disabledServers?: string[];
+  enabledServers?: string[];
+  /**
+   * Server names the CLI enabled for this session via `--enable-mcp-server`.
+   */
+  cliEnabledServers?: string[];
+  mcp3pEnabled?: boolean;
+  includeWorkspaceSources?: boolean;
+  configFilter?: OpaqueInProcessValue;
+  githubMcpToolOptions?: OpaqueInProcessValue;
+  githubMcpUserOverride?: boolean;
+  secretStore?: OpaqueInProcessValue;
+  activeGitHubToken?: string;
+  useCachedToolSnapshots?: boolean;
+  forceRestart?: boolean;
 }
 /**
  * Opaque MCP reload configuration.
@@ -6761,14 +11014,7 @@ export interface McpRegisterExternalClientRequest {
 /** @experimental */
 /** @internal */
 export interface McpReloadWithConfigRequest {
-  /**
-   * Opaque runtime MCP reload configuration. Marked internal: an in-process runtime shape (reloadMcpServers throws over the wire).
-   *
-   * @internal
-   */
-  config: {
-    [k: string]: unknown | undefined;
-  };
+  config: unknown;
 }
 /**
  * Indicates whether the auto-managed `github` MCP server was removed (false when nothing to remove).
@@ -6784,26 +11030,301 @@ export interface McpRemoveGitHubResult {
   removed: boolean;
 }
 /**
- * Server name and opaque configuration for an individual MCP server restart.
+ * An MCP resource descriptor (spec `Resource`): URI, name, and optional title, description, MIME type, size, icons, annotations, and metadata. Server-provided fields outside the standard descriptor shape are exposed under `additionalProperties`.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpResource".
+ */
+/** @experimental */
+export interface McpResource {
+  /**
+   * The resource URI (e.g. ui://... or file:///...)
+   */
+  uri: string;
+  /**
+   * The programmatic name of the resource
+   */
+  name: string;
+  /**
+   * Optional human-readable display title
+   */
+  title?: string;
+  /**
+   * Optional description of what this resource represents
+   */
+  description?: string;
+  /**
+   * MIME type of the resource, if known
+   */
+  mimeType?: string;
+  /**
+   * Resource size in bytes, when known
+   */
+  size?: number;
+  /**
+   * Icons associated with this resource
+   */
+  icons?: McpResourceIcon[];
+  annotations?: McpResourceAnnotations;
+  /**
+   * Resource-level metadata
+   */
+  _meta?: {
+    [k: string]: JsonValue | undefined;
+  };
+  /**
+   * Server-provided non-standard descriptor fields preserved from the MCP response
+   */
+  additionalProperties?: {
+    [k: string]: JsonValue | undefined;
+  };
+}
+/**
+ * A resource icon descriptor plus preserved non-standard icon fields.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpResourceIcon".
+ */
+/** @experimental */
+export interface McpResourceIcon {
+  /**
+   * Icon URI
+   */
+  src: string;
+  /**
+   * Icon MIME type, when known
+   */
+  mimeType?: string;
+  /**
+   * Icon sizes hint
+   */
+  sizes?: string;
+  /**
+   * Theme hint for this icon
+   */
+  theme?: string;
+  /**
+   * Server-provided non-standard icon fields preserved from the MCP response
+   */
+  additionalProperties?: {
+    [k: string]: JsonValue | undefined;
+  };
+}
+/**
+ * Standard MCP resource annotations plus preserved non-standard annotation fields.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpResourceAnnotations".
+ */
+/** @experimental */
+export interface McpResourceAnnotations {
+  /**
+   * Intended audience roles for this resource
+   */
+  audience?: string[];
+  /**
+   * Priority hint for model/client use
+   */
+  priority?: number;
+  /**
+   * Last-modified timestamp hint
+   */
+  lastModified?: string;
+  /**
+   * Server-provided non-standard annotation fields preserved from the MCP response
+   */
+  additionalProperties?: {
+    [k: string]: JsonValue | undefined;
+  };
+}
+/**
+ * MCP resource content with URI, optional MIME type, text or base64 blob, and resource metadata.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpResourceContent".
+ */
+/** @experimental */
+export interface McpResourceContent {
+  /**
+   * The resource URI
+   */
+  uri: string;
+  /**
+   * MIME type of the content
+   */
+  mimeType?: string;
+  /**
+   * Text content (e.g. HTML)
+   */
+  text?: string;
+  /**
+   * Base64-encoded binary content
+   */
+  blob?: string;
+  /**
+   * Resource-level metadata (CSP, permissions, etc.)
+   */
+  _meta?: {
+    [k: string]: JsonValue | undefined;
+  };
+}
+/**
+ * MCP server whose resources to enumerate.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpResourcesListRequest".
+ */
+/** @experimental */
+export interface McpResourcesListRequest {
+  /**
+   * Name of the MCP server whose resources to enumerate
+   */
+  serverName: string;
+  /**
+   * Opaque MCP pagination cursor from a prior `nextCursor` value
+   */
+  cursor?: string;
+}
+/**
+ * One page of resources advertised by the named MCP server.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpResourcesListResult".
+ */
+/** @experimental */
+export interface McpResourcesListResult {
+  /**
+   * Resources advertised by the server (proxied MCP `resources/list`)
+   */
+  resources: McpResource[];
+  /**
+   * Opaque cursor for the next page, if the server has more resources
+   */
+  nextCursor?: string;
+}
+/**
+ * MCP server whose resource templates to enumerate.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpResourcesListTemplatesRequest".
+ */
+/** @experimental */
+export interface McpResourcesListTemplatesRequest {
+  /**
+   * Name of the MCP server whose resource templates to enumerate
+   */
+  serverName: string;
+  /**
+   * Opaque MCP pagination cursor from a prior `nextCursor` value
+   */
+  cursor?: string;
+}
+/**
+ * One page of resource templates advertised by the named MCP server.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpResourcesListTemplatesResult".
+ */
+/** @experimental */
+export interface McpResourcesListTemplatesResult {
+  /**
+   * Resource templates advertised by the server (proxied MCP `resources/templates/list`)
+   */
+  resourceTemplates: McpResourceTemplate[];
+  /**
+   * Opaque cursor for the next page, if the server has more resource templates
+   */
+  nextCursor?: string;
+}
+/**
+ * An MCP resource template descriptor (spec `ResourceTemplate`): an RFC 6570 URI template, name, and optional title, description, MIME type, icons, annotations, and metadata. Server-provided fields outside the standard descriptor shape are exposed under `additionalProperties`.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpResourceTemplate".
+ */
+/** @experimental */
+export interface McpResourceTemplate {
+  /**
+   * An RFC 6570 URI template for constructing resource URIs
+   */
+  uriTemplate: string;
+  /**
+   * The programmatic name of the resource template
+   */
+  name: string;
+  /**
+   * Optional human-readable display title
+   */
+  title?: string;
+  /**
+   * Optional description of what this template is for
+   */
+  description?: string;
+  /**
+   * MIME type for resources matching this template, if uniform
+   */
+  mimeType?: string;
+  /**
+   * Icons associated with resources matching this template
+   */
+  icons?: McpResourceIcon[];
+  annotations?: McpResourceAnnotations;
+  /**
+   * Resource-template-level metadata
+   */
+  _meta?: {
+    [k: string]: JsonValue | undefined;
+  };
+  /**
+   * Server-provided non-standard descriptor fields preserved from the MCP response
+   */
+  additionalProperties?: {
+    [k: string]: JsonValue | undefined;
+  };
+}
+/**
+ * MCP server and resource URI to fetch.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpResourcesReadRequest".
+ */
+/** @experimental */
+export interface McpResourcesReadRequest {
+  /**
+   * Name of the MCP server hosting the resource
+   */
+  serverName: string;
+  /**
+   * Resource URI
+   */
+  uri: string;
+}
+/**
+ * Resource contents returned by the MCP server.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpResourcesReadResult".
+ */
+/** @experimental */
+export interface McpResourcesReadResult {
+  /**
+   * Resource contents returned by the server
+   */
+  contents: McpResourceContent[];
+}
+/**
+ * Server name and optional replacement configuration for an individual MCP server restart. Omit `config` for a config-free restart-by-name of an already-configured server.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "McpRestartServerRequest".
  */
 /** @experimental */
-/** @internal */
 export interface McpRestartServerRequest {
   /**
    * Name of the MCP server to restart
    */
   serverName: string;
-  /**
-   * Opaque server configuration (MCPServerConfig). Marked internal: an in-process runtime shape supplied only by in-process CLI callers.
-   *
-   * @internal
-   */
-  config: {
-    [k: string]: unknown | undefined;
-  };
+  config?: McpSerializableServerConfig;
 }
 /**
  * Outcome of an MCP sampling execution: success result, failure error, or cancellation.
@@ -6848,6 +11369,84 @@ export interface McpServer {
   error?: string;
 }
 /**
+ * In-process MCP server configuration used by embedded SDK clients.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpServerConfigMemory".
+ */
+/** @experimental */
+/** @internal */
+export interface McpServerConfigMemory {
+  type: McpServerConfigMemoryType;
+  /**
+   * In-process MCP server instance. This value cannot cross a JSON-RPC boundary.
+   *
+   * @internal
+   */
+  serverInstance: OpaqueInProcessValue;
+  /**
+   * Tools to include. Defaults to all tools if not specified.
+   */
+  tools?: string[];
+  /**
+   * Optional human-readable server name.
+   */
+  displayName?: string;
+  /**
+   * Whether this server is a built-in fallback.
+   */
+  isDefaultServer?: boolean;
+  filterMapping?: FilterMapping;
+  safeForTelemetry?: McpSafeForTelemetry;
+  /**
+   * Timeout in milliseconds for tool discovery and tool calls.
+   */
+  timeout?: number;
+  oidc?: McpServerAuthConfig;
+  deferTools?: McpServerConfigDeferTools;
+  /**
+   * Whether persisted tool snapshots are disabled.
+   */
+  disableToolCache?: boolean;
+  /**
+   * Whether secret masking is disabled for calls to this server.
+   */
+  disableSecretMasking?: boolean;
+  /**
+   * Tool names excluded after the include filter is applied.
+   */
+  excludeTools?: string[];
+  /**
+   * Event types this server receives as Copilot notifications.
+   */
+  events?: string[];
+  /**
+   * Copilot notification types this server may send to the host.
+   */
+  notifications?: string[];
+  source?: McpServerSource;
+  /**
+   * Plugin that provided this server.
+   */
+  sourcePlugin?: string;
+  /**
+   * Version of the plugin that provided this server.
+   */
+  sourcePluginVersion?: string;
+  /**
+   * Whether the providing plugin uses the Open Plugin Spec.
+   */
+  sourcePluginSpec?: boolean;
+  /**
+   * Source file path recorded while loading the config.
+   */
+  sourcePath?: string;
+  /**
+   * Configuration warnings recorded while loading the server.
+   */
+  configWarnings?: string[];
+}
+/**
  * MCP servers configured for the session, with their connection status and host-level state.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -6882,26 +11481,18 @@ export interface McpSetEnvValueModeResult {
   mode: McpSetEnvValueModeDetails;
 }
 /**
- * Server name and opaque configuration for an individual MCP server start.
+ * Server name and optional configuration for an individual MCP server start. Omit `config` for a config-free start-by-name of an already-configured server.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "McpStartServerRequest".
  */
 /** @experimental */
-/** @internal */
 export interface McpStartServerRequest {
   /**
    * Name of the MCP server to start
    */
   serverName: string;
-  /**
-   * Opaque server configuration (MCPServerConfig). Marked internal: an in-process runtime shape supplied only by in-process CLI callers.
-   *
-   * @internal
-   */
-  config: {
-    [k: string]: unknown | undefined;
-  };
+  config?: McpSerializableServerConfig;
 }
 /**
  * MCP server startup filtering result.
@@ -6919,6 +11510,10 @@ export interface McpStartServersResult {
    * Non-default servers allowed by policy
    */
   allowedServers?: McpAllowedServer[];
+  /**
+   * Servers whose connection attempt failed.
+   */
+  failedServers?: McpFailedServer[];
 }
 /**
  * Server name for an individual MCP server stop.
@@ -6932,6 +11527,19 @@ export interface McpStopServerRequest {
    * Name of the MCP server to stop
    */
   serverName: string;
+}
+/**
+ * Metadata controlling an MCP task's lifetime.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpTaskMetadata".
+ */
+/** @experimental */
+export interface McpTaskMetadata {
+  /**
+   * Task time-to-live.
+   */
+  ttl?: number;
 }
 /**
  * Server name identifying the external client to remove.
@@ -7133,7 +11741,7 @@ export interface SessionWorkingDirectoryContext {
   baseCommit?: string;
 }
 /**
- * Notify the session that its working directory context has changed. Emits a `session.context_changed` event so consumers (telemetry, OTel tracker, ACP, the timeline UI) can react. Use this when the host has detected a cwd/branch/repo change outside the session's normal lifecycle (e.g., after a shell command in interactive mode).
+ * Notify the session that its working directory context has changed. Emits a `session.context_changed` event so consumers (telemetry, OTel tracker, ACP, the timeline UI) can react. Use this when the host has detected a cwd/branch/repo change outside the session's normal lifecycle (e.g., after a shell command in interactive mode). For a local session, a report whose `cwd` diverges from the session's current working directory is ignored (the call still succeeds but records nothing and emits no event); move a local session's working directory via `metadata.setWorkingDirectory` instead.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "MetadataRecordContextChangeResult".
@@ -7141,7 +11749,7 @@ export interface SessionWorkingDirectoryContext {
 /** @experimental */
 export interface MetadataRecordContextChangeResult {}
 /**
- * Absolute path to set as the session's new working directory.
+ * Absolute path to set as the session's new working directory. For local sessions the path must be absolute and exist on disk: it is validated before any session state changes, and a failing validation rejects the call with nothing mutated, persisted, or emitted. Remote sessions record the path as-is.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "MetadataSetWorkingDirectoryRequest".
@@ -7154,7 +11762,7 @@ export interface MetadataSetWorkingDirectoryRequest {
   workingDirectory: string;
 }
 /**
- * Update the session's working directory. Used by the host when the user explicitly changes cwd (e.g., the `/cd` slash command). The host is responsible for `process.chdir` and any related side-effects (file index, etc.); this method only updates the session's own recorded path.
+ * Update the session's working directory. Used by the host when the user explicitly changes cwd (e.g., the `/cd` slash command). The host is responsible for any related side-effects (file index, etc.); it does NOT change the process working directory (a session's cwd is per-session, not process-global). For local sessions the runtime validates the target first (an absolute path that exists on disk) and re-bases the permission primary directory; a rejected validation fails the call before anything is mutated, persisted, or emitted. Location-scoped permission rules are then re-keyed to the new directory (best-effort). Remote sessions only record the path.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "MetadataSetWorkingDirectoryResult".
@@ -7233,6 +11841,10 @@ export interface Model {
    * Default reasoning effort level (only present if model supports reasoning effort)
    */
   defaultReasoningEffort?: string;
+  /**
+   * Context-window tiers this model offers, when the provider advertises them independently of tiered token pricing. Copilot models carry their tiers in `billing.tokenPrices`; a provider that has no pricing to publish (an agent host reached over AHP, for example) declares them here instead, so the model picker can still offer the tier toggle.
+   */
+  supportedContextTiers?: string[];
   modelPickerCategory?: ModelPickerCategory;
   modelPickerPriceCategory?: ModelPickerPriceCategory;
 }
@@ -7339,6 +11951,7 @@ export interface ModelBilling {
    * Whole-number percentage discount (0-100) applied to usage billed through this model. Populated for the synthetic `auto` model, where requests routed by auto-mode are billed at a reduced rate; absent for concrete models.
    */
   discountPercent?: number;
+  promo?: ModelBillingPromo;
 }
 /**
  * Token-level pricing information for this model
@@ -7369,6 +11982,10 @@ export interface ModelBillingTokenPrices {
    * AI Credits cost per billing batch of cache-write (cache creation) tokens.
    */
   cacheWritePrice?: number;
+  /**
+   * AI Credits cost per billing batch of 1-hour cache-write (cache creation) tokens.
+   */
+  cacheWrite1hPrice?: number;
   /**
    * Number of tokens per standard billing batch
    */
@@ -7414,6 +12031,10 @@ export interface ModelBillingTokenPricesLongContext {
    */
   cacheWritePrice?: number;
   /**
+   * AI Credits cost per billing batch of 1-hour cache-write (cache creation) tokens.
+   */
+  cacheWrite1hPrice?: number;
+  /**
    * @deprecated
    * Use maxPromptTokens instead. Prompt token budget for the long context tier. The total context window is this value plus the model's max_output_tokens.
    */
@@ -7422,6 +12043,68 @@ export interface ModelBillingTokenPricesLongContext {
    * Prompt token budget for the long context tier. The total context window is this value plus the model's max_output_tokens.
    */
   maxPromptTokens?: number;
+}
+/**
+ * Active server-driven promotion for a model, including its discount and optional expiry.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ModelBillingPromo".
+ */
+/** @experimental */
+export interface ModelBillingPromo {
+  /**
+   * Stable identifier for the promotion campaign.
+   */
+  id?: string;
+  /**
+   * Percentage discount (0-100) applied while the promotion is active. May be fractional.
+   */
+  discountPercent?: number;
+  /**
+   * UTC ISO 8601 timestamp marking when the promotion ends. Optional: an open-ended promotion omits this field. When present, the API only surfaces a promo whose expiry parses and is in the future, so consumers should treat a past value as expired.
+   */
+  endsAt?: string;
+  /**
+   * Human-readable promotion message. Does not include the expiry timestamp; consumers may format endsAt and append it when present.
+   */
+  message?: string;
+}
+/**
+ * Managed, repository, and CLI model overrides to overlay onto the session at startup.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ModelApplyStartupOverlayRequest".
+ */
+/** @experimental */
+export interface ModelApplyStartupOverlayRequest {
+  /**
+   * Model required by device-managed policy, when configured.
+   */
+  deviceManagedModel?: string;
+  /**
+   * Model required by server-managed policy, when configured.
+   */
+  serverManagedModel?: string;
+  /**
+   * Model selected by repository settings, when configured.
+   */
+  repoModel?: string;
+  /**
+   * Reasoning effort selected by repository settings, when configured.
+   */
+  repoReasoningEffort?: string;
+  /**
+   * Context tier selected by repository settings, when configured.
+   */
+  repoContextTier?: string;
+  /**
+   * Model explicitly selected by the CLI, when provided.
+   */
+  cliModel?: string;
+  /**
+   * Whether the overlay is being applied while resuming a deferred session.
+   */
+  deferredResume?: boolean;
 }
 /**
  * Optional capability overrides (vision, tool_calls, reasoning, etc.).
@@ -7508,18 +12191,39 @@ export interface ModelList {
    */
   models: Model[];
 }
+
+/** @experimental */
+export interface ModelPickerPersistenceRequest {
+  settingsContext: ModelPickerSettingsContext;
+  /**
+   * Whether reasoning effort was explicitly selected and should be persisted.
+   */
+  reasoningEffortExplicit?: boolean;
+  /**
+   * Whether context tier was explicitly selected and should be persisted.
+   */
+  contextTierExplicit?: boolean;
+}
 /**
- * Optional listing options.
+ * Filesystem and environment context used to resolve model-picker settings.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "ModelListRequest".
+ * via the `definition` "ModelPickerSettingsContext".
  */
 /** @experimental */
-export interface ModelListRequest {
+export interface ModelPickerSettingsContext {
   /**
-   * If true, bypasses the per-session model list cache and re-fetches from CAPI.
+   * Optional Copilot configuration directory containing persisted settings.
    */
-  skipCache?: boolean;
+  configDir?: string;
+  /**
+   * User home directory used when resolving persisted settings.
+   */
+  homeDirectory: string;
+  /**
+   * Environment variables consulted while resolving model-picker settings.
+   */
+  environment: {};
 }
 /**
  * Reasoning effort level to apply to the currently selected model.
@@ -7551,9 +12255,29 @@ export interface ModelSetReasoningEffortResult {
 /** @experimental */
 export interface ModelsListRequest {
   /**
-   * GitHub token for per-user model listing. When provided, resolves this token to determine the user's Copilot plan and available models instead of using the global auth.
+   * Opaque account identifier returned by `account.getAllUsers`. When omitted, the current account is used.
+   */
+  selectionId?: string;
+  /**
+   * GitHub token accepted for compatibility with existing SDK clients. When provided, resolves this token instead of using the current account.
    */
   gitHubToken?: string;
+}
+
+/** @experimental */
+export interface ModelSwitchConfirmation {
+  /**
+   * Display name of the model that requires compaction confirmation.
+   */
+  targetModelDisplayName: string;
+  /**
+   * Current conversation token count before switching models.
+   */
+  currentTokens: number;
+  /**
+   * Target model token limit used by the compaction preflight.
+   */
+  targetLimit: number;
 }
 /**
  * Target model identifier and optional reasoning effort, summary, capability overrides, and context tier.
@@ -7568,12 +12292,39 @@ export interface ModelSwitchToRequest {
    */
   modelId: string;
   /**
-   * Reasoning effort level to use for the model. "none" disables reasoning.
+   * Reasoning effort level to use for the model. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. "none" disables reasoning. When omitted, no effort override is applied.
    */
   reasoningEffort?: string;
   reasoningSummary?: ReasoningSummary;
+  verbosity?: Verbosity;
   modelCapabilities?: ModelCapabilitiesOverride;
   contextTier?: ContextTier;
+  source?: ModelChangeSource;
+  /**
+   * When true, defer this switch (enqueue it) if another model change is already queued, even when no turn is active — so it drains last (FIFO) and wins over the already-queued change. Intended for genuine user-initiated model selections; internal restore/reapply switches omit it and apply immediately when no turn is active. When no other model change is queued this has no effect (a switch still applies immediately unless a turn is active).
+   */
+  deferIfModelChangeQueued?: boolean;
+  /**
+   * Explicit response to a model-switch compaction preflight. Omit to request a confirmation projection when compaction is necessary.
+   */
+  compactionDecision?: string;
+  /**
+   * When true, evaluate context-window compaction policy before applying the switch.
+   */
+  runCompactionPreflight?: boolean;
+  /**
+   * Optional repository settings scope to persist after the switch commits.
+   */
+  repoScope?: string;
+  /**
+   * Settings scope used when persisting the selected model.
+   */
+  modelChangeScope?: string;
+  /**
+   * Require the target to be currently available and enabled before applying the switch.
+   */
+  requireAvailable?: boolean;
+  pickerPersistence?: ModelPickerPersistenceRequest;
 }
 /**
  * The model identifier active on the session after the switch.
@@ -7587,6 +12338,31 @@ export interface ModelSwitchToResult {
    * Currently active model identifier after the switch
    */
   modelId?: string;
+  /**
+   * True when the switch was deferred (enqueued as a cancellable `/model` command) because a turn was active or another model change was already queued, rather than applied immediately. When true, the session's live model is unchanged until the queued change drains.
+   */
+  deferred?: boolean;
+  /**
+   * Lifecycle result for the requested switch
+   */
+  status?: string;
+  confirmation?: ModelSwitchConfirmation;
+  /**
+   * Persistence failure encountered after applying the model switch.
+   */
+  persistenceError?: string;
+  /**
+   * User-facing outcome message for the model switch.
+   */
+  message?: string;
+  /**
+   * User-facing warning produced while applying the model switch.
+   */
+  warning?: string;
+  /**
+   * Deprecation warnings associated with the selected model or options.
+   */
+  deprecationWarnings?: string[];
 }
 /**
  * Agent interaction mode to apply to the session.
@@ -7597,9 +12373,97 @@ export interface ModelSwitchToResult {
 /** @experimental */
 export interface ModeSetRequest {
   mode: SessionMode;
+  /**
+   * Session whose plan-mode base state should be inherited.
+   */
+  inheritPlanBaseFromSessionId?: string;
+  /**
+   * Whether a dedicated plan model is configured.
+   */
+  planModelConfigured?: boolean;
+  /**
+   * Dedicated model to use in plan mode, when configured.
+   */
+  planModel?: string;
+  /**
+   * Reasoning effort to use with the dedicated plan model.
+   */
+  planReasoningEffort?: string;
+  /**
+   * Context tier to use with the dedicated plan model.
+   */
+  planContextTier?: string;
+  /**
+   * Explicit response to a model-switch compaction preflight.
+   */
+  compactionDecision?: string;
+  /**
+   * Whether leaving plan mode should restore the session's previous model.
+   */
+  restorePlanModel?: boolean;
+  /**
+   * Whether the selected plan model should be persisted.
+   */
+  persistPlanSelection?: boolean;
+  pickerSettingsContext?: ModelPickerSettingsContext;
+  /**
+   * Action to perform when leaving plan mode.
+   */
+  planExitAction?: string;
 }
 /**
- * A named BYOK provider connection (transport + credentials).
+ * Outcome of a session mode change, including any model switch it triggered and follow-up the host must perform.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ModeSetResult".
+ */
+/** @experimental */
+export interface ModeSetResult {
+  /**
+   * Lifecycle status of the requested mode change.
+   */
+  status: string;
+  /**
+   * Whether applying the mode changed the active model.
+   */
+  modelChanged: boolean;
+  confirmation?: ModelSwitchConfirmation;
+  /**
+   * User-facing warning produced while applying the mode change.
+   */
+  warning?: string;
+  /**
+   * User-facing outcome message for the model switch triggered by the mode change.
+   */
+  message?: string;
+  /**
+   * Deprecation warnings associated with the model selected by the mode change.
+   */
+  deprecationWarnings?: string[];
+  /**
+   * Whether the host must defer implementing the requested mode change.
+   */
+  deferImplementation?: boolean;
+  /**
+   * Whether the host should arm an interactive continuation after the mode change.
+   */
+  armInteractiveContinuation?: boolean;
+}
+/**
+ * Result of moving in-flight MCP loading to the background.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "MoveMcpLoadingToBackgroundResult".
+ */
+/** @experimental */
+export interface MoveMcpLoadingToBackgroundResult {
+  /**
+   * Whether an in-flight MCP load was moved to the background, releasing turns that were waiting on it. False when no MCP load was in flight or the waiting turns had already been released.
+   */
+  movedToBackground: boolean;
+}
+/**
+ * External SDK input for a named custom model provider. Ingested by the native protocol boundary before host dispatch.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "NamedProviderConfig".
@@ -7607,33 +12471,33 @@ export interface ModeSetRequest {
 /** @experimental */
 export interface NamedProviderConfig {
   /**
-   * Stable identifier referenced by BYOK model definitions. Must not contain '/'.
+   * Unique provider name used to qualify model selection IDs.
    */
   name: string;
   type?: ProviderConfigType;
   wireApi?: ProviderConfigWireApi;
   transport?: ProviderConfigTransport;
   /**
-   * API endpoint URL.
+   * Base URL for provider API requests.
    */
   baseUrl: string;
   /**
-   * API key. Optional for local providers like Ollama.
+   * Static API key used to authenticate provider requests.
    */
   apiKey?: string;
   /**
-   * Bearer token for authentication. Sets the Authorization header directly. Takes precedence over apiKey when both are set.
+   * Static bearer token used to authenticate provider requests.
    */
   bearerToken?: string;
   azure?: ProviderConfigAzure;
   /**
-   * Custom HTTP headers to include in all outbound requests to the provider.
+   * Additional HTTP headers included with provider requests.
    */
   headers?: {
     [k: string]: string | undefined;
   };
   /**
-   * When true, the SDK client supplies bearer tokens on demand: the runtime calls the client-session `providerToken.getToken` callback before each request and applies the returned token as an `Authorization: Bearer <token>` header. This is the bearer/OAuth scheme used by Azure AD / managed-identity tokens and provider OAuth access tokens (including Anthropic's), not a provider-specific API-key header such as Anthropic's `x-api-key`. The token-acquiring function itself stays on the SDK side and is never serialized; only this flag crosses the wire. When set alongside `apiKey`/`bearerToken`, the callback takes precedence: the runtime applies the token returned by `providerToken.getToken` as the `Authorization: Bearer` header for each request and does not send the static credential.
+   * Whether the host supplies bearer tokens dynamically.
    */
   hasBearerTokenProvider?: boolean;
 }
@@ -7710,8 +12574,14 @@ export interface NameSetRequest {
  */
 /** @experimental */
 export interface OptionsUpdateAdditionalContentExclusionPolicy {
+  /**
+   * Content-exclusion rules to apply.
+   */
   rules: OptionsUpdateAdditionalContentExclusionPolicyRule[];
-  last_updated_at: unknown;
+  /**
+   * Opaque policy update timestamp supplied by the host.
+   */
+  last_updated_at: JsonValue;
   scope: OptionsUpdateAdditionalContentExclusionPolicyScope;
 }
 /**
@@ -7722,8 +12592,17 @@ export interface OptionsUpdateAdditionalContentExclusionPolicy {
  */
 /** @experimental */
 export interface OptionsUpdateAdditionalContentExclusionPolicyRule {
+  /**
+   * Path patterns covered by this rule.
+   */
   paths: string[];
+  /**
+   * Conditions of which at least one must match.
+   */
   ifAnyMatch?: string[];
+  /**
+   * Conditions none of which may match.
+   */
   ifNoneMatch?: string[];
   source: OptionsUpdateAdditionalContentExclusionPolicyRuleSource;
 }
@@ -7735,7 +12614,13 @@ export interface OptionsUpdateAdditionalContentExclusionPolicyRule {
  */
 /** @experimental */
 export interface OptionsUpdateAdditionalContentExclusionPolicyRuleSource {
+  /**
+   * Name of the policy source.
+   */
   name: string;
+  /**
+   * Type of the policy source.
+   */
   type: string;
 }
 /**
@@ -7777,6 +12662,10 @@ export interface PermissionDecisionApproveOnce {
    * Approve this single request only
    */
   kind: "approve-once";
+  /**
+   * True only when a host surfaced this request to a user who approved it.
+   */
+  approvedInteractively?: boolean;
 }
 /**
  * Permission-decision request variant to approve for the rest of the session, with optional tool approval or URL domain.
@@ -7925,6 +12814,23 @@ export interface PermissionDecisionApproveForSessionApprovalExtensionManagement 
   operation?: string;
 }
 /**
+ * Session-scoped factory approval, optionally narrowed by approval key.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionDecisionApproveForSessionApprovalFactory".
+ */
+/** @experimental */
+export interface PermissionDecisionApproveForSessionApprovalFactory {
+  /**
+   * Approval covering factory operations.
+   */
+  kind: "factory";
+  /**
+   * Optional factory operation name or canonical approval key; when omitted, the approval covers all factory operations.
+   */
+  approvalKey?: string;
+}
+/**
  * Session-scoped approval details for an extension's permission-gated capability access, keyed by extension name.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -7940,6 +12846,29 @@ export interface PermissionDecisionApproveForSessionApprovalExtensionPermissionA
    * Extension name.
    */
   extensionName: string;
+}
+/**
+ * Session-scoped approval details for an extension's access to sensitive environment variables, keyed by extension name and the exact set of variable names.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionDecisionApproveForSessionApprovalExtensionEnvAccess".
+ */
+/** @experimental */
+export interface PermissionDecisionApproveForSessionApprovalExtensionEnvAccess {
+  /**
+   * Approval covering an extension's request to read sensitive environment variables.
+   */
+  kind: "extension-env-access";
+  /**
+   * Extension name.
+   */
+  extensionName: string;
+  /**
+   * Names of the sensitive environment variables this approval covers. Values are never persisted.
+   *
+   * @minItems 1
+   */
+  environmentVariables: [string, ...string[]];
 }
 /**
  * Permission-decision request variant to approve and persist a permission for a project location, with approval details and location key.
@@ -8088,6 +13017,23 @@ export interface PermissionDecisionApproveForLocationApprovalExtensionManagement
   operation?: string;
 }
 /**
+ * Location-scoped factory approval, optionally narrowed by approval key.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionDecisionApproveForLocationApprovalFactory".
+ */
+/** @experimental */
+export interface PermissionDecisionApproveForLocationApprovalFactory {
+  /**
+   * Approval covering factory operations.
+   */
+  kind: "factory";
+  /**
+   * Optional factory operation name or canonical approval key; when omitted, the approval covers all factory operations.
+   */
+  approvalKey?: string;
+}
+/**
  * Location-scoped approval details for an extension's permission-gated capability access, keyed by extension name.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -8103,6 +13049,29 @@ export interface PermissionDecisionApproveForLocationApprovalExtensionPermission
    * Extension name.
    */
   extensionName: string;
+}
+/**
+ * Location-scoped approval details for an extension's access to sensitive environment variables, keyed by extension name and the exact set of variable names.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionDecisionApproveForLocationApprovalExtensionEnvAccess".
+ */
+/** @experimental */
+export interface PermissionDecisionApproveForLocationApprovalExtensionEnvAccess {
+  /**
+   * Approval covering an extension's request to read sensitive environment variables.
+   */
+  kind: "extension-env-access";
+  /**
+   * Extension name.
+   */
+  extensionName: string;
+  /**
+   * Names of the sensitive environment variables this approval covers. Values are never persisted.
+   *
+   * @minItems 1
+   */
+  environmentVariables: [string, ...string[]];
 }
 /**
  * Permission-decision request variant to permanently approve a URL domain across sessions.
@@ -8307,6 +13276,18 @@ export interface PermissionDecisionDeniedByPermissionRequestHook {
   interrupt?: boolean;
 }
 /**
+ * Optional informational context describing how and where the permission decision was made. This does not affect permission behavior.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionDecisionContext".
+ */
+/** @experimental */
+export interface PermissionDecisionContext {
+  outcome: PermissionDecisionOutcome;
+  source: PermissionDecisionSource;
+  surface: PermissionDecisionSurface;
+}
+/**
  * Pending permission request ID and the decision to apply (approve/reject and scope).
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -8319,6 +13300,7 @@ export interface PermissionDecisionRequest {
    */
   requestId: string;
   result: PermissionDecision;
+  decisionContext?: PermissionDecisionContext;
 }
 /**
  * Location-scoped tool approval to persist.
@@ -8463,6 +13445,23 @@ export interface PermissionsLocationsAddToolApprovalDetailsExtensionManagement {
   operation?: string;
 }
 /**
+ * Location-persisted factory approval, optionally narrowed by approval key.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsLocationsAddToolApprovalDetailsFactory".
+ */
+/** @experimental */
+export interface PermissionsLocationsAddToolApprovalDetailsFactory {
+  /**
+   * Approval covering factory operations.
+   */
+  kind: "factory";
+  /**
+   * Optional factory operation name or canonical approval key; when omitted, the approval covers all factory operations.
+   */
+  approvalKey?: string;
+}
+/**
  * Location-persisted tool approval details for an extension's permission-gated capability access, keyed by extension name.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -8478,6 +13477,29 @@ export interface PermissionsLocationsAddToolApprovalDetailsExtensionPermissionAc
    * Extension name.
    */
   extensionName: string;
+}
+/**
+ * Location-persisted tool approval details for an extension's access to sensitive environment variables, keyed by extension name and the exact set of variable names.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsLocationsAddToolApprovalDetailsExtensionEnvAccess".
+ */
+/** @experimental */
+export interface PermissionsLocationsAddToolApprovalDetailsExtensionEnvAccess {
+  /**
+   * Approval covering an extension's request to read sensitive environment variables.
+   */
+  kind: "extension-env-access";
+  /**
+   * Extension name.
+   */
+  extensionName: string;
+  /**
+   * Names of the sensitive environment variables this approval covers. Values are never persisted.
+   *
+   * @minItems 1
+   */
+  environmentVariables: [string, ...string[]];
 }
 /**
  * Working directory to load persisted location permissions for.
@@ -8720,8 +13742,14 @@ export interface PermissionRulesSet {
  */
 /** @experimental */
 export interface PermissionsConfigureAdditionalContentExclusionPolicy {
+  /**
+   * Content-exclusion rules to apply.
+   */
   rules: PermissionsConfigureAdditionalContentExclusionPolicyRule[];
-  last_updated_at: unknown;
+  /**
+   * Opaque policy update timestamp supplied by the host.
+   */
+  last_updated_at: JsonValue;
   scope: PermissionsConfigureAdditionalContentExclusionPolicyScope;
 }
 /**
@@ -8732,8 +13760,17 @@ export interface PermissionsConfigureAdditionalContentExclusionPolicy {
  */
 /** @experimental */
 export interface PermissionsConfigureAdditionalContentExclusionPolicyRule {
+  /**
+   * Path patterns covered by this rule.
+   */
   paths: string[];
+  /**
+   * Conditions of which at least one must match.
+   */
   ifAnyMatch?: string[];
+  /**
+   * Conditions none of which may match.
+   */
   ifNoneMatch?: string[];
   source: PermissionsConfigureAdditionalContentExclusionPolicyRuleSource;
 }
@@ -8745,7 +13782,13 @@ export interface PermissionsConfigureAdditionalContentExclusionPolicyRule {
  */
 /** @experimental */
 export interface PermissionsConfigureAdditionalContentExclusionPolicyRuleSource {
+  /**
+   * Name of the policy source.
+   */
   name: string;
+  /**
+   * Type of the policy source.
+   */
   type: string;
 }
 /**
@@ -8819,10 +13862,20 @@ export interface PermissionsFolderTrustAddTrustedResult {
  * No parameters.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "PermissionsGetAllowAllRequest".
+ * via the `definition` "PermissionsGetModeRequest".
  */
 /** @experimental */
-export interface PermissionsGetAllowAllRequest {}
+export interface PermissionsGetModeRequest {}
+/**
+ * Current permission mode.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsGetModeResult".
+ */
+/** @experimental */
+export interface PermissionsGetModeResult {
+  mode: PermissionMode;
+}
 /**
  * Indicates whether the operation succeeded.
  *
@@ -8927,13 +13980,18 @@ export interface PermissionsPathsUpdatePrimaryResult {
 /** @experimental */
 export interface PermissionsPendingRequestsRequest {}
 /**
- * No parameters; clears all session-scoped tool permission approvals.
+ * Clears session-scoped tool permission approvals, and optionally the location-scoped ones.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "PermissionsResetSessionApprovalsRequest".
  */
 /** @experimental */
-export interface PermissionsResetSessionApprovalsRequest {}
+export interface PermissionsResetSessionApprovalsRequest {
+  /**
+   * Whether location-scoped approvals are cleared too. Defaults to `true`.
+   */
+  includeLocation?: boolean;
+}
 /**
  * Indicates whether the operation succeeded.
  *
@@ -8946,25 +14004,6 @@ export interface PermissionsResetSessionApprovalsResult {
    * Whether the operation succeeded
    */
   success: boolean;
-}
-/**
- * Allow-all mode to apply for the session.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "PermissionsSetAllowAllRequest".
- */
-/** @experimental */
-export interface PermissionsSetAllowAllRequest {
-  mode?: PermissionsAllowAllMode;
-  /**
-   * Legacy full allow-all toggle. Prefer `mode`; when `mode` is omitted, `enabled: true` is treated as `mode: "on"` and any other value is treated as `mode: "off"`.
-   */
-  enabled?: boolean;
-  /**
-   * Optional model id for the `auto` mode auto-approval LLM judging. Only meaningful when `mode` is `auto`; ignored otherwise. When omitted, the session's active model is used.
-   */
-  model?: string;
-  source?: PermissionsSetAllowAllSource;
 }
 /**
  * Allow-all toggle for tool permission requests, with an optional telemetry source.
@@ -8992,6 +14031,35 @@ export interface PermissionsSetApproveAllResult {
    * Whether the operation succeeded
    */
   success: boolean;
+}
+/**
+ * Permission mode to apply for the session.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsSetModeRequest".
+ */
+/** @experimental */
+export interface PermissionsSetModeRequest {
+  mode: PermissionMode;
+  /**
+   * Optional judge model id for assisted mode. When omitted, the session resolves the provider default: `gpt-5.5` for CAPI sessions and the active session model for BYOK sessions.
+   */
+  assistedApprovalModel?: string;
+  source?: PermissionModeSource;
+}
+/**
+ * Indicates whether the requested permission mode was applied and reports the authoritative post-mutation mode.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PermissionsSetModeResult".
+ */
+/** @experimental */
+export interface PermissionsSetModeResult {
+  /**
+   * Whether the operation succeeded
+   */
+  success: boolean;
+  mode: PermissionMode;
 }
 /**
  * Toggles whether permission prompts should be bridged into session events for this client.
@@ -9109,7 +14177,7 @@ export interface PlanReadResult {
 /** @experimental */
 export interface PlanReadSqlTodosResult {
   /**
-   * Rows from the session SQL todos table, ordered by creation time and id.
+   * Rows from the session SQL todos table, ordered by creation time with insertion order used to break ties when available and id used for WITHOUT ROWID tables.
    */
   rows: PlanSqlTodosRow[];
 }
@@ -9137,6 +14205,10 @@ export interface PlanSqlTodosRow {
    * Todo status.
    */
   status?: string;
+  /**
+   * Todo creation time, as stored by the session SQL schema's `datetime('now')` default: `YYYY-MM-DD HH:MM:SS` in UTC. Lets clients attribute todos to the work item that created them (e.g. scoping a goal's progress to the todos it produced) rather than to the whole session.
+   */
+  createdAt?: string;
 }
 /**
  * Todo rows + dependency edges read from the session SQL database.
@@ -9147,7 +14219,7 @@ export interface PlanSqlTodosRow {
 /** @experimental */
 export interface PlanReadSqlTodosWithDependenciesResult {
   /**
-   * Rows from the session SQL todos table, ordered by creation time and id. Empty when no database, no todos table, or the SELECT failed.
+   * Rows from the session SQL todos table, ordered by creation time with insertion order used to break ties when available and id used for WITHOUT ROWID tables. Empty when no database, no todos table, or the SELECT failed.
    */
   rows: PlanSqlTodosRow[];
   /**
@@ -9259,6 +14331,21 @@ export interface PluginListResult {
   plugins: InstalledPluginInfo[];
 }
 /**
+ * Trusted built-in plugin directories to use for this runtime process.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "PluginsBuiltinSetRequest".
+ */
+/** @experimental */
+export interface PluginsBuiltinSetRequest {
+  /**
+   * Complete replacement set of trusted built-in plugin directories. Every entry must be an absolute local filesystem path no longer than 4096 characters.
+   *
+   * @maxItems 64
+   */
+  paths: string[];
+}
+/**
  * Plugin names (or specs) to disable.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -9302,7 +14389,7 @@ export interface PluginsInstallRequest {
   workingDirectory?: string;
 }
 /**
- * Marketplace source to register.
+ * Marketplace source and optional working directory for relative-path resolution.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "PluginsMarketplacesAddRequest".
@@ -9313,6 +14400,10 @@ export interface PluginsMarketplacesAddRequest {
    * Marketplace source. Accepts the same forms as the CLI: "owner/repo" or "owner/repo#ref" (GitHub), an http/https/ssh URL (optionally with #ref), a git scp-style URL (user@host:path), or a local path. The marketplace's own name (from its manifest) is used as the registration key.
    */
   source: string;
+  /**
+   * Working directory used to resolve relative local paths in `source`. Defaults to the server's current working directory.
+   */
+  workingDirectory?: string;
 }
 /**
  * Name of the marketplace whose plugin catalog to fetch.
@@ -9351,31 +14442,6 @@ export interface PluginsMarketplacesRemoveRequest {
    * When true, also uninstall every plugin sourced from this marketplace. When false (default), removal is a no-op if any plugin from this marketplace is installed and the dependent plugin names are returned in the result.
    */
   force?: boolean;
-}
-/**
- * Optional flags controlling which side effects the reload performs.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "PluginsReloadRequest".
- */
-/** @experimental */
-export interface PluginsReloadRequest {
-  /**
-   * Reload MCP server connections after refreshing plugins. Defaults to true.
-   */
-  reloadMcp?: boolean;
-  /**
-   * Re-run custom-agent discovery after refreshing plugins. Defaults to true.
-   */
-  reloadCustomAgents?: boolean;
-  /**
-   * Re-load user, plugin, and (subject to `deferRepoHooks`) repo hooks. Defaults to true. Has no effect when the host has not registered a hook reloader (e.g. remote sessions).
-   */
-  reloadHooks?: boolean;
-  /**
-   * When true, skip repo-level hooks during the hook reload. Use before folder trust is confirmed; load them post-trust via `sessions.loadDeferredRepoHooks`.
-   */
-  deferRepoHooks?: boolean;
 }
 /**
  * Name (or spec) of the plugin to uninstall.
@@ -9479,6 +14545,52 @@ export interface PluginUpdateResult {
   skillsInstalled: number;
 }
 /**
+ * Serializable definition of a caller-implemented tool whose execution is handled over the SDK connection.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ProtocolExternalToolDefinition".
+ */
+/** @experimental */
+export interface ProtocolExternalToolDefinition {
+  /**
+   * Unique model-visible tool name.
+   */
+  name: string;
+  /**
+   * Model-visible explanation of what the tool does.
+   */
+  description: string;
+  /**
+   * Optional human-readable display title.
+   */
+  title?: string;
+  /**
+   * JSON Schema describing the tool's input arguments.
+   */
+  parameters?: {
+    [k: string]: JsonValue | undefined;
+  };
+  /**
+   * Whether this definition replaces a built-in tool with the same name.
+   */
+  overridesBuiltInTool?: boolean;
+  /**
+   * Whether execution bypasses the normal tool permission prompt.
+   */
+  skipPermission?: boolean;
+  defer?: ProtocolExternalToolDefer;
+  /**
+   * Whether the tool executes commands in a terminal.
+   */
+  isTerminal?: boolean;
+  /**
+   * Optional caller-defined metadata associated with the tool.
+   */
+  metadata?: {
+    [k: string]: JsonValue | undefined;
+  };
+}
+/**
  * BYOK providers and/or models to add to the session's registry at runtime. Both fields are optional; provide providers, models, or both.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -9508,7 +14620,7 @@ export interface ProviderModelConfig {
    */
   id: string;
   /**
-   * Name of the NamedProviderConfig that serves this model.
+   * Name of the configured provider that serves this model.
    */
   provider: string;
   /**
@@ -9548,7 +14660,7 @@ export interface ProviderAddResult {
   /**
    * Synthesized selectable model entries for the newly added BYOK models, each under its provider-qualified selection id (`provider/id`). Empty when only providers were added.
    */
-  models: unknown[];
+  models: JsonValue[];
 }
 /**
  * Custom model-provider configuration (BYOK).
@@ -9578,6 +14690,11 @@ export interface ProviderConfig {
    * Well-known model ID used for capability lookup. When set, agent behavior config and token limits are inferred from this model.
    */
   modelId?: string;
+  modelCapabilities?: ModelCapabilitiesOverride;
+  /**
+   * Provider name used for model and telemetry attribution.
+   */
+  providerName?: string;
   /**
    * The model identifier sent to the provider API for inference (the "wire" model), as opposed to modelId which is the well-known base.
    */
@@ -9658,19 +14775,6 @@ export interface ProviderSessionToken {
   expiresAt?: string;
 }
 /**
- * Optional model identifier to scope the endpoint snapshot to.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "ProviderGetEndpointRequest".
- */
-/** @experimental */
-export interface ProviderGetEndpointRequest {
-  /**
-   * Model identifier the caller intends to use against the returned endpoint. Used to pick the correct wire shape. Omit to use whichever model the session is currently using.
-   */
-  modelId?: string;
-}
-/**
  * Asks the SDK client to acquire a bearer token for a BYOK provider whose config set `hasBearerTokenProvider: true`. Issued by the runtime before each outbound model request; the runtime does no caching, so this is sent once per request.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -9683,7 +14787,7 @@ export interface ProviderTokenAcquireRequest {
    */
   sessionId: string;
   /**
-   * Name of the BYOK provider needing a token. For the legacy whole-session `provider` this is the implicit provider name; for named providers it is `NamedProviderConfig.name`.
+   * Name of the BYOK provider needing a token. For the legacy whole-session provider this is the implicit provider name; for named providers it is the configured provider name.
    */
   providerName: string;
 }
@@ -10160,6 +15264,254 @@ export interface PushAttachmentBlob {
   displayName?: string;
 }
 /**
+ * Inputs for starting a deferred-idle drain.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueBeginDeferredIdleDrainRequest".
+ */
+/** @experimental */
+export interface QueueBeginDeferredIdleDrainRequest {
+  /**
+   * Whether the host still has active background work.
+   */
+  activeBackgroundWork: boolean;
+}
+/**
+ * Whether a deferred-idle drain should run.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueBeginDeferredIdleDrainResult".
+ */
+/** @experimental */
+export interface QueueBeginDeferredIdleDrainResult {
+  /**
+   * True when the host should run finishDeferredIdleDrain asynchronously.
+   */
+  shouldDrain: boolean;
+}
+/**
+ * Internal filter for consuming queued system notifications.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueConsumeSystemNotificationsRequest".
+ */
+/** @experimental */
+export interface QueueConsumeSystemNotificationsRequest {
+  /**
+   * Opaque runtime-owned filter object.
+   */
+  filter: JsonValue;
+}
+/**
+ * Inputs for marking session.idle deferred in native state.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueDeferSessionIdleRequest".
+ */
+/** @experimental */
+export interface QueueDeferSessionIdleRequest {
+  /**
+   * Whether the deferred idle was caused by an aborted foreground turn.
+   */
+  aborted: boolean;
+}
+/**
+ * Parameters for duplicating a queued item.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueDuplicateAtRequest".
+ */
+/** @experimental */
+export interface QueueDuplicateAtRequest {
+  /**
+   * Stable opaque ID of the queued item to duplicate.
+   */
+  id: string;
+}
+/**
+ * Result of duplicating a queued item.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueDuplicateAtResult".
+ */
+/** @experimental */
+export interface QueueDuplicateAtResult {
+  /**
+   * Fresh stable opaque id assigned to the duplicate.
+   */
+  id: string;
+}
+/**
+ * Result of enqueueing the resume-pending wake item.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueEnqueueResumePendingResult".
+ */
+/** @experimental */
+export interface QueueEnqueueResumePendingResult {
+  /**
+   * True when a wake item was newly queued.
+   */
+  queued: boolean;
+}
+/**
+ * Inputs for completing a deferred-idle drain.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueFinishDeferredIdleDrainRequest".
+ */
+/** @experimental */
+export interface QueueFinishDeferredIdleDrainRequest {
+  /**
+   * Whether the host still has active background work.
+   */
+  activeBackgroundWork: boolean;
+  /**
+   * Whether native queued work remains.
+   */
+  hasPending: boolean;
+}
+/**
+ * Action selected by the native deferred-idle drain.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueFinishDeferredIdleDrainResult".
+ */
+/** @experimental */
+export interface QueueFinishDeferredIdleDrainResult {
+  /**
+   * One of none, processQueue, or emitSessionIdle.
+   */
+  action: string;
+  /**
+   * Whether the deferred idle was caused by an aborted foreground turn.
+   */
+  aborted: boolean;
+}
+/**
+ * Whether the native queue has pending work.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueHasPendingResult".
+ */
+/** @experimental */
+export interface QueueHasPendingResult {
+  /**
+   * True when queued or immediate native work is pending.
+   */
+  hasPending: boolean;
+}
+/**
+ * Parameters for inserting a queued message at a public visible position.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueInsertAtRequest".
+ */
+/** @experimental */
+export interface QueueInsertAtRequest {
+  /**
+   * Zero-based position in the public visible queue. Values outside the queue clamp to an end.
+   */
+  position: number;
+  message: QueueInsertMessage;
+}
+/**
+ * Serializable message fields accepted by queue.insertAt.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueInsertMessage".
+ */
+/** @experimental */
+export interface QueueInsertMessage {
+  /**
+   * The user message text.
+   */
+  prompt: string;
+  /**
+   * Optional user-facing display text.
+   */
+  displayPrompt?: string;
+  /**
+   * Optional attachments for the message.
+   */
+  attachments?: Attachment[];
+  agentMode?: SendAgentMode;
+  /**
+   * Optional provenance source. `system` is rejected: it would hide the inserted row from `pendingItems` and make it unaddressable while still executing, so inserted items must stay visible.
+   */
+  source?: string;
+  /**
+   * Whether the message is billable.
+   */
+  billable?: boolean;
+  /**
+   * Required tool name for the turn, when any.
+   */
+  requiredTool?: string;
+  /**
+   * Per-turn request headers.
+   */
+  requestHeaders?: {
+    [k: string]: string | undefined;
+  };
+  mode?: SendMode;
+  /**
+   * Accepted for SendOptions compatibility but ignored; the requested public position controls placement.
+   */
+  prepend?: boolean;
+  /**
+   * Accepted for SendOptions compatibility but ignored; insertion scheduling is controlled by the queue drain state.
+   */
+  wait?: boolean;
+  /**
+   * Accepted for internal SendOptions compatibility but ignored; delivery is derived from current session activity.
+   */
+  delivery?: string;
+}
+/**
+ * Result of inserting a queued message.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueInsertAtResult".
+ */
+/** @experimental */
+export interface QueueInsertAtResult {
+  /**
+   * Fresh stable opaque id assigned to the inserted item.
+   */
+  id: string;
+}
+/**
+ * Parameters for moving a queued item by stable id.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueMoveItemRequest".
+ */
+/** @experimental */
+export interface QueueMoveItemRequest {
+  /**
+   * Stable opaque queued-item id.
+   */
+  id: string;
+  /**
+   * Zero-based target position in the public visible queue. Values outside the queue clamp to an end.
+   */
+  toPosition: number;
+}
+/**
+ * Result of moving a queued item.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueMoveItemResult".
+ */
+/** @experimental */
+export interface QueueMoveItemResult {
+  /**
+   * True when the item changed position; false when it was already at the requested position.
+   */
+  changed: boolean;
+}
+/**
  * User-facing pending queue entry, with kind and display text for a queued message, slash command, or model change.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -10167,11 +15519,16 @@ export interface PushAttachmentBlob {
  */
 /** @experimental */
 export interface QueuePendingItems {
+  /**
+   * Stable opaque id for the canonical queued item. Batch rows share one id.
+   */
+  id: string;
   kind: QueuePendingItemsKind;
   /**
    * Human-readable text to display for this queue entry in the UI
    */
   displayText: string;
+  agentMode: SendAgentMode;
 }
 /**
  * Snapshot of the session's pending queued items and immediate-steering messages.
@@ -10191,6 +15548,32 @@ export interface QueuePendingItemsResult {
   steeringMessages: string[];
 }
 /**
+ * Parameters for removing a queued item by stable id.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueRemoveAtRequest".
+ */
+/** @experimental */
+export interface QueueRemoveAtRequest {
+  /**
+   * Stable opaque ID of the queued item to remove.
+   */
+  id: string;
+}
+/**
+ * Result of removing a queued item.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueRemoveAtResult".
+ */
+/** @experimental */
+export interface QueueRemoveAtResult {
+  /**
+   * True when the addressed item was removed.
+   */
+  removed: boolean;
+}
+/**
  * Indicates whether a user-facing pending item was removed.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -10204,6 +15587,104 @@ export interface QueueRemoveMostRecentResult {
   removed: boolean;
 }
 /**
+ * Parameters for steering a queued message into a live turn.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueSendNowRequest".
+ */
+/** @experimental */
+export interface QueueSendNowRequest {
+  /**
+   * Stable opaque ID of the queued item to steer into the live turn.
+   */
+  id: string;
+}
+/**
+ * Result of trying to steer a queued message into a live turn.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueSendNowResult".
+ */
+/** @experimental */
+export interface QueueSendNowResult {
+  /**
+   * True when the item was accepted into the steering lane; false when no main turn was live.
+   */
+  steered: boolean;
+}
+/**
+ * Parameters for acquiring or releasing the queued-lane drain pause. Acquisition is exclusive and non-idempotent: `paused: true` against an already-paused session fails with `queue_already_paused`. The pause is never released automatically — it is not tied to the caller's lifetime, so a client that exits without sending `paused: false` leaves the lane frozen. Release is unowned: `paused: false` clears the pause for any caller, including one that never acquired it.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueSetDrainPausedRequest".
+ */
+/** @experimental */
+export interface QueueSetDrainPausedRequest {
+  /**
+   * Whether queued-lane draining should be paused.
+   */
+  paused: boolean;
+}
+/**
+ * Internal snapshot of native queue state for local session orchestration.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueSnapshotResult".
+ */
+/** @experimental */
+export interface QueueSnapshotResult {
+  /**
+   * User-facing pending items in FIFO order.
+   */
+  items: QueuePendingItems[];
+  /**
+   * Immediate steering messages waiting for an active turn.
+   */
+  steeringMessages: string[];
+  /**
+   * Insertion orders for queued items, aligned with `items`.
+   */
+  itemOrders?: number[];
+  /**
+   * Insertion orders for immediate steering messages, aligned with `steeringMessages`.
+   */
+  steeringMessageOrders?: number[];
+}
+/**
+ * Parameters for editing a single queued message.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueUpdateTextRequest".
+ */
+/** @experimental */
+export interface QueueUpdateTextRequest {
+  /**
+   * Stable opaque ID of the queued item to edit.
+   */
+  id: string;
+  /**
+   * Replacement prompt sent to the model.
+   */
+  prompt: string;
+  /**
+   * Optional replacement prompt displayed to the user.
+   */
+  displayPrompt?: string;
+}
+/**
+ * Result of editing a queued message.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "QueueUpdateTextResult".
+ */
+/** @experimental */
+export interface QueueUpdateTextResult {
+  /**
+   * True when the stored text changed.
+   */
+  updated: boolean;
+}
+/**
  * Event type to register consumer interest for, used by runtime gating logic.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -10212,7 +15693,7 @@ export interface QueueRemoveMostRecentResult {
 /** @experimental */
 export interface RegisterEventInterestParams {
   /**
-   * The event type the consumer wants the runtime to treat as 'observed' for behavior-switching gating. Some runtime code paths inspect whether any consumer is interested in a specific event type and choose a different implementation accordingly (e.g. `mcp.oauth_required`: when interest is registered the runtime delegates the full interactive OAuth flow to the consumer; when no interest is registered the runtime installs a browserless fallback that silently reuses cached tokens). SDK clients that long-poll events do NOT automatically appear as listeners to these gating checks — they must explicitly call `registerInterest` for each event type they want the runtime to count as having a consumer. Multiple registrations for the same event type from the same or different consumers are tracked independently and must each be released. See: `mcp.oauth_required`, `sampling.requested`, `auto_mode_switch.requested`, `session_limits_exhausted.requested`, `user_input.requested`, `elicitation.requested`, `command.queued`, `exit_plan_mode.requested`.
+   * The event type the consumer wants the runtime to treat as 'observed' for behavior-switching gating. Some runtime code paths inspect whether any consumer is interested in a specific event type and choose a different implementation accordingly (e.g. `mcp.oauth_required`: when interest is registered the runtime delegates interactive OAuth token acquisition to the consumer via `mcp.oauth_required` events; when no interest is registered the runtime still attempts non-interactive reconnect from cached or refreshable tokens, and only marks the server `needs-auth` if usable credentials are unavailable — it does not open a browser or start interactive OAuth without a consumer). SDK clients that long-poll events do NOT automatically appear as listeners to these gating checks — they must explicitly call `registerInterest` for each event type they want the runtime to count as having a consumer. Multiple registrations for the same event type from the same or different consumers are tracked independently and must each be released. See: `mcp.oauth_required`, `sampling.requested`, `auto_mode_switch.requested`, `session_limits_exhausted.requested`, `user_input.requested`, `elicitation.requested`, `command.queued`, `exit_plan_mode.requested`.
    */
   eventType: string;
 }
@@ -10249,9 +15730,7 @@ export interface RegisterExtensionToolsParams {
    *
    * @internal
    */
-  loader: {
-    [k: string]: unknown | undefined;
-  };
+  loader: OpaqueInProcessValue;
   options?: SessionsRegisterExtensionToolsOnSessionOptions;
 }
 /**
@@ -10267,9 +15746,7 @@ export interface SessionsRegisterExtensionToolsOnSessionOptions {
    *
    * @internal
    */
-  enabled?: {
-    [k: string]: unknown | undefined;
-  };
+  enabled?: OpaqueInProcessValue;
 }
 /**
  * Handle for releasing the extension tool registration.
@@ -10287,9 +15764,7 @@ export interface RegisterExtensionToolsResult {
    *
    * @internal
    */
-  unsubscribe: {
-    [k: string]: unknown | undefined;
-  };
+  unsubscribe: OpaqueInProcessValue;
 }
 /**
  * Opaque handle previously returned by `registerInterest` to release.
@@ -10406,13 +15881,17 @@ export interface RemoteControlStatusActive {
    */
   isSteerable: boolean;
   /**
-   * In-process prompt-manager handle (CLI-only optimization). Marked internal: this field is excluded from the public SDK surface. When the CLI migrates to a process-separated SDK, the same bidirectional prompt-routing handshake is expressed via dedicated remote-control RPCs (register/resolve) rather than a shared in-process object.
+   * In-process prompt-manager handle (CLI-only optimization). Marked internal: this field is excluded from the public SDK surface. Retained as an optional compatibility field; native remote control does not populate or consume it.
    *
    * @internal
    */
-  promptManager?: {
-    [k: string]: unknown | undefined;
-  };
+  promptManager?: OpaqueInProcessValue;
+  /**
+   * True while a read-only/session-sync export is deferred, awaiting the first `user.message` before its MC session exists. Marked internal: this field is excluded from the public SDK surface and is populated only on the CLI in-process path.
+   *
+   * @internal
+   */
+  awaitingFirstMessage?: boolean;
 }
 /**
  * The last setup attempt failed. The singleton is otherwise off.
@@ -10611,6 +16090,11 @@ export interface RemoteSessionMetadataValue {
    * Server-side task state returned by GitHub.
    */
   state?: string;
+  hostStatus?: RemoteSessionHostStatus;
+  /**
+   * Host-supplied human description of what the session is doing right now ("running tests", "waiting for approval"). Optional in the protocol and absent on hosts that do not publish it, so never rely on it -- it enriches `hostStatus`, it does not replace it.
+   */
+  hostActivity?: string;
 }
 /**
  * Repository context for the remote session.
@@ -10650,6 +16134,11 @@ export interface SandboxConfig {
    * Whether to auto-add the current working directory to readwritePaths. Default: true.
    */
   addCurrentWorkingDirectory?: boolean;
+  auth?: SandboxConfigAuth;
+  /**
+   * Whether to auto-grant read access to the tool directories discovered on PATH and in toolchain environment variables (GOROOT, CARGO_HOME, JAVA_HOME, VIRTUAL_ENV, and similar), and to common developer-tool caches, registries, and toolchains in their default home locations (cargo, go, npm, Maven, and more), plus read-write access to (and, on Unix, up-front creation of) the scratch caches builds write on every run (go-build, ccache, sccache, Gradle caches, Cargo lock/tracker files), so builds work without extra configuration; a relocated CARGO_HOME additionally gets its Cargo lock files granted read-write. Set to false to disable every grant listed above: user-installed toolchains (rustup, nvm, pyenv, conda, pipx) then need explicit userPolicy.filesystem entries — readonlyPaths to read them, plus readwriteFiles for a relocated CARGO_HOME's .package-cache and .global-cache, which Cargo locks on every build. Only these developer-tool grants are affected: the working directory (see addCurrentWorkingDirectory), temporary storage, session log paths, and system locations follow their own rules and stay granted, so commands still run. Default: true (enabled by default; set to false to opt out).
+   */
+  allowDevToolAccess?: boolean;
 }
 /**
  * User-managed sandbox policy fragment merged into the auto-discovered base policy.
@@ -10705,6 +16194,28 @@ export interface SandboxConfigUserPolicyNetwork {
    * Whether traffic to local/loopback addresses is allowed.
    */
   allowLocalNetwork?: boolean;
+  proxy?: SandboxConfigUserPolicyNetworkProxy;
+}
+/**
+ * HTTP proxy configuration for sandboxed traffic.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SandboxConfigUserPolicyNetworkProxy".
+ */
+/** @experimental */
+export interface SandboxConfigUserPolicyNetworkProxy {
+  /**
+   * Proxy URL (e.g. http://proxy.example.com:8080). The port is optional and defaults to the scheme's standard port when omitted. Credentials must not be embedded here — a `user:pass@` authority is rejected; put them in the separate `username`/`password` fields. A credential-free http:// loopback URL is routed through the localhost proxy automatically; loopback covers localhost and any *.localhost subdomain, the whole 127.0.0.0/8 range, ::1, and IPv4-mapped loopback (::ffff:127.0.0.1). An https:// URL, or one with a username/password set, is used as-is.
+   */
+  url: string;
+  /**
+   * Optional username for proxy authentication. Combined with the URL (and `password`) into `user:pass@host` when the sandboxed process routes through the proxy.
+   */
+  username?: string;
+  /**
+   * Optional password for proxy authentication, combined with the URL at spawn time. The persisted value may be a literal password, a `${secret:…}` reference resolved from the OS keychain, or a `${VAR}`/`$VAR` environment reference; it is resolved just before the sandboxed process routes through the proxy. The /sandbox dialog stores a real password in the OS keychain and persists only a `${secret:…}` placeholder (never plaintext in settings.json); the field is masked in the dialog and redacted by /settings show.
+   */
+  password?: string;
 }
 /**
  * macOS seatbelt-specific options.
@@ -10741,6 +16252,116 @@ export interface SandboxConfigUserPolicyExperimentalSeatbelt {
    * Whether the macOS seatbelt profile may access the keychain.
    */
   keychainAccess?: boolean;
+}
+/**
+ * Credential-injection capability flags applied while the sandbox is enabled. For the same capability independent of sandboxing, and matched to the credential's GitHub host, see `shell.credentials`; the two are additive.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SandboxConfigAuth".
+ */
+/** @experimental */
+export interface SandboxConfigAuth {
+  /**
+   * Whether to inject git credentials as an `http.<url>.extraheader` so authenticated HTTPS git works inside the sandbox without the shell-based credential helper the sandbox blocks. github.com is served by the Copilot token; every other forge (Azure DevOps, GitHub Enterprise Server, GitLab, ...) by a credential the host resolves from the user's own helper before the sandbox is applied. Default: false (opt-in).
+   */
+  git?: boolean;
+  /**
+   * Whether to export `GH_TOKEN` so the `gh` CLI authenticates inside the sandbox without the OS keyring the sandbox blocks. Default: false (opt-in).
+   */
+  gh?: boolean;
+}
+/**
+ * Register an absolute-time scheduled prompt.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ScheduleAddAtRequest".
+ */
+/** @experimental */
+export interface ScheduleAddAtRequest {
+  /**
+   * Epoch milliseconds when the prompt should fire.
+   */
+  at: number;
+  /**
+   * Prompt text to enqueue when the schedule fires.
+   */
+  prompt: string;
+  /**
+   * Whether the schedule should re-arm after each tick. Defaults to false.
+   */
+  recurring?: boolean;
+  /**
+   * Optional display-only prompt label.
+   */
+  displayPrompt?: string;
+}
+/**
+ * Register a cron scheduled prompt.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ScheduleAddCronRequest".
+ */
+/** @experimental */
+export interface ScheduleAddCronRequest {
+  /**
+   * 5-field cron expression.
+   */
+  cron: string;
+  /**
+   * Prompt text to enqueue when the schedule fires.
+   */
+  prompt: string;
+  /**
+   * Whether the schedule should re-arm after each tick. Defaults to true.
+   */
+  recurring?: boolean;
+  /**
+   * Optional display-only prompt label.
+   */
+  displayPrompt?: string;
+  /**
+   * IANA timezone for evaluating the cron expression.
+   */
+  tz?: string;
+}
+/**
+ * Register a relative-interval scheduled prompt.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ScheduleAddRequest".
+ */
+/** @experimental */
+export interface ScheduleAddRequest {
+  /**
+   * Human-readable interval such as `30s`, `5m`, or `2h`.
+   */
+  interval: string;
+  /**
+   * Prompt text to enqueue when the schedule fires.
+   */
+  prompt: string;
+  /**
+   * Whether the schedule should re-arm after each tick. Defaults to true.
+   */
+  recurring?: boolean;
+  /**
+   * Optional display-only prompt label.
+   */
+  displayPrompt?: string;
+}
+/**
+ * Result of registering or re-arming a scheduled prompt.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ScheduleAddResult".
+ */
+/** @experimental */
+export interface ScheduleAddResult {
+  entry?: ScheduleEntry;
+  /**
+   * User-facing validation error, when registration failed.
+   */
+  error?: string;
 }
 /**
  * Scheduled prompt entry with ID, timing (`intervalMs`, `cron`, or `at`), prompt text, recurrence, and next run time.
@@ -10792,6 +16413,36 @@ export interface ScheduleEntry {
   nextRunAt: string;
 }
 /**
+ * Register a self-paced scheduled prompt.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ScheduleAddSelfPacedRequest".
+ */
+/** @experimental */
+export interface ScheduleAddSelfPacedRequest {
+  /**
+   * Prompt text to enqueue when the schedule fires.
+   */
+  prompt: string;
+  /**
+   * Optional display-only prompt label.
+   */
+  displayPrompt?: string;
+}
+/**
+ * Whether the session currently has an active self-paced schedule.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ScheduleHasSelfPacedResult".
+ */
+/** @experimental */
+export interface ScheduleHasSelfPacedResult {
+  /**
+   * True when at least one active schedule is self-paced.
+   */
+  hasSelfPaced: boolean;
+}
+/**
  * Snapshot of the currently active recurring prompts for this session.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -10803,6 +16454,23 @@ export interface ScheduleList {
    * Active scheduled prompts, ordered by id.
    */
   entries: ScheduleEntry[];
+}
+/**
+ * Re-arm a self-paced scheduled prompt.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ScheduleRearmSelfPacedRequest".
+ */
+/** @experimental */
+export interface ScheduleRearmSelfPacedRequest {
+  /**
+   * Id of the self-paced scheduled prompt.
+   */
+  id: number;
+  /**
+   * Epoch milliseconds when the prompt should next fire.
+   */
+  at: number;
 }
 /**
  * Identifier of the scheduled prompt to remove.
@@ -10871,6 +16539,93 @@ export interface SendAttachmentsToMessageParams {
   attachments: PushAttachment[];
 }
 /**
+ * A single user message to append to the session as part of a `session.sendMessages` turn
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SendMessageItem".
+ */
+/** @experimental */
+export interface SendMessageItem {
+  /**
+   * The user message text
+   */
+  prompt: string;
+  /**
+   * If provided, this is shown in the timeline instead of `prompt`
+   */
+  displayPrompt?: string;
+  /**
+   * Optional attachments (files, directories, selections, blobs, GitHub references) to include with this message
+   */
+  attachments?: Attachment[];
+  /**
+   * If false, this message will not trigger a Premium Request Unit charge. User messages default to billable.
+   *
+   * @internal
+   */
+  billable?: boolean;
+  /**
+   * If set, the request will fail if the named tool is not available when this message is among the user messages at the start of the current exchange
+   */
+  requiredTool?: string;
+  /**
+   * Optional provenance tag copied to the resulting user.message event. Must be `user`, `system`, `command-<command-id>` for command-originated messages, `schedule-<numeric-id>` for scheduled prompts, or `agent-<agent-id>` for prompts sent by another agent.
+   *
+   * @internal
+   */
+  source?: string;
+}
+/**
+ * Parameters for sending zero or more user messages to the session in a single turn. Remote-backed (Mission Control) sessions do not support this method and will return an error.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SendMessagesRequest".
+ */
+/** @experimental */
+export interface SendMessagesRequest {
+  /**
+   * The user messages to append to the conversation, in order. May be empty, in which case a single turn runs over the existing history with no new user message.
+   */
+  messages: SendMessageItem[];
+  mode?: SendMode;
+  /**
+   * If true, adds the messages to the front of the queue instead of the end
+   */
+  prepend?: boolean;
+  agentMode?: SendAgentMode;
+  /**
+   * Custom HTTP headers to include in outbound model requests for this turn. Merged with session-level provider headers; per-turn headers augment and overwrite session-level headers with the same key.
+   */
+  requestHeaders?: {
+    [k: string]: string | undefined;
+  };
+  /**
+   * W3C Trace Context traceparent header for distributed tracing of this agent turn
+   */
+  traceparent?: string;
+  /**
+   * W3C Trace Context tracestate header for distributed tracing
+   */
+  tracestate?: string;
+  /**
+   * If true, await completion of the agentic loop for this turn before returning. Defaults to false (fire-and-forget). When true, the result still contains the same `messageIds`; the caller can rely on the agent having processed the messages before the call resolves. Transport-dependent tail semantics: on a LOCAL (in-process) session the wait additionally blocks until the completed turn's event tail has been dispatched to this session's in-process subscribers, so a subsequent read of subscriber state already reflects the turn; on a REMOTE session the wait resolves once the loop completes and mirrored delivery follows over the wire. Callers that need the stronger local guarantee on remote sessions should await the event stream explicitly.
+   */
+  wait?: boolean;
+}
+/**
+ * Result of sending zero or more user messages
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SendMessagesResult".
+ */
+/** @experimental */
+export interface SendMessagesResult {
+  /**
+   * Unique identifiers assigned to the messages, one per provided message in order. Empty when no messages were provided.
+   */
+  messageIds: string[];
+}
+/**
  * Parameters for sending a user message to the session
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -10904,7 +16659,7 @@ export interface SendRequest {
    */
   requiredTool?: string;
   /**
-   * Optional provenance tag copied to the resulting user.message event. Must match one of three forms: the literal `system`, `command-<command-id>` for messages originating from a command (e.g. slash command, Mission Control command), or `schedule-<numeric-id>` for messages originating from a scheduled job.
+   * Optional provenance tag copied to the resulting user.message event. Must be `user`, `system`, `command-<command-id>` for command-originated messages, `schedule-<numeric-id>` for scheduled prompts, or `agent-<agent-id>` for prompts sent by another agent.
    *
    * @internal
    */
@@ -10925,7 +16680,7 @@ export interface SendRequest {
    */
   tracestate?: string;
   /**
-   * If true, await completion of the agentic loop for this message before returning. Defaults to false (fire-and-forget). When true, the result still contains the same `messageId`; the caller can rely on the agent having processed the message before the call resolves.
+   * If true, await completion of the agentic loop for this message before returning. Defaults to false (fire-and-forget). When true, the result still contains the same `messageId`; the caller can rely on the agent having processed the message before the call resolves. Transport-dependent tail semantics: on a LOCAL (in-process) session the wait additionally blocks until the completed turn's event tail has been dispatched to this session's in-process subscribers, so a subsequent read of subscriber state already reflects the turn; on a REMOTE session the wait resolves once the loop completes and mirrored delivery follows over the wire. Callers that need the stronger local guarantee on remote sessions should await the event stream explicitly.
    */
   wait?: boolean;
 }
@@ -10941,6 +16696,27 @@ export interface SendResult {
    * Unique identifier assigned to the message
    */
   messageId: string;
+}
+/**
+ * Internal request for sending a system notification.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SendSystemNotificationRequest".
+ */
+/** @experimental */
+export interface SendSystemNotificationRequest {
+  /**
+   * Notification text to deliver to the model.
+   */
+  message: string;
+  /**
+   * Optional structured notification kind.
+   */
+  kind?: JsonValue;
+  /**
+   * Internal delivery options, including passive policy.
+   */
+  options?: JsonValue;
 }
 /**
  * Agents discovered across user, project, plugin, and remote sources.
@@ -10981,6 +16757,10 @@ export interface ServerSkill {
    */
   name: string;
   /**
+   * Canonical slash command name used to invoke the skill, without the leading '/'
+   */
+  commandName?: string;
+  /**
    * Description of what the skill does
    */
   description: string;
@@ -11018,6 +16798,10 @@ export interface ServerSkillList {
    * All discovered skills across all sources
    */
   skills: ServerSkill[];
+  /**
+   * Messages for skills that failed to load (e.g. malformed SKILL.md). Empty when host skills are excluded so host-local paths are not disclosed to multitenant callers.
+   */
+  errors?: string[];
 }
 /**
  * Current activity flags for the session.
@@ -11035,6 +16819,41 @@ export interface SessionActivity {
    * Whether the session currently has active work, including running turns or tasks.
    */
   hasActiveWork: boolean;
+}
+/**
+ * Internal GitHub login parameters.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionAuthLoginRequest".
+ */
+/** @experimental */
+export interface SessionAuthLoginRequest {
+  /**
+   * GitHub host URL
+   */
+  host: string;
+  /**
+   * GitHub login
+   */
+  login: string;
+  /**
+   * GitHub authentication token
+   */
+  token: string;
+  /**
+   * Whether to persist the token after login
+   */
+  persist?: boolean;
+}
+/**
+ * Parameters identifying a GitHub authentication to log out.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionAuthLogoutUserRequest".
+ */
+/** @experimental */
+export interface SessionAuthLogoutUserRequest {
+  authInfo: AuthInfo;
 }
 /**
  * Authentication status and account metadata for the session.
@@ -11065,6 +16884,20 @@ export interface SessionAuthStatus {
    * Copilot plan tier (e.g., individual_pro, business)
    */
   copilotPlan?: string;
+}
+/**
+ * Parameters for switching the session's active authentication.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionAuthSwitchRequest".
+ */
+/** @experimental */
+export interface SessionAuthSwitchRequest {
+  authInfo: AuthInfo;
+  /**
+   * Optional token paired with the authentication information
+   */
+  token?: string;
 }
 /**
  * Map of sessionId -> bytes freed by removing the session's workspace directory.
@@ -11400,7 +17233,7 @@ export interface SessionFsSqliteExistsResult {
   exists: boolean;
 }
 /**
- * SQL query, query type, and optional bind parameters for executing a SQLite query against the per-session database.
+ * SQL query, query type, and optional bind parameters for executing a SQLite query against the per-session database. The provider applies its SQLite busy timeout for every call.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "SessionFsSqliteQueryRequest".
@@ -11420,7 +17253,7 @@ export interface SessionFsSqliteQueryRequest {
    * Optional named bind parameters
    */
   params?: {
-    [k: string]: unknown | undefined;
+    [k: string]: JsonValue | undefined;
   };
 }
 /**
@@ -11435,7 +17268,7 @@ export interface SessionFsSqliteQueryResult {
    * For SELECT: array of row objects. For others: empty array.
    */
   rows: {
-    [k: string]: unknown | undefined;
+    [k: string]: JsonValue | undefined;
   }[];
   /**
    * Column names from the result set
@@ -11450,6 +17283,71 @@ export interface SessionFsSqliteQueryResult {
    */
   lastInsertRowid?: number;
   error?: SessionFsError;
+}
+/**
+ * Classified SQLite transaction failure. busyOrLocked guarantees rollback; postCommitAmbiguous must never be retried.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionFsSqliteTransactionError".
+ */
+/** @experimental */
+export interface SessionFsSqliteTransactionError {
+  errorClass: SessionFsSqliteTransactionErrorClass;
+  /**
+   * Human-readable transaction failure message.
+   */
+  message: string;
+}
+/**
+ * Statements to execute atomically. Providers apply busy handling for every call.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionFsSqliteTransactionRequest".
+ */
+/** @experimental */
+export interface SessionFsSqliteTransactionRequest {
+  /**
+   * Target session identifier
+   */
+  sessionId: string;
+  /**
+   * Ordered SQL statements to execute in one transaction.
+   */
+  statements: SessionFsSqliteTransactionStatement[];
+}
+/**
+ * One statement in an atomic SQLite transaction.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionFsSqliteTransactionStatement".
+ */
+/** @experimental */
+export interface SessionFsSqliteTransactionStatement {
+  /**
+   * SQL statement to execute.
+   */
+  query: string;
+  queryType: SessionFsSqliteQueryType;
+  /**
+   * Optional named bind parameters.
+   */
+  params?: {
+    [k: string]: JsonValue | undefined;
+  };
+}
+/**
+ * Per-statement results, or a classified transaction error.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionFsSqliteTransactionResult".
+ */
+/** @experimental */
+export interface SessionFsSqliteTransactionResult {
+  /**
+   * Per-statement query results in input order.
+   */
+  results: SessionFsSqliteQueryResult[];
+  error?: SessionFsSqliteTransactionError;
 }
 /**
  * Path whose metadata should be returned from the client-provided session filesystem.
@@ -11556,9 +17454,13 @@ export interface SessionInstalledPlugin {
    */
   cache_path?: string;
   source?: SessionInstalledPluginSource;
+  /**
+   * Per-plugin source fingerprint (a SHA-256 hash of the plugin's catalog source spec plus its resolved source subtree — NOT a Git commit SHA) captured at marketplace install/update time. Auto-update compares it against the freshly recomputed fingerprint to detect a content change that does not bump the version. Absent for pre-existing installs and for direct (non-marketplace) installs.
+   */
+  source_sha?: string;
 }
 /**
- * Source descriptor for a direct GitHub plugin install, with `owner/repo`, optional ref, and optional subpath.
+ * Source descriptor for a direct GitHub plugin install, with `owner/repo`, optional ref or full commit SHA, and optional subpath.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "SessionInstalledPluginSourceGitHub".
@@ -11569,12 +17471,25 @@ export interface SessionInstalledPluginSourceGitHub {
    * Constant value. Always "github".
    */
   source: "github";
+  /**
+   * GitHub repository in `owner/repo` form.
+   */
   repo: string;
+  /**
+   * Optional Git ref to resolve.
+   */
   ref?: string;
+  /**
+   * Optional full 40-character hexadecimal commit SHA.
+   */
+  sha?: string;
+  /**
+   * Optional repository-relative path to the plugin.
+   */
   path?: string;
 }
 /**
- * Source descriptor for a direct URL plugin install, with URL, optional ref, and optional subpath.
+ * Source descriptor for a direct URL plugin install, with URL, optional ref or full commit SHA, and optional subpath.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "SessionInstalledPluginSourceUrl".
@@ -11585,8 +17500,21 @@ export interface SessionInstalledPluginSourceUrl {
    * Constant value. Always "url".
    */
   source: "url";
+  /**
+   * URL of the plugin source.
+   */
   url: string;
+  /**
+   * Optional Git ref to resolve.
+   */
   ref?: string;
+  /**
+   * Optional full 40-character hexadecimal commit SHA.
+   */
+  sha?: string;
+  /**
+   * Optional source-relative path to the plugin.
+   */
   path?: string;
 }
 /**
@@ -11601,7 +17529,74 @@ export interface SessionInstalledPluginSourceLocal {
    * Constant value. Always "local".
    */
   source: "local";
+  /**
+   * Local filesystem path to the plugin.
+   */
   path: string;
+}
+/**
+ * Baseline data provenance for a prediction.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionLimitPredictionBaselineData".
+ */
+/** @experimental */
+export interface SessionLimitPredictionBaselineData {
+  /**
+   * Start of the baseline data slice.
+   */
+  windowStart: string;
+  /**
+   * End of the baseline data slice.
+   */
+  windowEnd: string;
+}
+/**
+ * Explainable AI-credit session-limit prediction.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionLimitPredictionDetails".
+ */
+/** @experimental */
+export interface SessionLimitPredictionDetails {
+  clientType: SessionLimitPredictionClientType;
+  /**
+   * Model identifier used for lookup.
+   */
+  modelId: string;
+  source: SessionLimitPredictionSource;
+  /**
+   * Key matched at the source level, such as a model id, family id, or `global`.
+   */
+  sourceKey: string;
+  /**
+   * Resolved model family when known.
+   */
+  family?: string;
+  /**
+   * Ordered usage tiers and their AI-credit caps.
+   */
+  tiers: SessionLimitPredictionTierOption[];
+  baselineData: SessionLimitPredictionBaselineData;
+  recommendedTier: SessionLimitPredictionTier;
+  /**
+   * Recommended maximum AI credits for this session.
+   */
+  recommendedCap: number;
+}
+/**
+ * Semantic usage tier and its AI-credit cap.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionLimitPredictionTierOption".
+ */
+/** @experimental */
+export interface SessionLimitPredictionTierOption {
+  tier: SessionLimitPredictionTier;
+  /**
+   * AI-credit cap for this tier.
+   */
+  cap: number;
 }
 /**
  * Sessions matching the filter, ordered most-recently-modified first.
@@ -11657,6 +17652,38 @@ export interface SessionLoadDeferredRepoHooksResult {
    * Total hook command count (user + plugin + repo) loaded for the session by this call. Captured atomically with startupPrompts so callers don't need to read a separate counter.
    */
   hookCount: number;
+}
+/**
+ * Enterprise permission policy expressed with the runtime's managed permission-rule syntax.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionManagedPermissions".
+ */
+/** @experimental */
+export interface SessionManagedPermissions {
+  disableBypassPermissionsMode?: DisableBypassPermissionsMode;
+  /**
+   * Permission rules that block matching operations. Deny has highest precedence.
+   */
+  deny?: string[];
+  /**
+   * Permission rules that require explicit human approval.
+   */
+  ask?: string[];
+  /**
+   * Permission rules that allow matching operations unless another managed source, deny, or ask rule restricts them.
+   */
+  allow?: string[];
+}
+/**
+ * Managed settings an SDK host may inject at session startup. Only permissions are accepted in this initial contract.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionManagedSettings".
+ */
+/** @experimental */
+export interface SessionManagedSettings {
+  permissions?: SessionManagedPermissions;
 }
 /**
  * Point-in-time snapshot of slow-changing session identifier and state fields
@@ -11732,13 +17759,31 @@ export interface SessionModelList {
   /**
    * Available models, ordered with the most preferred default first. Includes both Copilot (CAPI) models and any registry BYOK models; a BYOK model appears under its provider-qualified selection id (`provider/id`).
    */
-  list: unknown[];
+  list: JsonValue[];
+  /**
+   * Cost categories for the full CAPI catalog, including picker-disabled models that Auto may select. Metadata only; entries absent from `list` are not manually selectable.
+   */
+  modelPriceCategories?: SessionModelPriceCategory[];
   /**
    * Per-quota snapshots returned alongside the model list, keyed by quota type.
    */
   quotaSnapshots?: {
-    [k: string]: unknown | undefined;
+    [k: string]: JsonValue | undefined;
   };
+}
+/**
+ * Cost-category metadata for a CAPI model.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionModelPriceCategory".
+ */
+/** @experimental */
+export interface SessionModelPriceCategory {
+  /**
+   * CAPI model identifier.
+   */
+  id: string;
+  priceCategory: ModelPickerPriceCategory;
 }
 /**
  * Session construction options.
@@ -11761,10 +17806,11 @@ export interface SessionOpenOptions {
    */
   model?: string;
   /**
-   * Initial reasoning effort level.
+   * Initial reasoning effort level. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. When omitted, no effort override is applied.
    */
   reasoningEffort?: string;
   reasoningSummary?: SessionOpenOptionsReasoningSummary;
+  verbosity?: Verbosity;
   /**
    * Identifier of the client driving the session.
    */
@@ -11786,13 +17832,16 @@ export interface SessionOpenOptions {
    *
    * @internal
    */
-  expAssignments?: {
-    [k: string]: unknown | undefined;
-  };
+  expAssignments?: JsonValue;
   /**
-   * Opt-in: self-fetch enterprise managed settings at session bootstrap.
+   * Opt-in: self-fetch and enforce enterprise managed settings at session bootstrap.
    */
-  selfFetchManagedSettings?: boolean;
+  enableManagedSettings?: boolean;
+  managedSettings?: SessionManagedSettings;
+  /**
+   * Opt in to capturing file changes for session rewind and session diff. Capture cannot reconstruct changes made before it was enabled. On create it starts capture from the first turn. It is also honored on resume: for a session that already has tracked prior turns, tracking continues automatically even if this is omitted; passing it on resume additionally enables tracking for an eligible session that has no prior root turn yet. Resuming a session whose prior root turns were never tracked has no restorable baseline, so tracking stays disabled for it and rewind reports file change tracking as unavailable; the resume itself still succeeds, so sessions that predate tracking remain loadable. The opt-in is only rejected when the session can never track (a subagent session, or one without local session storage). It is intentionally absent from the mutable options update because enabling it after edits have occurred would create an incomplete, misleading baseline. Subagents share the parent session's capture store and are not tracked as separate rewind points: a file a subagent writes is attributed to whichever root user turn was open when the capture was staged, just before the tool body ran. A turn cannot open while a staged capture is still in flight, so a subagent tool that staged under the spawning turn stays attributed to it however late the write lands, while a capture it stages after the user's next message belongs to that later turn. Attribution decides which turn's rewind point counts and file preview include that write; it does not narrow which rewinds revert it, because a rewind restores every capture from the selected turn onward, so the earlier spawning turn reverts it as well.
+   */
+  enableFileChangeTracking?: boolean;
   /**
    * Feature-flag values resolved by the host.
    */
@@ -11822,6 +17871,10 @@ export interface SessionOpenOptions {
    * Working directory to anchor the session.
    */
   workingDirectory?: string;
+  /**
+   * Additional directories the agent may access beyond the working directory. Each entry is granted to the session's file-access allow-list and surfaced to the model (system prompt context and `@`-mention completion). Absolute paths are recommended; a relative path is resolved against the session's working directory. Nonexistent or unresolvable entries are skipped with a warning. This is applied on both session creation and resume, and is not persisted: a resumed session that omits this option does not retain previously supplied directories (re-supply them, exactly as the CLI re-passes `--add-dir`).
+   */
+  additionalDirectories?: string[];
   workingDirectoryContext?: SessionContext;
   /**
    * Whether this session supports remote steering.
@@ -11852,6 +17905,10 @@ export interface SessionOpenOptions {
    */
   excludedTools?: string[];
   /**
+   * Built-in subagent names to include in this session. When specified, only these built-ins are available, subject to runtime availability and exclusions. Custom agents with the same name remain available.
+   */
+  includedBuiltinAgents?: string[];
+  /**
    * Built-in subagent names to exclude from this session. Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a custom agent with the same name is available.
    */
   excludedBuiltinAgents?: string[];
@@ -11859,12 +17916,14 @@ export interface SessionOpenOptions {
    * Whether shell-script safety heuristics are enabled.
    */
   enableScriptSafety?: boolean;
+  shell?: ShellOptions;
   /**
-   * Shell init profile.
+   * @deprecated
+   * Use shell.initProfile instead. Shell init profile.
    */
   shellInitProfile?: string;
   /**
-   * Per-shell process flags.
+   * PowerShell process flags applied to built-in and user-requested shell commands.
    */
   shellProcessFlags?: string[];
   sandboxConfig?: SandboxConfig;
@@ -11873,6 +17932,10 @@ export interface SessionOpenOptions {
    */
   logInteractiveShells?: boolean;
   envValueMode?: SessionOpenOptionsEnvValueMode;
+  /**
+   * MCP server names disabled for this session. Disabled servers are not started or authenticated on create or cold resume.
+   */
+  disabledMcpServers?: string[];
   /**
    * Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
    */
@@ -11914,7 +17977,7 @@ export interface SessionOpenOptions {
    */
   enableStreaming?: boolean;
   /**
-   * Experimental: enable native model citations (Anthropic models today), normalized onto the `assistant.message` event. Off by default; may change or be removed while the citations surface is experimental.
+   * Experimental: enable native model citations for supported Anthropic and OpenAI models, normalized onto the `assistant.message` event. Off by default; may change or be removed while the citations surface is experimental.
    *
    * @experimental
    */
@@ -11954,6 +18017,10 @@ export interface SessionOpenOptions {
    */
   eventsLogDirectory?: string;
   /**
+   * Whether subagent callback events should be forwarded into the session event log sink.
+   */
+  eventsLogIncludesSubagents?: boolean;
+  /**
    * Override Copilot configuration directory.
    */
   configDir?: string;
@@ -11970,6 +18037,94 @@ export interface SessionOpenOptions {
   sessionCapabilities?: SessionCapability[];
 }
 /**
+ * Per-session settings for built-in shell tools.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ShellOptions".
+ */
+/** @experimental */
+export interface ShellOptions {
+  initProfile?: ShellInitProfile;
+  /**
+   * Ordered host-provided script paths sourced before each built-in shell command when the
+   * entry's shell target matches the active shell. Use these for rc files, environment setup scripts,
+   * or other custom scripts. A script that returns a nonzero status is reported, and later scripts
+   * and the user command continue while the shell remains running. Because scripts are sourced into
+   * the command shell, `exit`, `exec`, failures under `set -e`, or other shell-terminating behavior
+   * can prevent continuation. Script standard output is preserved; Bash script stderr is discarded,
+   * PowerShell exception messages are replaced, and runtime-generated failure notices omit
+   * configured script paths. When sandboxing is enabled, each script must already be readable under
+   * the active sandbox filesystem policy. Pass an empty array to clear the list.
+   */
+  initScripts?: ShellInitScript[];
+  /**
+   * Flags passed to the active built-in shell process on startup, replacing its default flags.
+   * When omitted, the built-in Bash shell uses `--norc --noprofile`,
+   * and the built-in PowerShell shell uses `-NoProfile -NoLogo`.
+   */
+  processFlags?: string[];
+  credentials?: ShellCredentials;
+}
+/**
+ * A host-provided script sourced before each built-in shell command when its shell target matches the active shell.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ShellInitScript".
+ */
+/** @experimental */
+export interface ShellInitScript {
+  /**
+   * Path to the script to source.
+   */
+  path: string;
+  shell: ShellInitScriptShell;
+}
+/**
+ * Command-scoped GitHub credential injection for the shell commands an agent runs.
+ *
+ * Each channel is opt-in and independent, and injection is scoped to the individual command
+ * spawn: the credential is resolved from the session's *current* authentication at every spawn
+ * and reaches only spawns whose script actually invokes `git` or `gh`. Because nothing is
+ * retained between spawns, replacing the session credential (`session.gitHubAuth.setCredentials`)
+ * changes what the next spawned command presents — which seeding a credential into the runtime
+ * process's own environment cannot do, since a child's environment is fixed at `exec`.
+ *
+ * The credential is matched to the host it authenticates to, so a github.com credential is never
+ * presented to a GitHub Enterprise host and vice versa. Where a channel cannot express that
+ * boundary it injects nothing rather than crossing it -- see `gh` below.
+ *
+ * This is independent of `sandboxConfig`: it is a decision about which identity the agent
+ * presents, not about what the agent may touch, and it works on every platform whether or not
+ * an OS sandboxing backend is available. `sandboxConfig.auth` remains the sandbox-scoped
+ * spelling and is additive with this one.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ShellCredentials".
+ */
+/** @experimental */
+export interface ShellCredentials {
+  /**
+   * Whether to authenticate the agent's `git` commands as the session's GitHub credential, by
+   * injecting an `http.<host>.extraheader` (plus `insteadOf` rewrites so SSH-spelled remotes for
+   * that host use the authenticated HTTPS transport). Applied only to a spawn that runs a
+   * remote-contacting `git` subcommand. Default: false (opt-in).
+   */
+  git?: boolean;
+  /**
+   * Whether to authenticate the agent's `gh` commands as the session's GitHub credential, by
+   * exporting `GH_TOKEN` to a spawn that runs `gh`. Any inherited `gh` credential is removed from
+   * spawns that do not, so the credential stays command-scoped.
+   *
+   * Applies to a github.com credential only. `gh` picks its credential variable from the host a
+   * command targets rather than the one the credential belongs to, and the command can choose that
+   * target, so `GH_ENTERPRISE_TOKEN` would offer a single-tenant enterprise credential to every
+   * other enterprise host. A session whose credential is enterprise-scoped therefore runs `gh`
+   * unauthenticated; its `git` commands are unaffected, because `http.<host>.extraheader` is scoped
+   * to one host by construction. Default: false (opt-in).
+   */
+  gh?: boolean;
+}
+/**
  * Content-exclusion policy supplied to `sessions.open` options, with rules, last-updated data, and scope.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -11977,8 +18132,14 @@ export interface SessionOpenOptions {
  */
 /** @experimental */
 export interface SessionOpenOptionsAdditionalContentExclusionPolicy {
+  /**
+   * Content-exclusion rules to apply.
+   */
   rules: SessionOpenOptionsAdditionalContentExclusionPolicyRule[];
-  last_updated_at: unknown;
+  /**
+   * Opaque policy update timestamp supplied by the host.
+   */
+  last_updated_at: JsonValue;
   scope: SessionOpenOptionsAdditionalContentExclusionPolicyScope;
 }
 /**
@@ -11989,8 +18150,17 @@ export interface SessionOpenOptionsAdditionalContentExclusionPolicy {
  */
 /** @experimental */
 export interface SessionOpenOptionsAdditionalContentExclusionPolicyRule {
+  /**
+   * Path patterns covered by this rule.
+   */
   paths: string[];
+  /**
+   * Conditions of which at least one must match.
+   */
   ifAnyMatch?: string[];
+  /**
+   * Conditions none of which may match.
+   */
   ifNoneMatch?: string[];
   source: SessionOpenOptionsAdditionalContentExclusionPolicyRuleSource;
 }
@@ -12002,7 +18172,13 @@ export interface SessionOpenOptionsAdditionalContentExclusionPolicyRule {
  */
 /** @experimental */
 export interface SessionOpenOptionsAdditionalContentExclusionPolicyRuleSource {
+  /**
+   * Name of the policy source.
+   */
   name: string;
+  /**
+   * Type of the policy source.
+   */
   type: string;
 }
 /**
@@ -12127,9 +18303,7 @@ export interface SessionsOpenCloud {
    *
    * @internal
    */
-  onTaskCreated?: {
-    [k: string]: unknown | undefined;
-  };
+  onTaskCreated?: OpaqueInProcessValue;
 }
 /**
  * Parameters for fetching a remote session and handing it off to a new local session.
@@ -12151,9 +18325,13 @@ export interface SessionsOpenHandoff {
    *
    * @internal
    */
-  onProgress?: {
-    [k: string]: unknown | undefined;
-  };
+  onProgress?: OpaqueInProcessValue;
+  /**
+   * In-process confirmation callback `(request) => boolean | Promise<boolean>` invoked when the handoff needs the caller to confirm a non-fatal blocker (e.g. a repository mismatch between the current working directory and the remote session). Returning `true` proceeds with the handoff; returning `false` (or omitting the callback) aborts it. Marked internal because a function reference cannot cross the JSON-RPC boundary, for the same reasons as `onProgress`.
+   *
+   * @internal
+   */
+  onConfirm?: OpaqueInProcessValue;
 }
 /**
  * Result of opening a session.
@@ -12175,9 +18353,7 @@ export interface SessionOpenResult {
    *
    * @internal
    */
-  sessionApi?: {
-    [k: string]: unknown | undefined;
-  };
+  sessionApi?: OpaqueInProcessValue;
   /**
    * Startup prompts queued by user-level hook configs at session creation. Only populated when status is `created`; resumed sessions return an empty array.
    */
@@ -12297,6 +18473,23 @@ export interface SessionsCloseRequest {
 /** @experimental */
 export interface SessionsCloseResult {}
 /**
+ * Session ID to delete from disk.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsDeleteRequest".
+ */
+/** @experimental */
+export interface SessionsDeleteRequest {
+  /**
+   * Session ID to delete
+   */
+  sessionId: string;
+  /**
+   * Internal resolved session directory path to delete
+   */
+  sessionPath?: string | null;
+}
+/**
  * Session metadata records to enrich with summary and context information.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -12344,7 +18537,13 @@ export interface SessionSetCredentialsResult {
  */
 /** @experimental */
 export interface SessionSettingsBuiltInToolAvailabilitySnapshot {
+  /**
+   * Whether the report-progress tool is available.
+   */
   reportProgress?: boolean;
+  /**
+   * Whether the create-pull-request tool is available.
+   */
   createPullRequest?: boolean;
 }
 /**
@@ -12369,6 +18568,9 @@ export interface SessionSettingsEvaluatePredicateRequest {
  */
 /** @experimental */
 export interface SessionSettingsEvaluatePredicateResult {
+  /**
+   * Whether the named settings predicate evaluated to enabled.
+   */
   enabled: boolean;
 }
 /**
@@ -12379,7 +18581,13 @@ export interface SessionSettingsEvaluatePredicateResult {
  */
 /** @experimental */
 export interface SessionSettingsJobSnapshot {
+  /**
+   * GitHub Actions event type for the job.
+   */
   eventType?: string;
+  /**
+   * Whether this is the workflow's trigger job.
+   */
   isTriggerJob?: boolean;
   builtInToolAvailability?: SessionSettingsBuiltInToolAvailabilitySnapshot;
 }
@@ -12391,9 +18599,21 @@ export interface SessionSettingsJobSnapshot {
  */
 /** @experimental */
 export interface SessionSettingsModelSnapshot {
+  /**
+   * Selected model identifier.
+   */
   model?: string;
+  /**
+   * Default reasoning effort for the selected model.
+   */
   defaultReasoningEffort?: string;
+  /**
+   * Agent job identifier for the session.
+   */
   instanceId?: string;
+  /**
+   * Agent service callback URL for job and progress updates.
+   */
   callbackUrl?: string;
 }
 /**
@@ -12404,7 +18624,13 @@ export interface SessionSettingsModelSnapshot {
  */
 /** @experimental */
 export interface SessionSettingsOnlineEvaluationSnapshot {
+  /**
+   * Whether online evaluation is disabled.
+   */
   disableOnlineEvaluation?: boolean;
+  /**
+   * Whether online-evaluation output-file generation is enabled.
+   */
   enableOnlineEvaluationOutputFile?: boolean;
 }
 /**
@@ -12415,17 +18641,53 @@ export interface SessionSettingsOnlineEvaluationSnapshot {
  */
 /** @experimental */
 export interface SessionSettingsRepoSnapshot {
+  /**
+   * Repository name.
+   */
   name?: string;
+  /**
+   * GitHub repository database ID.
+   */
   id?: number;
+  /**
+   * Checked-out repository branch.
+   */
   branch?: string;
+  /**
+   * Checked-out commit SHA.
+   */
   commit?: string;
+  /**
+   * Whether the repository is writable.
+   */
   readWrite?: boolean;
+  /**
+   * Repository owner login.
+   */
   ownerName?: string;
+  /**
+   * GitHub repository owner database ID.
+   */
   ownerId?: number;
+  /**
+   * GitHub server base URL.
+   */
   serverUrl?: string;
+  /**
+   * GitHub server host name.
+   */
   host?: string;
+  /**
+   * Protocol used to access the GitHub host.
+   */
   hostProtocol?: string;
+  /**
+   * GitHub secret-scanning service URL.
+   */
   secretScanningUrl?: string;
+  /**
+   * Number of commits in the pull request.
+   */
   prCommitCount?: number;
 }
 /**
@@ -12436,9 +18698,21 @@ export interface SessionSettingsRepoSnapshot {
  */
 /** @experimental */
 export interface SessionSettingsSnapshot {
+  /**
+   * Agent runtime version selector copied from the session settings, such as `latest` or a runtime release identifier.
+   */
   version?: string;
+  /**
+   * Name of the SDK client that created the session.
+   */
   clientName?: string;
+  /**
+   * Session timeout in milliseconds.
+   */
   timeoutMs?: number;
+  /**
+   * Session start time as Unix epoch milliseconds.
+   */
   startTimeMs?: number;
   repo: SessionSettingsRepoSnapshot;
   model: SessionSettingsModelSnapshot;
@@ -12454,14 +18728,41 @@ export interface SessionSettingsSnapshot {
  */
 /** @experimental */
 export interface SessionSettingsValidationSnapshot {
+  /**
+   * General validation timeout budget in seconds.
+   */
   timeout?: number;
+  /**
+   * Dependabot validation timeout budget in seconds.
+   */
   dependabotTimeout?: number;
+  /**
+   * Whether CodeQL validation is enabled.
+   */
   codeqlEnabled?: boolean;
+  /**
+   * Whether code-review validation is enabled.
+   */
   codeReviewEnabled?: boolean;
+  /**
+   * Model used for code-review validation.
+   */
   codeReviewModel?: string;
+  /**
+   * Whether advisory validation is enabled.
+   */
   advisoryEnabled?: boolean;
+  /**
+   * Whether secret-scanning validation is enabled.
+   */
   secretScanningEnabled?: boolean;
+  /**
+   * Whether the memory-store tool is enabled.
+   */
   memoryStoreEnabled?: boolean;
+  /**
+   * Whether the memory-vote tool is enabled.
+   */
   memoryVoteEnabled?: boolean;
 }
 /**
@@ -12630,6 +18931,29 @@ export interface SessionsGetLastForContextResult {
   sessionId?: string;
 }
 /**
+ * Session ID whose persisted metadata should be read.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsGetMetadataRequest".
+ */
+/** @experimental */
+export interface SessionsGetMetadataRequest {
+  /**
+   * Session ID to inspect
+   */
+  sessionId: string;
+}
+/**
+ * Persisted local session metadata when the session exists.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsGetMetadataResult".
+ */
+/** @experimental */
+export interface SessionsGetMetadataResult {
+  session?: LocalSessionMetadataValue;
+}
+/**
  * Session ID to look up the persisted remote-steerable flag for.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -12669,6 +18993,32 @@ export interface SessionSizes {
   sizes: {
     [k: string]: number | undefined;
   };
+}
+/**
+ * Limit for non-empty local session IDs.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsListNonEmptySessionIdsRequest".
+ */
+/** @experimental */
+export interface SessionsListNonEmptySessionIdsRequest {
+  /**
+   * Maximum number of session IDs to return.
+   */
+  limit?: number;
+}
+/**
+ * Recent local session IDs that contain user-visible history.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SessionsListNonEmptySessionIdsResult".
+ */
+/** @experimental */
+export interface SessionsListNonEmptySessionIdsResult {
+  /**
+   * Session IDs ordered newest-first.
+   */
+  sessionIds: string[];
 }
 /**
  * Optional source filter, metadata-load limit, and context filter applied to the returned sessions.
@@ -12902,10 +19252,11 @@ export interface SessionUpdateOptionsParams {
   model?: string;
   modelCapabilitiesOverrides?: ModelCapabilitiesOverride;
   /**
-   * Reasoning effort for the selected model (model-defined enum).
+   * Reasoning effort for the selected model. CAPI values are model-defined and validated against the selected model; BYOK providers may define additional values. When omitted, no effort override is applied.
    */
   reasoningEffort?: string;
   reasoningSummary?: OptionsUpdateReasoningSummary;
+  verbosity?: Verbosity;
   /**
    * Identifier of the client driving the session.
    */
@@ -12943,6 +19294,10 @@ export interface SessionUpdateOptionsParams {
    */
   excludedTools?: string[];
   /**
+   * Built-in subagent names to include in this session. When specified, only these built-ins are available, subject to runtime availability and exclusions. Custom agents with the same name remain available. Set to null to remove the allowlist restriction.
+   */
+  includedBuiltinAgents?: string[] | null;
+  /**
    * Built-in subagent names to exclude from this session. Excluded built-ins are hidden from agent discovery and cannot be dispatched unless a custom agent with the same name is available.
    */
   excludedBuiltinAgents?: string[];
@@ -12951,12 +19306,14 @@ export interface SessionUpdateOptionsParams {
    * Whether shell-script safety heuristics are enabled.
    */
   enableScriptSafety?: boolean;
+  shell?: ShellOptions;
   /**
-   * Shell init profile (`None` or `NonInteractive`).
+   * @deprecated
+   * Use shell.initProfile instead. Shell init profile (`None` or `NonInteractive`).
    */
   shellInitProfile?: string;
   /**
-   * Per-shell process flags (e.g., `pwsh` arguments).
+   * PowerShell process flags applied to built-in and user-requested shell commands.
    */
   shellProcessFlags?: string[];
   sandboxConfig?: SandboxConfig;
@@ -12978,7 +19335,7 @@ export interface SessionUpdateOptionsParams {
    */
   disabledSkills?: string[];
   /**
-   * Whether to discover custom instructions on demand after successful file views (AGENTS.md / CLAUDE.md / .github/copilot-instructions.md surfacing). Combined with `skipCustomInstructions` and the runtime-side `ON_DEMAND_INSTRUCTIONS` feature flag.
+   * Whether to discover custom instructions on demand after successful file views (AGENTS.md / CLAUDE.md / .github/copilot-instructions.md surfacing). Combined with `skipCustomInstructions`.
    */
   enableOnDemandInstructionDiscovery?: boolean;
   /**
@@ -13046,6 +19403,10 @@ export interface SessionUpdateOptionsParams {
    */
   eventsLogDirectory?: string;
   /**
+   * Whether subagent callback events should be forwarded into the session event log sink.
+   */
+  eventsLogIncludesSubagents?: boolean;
+  /**
    * Additional content-exclusion policies to merge into the session's policy set.
    *
    * @experimental
@@ -13101,6 +19462,10 @@ export interface SessionUpdateOptionsResult {
    * Whether the operation succeeded
    */
   success: boolean;
+  /**
+   * Number of hooks loaded from installed plugins, returned when installedPlugins is updated
+   */
+  pluginHookCount?: number;
 }
 /**
  * User-requested shell execution cancellation handle.
@@ -13220,6 +19585,10 @@ export interface Skill {
    */
   name: string;
   /**
+   * Canonical slash command name used to invoke the skill, without the leading '/'
+   */
+  commandName?: string;
+  /**
    * Description of what the skill does
    */
   description: string;
@@ -13305,6 +19674,23 @@ export interface SkillsConfigSetDisabledSkillsRequest {
    * List of skill names to disable
    */
   disabledSkills: string[];
+}
+/**
+ * Adds or removes a single skill from the global disabled list, leaving every other entry untouched.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SkillsConfigSetSkillDisabledRequest".
+ */
+/** @experimental */
+export interface SkillsConfigSetSkillDisabledRequest {
+  /**
+   * Name of the skill to add to or remove from the disabled list
+   */
+  name: string;
+  /**
+   * True to disable the skill, false to enable it
+   */
+  disabled: boolean;
 }
 /**
  * Name of the skill to disable for the session.
@@ -13429,8 +19815,41 @@ export interface SkillsLoadDiagnostics {
    */
   errors: string[];
 }
+
+/** @experimental */
+export interface SlashCommandAddTimelineEntryResult {
+  /**
+   * Discriminator for an add-timeline-entry result.
+   */
+  kind: "add-timeline-entry";
+  entry: SlashCommandTimelineEntry;
+  /**
+   * Optional text the host should prefill into the input editor.
+   */
+  prefillInput?: string;
+  /**
+   * Whether command execution changed persisted runtime settings.
+   */
+  runtimeSettingsChanged?: boolean;
+}
+
+/** @experimental */
+export interface SlashCommandTimelineEntry {
+  /**
+   * Timeline entry presentation type.
+   */
+  type: string;
+  /**
+   * Text displayed for the timeline entry.
+   */
+  text: string;
+  /**
+   * Optional URL associated with the timeline entry.
+   */
+  url?: string;
+}
 /**
- * Slash-command invocation result that submits an agent prompt, with display prompt, optional mode, and settings-change flag.
+ * Slash-command invocation result that submits an agent prompt, with display prompt, optional mode, optional user-facing notice, and settings-change flag.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "SlashCommandAgentPromptResult".
@@ -13450,6 +19869,10 @@ export interface SlashCommandAgentPromptResult {
    */
   displayPrompt: string;
   mode?: SessionMode;
+  /**
+   * Optional user-facing notice to show before the prompt is submitted
+   */
+  notice?: string;
   /**
    * True when the invocation mutated user runtime settings; consumers caching settings should refresh
    */
@@ -13555,6 +19978,95 @@ export interface SlashCommandSelectSubcommandOption {
    */
   group?: string;
 }
+
+/** @experimental */
+export interface SlashCommandShowDialogResult {
+  /**
+   * Discriminator for a show-dialog result.
+   */
+  kind: "show-dialog";
+  dialog: SlashCommandModelPickerDialog;
+  /**
+   * Whether command execution changed persisted runtime settings.
+   */
+  runtimeSettingsChanged?: boolean;
+}
+
+/** @experimental */
+export interface SlashCommandModelPickerDialog {
+  /**
+   * Discriminator for a model-picker dialog.
+   */
+  kind: "model-picker";
+  /**
+   * Model that should be enabled before it can be selected.
+   */
+  modelToEnable?: string;
+  /**
+   * Settings scope the picker should modify.
+   */
+  scope?: string;
+  /**
+   * Model-selection target represented by the picker.
+   */
+  target?: string;
+}
+
+/** @experimental */
+export interface SlashCommandSetModelResult {
+  /**
+   * Discriminator for a set-model result.
+   */
+  kind: "set-model";
+  /**
+   * Model selected by the command.
+   */
+  model: string;
+  /**
+   * Settings scope modified by the command.
+   */
+  scope?: string;
+  /**
+   * User-facing warning produced while selecting the model.
+   */
+  warning?: string;
+  /**
+   * Reasoning effort selected for the model.
+   */
+  reasoningEffort?: string;
+  /**
+   * User-settings snapshot to restore if the host cancels the model switch.
+   */
+  revertOnCancel?: {};
+  /**
+   * Repository settings scope modified by the command.
+   */
+  repoScope?: string;
+  /**
+   * Whether command execution changed persisted runtime settings.
+   */
+  runtimeSettingsChanged?: boolean;
+}
+
+/** @experimental */
+export interface SlashCommandSetPlanModelResult {
+  /**
+   * Discriminator for a set-plan-model result.
+   */
+  kind: "set-plan-model";
+  /**
+   * Dedicated model selected for plan mode.
+   */
+  planModel?: string;
+  /**
+   * User-facing confirmation message for the plan-model selection.
+   */
+  message: string;
+  /**
+   * Whether command execution changed persisted runtime settings.
+   */
+  runtimeSettingsChanged?: boolean;
+}
 /**
  * Subagent model, reasoning effort, and context tier settings
  *
@@ -13593,6 +20105,10 @@ export interface TaskAgentInfo {
    * Tool call ID associated with this agent task
    */
   toolCallId: string;
+  /**
+   * Friendly, non-unique name intended for display
+   */
+  displayName?: string;
   /**
    * Short description of the task
    */
@@ -13689,6 +20205,35 @@ export interface TaskProgressLine {
    * ISO 8601 timestamp when this event occurred
    */
   timestamp: string;
+}
+
+/** @experimental */
+export interface TaskCompletionDecision {
+  outcome: TaskCompletionOutcome;
+  /**
+   * Rationale for the completion decision, when one is available.
+   */
+  reason?: string;
+  /**
+   * Whether the rationale was derived from completion-reviewer output.
+   */
+  reviewerDerived?: boolean;
+  /**
+   * Information-flow metadata captured from the completion reviewer.
+   */
+  reviewerResultMeta?: JsonValue;
+  /**
+   * Active autopilot objective evaluated by the completion reviewer.
+   */
+  objectiveId?: number;
+  /**
+   * Whether completion was accepted after the reviewer-rejection budget was exhausted.
+   */
+  completionRejectionBudgetExhausted?: boolean;
+  /**
+   * Objective eligibility token captured when the decision was evaluated.
+   */
+  completionEligibilityToken?: number;
 }
 /**
  * Tracked shell task metadata, including ID, command, status, timing, attachment/execution mode, log path, and PID.
@@ -13959,7 +20504,7 @@ export interface TasksStartAgentRequest {
    */
   prompt: string;
   /**
-   * Short name for the agent, used to generate a human-readable ID
+   * Friendly, non-unique name used when displaying the agent
    */
   name: string;
   /**
@@ -14031,7 +20576,7 @@ export interface Tool {
    * JSON Schema for the tool's input parameters
    */
   parameters?: {
-    [k: string]: unknown | undefined;
+    [k: string]: JsonValue | undefined;
   };
   /**
    * Optional instructions for how to use this tool effectively
@@ -14050,6 +20595,209 @@ export interface ToolList {
    * List of available built-in tools with metadata
    */
   tools: Tool[];
+}
+/**
+ * Expanded canonical result returned by a session tool.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolResultExpanded".
+ */
+/** @experimental */
+export interface ToolResultExpanded {
+  /**
+   * Text result returned to the model.
+   */
+  textResultForLlm: string;
+  resultType: ToolResultType;
+  /**
+   * Base64-encoded binary results returned to the model.
+   */
+  binaryResultsForLlm?: ExternalToolTextResultForLlmBinaryResultsForLlm[];
+  /**
+   * Detailed log content available for session display.
+   */
+  sessionLog?: string;
+  /**
+   * Error message for an unsuccessful execution.
+   */
+  error?: string;
+  /**
+   * Tool-specific telemetry payload.
+   */
+  toolTelemetry?: JsonValue;
+  /**
+   * Whether large-output post-processing should be skipped.
+   */
+  skipLargeOutputProcessing?: boolean;
+  /**
+   * Messages to inject after the tool result.
+   */
+  newMessages?: ToolResultNewMessage[];
+  /**
+   * Structured content blocks returned to the model.
+   */
+  contents?: ExternalToolTextResultForLlmContent[];
+  /**
+   * Deferred tool names made available by this result.
+   */
+  toolReferences?: string[];
+  /**
+   * Sources returned by the tool that the model may cite.
+   */
+  citableSources?: JsonValue[];
+  /**
+   * Skill invocation metadata produced by the tool.
+   */
+  skillInvocation?: JsonValue;
+  /**
+   * Whether post-tool-use failure hooks have already processed this result.
+   */
+  postToolUseFailureHooksProcessed?: boolean;
+  /**
+   * Optional UI resource produced by the tool.
+   */
+  uiResource?: JsonValue;
+  /**
+   * Metadata propagated with the tool result, including information-flow labels.
+   */
+  mcpMeta?: {
+    [k: string]: JsonValue | undefined;
+  };
+  /**
+   * Structured result content in addition to the model-facing text.
+   */
+  structuredContent?: JsonValue;
+  taskCompletionDecision?: TaskCompletionDecision;
+}
+/**
+ * A message injected by a tool result.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolResultNewMessage".
+ */
+/** @experimental */
+export interface ToolResultNewMessage {
+  /**
+   * Message content to inject after the tool result.
+   */
+  content: string;
+  /**
+   * Source attributed to the injected message.
+   */
+  source: string;
+}
+/**
+ * A tool name and arguments to execute through the session's native invocation pipeline.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolsExecuteRequest".
+ */
+/** @experimental */
+export interface ToolsExecuteRequest {
+  /**
+   * Name of the currently offered tool to execute.
+   */
+  name: string;
+  /**
+   * Arguments supplied to the tool.
+   */
+  arguments: JsonValue;
+  /**
+   * Optional identifier used to correlate this invocation with its tool call.
+   */
+  toolCallId?: string;
+}
+/**
+ * Options controlling how Rust-owned built-in tool descriptors are materialized.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolsGetBuiltinDescriptorsRequest".
+ */
+/** @experimental */
+export interface ToolsGetBuiltinDescriptorsRequest {
+  /**
+   * Whether line numbers should be omitted from the view tool descriptor.
+   */
+  noViewLineNumbers?: boolean;
+  /**
+   * Whether descriptors should favor fewer user-intervention prompts.
+   */
+  reduceUserIntervention?: boolean;
+  /**
+   * Whether tool descriptors should include authoring metadata.
+   */
+  includeAuthor?: boolean;
+  /**
+   * Whether semantic skill lookup is available.
+   */
+  skillEmbeddingEnabled?: boolean;
+  shellConfig?: ToolsShellDescriptorConfig;
+  /**
+   * Whether shell commands may only run asynchronously.
+   */
+  shellAsyncOnlyEnabled?: boolean;
+  /**
+   * Whether the configured shell supports PowerShell 7 syntax.
+   */
+  shellSupportsPowerShell7Syntax?: boolean;
+  /**
+   * Default shell timeout in milliseconds.
+   */
+  shellTimeoutMs?: number;
+  /**
+   * Whether background task completion notifications are enabled.
+   */
+  backgroundTaskNotificationsEnabled?: boolean;
+}
+/**
+ * Shell-specific names and description lines used to materialize built-in shell tool descriptors.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolsShellDescriptorConfig".
+ */
+/** @experimental */
+export interface ToolsShellDescriptorConfig {
+  /**
+   * Stable shell type identifier.
+   */
+  shellType: string;
+  /**
+   * Human-readable shell name.
+   */
+  displayName: string;
+  /**
+   * Tool name used to start shell commands.
+   */
+  shellToolName: string;
+  /**
+   * Tool name used to read shell output.
+   */
+  readShellToolName: string;
+  /**
+   * Tool name used to stop shell commands.
+   */
+  stopShellToolName: string;
+  /**
+   * Tool name used to list active shells.
+   */
+  listShellsToolName: string;
+  /**
+   * Additional model-facing shell description lines.
+   */
+  descriptionLines: string[];
+}
+/**
+ * Rust-owned built-in tool descriptors for the session.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolsGetBuiltinDescriptorsResult".
+ */
+/** @experimental */
+export interface ToolsGetBuiltinDescriptorsResult {
+  /**
+   * Built-in tool descriptors materialized for the session.
+   */
+  tools: BuiltinToolDescriptor[];
 }
 /**
  * Current lightweight tool metadata snapshot for the session.
@@ -14084,6 +20832,41 @@ export interface ToolsListRequest {
    * Optional model ID — when provided, the returned tool list reflects model-specific overrides
    */
   model?: string;
+}
+/**
+ * Complete externally implemented tool list for the calling connection. An empty list removes every tool previously supplied by that connection.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolsSetRequest".
+ */
+/** @experimental */
+export interface ToolsSetRequest {
+  /**
+   * Complete replacement list for the calling connection.
+   */
+  tools: ProtocolExternalToolDefinition[];
+}
+/**
+ * Empty result after replacing the calling connection's externally implemented tools.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolsSetResult".
+ */
+/** @experimental */
+export interface ToolsSetResult {}
+/**
+ * Task-completion tool arguments and final result used to build a label-safe session event payload.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ToolsTaskCompleteEventDataRequest".
+ */
+/** @experimental */
+export interface ToolsTaskCompleteEventDataRequest {
+  /**
+   * Arguments supplied to the completed task_complete tool call.
+   */
+  toolArgs: JsonValue;
+  finalResult: ToolResultExpanded;
 }
 /**
  * Empty result after applying subagent settings
@@ -14216,11 +20999,20 @@ export interface UIElicitationArrayEnumFieldItems {
  */
 /** @experimental */
 export interface UIElicitationRequest {
+  mode?: McpElicitationFormMode;
   /**
    * Message describing what information is needed from the user
    */
   message: string;
   requestedSchema: UIElicitationSchema;
+  /**
+   * MCP request metadata.
+   */
+  _meta?: {
+    [k: string]: unknown | undefined;
+  };
+  task?: McpTaskMetadata;
+  [k: string]: unknown | undefined;
 }
 /**
  * JSON Schema describing the form fields to present to the user
@@ -14423,6 +21215,13 @@ export interface UIElicitationSchemaPropertyNumber {
 export interface UIElicitationResponse {
   action: UIElicitationResponseAction;
   content?: UIElicitationResponseContent;
+  /**
+   * MCP response metadata.
+   */
+  _meta?: {
+    [k: string]: unknown | undefined;
+  };
+  [k: string]: unknown | undefined;
 }
 /**
  * The form values submitted by the user (present when action is 'accept')
@@ -14464,20 +21263,16 @@ export interface UIEphemeralQueryRequest {
    *
    * @internal
    */
-  onChunk?: {
-    [k: string]: unknown | undefined;
-  };
+  onChunk?: OpaqueInProcessValue;
   /**
    * In-process `AbortSignal` forwarded to the model client to cancel an in-flight request. Marked internal: excluded from the public SDK surface. Replaced by an explicit cancellation token + cancel RPC in the SDK migration.
    *
    * @internal
    */
-  abortSignal?: {
-    [k: string]: unknown | undefined;
-  };
+  abortSignal?: OpaqueInProcessValue;
 }
 /**
- * Transient answer generated from current conversation context.
+ * Completed transient query. Ordered chunks and the terminal outcome are also delivered through `ui.ephemeral_query` session events while it runs.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
  * via the `definition` "UIEphemeralQueryResult".
@@ -14485,7 +21280,7 @@ export interface UIEphemeralQueryRequest {
 /** @experimental */
 export interface UIEphemeralQueryResult {
   /**
-   * Full assistant response text.
+   * Answer returned by the model
    */
   answer: string;
 }
@@ -14510,6 +21305,10 @@ export interface UIExitPlanModeResponse {
    * Feedback from the user when they declined the plan or requested changes.
    */
   feedback?: string;
+  /**
+   * When true, the agent is instructed to end its turn without starting implementation so the client can restore the session model and auto-submit a fresh implementation turn on it. Set only when a distinct plan configuration (a different model, reasoning effort, or context tier) actually ran the planning turn.
+   */
+  deferImplementation?: boolean;
 }
 /**
  * Request ID of a pending `auto_mode_switch.requested` event and the user's response.
@@ -14747,6 +21546,12 @@ export interface UsageGetMetricsResult {
     [k: string]: UsageMetricsModelMetric | undefined;
   };
   /**
+   * Per-agent usage metrics, keyed by agent instance identifier. The main conversation uses the stable key `main`.
+   */
+  agentMetrics?: {
+    [k: string]: UsageMetricsAgentMetric | undefined;
+  };
+  /**
    * Currently active model identifier
    */
   currentModel?: string;
@@ -14807,6 +21612,10 @@ export interface UsageMetricsCodeChanges {
 export interface UsageMetricsModelMetric {
   requests: UsageMetricsModelMetricRequests;
   usage: UsageMetricsModelMetricUsage;
+  /**
+   * Latest known prompt-cache expiration for this model. A timestamp in the past indicates that the observed cache has expired.
+   */
+  cacheExpiresAt?: string;
   /**
    * Accumulated nano-AI units cost for this model
    */
@@ -14878,6 +21687,37 @@ export interface UsageMetricsModelMetricTokenDetail {
   tokenCount: number;
 }
 /**
+ * Usage attributed to one agent instance, including its identity, API duration, AI units, and per-model breakdown.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UsageMetricsAgentMetric".
+ */
+/** @experimental */
+export interface UsageMetricsAgentMetric {
+  /**
+   * Configured agent name, when this is a subagent
+   */
+  agentName?: string;
+  /**
+   * Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.
+   */
+  agentDisplayName?: string;
+  /**
+   * Time spent in model API calls by this agent, in milliseconds
+   */
+  totalApiDurationMs: number;
+  /**
+   * Accumulated nano-AI units cost for this agent
+   */
+  totalNanoAiu: number;
+  /**
+   * Per-model usage for this agent, keyed by model identifier
+   */
+  modelMetrics: {
+    [k: string]: UsageMetricsModelMetric | undefined;
+  };
+}
+/**
  * Result of a user-requested shell command.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -14917,15 +21757,11 @@ export interface UserSettingMetadata {
   /**
    * The effective value: the user's value if set, otherwise the default.
    */
-  value: {
-    [k: string]: unknown | undefined;
-  };
+  value: JsonValue;
   /**
    * The centrally-known default for this setting (null when no default is registered).
    */
-  default: {
-    [k: string]: unknown | undefined;
-  };
+  default: JsonValue;
   /**
    * True when the user has not set an explicit value for this setting (i.e. it is left at its default). Reflects whether the user has overridden the key, not whether the effective value happens to equal the default — a key explicitly set to a value identical to the default still reports false.
    */
@@ -14957,9 +21793,7 @@ export interface UserSettingsSetRequest {
   /**
    * Partial user settings to write, as a free-form object keyed by setting name
    */
-  settings: {
-    [k: string]: unknown | undefined;
-  };
+  settings: JsonValue;
 }
 /**
  * Outcome of writing user settings.
@@ -15029,7 +21863,7 @@ export interface VisibilitySetResult {
 /** @experimental */
 export interface WorkspaceDiffFileChange {
   /**
-   * Path to the changed file, relative to the workspace root.
+   * Path to the changed file, relative to the workspace root when the file lives under it. A file changed outside the workspace root keeps a `../`-relative path, or an absolute path when no relative path exists (for example a different Windows drive).
    */
   path: string;
   /**
@@ -15065,9 +21899,58 @@ export interface WorkspaceDiffResult {
    */
   baseBranch?: string;
   /**
-   * Whether a requested branch diff fell back to unstaged changes because branch diff failed.
+   * Whether the requested diff fell back to unstaged changes, either because branch diff failed or session diff was unavailable.
    */
   isFallback: boolean;
+  unavailableReason?: HistoryRewindUnavailableReason;
+}
+/**
+ * Compaction summary checkpoint to persist.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "WorkspacesAddSummaryRequest".
+ */
+/** @experimental */
+export interface WorkspacesAddSummaryRequest {
+  /**
+   * Summary title shown in checkpoint listings.
+   */
+  title: string;
+  /**
+   * Markdown summary content to persist.
+   */
+  content: string;
+}
+/**
+ * Persisted summary metadata and refreshed workspace metadata.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "WorkspacesAddSummaryResult".
+ */
+/** @experimental */
+export interface WorkspacesAddSummaryResult {
+  /**
+   * Metadata for the persisted summary.
+   */
+  summary?: {};
+  /**
+   * Refreshed metadata for the containing workspace.
+   */
+  workspace?: {};
+  [k: string]: unknown | undefined;
+}
+/**
+ * Whether the autopilot objective file exists.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "WorkspacesAutopilotObjectiveExistsResult".
+ */
+/** @experimental */
+export interface WorkspacesAutopilotObjectiveExistsResult {
+  /**
+   * True when the objective file exists.
+   */
+  exists: boolean;
 }
 /**
  * Workspace checkpoint metadata with assigned number, human-readable title, and checkpoint filename.
@@ -15108,6 +21991,19 @@ export interface WorkspacesCreateFileRequest {
   content: string;
 }
 /**
+ * Result of deleting the autopilot objective file.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "WorkspacesDeleteAutopilotObjectiveResult".
+ */
+/** @experimental */
+export interface WorkspacesDeleteAutopilotObjectiveResult {
+  /**
+   * True when a file was deleted.
+   */
+  deleted: boolean;
+}
+/**
  * Parameters for computing a workspace diff.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -15122,6 +22018,19 @@ export interface WorkspacesDiffRequest {
   ignoreWhitespace?: boolean;
 }
 /**
+ * Optional session context used when creating a local workspace.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "WorkspacesEnsureRequest".
+ */
+/** @experimental */
+export interface WorkspacesEnsureRequest {
+  /**
+   * Opaque workspace context supplied by the session host.
+   */
+  context?: JsonValue;
+}
+/**
  * Current workspace metadata for the session, including its absolute filesystem path when available.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -15133,22 +22042,70 @@ export interface WorkspacesGetWorkspaceResult {
    * Current workspace metadata, or null if not available
    */
   workspace: {
+    /**
+     * Stable workspace identifier.
+     */
     id: string;
+    /**
+     * Current working directory associated with the workspace.
+     */
     cwd?: string;
+    /**
+     * Git repository root associated with the workspace.
+     */
     git_root?: string;
+    /**
+     * Repository identifier associated with the workspace.
+     */
     repository?: string;
     host_type?: WorkspacesWorkspaceDetailsHostType;
+    /**
+     * Current Git branch.
+     */
     branch?: string;
+    /**
+     * Workspace display name.
+     */
     name?: string;
+    /**
+     * Name of the client that created the workspace.
+     */
     client_name?: string;
+    /**
+     * Whether the workspace name was explicitly chosen by the user.
+     */
     user_named?: boolean;
+    /**
+     * Number of persisted summaries in the workspace.
+     */
     summary_count?: number;
+    /**
+     * Timestamp when the workspace was created.
+     */
     created_at?: string;
+    /**
+     * Timestamp when the workspace was last updated.
+     */
     updated_at?: string;
+    /**
+     * Whether the workspace session can be steered remotely.
+     */
     remote_steerable?: boolean;
+    /**
+     * Mission Control task identifier associated with the workspace.
+     */
     mc_task_id?: string;
+    /**
+     * Mission Control session identifier associated with the workspace.
+     */
     mc_session_id?: string;
+    /**
+     * Most recent Mission Control event identifier observed for the workspace.
+     */
     mc_last_event_id?: string;
+    /**
+     * Whether the per-session Chronicle upgrade prompt was dismissed for the workspace.
+     */
     chronicle_sync_dismissed?: boolean;
   } | null;
   /**
@@ -15181,6 +22138,19 @@ export interface WorkspacesListFilesResult {
    * Relative file paths in the workspace files directory
    */
   files: string[];
+}
+/**
+ * Autopilot objective file content, or null when missing.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "WorkspacesReadAutopilotObjectiveResult".
+ */
+/** @experimental */
+export interface WorkspacesReadAutopilotObjectiveResult {
+  /**
+   * Autopilot objective file content, or null when missing.
+   */
+  content: string | null;
 }
 /**
  * Checkpoint number to read.
@@ -15274,6 +22244,82 @@ export interface WorkspacesSaveLargePasteResult {
   } | null;
 }
 /**
+ * Rollback point for local workspace summaries.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "WorkspacesTruncateSummariesRequest".
+ */
+/** @experimental */
+export interface WorkspacesTruncateSummariesRequest {
+  /**
+   * Number of newest summaries to keep.
+   */
+  keepCount: number;
+}
+/**
+ * Workspace metadata fields to update.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "WorkspacesUpdateMetadataRequest".
+ */
+/** @experimental */
+export interface WorkspacesUpdateMetadataRequest {
+  /**
+   * Opaque workspace context supplied by the session host.
+   */
+  context?: JsonValue;
+  /**
+   * Optional workspace display name override.
+   */
+  name?: string;
+}
+/**
+ * Autopilot objective file content to persist.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "WorkspacesWriteAutopilotObjectiveRequest".
+ */
+/** @experimental */
+export interface WorkspacesWriteAutopilotObjectiveRequest {
+  /**
+   * Autopilot objective file content.
+   */
+  content: string;
+}
+/**
+ * Result of writing the autopilot objective file.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "WorkspacesWriteAutopilotObjectiveResult".
+ */
+/** @experimental */
+export interface WorkspacesWriteAutopilotObjectiveResult {
+  /**
+   * Filesystem operation performed.
+   */
+  operation: string;
+}
+
+/** @experimental */
+export interface SessionModelListRequest {
+  /**
+   * If true, bypasses the per-session model list cache and re-fetches from CAPI.
+   */
+  skipCache?: boolean;
+}
+
+/** @experimental */
+export interface SessionAgentListRequest {
+  /**
+   * When true, request the session's configured built-in agents alongside custom agents. Listing applies feature, context, inclusion, exclusion, and user-disabled-agent policy, but does not evaluate transient invocation requirements such as model availability. Built-in metadata may be omitted when the session cannot project it, such as a relay session.
+   */
+  includeBuiltInAgents?: boolean;
+  /**
+   * When true, request authored base prompt text on each AgentInfo. Prompt text may be omitted when unavailable, such as for agents projected through a relay session.
+   */
+  includePrompt?: boolean;
+}
+/**
  * Standard MCP CallToolResult
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -15281,7 +22327,83 @@ export interface WorkspacesSaveLargePasteResult {
  */
 /** @experimental */
 export interface SessionMcpAppsCallToolResult {
-  [k: string]: unknown | undefined;
+  [k: string]: JsonValue | undefined;
+}
+
+/** @experimental */
+export interface SessionPluginsReloadRequest {
+  /**
+   * Reload MCP server connections after refreshing plugins. Defaults to true.
+   */
+  reloadMcp?: boolean;
+  /**
+   * Re-run custom-agent discovery after refreshing plugins. Defaults to true.
+   */
+  reloadCustomAgents?: boolean;
+  /**
+   * Re-load user, plugin, and (subject to `deferRepoHooks`) repo hooks. Defaults to true. Has no effect when the host has not registered a hook reloader (e.g. remote sessions).
+   */
+  reloadHooks?: boolean;
+  /**
+   * Re-discover and relaunch subprocess extensions (including plugin-shipped extensions) after refreshing plugins. Defaults to true. Has no effect when the session has no active extension controller (e.g. extensions were not requested for the session).
+   */
+  reloadExtensions?: boolean;
+  /**
+   * When true, skip repo-level hooks during the hook reload. Use before folder trust is confirmed; load them post-trust via `sessions.loadDeferredRepoHooks`.
+   */
+  deferRepoHooks?: boolean;
+}
+
+/** @experimental */
+export interface SessionProviderGetEndpointRequest {
+  /**
+   * Model identifier the caller intends to use against the returned endpoint. Used to pick the correct wire shape. Omit to use whichever model the session is currently using.
+   */
+  modelId?: string;
+}
+
+/** @experimental */
+export interface SessionCommandsListRequest {
+  /**
+   * Include runtime built-in commands
+   */
+  includeBuiltins?: boolean;
+  /**
+   * Include enabled user-invocable skills and commands
+   */
+  includeSkills?: boolean;
+  /**
+   * Include commands registered by protocol clients, including SDK clients and extensions
+   */
+  includeClientCommands?: boolean;
+}
+
+/** @experimental */
+export interface SessionHistoryCompactRequest {
+  /**
+   * Optional user-provided instructions to focus the compaction summary
+   */
+  customInstructions?: string;
+  /**
+   * What initiated this compaction request, recorded as the `trigger` on the persisted `session.compaction_start` / `session.compaction_complete` events. When absent, the compaction is persisted without trigger attribution (initiator unknown).
+   */
+  trigger?: /** User-requested compaction, e.g. the /compact command or a direct history.compact call. */
+    | "manual"
+    /** Compaction requested while switching to a model with a smaller context window. */
+    | "model_switch";
+  /**
+   * Context window token limit this compaction is targeting, recorded as the `tokenLimit` on the persisted `session.compaction_start` / `session.compaction_complete` events. Set it when the compaction targets a window other than the compacting model's own, e.g. switching to a model with a smaller context window: the compaction still runs on the current model, so the limit that motivated it would otherwise be lost. When absent, the events record the compacting model's own resolved limit. Attribution metadata only - it does not change how much the compaction removes.
+   */
+  tokenLimit?: number;
+}
+
+/** @experimental */
+export interface SessionLimitPredictionPredictRequest {
+  /**
+   * Optional model identifier override. If omitted, the session's current model is used.
+   */
+  modelId?: string;
+  clientType?: SessionLimitPredictionClientType;
 }
 /**
  * Identifies the target session.
@@ -15316,12 +22438,19 @@ export function createServerRpc(connection: MessageConnection) {
             /**
              * Lists Copilot models available to the authenticated user.
              *
-             * @param params Optional GitHub token used to list models for a specific user instead of the global auth context.
+             * @param params Optional opaque account selection or compatibility GitHub token used to list models.
              *
              * @returns List of Copilot models available to the resolved user, including capabilities and billing metadata.
              */
             list: async (params: ModelsListRequest): Promise<ModelList> =>
                 connection.sendRequest("models.list", params),
+            /**
+             * Returns the running runtime's complete catalog of well-known built-in model IDs without authentication or network access.
+             *
+             * @returns The running runtime's complete catalog of well-known built-in model IDs, including supported models and additional IDs with built-in metadata.
+             */
+            getBuiltInCatalog: async (): Promise<BuiltInModelCatalog> =>
+                connection.sendRequest("models.getBuiltInCatalog", {}),
         },
         /** @experimental */
         tools: {
@@ -15338,9 +22467,9 @@ export function createServerRpc(connection: MessageConnection) {
         /** @experimental */
         account: {
             /**
-             * Gets Copilot quota usage for the authenticated user or supplied GitHub token.
+             * Gets Copilot quota usage for the current or opaquely selected authenticated user.
              *
-             * @param params Optional GitHub token used to look up quota for a specific user instead of the global auth context.
+             * @param params Optional opaque account selection or compatibility GitHub token used to look up quota.
              *
              * @returns Quota usage snapshots for the resolved user, keyed by quota type.
              */
@@ -15452,6 +22581,58 @@ export function createServerRpc(connection: MessageConnection) {
              */
             discover: async (params: McpDiscoverRequest): Promise<McpDiscoverResult> =>
                 connection.sendRequest("mcp.discover", params),
+            /**
+             * Requests a side-effect-free MCP install plan from a catalog candidate handle or a caller-supplied card. This host-implemented server method is available through SDK/TUI hosts; standalone and C-ABI runtimes whose host does not implement server-method dispatch return JSON-RPC MethodNotFound. A runtime with planning available returns a normalised plan and opaque single-use plan handle; a runtime without it returns the typed planning-unavailable result. A completed plan reports resource identity, provenance, eligible transport choices, the user-scope target, required typed values and secret placeholders, the policy result, the configuration changes installing would make, and whether a reload would be needed. Planning never writes configuration, stores a secret, or reloads MCP servers, so abandoning a plan needs no call and leaves nothing behind.
+             *
+             * @param params A side-effect-free request for an MCP install plan. Computing a plan never writes configuration, stores a secret, or reloads MCP servers.
+             *
+             * @returns Outcome of an mcp.planInstall call: either a normalised plan, or one typed refusal. Nothing is written in either case.
+             */
+            planInstall: async (params: McpPlanInstallRequest): Promise<McpPlanInstallResult> =>
+                connection.sendRequest("mcp.planInstall", params),
+        },
+        /** @experimental */
+        extensions: {
+            /**
+             * Discovers user and enabled installed-plugin extensions from persisted Copilot home state, including enablement preferences. Launch-scoped additional plugins are not included.
+             *
+             * @returns Extensions discovered from persisted Copilot home state and their effective loading mode. Launch-scoped additional plugins are not included.
+             */
+            discover: async (): Promise<DiscoveredExtensions> =>
+                connection.sendRequest("extensions.discover", {}),
+            /**
+             * Persistently enables extension IDs for future sessions. Active sessions are unchanged; use session.extensions.enable to update them.
+             *
+             * @param params Source-qualified extension identifiers to persistently enable for future sessions.
+             */
+            enable: async (params: DiscoveredExtensionsEnableRequest): Promise<void> =>
+                connection.sendRequest("extensions.enable", params),
+            /**
+             * Persistently disables extension IDs for future sessions. Active sessions are unchanged; use session.extensions.disable to update them.
+             *
+             * @param params Source-qualified extension identifiers to persistently disable for future sessions.
+             */
+            disable: async (params: DiscoveredExtensionsDisableRequest): Promise<void> =>
+                connection.sendRequest("extensions.disable", params),
+        },
+        /**
+         * Registers the calling SDK client as the per-entrypoint extension launch provider. Call before creating any sessions. When omitted, the runtime temporarily falls back to its built-in Node launcher for backward compatibility.
+         *
+         * @experimental
+         */
+        registerExtensionLaunchProvider: async (): Promise<void> =>
+            connection.sendRequest("registerExtensionLaunchProvider", {}),
+        /** @experimental */
+        catalog: {
+            /**
+             * Requests a bounded catalog search. This host-implemented server method is available through SDK/TUI hosts; standalone and C-ABI runtimes whose host does not implement server-method dispatch return JSON-RPC MethodNotFound. A runtime with search available returns inert candidate summaries, each with an opaque single-use handle scoped to this runtime instance; a runtime without it returns the typed search-unavailable result. Public authorities may be searched anonymously, while an authority that requires credentials yields the typed authentication-required result. All returned text, URLs, and package metadata are untrusted external data and can never trigger instructions, tools, or installation. Read-only: nothing is installed, configured, or persisted.
+             *
+             * @param params A bounded catalog search. Both the query length and the result count are capped by the schema so a caller cannot request an unbounded scan.
+             *
+             * @returns Outcome of a catalog.search call: either bounded inert candidates, or one typed refusal. Never a partial success.
+             */
+            search: async (params: CatalogSearchRequest): Promise<CatalogSearchResult> =>
+                connection.sendRequest("catalog.search", params),
         },
         /** @experimental */
         plugins: {
@@ -15509,6 +22690,16 @@ export function createServerRpc(connection: MessageConnection) {
             disable: async (params: PluginsDisableRequest): Promise<void> =>
                 connection.sendRequest("plugins.disable", params),
             /** @experimental */
+            builtin: {
+                /**
+                 * Replaces this server's trusted built-in plugin directories while no sessions are active.
+                 *
+                 * @param params Trusted built-in plugin directories to use for this runtime process.
+                 */
+                set: async (params: PluginsBuiltinSetRequest): Promise<void> =>
+                    connection.sendRequest("plugins.builtin.set", params),
+            },
+            /** @experimental */
             marketplaces: {
                 /**
                  * Lists all registered marketplaces (defaults + user-added).
@@ -15520,7 +22711,7 @@ export function createServerRpc(connection: MessageConnection) {
                 /**
                  * Registers a new marketplace from a source (owner/repo, URL, or local path).
                  *
-                 * @param params Marketplace source to register.
+                 * @param params Marketplace source and optional working directory for relative-path resolution.
                  *
                  * @returns Result of registering a new marketplace.
                  */
@@ -15566,6 +22757,13 @@ export function createServerRpc(connection: MessageConnection) {
                  */
                 setDisabledSkills: async (params: SkillsConfigSetDisabledSkillsRequest): Promise<void> =>
                     connection.sendRequest("skills.config.setDisabledSkills", params),
+                /**
+                 * Atomically adds or removes one skill from the disabled list.
+                 *
+                 * @param params Adds or removes a single skill from the global disabled list, leaving every other entry untouched.
+                 */
+                setSkillDisabled: async (params: SkillsConfigSetSkillDisabledRequest): Promise<void> =>
+                    connection.sendRequest("skills.config.setSkillDisabled", params),
             },
             /**
              * Discovers skills across global and project sources.
@@ -15629,6 +22827,16 @@ export function createServerRpc(connection: MessageConnection) {
                 connection.sendRequest("instructions.getDiscoveryPaths", params),
         },
         /** @experimental */
+        commands: {
+            /**
+             * Lists the well-known built-in slash commands that work as the first message in a new session (e.g. /plan, /env), without requiring an active session. Commands that depend on session state, authentication, or a synced session are omitted.
+             *
+             * @returns Slash commands available in the session, after applying any include/exclude filters.
+             */
+            list: async (): Promise<CommandList> =>
+                connection.sendRequest("commands.list", {}),
+        },
+        /** @experimental */
         user: {
             /** @experimental */
             settings: {
@@ -15654,6 +22862,16 @@ export function createServerRpc(connection: MessageConnection) {
                 set: async (params: UserSettingsSetRequest): Promise<UserSettingsSetResult> =>
                     connection.sendRequest("user.settings.set", params),
             },
+        },
+        /** @experimental */
+        managedSettings: {
+            /**
+             * Discovers device-managed settings from production MDM and managed-file sources, validates them against the runtime-owned managed-settings schema, and returns the canonical JSON without requiring a session.
+             *
+             * @returns Validated device-managed settings discovered before a session exists.
+             */
+            read: async (): Promise<ManagedSettingsReadResult> =>
+                connection.sendRequest("managedSettings.read", {}),
         },
         /** @experimental */
         runtime: {
@@ -15934,7 +23152,7 @@ export function createInternalServerRpc(connection: MessageConnection) {
         /**
          * Performs the SDK server connection handshake and validates the optional connection token. Marked internal because this is JSON-RPC transport plumbing invoked automatically by an SDK client's own `connect()` wrapper, not a user-facing method. Stays internal as long as the SDK client owns the handshake; would only become public if the SDK ever exposed the raw schema surface to consumers without a connection wrapper.
          *
-         * @param params Parameters for the `server.connect` handshake: an optional connection token and optional connection-level opt-ins (e.g. GitHub telemetry forwarding).
+         * @param params Connection-level opt-ins for the `server.connect` handshake. Transport authentication is consumed by the native protocol boundary before dispatch.
          *
          * @returns Handshake result reporting the server's protocol version and package version on success.
          *
@@ -15944,6 +23162,24 @@ export function createInternalServerRpc(connection: MessageConnection) {
             connection.sendRequest("connect", params),
         /** @experimental */
         sessions: {
+            /**
+             * Reads lightweight persisted metadata for one local session without opening it.
+             *
+             * @param params Session ID whose persisted metadata should be read.
+             *
+             * @returns Persisted local session metadata when the session exists.
+             */
+            getMetadata: async (params: SessionsGetMetadataRequest): Promise<SessionsGetMetadataResult> =>
+                connection.sendRequest("sessions.getMetadata", params),
+            /**
+             * Lists recent local session IDs that contain user-visible history, omitting housekeeping-only sessions.
+             *
+             * @param params Limit for non-empty local session IDs.
+             *
+             * @returns Recent local session IDs that contain user-visible history.
+             */
+            listNonEmptySessionIds: async (params: SessionsListNonEmptySessionIdsRequest): Promise<SessionsListNonEmptySessionIdsResult> =>
+                connection.sendRequest("sessions.listNonEmptySessionIds", params),
             /**
              * Computes the absolute path to a session's persisted events.jsonl file. Internal: filesystem paths are only meaningful in-process (CLI and runtime share a filesystem). Currently used by the CLI's contribution-graph feature to read historical events directly. Remote SDK consumers must not depend on this; a proper event-query API would replace it if the contribution graph ever needed to work over the wire.
              *
@@ -15962,6 +23198,13 @@ export function createInternalServerRpc(connection: MessageConnection) {
              */
             getPersistedRemoteSteerable: async (params: SessionsGetPersistedRemoteSteerableRequest): Promise<SessionsGetPersistedRemoteSteerableResult> =>
                 connection.sendRequest("sessions.getPersistedRemoteSteerable", params),
+            /**
+             * Deletes one local session from disk after running the same lifecycle hooks as the session manager.
+             *
+             * @param params Session ID to delete from disk.
+             */
+            delete: async (params: SessionsDeleteRequest): Promise<void> =>
+                connection.sendRequest("sessions.delete", params),
             /**
              * Gets the dynamic-context board entry count associated with a session, when available. Internal: this exists solely so CLI telemetry events (`rem_spawn_gate`, `rem_consolidation_complete`) can pair START / END board counts around the detached rem-agent spawn. "Dynamic context board" is a runtime-internal concept that is not part of the public SDK contract; the long-term plan is to relocate the telemetry emission into the runtime so this method can be deleted entirely.
              *
@@ -16013,6 +23256,17 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
         send: async (params: SendRequest): Promise<SendResult> =>
             connection.sendRequest("session.send", { sessionId, ...params }),
         /**
+         * Sends zero or more user messages to the session in a single turn and returns their message IDs. All provided messages are appended to the conversation in order, then exactly one agent turn runs over the resulting history. When the list is empty, one turn runs over the existing history with no new user message. Remote-backed (Mission Control) sessions do not support this method and will return an error.
+         *
+         * @param params Parameters for sending zero or more user messages to the session in a single turn. Remote-backed (Mission Control) sessions do not support this method and will return an error.
+         *
+         * @returns Result of sending zero or more user messages
+         *
+         * @experimental
+         */
+        sendMessages: async (params: SendMessagesRequest): Promise<SendMessagesResult> =>
+            connection.sendRequest("session.sendMessages", { sessionId, ...params }),
+        /**
          * Aborts the current agent turn.
          *
          * @param params Parameters for aborting the current turn
@@ -16023,6 +23277,26 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
          */
         abort: async (params: AbortRequest): Promise<AbortResult> =>
             connection.sendRequest("session.abort", { sessionId, ...params }),
+        /**
+         * Interrupts the current main agent turn while leaving running background work (subagents, sidekicks, and promoted attached shells) alive. No-op when the main loop is not processing.
+         *
+         * @param params Parameters for interrupting the main agent turn.
+         *
+         * @returns Result of interrupting the main agent turn.
+         *
+         * @experimental
+         */
+        interruptMainTurn: async (params: InterruptMainTurnRequest): Promise<InterruptMainTurnResult> =>
+            connection.sendRequest("session.interruptMainTurn", { sessionId, ...params }),
+        /**
+         * Cancels every running background agent (task-registry subagents plus sidekick agents) without interrupting the main agent loop. Promoted attached shells are left running.
+         *
+         * @returns The number of running background agents (task-registry agents) that were cancelled.
+         *
+         * @experimental
+         */
+        cancelAllBackgroundAgents: async (): Promise<SessionCancelAllBackgroundAgentsResult> =>
+            connection.sendRequest("session.cancelAllBackgroundAgents", { sessionId }),
         /**
          * Shuts down the session and persists its final state. Awaits any deferred sessionEnd hooks before resolving so user-supplied hook scripts complete before the runtime tears down.
          *
@@ -16109,6 +23383,111 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             },
         },
         /** @experimental */
+        factory: {
+            /**
+             * Runs a registered factory by name at the top level.
+             *
+             * @param params Parameters for invoking a registered factory.
+             *
+             * @returns Complete current or terminal factory run envelope.
+             */
+            run: async (params: FactoryRunRequest): Promise<FactoryRunResult> =>
+                connection.sendRequest("session.factory.run", { sessionId, ...params }),
+            /**
+             * Resumes a factory run using its persisted name, arguments, journal, and accounting.
+             *
+             * @param params Parameters for resuming a factory run from its persisted identity.
+             *
+             * @returns Resolved persisted factory identity and resumed run envelope.
+             */
+            resume: async (params: FactoryResumeRequest): Promise<FactoryResumeResult> =>
+                connection.sendRequest("session.factory.resume", { sessionId, ...params }),
+            /**
+             * Gets the current or settled envelope for a factory run.
+             *
+             * @param params Parameters for retrieving a factory run.
+             *
+             * @returns Complete current or terminal factory run envelope.
+             */
+            getRun: async (params: FactoryGetRunRequest): Promise<FactoryRunResult> =>
+                connection.sendRequest("session.factory.getRun", { sessionId, ...params }),
+            /**
+             * Lists durable factory runs for this session in creation order.
+             *
+             * @param params Parameters for paging factory runs.
+             *
+             * @returns A page of factory runs in durable creation order.
+             */
+            listRuns: async (params: FactoryListRunsRequest): Promise<FactoryListRunsResult> =>
+                connection.sendRequest("session.factory.listRuns", { sessionId, ...params }),
+            /**
+             * Gets durable and live observability detail for one factory run.
+             *
+             * @param params Parameters for retrieving a factory run.
+             *
+             * @returns Full factory run observability detail.
+             */
+            getRunDetail: async (params: FactoryGetRunRequest): Promise<FactoryRunDetail> =>
+                connection.sendRequest("session.factory.getRunDetail", { sessionId, ...params }),
+            /**
+             * Pages durable progress for one factory run.
+             *
+             * @param params Parameters for paging factory progress.
+             *
+             * @returns A bidirectional page of factory progress.
+             */
+            getRunProgress: async (params: FactoryGetRunProgressRequest): Promise<FactoryProgressPage> =>
+                connection.sendRequest("session.factory.getRunProgress", { sessionId, ...params }),
+            /**
+             * Requests cancellation of a factory run and returns its run envelope.
+             *
+             * @param params Parameters for cancelling a factory run.
+             *
+             * @returns Complete current or terminal factory run envelope.
+             */
+            cancel: async (params: FactoryCancelRequest): Promise<FactoryRunResult> =>
+                connection.sendRequest("session.factory.cancel", { sessionId, ...params }),
+            /**
+             * Records a batch of ordered factory progress lines.
+             *
+             * @param params Parameters for recording factory progress.
+             *
+             * @returns Acknowledgement that a factory request was accepted.
+             */
+            log: async (params: FactoryLogRequest): Promise<FactoryAckResult> =>
+                connection.sendRequest("session.factory.log", { sessionId, ...params }),
+            /**
+             * Runs one factory-scoped subagent and returns its result.
+             *
+             * @param params Parameters for one factory-scoped subagent call.
+             *
+             * @returns Result of one factory-scoped subagent call.
+             */
+            agent: async (params: FactoryAgentRequest): Promise<FactoryAgentResult> =>
+                connection.sendRequest("session.factory.agent", { sessionId, ...params }),
+            /** @experimental */
+            journal: {
+                /**
+                 * Reads a memoized factory journal entry.
+                 *
+                 * @param params Parameters for reading a factory journal entry.
+                 *
+                 * @returns Result of reading a factory journal entry.
+                 */
+                get: async (params: FactoryJournalGetRequest): Promise<FactoryJournalGetResult> =>
+                    connection.sendRequest("session.factory.journal.get", { sessionId, ...params }),
+                /**
+                 * Stores a memoized factory journal entry.
+                 *
+                 * @param params Parameters for storing a factory journal entry.
+                 *
+                 * @returns Acknowledgement that a factory request was accepted.
+                 */
+                put: async (params: FactoryJournalPutRequest): Promise<FactoryAckResult> =>
+                    connection.sendRequest("session.factory.journal.put", { sessionId, ...params }),
+            },
+        },
+        /** @experimental */
         model: {
             /**
              * Gets the currently selected model for the session.
@@ -16142,7 +23521,7 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              *
              * @returns The list of models available to this session.
              */
-            list: async (params?: ModelListRequest): Promise<SessionModelList> =>
+            list: async (params?: SessionModelListRequest): Promise<SessionModelList> =>
                 connection.sendRequest("session.model.list", { sessionId, ...params }),
         },
         /** @experimental */
@@ -16158,8 +23537,10 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              * Sets the current agent interaction mode.
              *
              * @param params Agent interaction mode to apply to the session.
+             *
+             * @returns Outcome of a session mode change, including any model switch it triggered and follow-up the host must perform.
              */
-            set: async (params: ModeSetRequest): Promise<void> =>
+            set: async (params: ModeSetRequest): Promise<ModeSetResult> =>
                 connection.sendRequest("session.mode.set", { sessionId, ...params }),
         },
         /** @experimental */
@@ -16234,6 +23615,24 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             getWorkspace: async (): Promise<WorkspacesGetWorkspaceResult> =>
                 connection.sendRequest("session.workspaces.getWorkspace", { sessionId }),
             /**
+             * Updates workspace metadata for a local session and returns the refreshed workspace.
+             *
+             * @param params Workspace metadata fields to update.
+             *
+             * @returns Current workspace metadata for the session, including its absolute filesystem path when available.
+             */
+            updateMetadata: async (params: WorkspacesUpdateMetadataRequest): Promise<WorkspacesGetWorkspaceResult> =>
+                connection.sendRequest("session.workspaces.updateMetadata", { sessionId, ...params }),
+            /**
+             * Ensures a local session workspace exists and returns it.
+             *
+             * @param params Optional session context used when creating a local workspace.
+             *
+             * @returns Current workspace metadata for the session, including its absolute filesystem path when available.
+             */
+            ensure: async (params: WorkspacesEnsureRequest): Promise<WorkspacesGetWorkspaceResult> =>
+                connection.sendRequest("session.workspaces.ensure", { sessionId, ...params }),
+            /**
              * Lists files stored in the session workspace files directory.
              *
              * @returns Relative paths of files stored in the session workspace files directory.
@@ -16273,6 +23672,54 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             readCheckpoint: async (params: WorkspacesReadCheckpointRequest): Promise<WorkspacesReadCheckpointResult> =>
                 connection.sendRequest("session.workspaces.readCheckpoint", { sessionId, ...params }),
             /**
+             * Adds a compaction summary checkpoint to the local session workspace.
+             *
+             * @param params Compaction summary checkpoint to persist.
+             *
+             * @returns Persisted summary metadata and refreshed workspace metadata.
+             */
+            addSummary: async (params: WorkspacesAddSummaryRequest): Promise<WorkspacesAddSummaryResult> =>
+                connection.sendRequest("session.workspaces.addSummary", { sessionId, ...params }),
+            /**
+             * Truncates local workspace compaction summaries after a rollback.
+             *
+             * @param params Rollback point for local workspace summaries.
+             *
+             * @returns Current workspace metadata for the session, including its absolute filesystem path when available.
+             */
+            truncateSummaries: async (params: WorkspacesTruncateSummariesRequest): Promise<WorkspacesGetWorkspaceResult> =>
+                connection.sendRequest("session.workspaces.truncateSummaries", { sessionId, ...params }),
+            /**
+             * Reads the autopilot objective state file from the local session workspace.
+             *
+             * @returns Autopilot objective file content, or null when missing.
+             */
+            readAutopilotObjective: async (): Promise<WorkspacesReadAutopilotObjectiveResult> =>
+                connection.sendRequest("session.workspaces.readAutopilotObjective", { sessionId }),
+            /**
+             * Writes the autopilot objective state file in the local session workspace.
+             *
+             * @param params Autopilot objective file content to persist.
+             *
+             * @returns Result of writing the autopilot objective file.
+             */
+            writeAutopilotObjective: async (params: WorkspacesWriteAutopilotObjectiveRequest): Promise<WorkspacesWriteAutopilotObjectiveResult> =>
+                connection.sendRequest("session.workspaces.writeAutopilotObjective", { sessionId, ...params }),
+            /**
+             * Deletes the autopilot objective state file from the local session workspace.
+             *
+             * @returns Result of deleting the autopilot objective file.
+             */
+            deleteAutopilotObjective: async (): Promise<WorkspacesDeleteAutopilotObjectiveResult> =>
+                connection.sendRequest("session.workspaces.deleteAutopilotObjective", { sessionId }),
+            /**
+             * Checks whether the local session workspace has an autopilot objective state file.
+             *
+             * @returns Whether the autopilot objective file exists.
+             */
+            autopilotObjectiveExists: async (): Promise<WorkspacesAutopilotObjectiveExistsResult> =>
+                connection.sendRequest("session.workspaces.autopilotObjectiveExists", { sessionId }),
+            /**
              * Saves pasted content as a UTF-8 file in the session workspace.
              *
              * @param params Pasted content to save as a UTF-8 file in the session workspace.
@@ -16282,7 +23729,7 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             saveLargePaste: async (params: WorkspacesSaveLargePasteRequest): Promise<WorkspacesSaveLargePasteResult> =>
                 connection.sendRequest("session.workspaces.saveLargePaste", { sessionId, ...params }),
             /**
-             * Computes a diff for the session workspace.
+             * Computes a diff for the session workspace. Never rejects for a busy session: a `session`-mode diff that cannot read the session's file-change captures falls back to an unstaged git diff with `isFallback: true` and reports why in `unavailableReason`.
              *
              * @param params Parameters for computing a workspace diff.
              *
@@ -16335,12 +23782,21 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
         /** @experimental */
         agent: {
             /**
-             * Lists custom agents available to the session.
+             * Lists agents available to the session. Defaults to custom agents only; pass includeBuiltInAgents to include the effective built-in agents.
              *
-             * @returns Custom agents available to the session.
+             * @param params Controls whether built-in agents and authored prompt text are included.
+             *
+             * @returns Agents available to the session.
              */
-            list: async (): Promise<AgentList> =>
-                connection.sendRequest("session.agent.list", { sessionId }),
+            list: async (params?: SessionAgentListRequest): Promise<AgentList> =>
+                connection.sendRequest("session.agent.list", { sessionId, ...params }),
+            /**
+             * Sets an in-memory authored prompt override for an available agent. For built-in agents, this replaces only the static base prompt while preserving runtime-owned dynamic prompt composition and behavior. The special `general-purpose` agent is not overrideable. Overrides are not persisted; resumed and forked sessions start without them, so the host must re-apply them.
+             *
+             * @param params An in-memory authored prompt override for an available agent.
+             */
+            setPrompt: async (params: AgentSetPromptRequest): Promise<void> =>
+                connection.sendRequest("session.agent.setPrompt", { sessionId, ...params }),
             /**
              * Gets the currently selected custom agent for the session.
              *
@@ -16515,7 +23971,7 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             list: async (): Promise<McpServerList> =>
                 connection.sendRequest("session.mcp.list", { sessionId }),
             /**
-             * Lists the tools exposed by a connected MCP server on this session's host.
+             * Lists the tools exposed by a connected MCP server on this session's host. This performs a live `tools/list` request. Tool UI metadata is returned independently of whether MCP Apps rendering is enabled for the session.
              *
              * @param params Server name whose tool list should be returned.
              *
@@ -16542,6 +23998,13 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              */
             reload: async (): Promise<void> =>
                 connection.sendRequest("session.mcp.reload", { sessionId }),
+            /**
+             * Releases any turns waiting on an in-flight MCP load without cancelling the load, letting the agent proceed while MCP servers finish connecting in the background. No-op when no MCP load is in flight or waiting turns were already released.
+             *
+             * @returns Result of moving in-flight MCP loading to the background.
+             */
+            moveLoadingToBackground: async (): Promise<MoveMcpLoadingToBackgroundResult> =>
+                connection.sendRequest("session.mcp.moveLoadingToBackground", { sessionId }),
             /**
              * Runs an MCP sampling inference on behalf of an MCP server.
              *
@@ -16577,6 +24040,20 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             removeGitHub: async (): Promise<McpRemoveGitHubResult> =>
                 connection.sendRequest("session.mcp.removeGitHub", { sessionId }),
             /**
+             * Starts an individual MCP server on the live session. Omit `config` for a config-free start-by-name of an already-configured server (reuses the server's already-registered configuration); supply `config` to start from a caller-supplied configuration. Session-scoped and ephemeral: the server is added to this session's running set only and is reaped when the session ends. Does NOT modify persistent user configuration (`mcp.config.*`), so it does not affect future sessions. The server surfaces through `session.mcp.list` and the `session.mcp_servers_loaded` / `session.mcp_server_status_changed` events like any other server.
+             *
+             * @param params Server name and optional configuration for an individual MCP server start. Omit `config` for a config-free start-by-name of an already-configured server.
+             */
+            startServer: async (params: McpStartServerRequest): Promise<void> =>
+                connection.sendRequest("session.mcp.startServer", { sessionId, ...params }),
+            /**
+             * Restarts an individual MCP server on the live session (stops then starts). Omit `config` for a config-free restart-by-name of an already-configured server; supply `config` to restart with a replacement configuration. Session-scoped and ephemeral: does NOT modify persistent user configuration (`mcp.config.*`).
+             *
+             * @param params Server name and optional replacement configuration for an individual MCP server restart. Omit `config` for a config-free restart-by-name of an already-configured server.
+             */
+            restartServer: async (params: McpRestartServerRequest): Promise<void> =>
+                connection.sendRequest("session.mcp.restartServer", { sessionId, ...params }),
+            /**
              * Stops an individual MCP server on the session's host.
              *
              * @param params Server name for an individual MCP server stop.
@@ -16604,6 +24081,13 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
                 handlePendingRequest: async (params: McpOauthHandlePendingRequest): Promise<McpOauthHandlePendingResult> =>
                     connection.sendRequest("session.mcp.oauth.handlePendingRequest", { sessionId, ...params }),
                 /**
+                 * Notifies the session that MCP OAuth authentication succeeded and updated credentials were persisted, so cached tool definitions can be refreshed.
+                 *
+                 * @param params Identifies the MCP server whose persisted OAuth credentials were updated.
+                 */
+                authenticationStateChanged: async (params: McpOauthAuthenticationStateChangedRequest): Promise<void> =>
+                    connection.sendRequest("session.mcp.oauth.authenticationStateChanged", { sessionId, ...params }),
+                /**
                  * Starts OAuth authentication for a remote MCP server.
                  *
                  * @param params Remote MCP server name and optional overrides controlling reauthentication, OAuth client display name, callback success-page copy, and static OAuth client selection.
@@ -16612,6 +24096,24 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
                  */
                 login: async (params: McpOauthLoginRequest): Promise<McpOauthLoginResult> =>
                     connection.sendRequest("session.mcp.oauth.login", { sessionId, ...params }),
+                /**
+                 * Passively probes a configured remote MCP server to classify whether OAuth is required or a cached/override token is accepted. Does not start OAuth, emit pending OAuth requests, or mutate MCP connection state.
+                 *
+                 * @param params Remote MCP server name for a passive OAuth status probe.
+                 *
+                 * @returns Passive MCP OAuth probe result. `authenticated` means the server accepted the probe request while an OAuth-origin access token was attached; it does not prove the server required or independently validated that token. The probe does not make a second unauthenticated request. Failed is an expected probe-domain outcome; JSON-RPC errors are reserved for API-call failures.
+                 */
+                probe: async (params: McpOauthProbeRequest): Promise<McpOauthProbeResult> =>
+                    connection.sendRequest("session.mcp.oauth.probe", { sessionId, ...params }),
+                /**
+                 * Responds to a pending MCP OAuth authorization request by its request id.
+                 *
+                 * @param params Pending MCP OAuth request id to respond to.
+                 *
+                 * @returns Indicates whether the pending MCP OAuth response was accepted.
+                 */
+                respond: async (params: McpOauthRespondRequest): Promise<McpOauthRespondResult> =>
+                    connection.sendRequest("session.mcp.oauth.respond", { sessionId, ...params }),
             },
             /** @experimental */
             headers: {
@@ -16678,6 +24180,36 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
                 diagnose: async (params: McpAppsDiagnoseRequest): Promise<McpAppsDiagnoseResult> =>
                     connection.sendRequest("session.mcp.apps.diagnose", { sessionId, ...params }),
             },
+            /** @experimental */
+            resources: {
+                /**
+                 * Fetch an MCP resource from a connected server by URI (proxies MCP `resources/read`).
+                 *
+                 * @param params MCP server and resource URI to fetch.
+                 *
+                 * @returns Resource contents returned by the MCP server.
+                 */
+                read: async (params: McpResourcesReadRequest): Promise<McpResourcesReadResult> =>
+                    connection.sendRequest("session.mcp.resources.read", { sessionId, ...params }),
+                /**
+                 * Enumerate one page of resources a connected MCP server exposes (proxies MCP `resources/list`). Pass `cursor` to continue from a prior result's `nextCursor`.
+                 *
+                 * @param params MCP server whose resources to enumerate.
+                 *
+                 * @returns One page of resources advertised by the named MCP server.
+                 */
+                list: async (params: McpResourcesListRequest): Promise<McpResourcesListResult> =>
+                    connection.sendRequest("session.mcp.resources.list", { sessionId, ...params }),
+                /**
+                 * Enumerate one page of resource templates a connected MCP server exposes (proxies MCP `resources/templates/list`). Pass `cursor` to continue from a prior result's `nextCursor`.
+                 *
+                 * @param params MCP server whose resource templates to enumerate.
+                 *
+                 * @returns One page of resource templates advertised by the named MCP server.
+                 */
+                listTemplates: async (params: McpResourcesListTemplatesRequest): Promise<McpResourcesListTemplatesResult> =>
+                    connection.sendRequest("session.mcp.resources.listTemplates", { sessionId, ...params }),
+            },
         },
         /** @experimental */
         plugins: {
@@ -16693,7 +24225,7 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              *
              * @param params Optional flags controlling which side effects the reload performs.
              */
-            reload: async (params?: PluginsReloadRequest): Promise<void> =>
+            reload: async (params?: SessionPluginsReloadRequest): Promise<void> =>
                 connection.sendRequest("session.plugins.reload", { sessionId, ...params }),
         },
         /** @experimental */
@@ -16705,7 +24237,7 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              *
              * @returns A snapshot of the provider endpoint the session is currently configured to talk to.
              */
-            getEndpoint: async (params?: ProviderGetEndpointRequest): Promise<ProviderEndpoint> =>
+            getEndpoint: async (params?: SessionProviderGetEndpointRequest): Promise<ProviderEndpoint> =>
                 connection.sendRequest("session.provider.getEndpoint", { sessionId, ...params }),
             /**
              * Adds BYOK providers and/or models to the session's registry at runtime, extending the additive registry built from the session's `providers`/`models` options. Both fields are optional, so a call may add providers only, models only, or both. Within a single call providers are registered before models, so a model may reference a provider added in the same call; across calls a model may reference any provider already registered (from session creation or a prior add). A model whose referenced provider is not registered by the end of the call is rejected. Newly added models become selectable via `model.list` / `model.switchTo` and are inherited by sub-agents spawned afterwards.
@@ -16778,6 +24310,33 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
         /** @experimental */
         tools: {
             /**
+             * Executes one tool from the session's currently offered tool set through the native invocation pipeline.
+             *
+             * @param params A tool name and arguments to execute through the session's native invocation pipeline.
+             *
+             * @returns Canonical result returned by a session tool.
+             */
+            execute: async (params: ToolsExecuteRequest): Promise<ToolResult> =>
+                connection.sendRequest("session.tools.execute", { sessionId, ...params }),
+            /**
+             * Returns the Rust-owned built-in tool descriptors used to construct the session's offered tool set.
+             *
+             * @param params Options controlling how Rust-owned built-in tool descriptors are materialized.
+             *
+             * @returns Rust-owned built-in tool descriptors for the session.
+             */
+            getBuiltinDescriptors: async (params: ToolsGetBuiltinDescriptorsRequest): Promise<ToolsGetBuiltinDescriptorsResult> =>
+                connection.sendRequest("session.tools.getBuiltinDescriptors", { sessionId, ...params }),
+            /**
+             * Projects a completed task_complete tool call into its label-safe session event payload.
+             *
+             * @param params Task-completion tool arguments and final result used to build a label-safe session event payload.
+             *
+             * @returns Task completion notification with summary from the agent
+             */
+            taskCompleteEventData: async (params: ToolsTaskCompleteEventDataRequest): Promise<TaskCompleteData> =>
+                connection.sendRequest("session.tools.taskCompleteEventData", { sessionId, ...params }),
+            /**
              * Provides the result for a pending external tool call.
              *
              * @param params Pending external tool call request ID, with the tool result or an error describing why it failed.
@@ -16801,6 +24360,15 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             getCurrentMetadata: async (): Promise<ToolsGetCurrentMetadataResult> =>
                 connection.sendRequest("session.tools.getCurrentMetadata", { sessionId }),
             /**
+             * Atomically replaces the complete externally implemented tool list supplied by the calling connection. Built-in, MCP/plugin, extension-discovered, subagent, and tools supplied by other connections remain unchanged.
+             *
+             * @param params Complete externally implemented tool list for the calling connection. An empty list removes every tool previously supplied by that connection.
+             *
+             * @returns Empty result after replacing the calling connection's externally implemented tools.
+             */
+            set: async (params: ToolsSetRequest): Promise<ToolsSetResult> =>
+                connection.sendRequest("session.tools.set", { sessionId, ...params }),
+            /**
              * Updates the current session's live subagent settings after user settings change. The persisted user settings remain the source of truth for future sessions.
              *
              * @param params Subagent settings to apply to the current session
@@ -16819,7 +24387,7 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              *
              * @returns Slash commands available in the session, after applying any include/exclude filters.
              */
-            list: async (params?: CommandsListRequest): Promise<CommandList> =>
+            list: async (params?: SessionCommandsListRequest): Promise<CommandList> =>
                 connection.sendRequest("session.commands.list", { sessionId, ...params }),
             /**
              * Invokes a slash command in the session.
@@ -16891,7 +24459,7 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              *
              * @param params Transient question to answer without adding it to conversation history.
              *
-             * @returns Transient answer generated from current conversation context.
+             * @returns Completed transient query. Ordered chunks and the terminal outcome are also delivered through `ui.ephemeral_query` session events while it runs.
              */
             ephemeralQuery: async (params: UIEphemeralQueryRequest): Promise<UIEphemeralQueryResult> =>
                 connection.sendRequest("session.ui.ephemeralQuery", { sessionId, ...params }),
@@ -17012,21 +24580,21 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             setApproveAll: async (params: PermissionsSetApproveAllRequest): Promise<PermissionsSetApproveAllResult> =>
                 connection.sendRequest("session.permissions.setApproveAll", { sessionId, ...params }),
             /**
-             * Sets the allow-all permission mode for the session. Used by attach-mode clients (e.g. LocalRpcSession's `/allow-all` forwarder) to flip the target session's permission state. The `on` mode swaps in unrestricted path and URL managers and emits `session.permissions_changed` on transition; the `auto` mode keeps normal prompt paths active while attaching LLM safety recommendations. The result returns the authoritative post-mutation state so callers can update their local mirrors without racing the `session.permissions_changed` notification on the same wire.
+             * Sets the permission mode for the session. `manual` follows the normal approval flow, `assisted` attaches LLM safety recommendations, and `allow-all` automatically approves permission requests. The result returns the authoritative post-mutation mode so callers can update local state without racing the `session.permissions_changed` notification.
              *
-             * @param params Allow-all mode to apply for the session.
+             * @param params Permission mode to apply for the session.
              *
-             * @returns Indicates whether the operation succeeded and reports the post-mutation state.
+             * @returns Indicates whether the requested permission mode was applied and reports the authoritative post-mutation mode.
              */
-            setAllowAll: async (params: PermissionsSetAllowAllRequest): Promise<AllowAllPermissionSetResult> =>
-                connection.sendRequest("session.permissions.setAllowAll", { sessionId, ...params }),
+            setMode: async (params: PermissionsSetModeRequest): Promise<PermissionsSetModeResult> =>
+                connection.sendRequest("session.permissions.setMode", { sessionId, ...params }),
             /**
-             * Returns the current allow-all permission mode for the session.
+             * Returns the current permission mode for the session.
              *
-             * @returns Current allow-all permission mode.
+             * @returns Current permission mode.
              */
-            getAllowAll: async (): Promise<AllowAllPermissionState> =>
-                connection.sendRequest("session.permissions.getAllowAll", { sessionId }),
+            getMode: async (): Promise<PermissionsGetModeResult> =>
+                connection.sendRequest("session.permissions.getMode", { sessionId }),
             /**
              * Adds or removes session-scoped or location-scoped permission rules.
              *
@@ -17048,10 +24616,12 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             /**
              * Clears session-scoped tool permission approvals.
              *
+             * @param params Clears session-scoped tool permission approvals, and optionally the location-scoped ones.
+             *
              * @returns Indicates whether the operation succeeded.
              */
-            resetSessionApprovals: async (): Promise<PermissionsResetSessionApprovalsResult> =>
-                connection.sendRequest("session.permissions.resetSessionApprovals", { sessionId }),
+            resetSessionApprovals: async (params: PermissionsResetSessionApprovalsRequest): Promise<PermissionsResetSessionApprovalsResult> =>
+                connection.sendRequest("session.permissions.resetSessionApprovals", { sessionId, ...params }),
             /**
              * Notifies the runtime that a permission prompt UI has been shown to the user.
              *
@@ -17231,20 +24801,20 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             getContextHeaviestMessages: async (params: MetadataContextHeaviestMessagesRequest): Promise<MetadataContextHeaviestMessagesResult> =>
                 connection.sendRequest("session.metadata.getContextHeaviestMessages", { sessionId, ...params }),
             /**
-             * Records a working-directory/git context change and emits a `session.context_changed` event.
+             * Records a working-directory/git context change and emits a `session.context_changed` event. For a local session, a report whose `cwd` diverges from the session's current working directory is ignored (the call still succeeds but records nothing and emits no event): a local session's working directory is authoritative and is moved via `metadata.setWorkingDirectory` (or an SDK `session.resume` that supplies a `workingDirectory`), not by this method.
              *
              * @param params Updated working-directory/git context to record on the session.
              *
-             * @returns Notify the session that its working directory context has changed. Emits a `session.context_changed` event so consumers (telemetry, OTel tracker, ACP, the timeline UI) can react. Use this when the host has detected a cwd/branch/repo change outside the session's normal lifecycle (e.g., after a shell command in interactive mode).
+             * @returns Notify the session that its working directory context has changed. Emits a `session.context_changed` event so consumers (telemetry, OTel tracker, ACP, the timeline UI) can react. Use this when the host has detected a cwd/branch/repo change outside the session's normal lifecycle (e.g., after a shell command in interactive mode). For a local session, a report whose `cwd` diverges from the session's current working directory is ignored (the call still succeeds but records nothing and emits no event); move a local session's working directory via `metadata.setWorkingDirectory` instead.
              */
             recordContextChange: async (params: MetadataRecordContextChangeRequest): Promise<MetadataRecordContextChangeResult> =>
                 connection.sendRequest("session.metadata.recordContextChange", { sessionId, ...params }),
             /**
-             * Updates the session's recorded working directory.
+             * Updates the session's working directory. For local sessions the target is validated first (an absolute path that exists on disk) and the permission primary directory is re-based; a rejected validation fails the call before any session state changes.
              *
-             * @param params Absolute path to set as the session's new working directory.
+             * @param params Absolute path to set as the session's new working directory. For local sessions the path must be absolute and exist on disk: it is validated before any session state changes, and a failing validation rejects the call with nothing mutated, persisted, or emitted. Remote sessions record the path as-is.
              *
-             * @returns Update the session's working directory. Used by the host when the user explicitly changes cwd (e.g., the `/cd` slash command). The host is responsible for `process.chdir` and any related side-effects (file index, etc.); this method only updates the session's own recorded path.
+             * @returns Update the session's working directory. Used by the host when the user explicitly changes cwd (e.g., the `/cd` slash command). The host is responsible for any related side-effects (file index, etc.); it does NOT change the process working directory (a session's cwd is per-session, not process-global). For local sessions the runtime validates the target first (an absolute path that exists on disk) and re-bases the permission primary directory; a rejected validation fails the call before anything is mutated, persisted, or emitted. Location-scoped permission rules are then re-keyed to the new directory (best-effort). Remote sessions only record the path.
              */
             setWorkingDirectory: async (params: MetadataSetWorkingDirectoryRequest): Promise<MetadataSetWorkingDirectoryResult> =>
                 connection.sendRequest("session.metadata.setWorkingDirectory", { sessionId, ...params }),
@@ -17259,9 +24829,21 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
                 connection.sendRequest("session.metadata.recomputeContextTokens", { sessionId, ...params }),
         },
         /** @experimental */
+        contentExclusion: {
+            /**
+             * Checks local file system absolute paths within the session working directory against its content-exclusion policy. Results preserve input order. Unsupported paths/filesystems and unavailable policy evaluation return available false, and callers must treat every requested path as excluded.
+             *
+             * @param params Local file system absolute paths within the session working directory to check against its content-exclusion policy.
+             *
+             * @returns Batch content-exclusion result. Callers must fail closed when policy evaluation is unavailable.
+             */
+            checkPaths: async (params: ContentExclusionCheckPathsRequest): Promise<ContentExclusionCheckPathsResult> =>
+                connection.sendRequest("session.contentExclusion.checkPaths", { sessionId, ...params }),
+        },
+        /** @experimental */
         shell: {
             /**
-             * Starts a shell command and streams output through session notifications.
+             * Starts a shell command and streams output through session notifications. The command runs as the leader of its own process group (POSIX) or in a dedicated job object (Windows), so a forced termination — via "shell.kill", the request timeout, or session disposal — signals that whole group/job rather than only the direct child. Two gaps are worth planning for: a command that exits on its own does not trigger that teardown, and on POSIX a descendant that moves itself into a new session or process group (for example via "setsid") leaves the signalled group, so either can leave a background process running.
              *
              * @param params Shell command to run, with optional working directory and timeout in milliseconds.
              *
@@ -17270,7 +24852,7 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
             exec: async (params: ShellExecRequest): Promise<ShellExecResult> =>
                 connection.sendRequest("session.shell.exec", { sessionId, ...params }),
             /**
-             * Sends a signal to a shell process previously started via "shell.exec".
+             * Sends a signal to a shell process previously started via "shell.exec". The signal targets the command's whole process group (POSIX) or job object (Windows), so descendants still in that group are signalled too, not just the direct child. On POSIX a descendant that moved itself into a new session or process group (for example via "setsid") is no longer in the signalled group and survives.
              *
              * @param params Identifier of a process previously returned by "shell.exec" and the signal to send.
              *
@@ -17306,7 +24888,7 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              *
              * @returns Compaction outcome with the number of tokens and messages removed, summary text, and the resulting context window breakdown.
              */
-            compact: async (params?: HistoryCompactRequest): Promise<HistoryCompactResult> =>
+            compact: async (params?: SessionHistoryCompactRequest): Promise<HistoryCompactResult> =>
                 connection.sendRequest("session.history.compact", { sessionId, ...params }),
             /**
              * Truncates persisted session history to a specific event.
@@ -17317,6 +24899,31 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              */
             truncate: async (params: HistoryTruncateRequest): Promise<HistoryTruncateResult> =>
                 connection.sendRequest("session.history.truncate", { sessionId, ...params }),
+            /**
+             * Lists the user turns that the session can rewind to. Never rejects for a busy session: rewind reads need the session's file-change captures to be settled, so a session that still holds active work answers with `unavailableReason: "session-busy"` and no points, which the caller can retry.
+             *
+             * @returns Rewind points and file-change-tracking availability for the session.
+             */
+            listRewindPoints: async (): Promise<HistoryListRewindPointsResult> =>
+                connection.sendRequest("session.history.listRewindPoints", { sessionId }),
+            /**
+             * Previews the files that a conversation-and-files rewind would restore.
+             *
+             * @param params Event boundary to preview for conversation-and-files rewind.
+             *
+             * @returns Files and aggregate changes for a prospective rewind.
+             */
+            previewRewind: async (params: HistoryPreviewRewindRequest): Promise<HistoryPreviewRewindResult> =>
+                connection.sendRequest("session.history.previewRewind", { sessionId, ...params }),
+            /**
+             * Rewinds the session conversation, optionally restoring files changed by the discarded turns. Not crash-atomic: file restore and conversation truncation are separate stores, applied in that order, so a process crash between them can leave the workspace rewound while the conversation still contains the discarded turns. There is no recovery journal; re-running the same rewind is the recovery path for a crash before truncation lands, since file restore is idempotent (already-restored files are reported as skipped) and truncation is re-derived from the still-retained boundary event. After truncation lands that boundary no longer exists, so the same request is rejected; the only stage that can still be outstanding is snapshot pruning, whose failure leaves orphan snapshots the capture store tolerates. The reverse inconsistency cannot occur, because truncation is never applied before file restore succeeds.
+             *
+             * @param params Boundary and mode for rewinding session history.
+             *
+             * @returns Structured outcome of a rewind request.
+             */
+            rewind: async (params: HistoryRewindRequest): Promise<HistoryRewindResult> =>
+                connection.sendRequest("session.history.rewind", { sessionId, ...params }),
             /**
              * Cancels any in-progress background compaction on a local session.
              *
@@ -17338,6 +24945,15 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              */
             summarizeForHandoff: async (): Promise<HistorySummarizeForHandoffResult> =>
                 connection.sendRequest("session.history.summarizeForHandoff", { sessionId }),
+            /**
+             * Clears the session's conversation history, keeping only system and developer messages, and seeds the fresh context window with a first user message. Must be called from inside a tool handler: the clear has to drop the results of the tool calls its wipe orphans, and it rejects when no tool call is in flight.
+             *
+             * @param params Parameters for clearing the conversation and seeding the window that replaces it.
+             *
+             * @returns What a successful clear removed. A clear that could not be applied rejects instead of reporting a count.
+             */
+            clearContext: async (params: HistoryClearContextRequest): Promise<HistoryClearContextResult> =>
+                connection.sendRequest("session.history.clearContext", { sessionId, ...params }),
         },
         /** @experimental */
         queue: {
@@ -17348,6 +24964,67 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              */
             pendingItems: async (): Promise<QueuePendingItemsResult> =>
                 connection.sendRequest("session.queue.pendingItems", { sessionId }),
+            /**
+             * Moves an addressable queued item to a public visible position.
+             *
+             * @param params Parameters for moving a queued item by stable id.
+             *
+             * @returns Result of moving a queued item.
+             */
+            moveItem: async (params: QueueMoveItemRequest): Promise<QueueMoveItemResult> =>
+                connection.sendRequest("session.queue.moveItem", { sessionId, ...params }),
+            /**
+             * Inserts a new queued message at a public visible position.
+             *
+             * @param params Parameters for inserting a queued message at a public visible position.
+             *
+             * @returns Result of inserting a queued message.
+             */
+            insertAt: async (params: QueueInsertAtRequest): Promise<QueueInsertAtResult> =>
+                connection.sendRequest("session.queue.insertAt", { sessionId, ...params }),
+            /**
+             * Removes an addressable queued item by its stable id.
+             *
+             * @param params Parameters for removing a queued item by stable id.
+             *
+             * @returns Result of removing a queued item.
+             */
+            removeAt: async (params: QueueRemoveAtRequest): Promise<QueueRemoveAtResult> =>
+                connection.sendRequest("session.queue.removeAt", { sessionId, ...params }),
+            /**
+             * Updates the text of an addressable single-message queue item.
+             *
+             * @param params Parameters for editing a single queued message.
+             *
+             * @returns Result of editing a queued message.
+             */
+            updateText: async (params: QueueUpdateTextRequest): Promise<QueueUpdateTextResult> =>
+                connection.sendRequest("session.queue.updateText", { sessionId, ...params }),
+            /**
+             * Duplicates an addressable queued item immediately after its source.
+             *
+             * @param params Parameters for duplicating a queued item.
+             *
+             * @returns Result of duplicating a queued item.
+             */
+            duplicateAt: async (params: QueueDuplicateAtRequest): Promise<QueueDuplicateAtResult> =>
+                connection.sendRequest("session.queue.duplicateAt", { sessionId, ...params }),
+            /**
+             * Acquires or releases the queued-lane drain pause.
+             *
+             * @param params Parameters for acquiring or releasing the queued-lane drain pause. Acquisition is exclusive and non-idempotent: `paused: true` against an already-paused session fails with `queue_already_paused`. The pause is never released automatically — it is not tied to the caller's lifetime, so a client that exits without sending `paused: false` leaves the lane frozen. Release is unowned: `paused: false` clears the pause for any caller, including one that never acquired it.
+             */
+            setDrainPaused: async (params: QueueSetDrainPausedRequest): Promise<void> =>
+                connection.sendRequest("session.queue.setDrainPaused", { sessionId, ...params }),
+            /**
+             * Moves an addressable queued message into the live turn's steering lane.
+             *
+             * @param params Parameters for steering a queued message into a live turn.
+             *
+             * @returns Result of trying to steer a queued message into a live turn.
+             */
+            sendNow: async (params: QueueSendNowRequest): Promise<QueueSendNowResult> =>
+                connection.sendRequest("session.queue.sendNow", { sessionId, ...params }),
             /**
              * Removes the most recently queued user-facing item (LIFO).
              *
@@ -17364,7 +25041,7 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
         /** @experimental */
         eventLog: {
             /**
-             * Reads a batch of session events from a cursor, optionally waiting for new events.
+             * Reads a batch of session events from a cursor, optionally waiting for new events. Supports tail-first reads via `direction: backward`.
              *
              * @param params Cursor, batch size, and optional long-poll/filter parameters for reading session events.
              *
@@ -17407,6 +25084,18 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              */
             getMetrics: async (): Promise<UsageGetMetricsResult> =>
                 connection.sendRequest("session.usage.getMetrics", { sessionId }),
+        },
+        /** @experimental */
+        limitPrediction: {
+            /**
+             * Predicts an AI-credit session limit for the session's resolved model. Returns an unavailable result instead of falling back when the current model is unresolved auto.
+             *
+             * @param params Parameters for predicting an AI-credit session limit. Omitting `modelId` uses the session's currently selected model.
+             *
+             * @returns Prediction result. Available results include prediction details; unavailable results include an explicit reason.
+             */
+            predict: async (params?: SessionLimitPredictionPredictRequest): Promise<SessionLimitPredictionResult> =>
+                connection.sendRequest("session.limitPrediction.predict", { sessionId, ...params }),
         },
         /** @experimental */
         remote: {
@@ -17482,6 +25171,110 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
  */
 export function createInternalSessionRpc(connection: MessageConnection, sessionId: string) {
     return {
+        /**
+         * Queues or sends an internal system notification to the session according to its passive policy.
+         *
+         * @param params Internal request for sending a system notification.
+         *
+         * @experimental
+         */
+        sendSystemNotification: async (params: SendSystemNotificationRequest): Promise<void> =>
+            connection.sendRequest("session.sendSystemNotification", { sessionId, ...params }),
+        /** @experimental */
+        gitHubAuth: {
+            /**
+             * Gets the current authentication information for internal session hosts.
+             *
+             * @returns Current authentication information, or null when no authentication is active.
+             */
+            getCurrentAuthInfo: async (): Promise<AuthIdentity | undefined> =>
+                connection.sendRequest("session.gitHubAuth.getCurrentAuthInfo", { sessionId }),
+            /**
+             * Gets all authentication accounts available to the internal session host.
+             *
+             * @returns Authentication accounts available to the internal session host.
+             */
+            getAllAuthAvailable: async (): Promise<SessionGitHubAuthGetAllAuthAvailableResult> =>
+                connection.sendRequest("session.gitHubAuth.getAllAuthAvailable", { sessionId }),
+            /**
+             * Refreshes Copilot account metadata for the current authentication.
+             *
+             * @returns Current authentication information, or null when no authentication is active.
+             */
+            refreshCopilotUser: async (): Promise<AuthIdentity | undefined> =>
+                connection.sendRequest("session.gitHubAuth.refreshCopilotUser", { sessionId }),
+            /**
+             * Logs in a GitHub user through the internal session host.
+             *
+             * @param params Internal GitHub login parameters.
+             *
+             * @returns Authentication credentials accepted only at native protocol ingress. Runtime outputs use credential-free `AuthIdentity` metadata.
+             */
+            login: async (params: SessionAuthLoginRequest): Promise<AuthInfo> =>
+                connection.sendRequest("session.gitHubAuth.login", { sessionId, ...params }),
+            /**
+             * Switches the session to another available authentication.
+             *
+             * @param params Parameters for switching the session's active authentication.
+             */
+            switchToAuth: async (params: SessionAuthSwitchRequest): Promise<void> =>
+                connection.sendRequest("session.gitHubAuth.switchToAuth", { sessionId, ...params }),
+            /**
+             * Logs out the session's current GitHub authentication.
+             *
+             * @returns Whether the current authentication was logged out.
+             */
+            logout: async (): Promise<SessionGitHubAuthLogoutResult> =>
+                connection.sendRequest("session.gitHubAuth.logout", { sessionId }),
+            /**
+             * Logs out a specific GitHub authentication.
+             *
+             * @param params Parameters identifying a GitHub authentication to log out.
+             *
+             * @returns Whether the requested authentication was logged out.
+             */
+            logoutUser: async (params: SessionAuthLogoutUserRequest): Promise<SessionGitHubAuthLogoutUserResult> =>
+                connection.sendRequest("session.gitHubAuth.logoutUser", { sessionId, ...params }),
+            /**
+             * Gets validation errors from the most recent authentication attempt.
+             *
+             * @returns Validation errors from the most recent authentication attempt.
+             */
+            lastAuthErrors: async (): Promise<AuthValidationErrors> =>
+                connection.sendRequest("session.gitHubAuth.lastAuthErrors", { sessionId }),
+        },
+        /** @experimental */
+        canvas: {
+            /** @experimental */
+            provider: {
+                /**
+                 * Registers an internal canvas provider connection and its contributions.
+                 *
+                 * @param params Internal canvas provider registration parameters.
+                 */
+                register: async (params: CanvasProviderRegisterRequest): Promise<void> =>
+                    connection.sendRequest("session.canvas.provider.register", { sessionId, ...params }),
+                /**
+                 * Unregisters an internal canvas provider connection.
+                 *
+                 * @param params Internal canvas provider unregistration parameters.
+                 */
+                unregister: async (params: CanvasProviderUnregisterRequest): Promise<void> =>
+                    connection.sendRequest("session.canvas.provider.unregister", { sessionId, ...params }),
+            },
+        },
+        /** @experimental */
+        model: {
+            /**
+             * Resolves and applies organization-managed and repository model overlays.
+             *
+             * @param params Managed, repository, and CLI model overrides to overlay onto the session at startup.
+             *
+             * @returns The model identifier active on the session after the switch.
+             */
+            applyStartupOverlay: async (params: ModelApplyStartupOverlayRequest): Promise<ModelSwitchToResult> =>
+                connection.sendRequest("session.model.applyStartupOverlay", { sessionId, ...params }),
+        },
         /** @experimental */
         mcp: {
             /**
@@ -17496,26 +25289,12 @@ export function createInternalSessionRpc(connection: MessageConnection, sessionI
             /**
              * Configures the built-in GitHub MCP server for the session's current auth context.
              *
-             * @param params Opaque auth info used to configure GitHub MCP.
+             * @param params Credential-free authentication identity used to configure GitHub MCP.
              *
              * @returns Result of configuring GitHub MCP.
              */
             configureGitHub: async (params: McpConfigureGitHubRequest): Promise<McpConfigureGitHubResult> =>
                 connection.sendRequest("session.mcp.configureGitHub", { sessionId, ...params }),
-            /**
-             * Starts an individual MCP server on the session's host.
-             *
-             * @param params Server name and opaque configuration for an individual MCP server start.
-             */
-            startServer: async (params: McpStartServerRequest): Promise<void> =>
-                connection.sendRequest("session.mcp.startServer", { sessionId, ...params }),
-            /**
-             * Restarts an individual MCP server on the session's host (stops then starts).
-             *
-             * @param params Server name and opaque configuration for an individual MCP server restart.
-             */
-            restartServer: async (params: McpRestartServerRequest): Promise<void> =>
-                connection.sendRequest("session.mcp.restartServer", { sessionId, ...params }),
             /**
              * Registers a pre-connected external MCP client (e.g. IDE) on the session's host. The caller retains lifecycle ownership of the client and transport. Marked internal because the `client` and `transport` arguments are in-process MCP SDK instances that cannot be serialized across the JSON-RPC boundary; once the CLI moves on top of the SDK, external clients will be expressed as transport configs the runtime can construct itself.
              *
@@ -17530,6 +25309,18 @@ export function createInternalSessionRpc(connection: MessageConnection, sessionI
              */
             unregisterExternalClient: async (params: McpUnregisterExternalClientRequest): Promise<void> =>
                 connection.sendRequest("session.mcp.unregisterExternalClient", { sessionId, ...params }),
+        },
+        /** @experimental */
+        commands: {
+            /**
+             * Finalizes persistence associated with a client-applied slash-command effect.
+             *
+             * @param params The pending slash-command invocation effect to finalize, plus whether the host applied or cancelled it.
+             *
+             * @returns Whether finalizing the invocation effect succeeded, and the failure reason when it did not.
+             */
+            finalizeInvocationEffect: async (params: CommandsFinalizeInvocationEffectRequest): Promise<CommandsFinalizeInvocationEffectResult> =>
+                connection.sendRequest("session.commands.finalizeInvocationEffect", { sessionId, ...params }),
         },
         /** @experimental */
         settings: {
@@ -17550,6 +25341,129 @@ export function createInternalSessionRpc(connection: MessageConnection, sessionI
             evaluatePredicate: async (params: SessionSettingsEvaluatePredicateRequest): Promise<SessionSettingsEvaluatePredicateResult> =>
                 connection.sendRequest("session.settings.evaluatePredicate", { sessionId, ...params }),
         },
+        /** @experimental */
+        queue: {
+            /**
+             * Returns the internal native queue snapshot for in-process session orchestration.
+             *
+             * @returns Internal snapshot of native queue state for local session orchestration.
+             */
+            snapshot: async (): Promise<QueueSnapshotResult> =>
+                connection.sendRequest("session.queue.snapshot", { sessionId }),
+            /**
+             * Reports whether the local session has native queued work pending.
+             *
+             * @returns Whether the native queue has pending work.
+             */
+            hasPending: async (): Promise<QueueHasPendingResult> =>
+                connection.sendRequest("session.queue.hasPending", { sessionId }),
+            /**
+             * Begins a native deferred-idle drain when background work has quiesced.
+             *
+             * @param params Inputs for starting a deferred-idle drain.
+             *
+             * @returns Whether a deferred-idle drain should run.
+             */
+            beginDeferredIdleDrain: async (params: QueueBeginDeferredIdleDrainRequest): Promise<QueueBeginDeferredIdleDrainResult> =>
+                connection.sendRequest("session.queue.beginDeferredIdleDrain", { sessionId, ...params }),
+            /**
+             * Finishes a native deferred-idle drain and reports whether to drain queue work or emit idle.
+             *
+             * @param params Inputs for completing a deferred-idle drain.
+             *
+             * @returns Action selected by the native deferred-idle drain.
+             */
+            finishDeferredIdleDrain: async (params: QueueFinishDeferredIdleDrainRequest): Promise<QueueFinishDeferredIdleDrainResult> =>
+                connection.sendRequest("session.queue.finishDeferredIdleDrain", { sessionId, ...params }),
+            /**
+             * Marks session.idle as deferred by native background work state.
+             *
+             * @param params Inputs for marking session.idle deferred in native state.
+             */
+            deferSessionIdle: async (params: QueueDeferSessionIdleRequest): Promise<void> =>
+                connection.sendRequest("session.queue.deferSessionIdle", { sessionId, ...params }),
+            /**
+             * Consumes queued native system notifications matching an internal filter.
+             *
+             * @param params Internal filter for consuming queued system notifications.
+             *
+             * @returns Indicates whether a user-facing pending item was removed.
+             */
+            consumeSystemNotifications: async (params: QueueConsumeSystemNotificationsRequest): Promise<QueueRemoveMostRecentResult> =>
+                connection.sendRequest("session.queue.consumeSystemNotifications", { sessionId, ...params }),
+            /**
+             * Enqueues the internal resume-pending wake item when orphan handling needs a follow-up turn.
+             *
+             * @returns Result of enqueueing the resume-pending wake item.
+             */
+            enqueueResumePending: async (): Promise<QueueEnqueueResumePendingResult> =>
+                connection.sendRequest("session.queue.enqueueResumePending", { sessionId }),
+            /**
+             * Drains the native local-session work queue for in-process session orchestration.
+             */
+            process: async (): Promise<void> =>
+                connection.sendRequest("session.queue.process", { sessionId }),
+        },
+        /** @experimental */
+        schedule: {
+            /**
+             * Hydrates the native schedule registry from persisted session events.
+             */
+            hydrate: async (): Promise<void> =>
+                connection.sendRequest("session.schedule.hydrate", { sessionId }),
+            /**
+             * Reports whether the session has an active self-paced scheduled prompt.
+             *
+             * @returns Whether the session currently has an active self-paced schedule.
+             */
+            hasSelfPaced: async (): Promise<ScheduleHasSelfPacedResult> =>
+                connection.sendRequest("session.schedule.hasSelfPaced", { sessionId }),
+            /**
+             * Registers a relative-interval scheduled prompt.
+             *
+             * @param params Register a relative-interval scheduled prompt.
+             *
+             * @returns Result of registering or re-arming a scheduled prompt.
+             */
+            add: async (params: ScheduleAddRequest): Promise<ScheduleAddResult> =>
+                connection.sendRequest("session.schedule.add", { sessionId, ...params }),
+            /**
+             * Registers a recurring cron scheduled prompt.
+             *
+             * @param params Register a cron scheduled prompt.
+             *
+             * @returns Result of registering or re-arming a scheduled prompt.
+             */
+            addCron: async (params: ScheduleAddCronRequest): Promise<ScheduleAddResult> =>
+                connection.sendRequest("session.schedule.addCron", { sessionId, ...params }),
+            /**
+             * Registers an absolute-time scheduled prompt.
+             *
+             * @param params Register an absolute-time scheduled prompt.
+             *
+             * @returns Result of registering or re-arming a scheduled prompt.
+             */
+            addAt: async (params: ScheduleAddAtRequest): Promise<ScheduleAddResult> =>
+                connection.sendRequest("session.schedule.addAt", { sessionId, ...params }),
+            /**
+             * Registers a self-paced scheduled prompt.
+             *
+             * @param params Register a self-paced scheduled prompt.
+             *
+             * @returns Result of registering or re-arming a scheduled prompt.
+             */
+            addSelfPaced: async (params: ScheduleAddSelfPacedRequest): Promise<ScheduleAddResult> =>
+                connection.sendRequest("session.schedule.addSelfPaced", { sessionId, ...params }),
+            /**
+             * Re-arms an active self-paced scheduled prompt.
+             *
+             * @param params Re-arm a self-paced scheduled prompt.
+             *
+             * @returns Result of registering or re-arming a scheduled prompt.
+             */
+            rearmSelfPaced: async (params: ScheduleRearmSelfPacedRequest): Promise<ScheduleAddResult> =>
+                connection.sendRequest("session.schedule.rearmSelfPaced", { sessionId, ...params }),
+        },
     };
 }
 
@@ -17564,6 +25478,27 @@ export interface ProviderTokenHandler {
      * @returns A bearer token supplied by the SDK client for a BYOK provider. The runtime sets it as `Authorization: Bearer <token>` on the outbound request and does no caching; the SDK consumer owns token caching and refresh.
      */
     getToken(params: ProviderTokenAcquireRequest): Promise<ProviderTokenAcquireResult>;
+}
+
+/** Handler for `factory` client session API methods. */
+/** @experimental */
+export interface FactoryHandler {
+    /**
+     * Asks the owning extension connection to execute a registered factory closure.
+     *
+     * @param params Parameters sent to the owning extension to execute a factory closure.
+     *
+     * @returns Result returned by an extension factory closure.
+     */
+    execute(params: FactoryExecuteRequest): Promise<FactoryExecuteResult>;
+    /**
+     * Asks the owning extension connection to abort a running factory cooperatively.
+     *
+     * @param params Parameters for cooperatively aborting a factory body.
+     *
+     * @returns Acknowledgement that a factory request was accepted.
+     */
+    abort(params: FactoryAbortRequest): Promise<FactoryAckResult>;
 }
 
 /** Handler for `sessionFs` client session API methods. */
@@ -17650,13 +25585,21 @@ export interface SessionFsHandler {
      */
     rename(params: SessionFsRenameRequest): Promise<SessionFsError | undefined>;
     /**
-     * Executes a SQLite query against the per-session database.
+     * Executes a SQLite query against the per-session database. Providers apply busy handling for every call.
      *
-     * @param params SQL query, query type, and optional bind parameters for executing a SQLite query against the per-session database.
+     * @param params SQL query, query type, and optional bind parameters for executing a SQLite query against the per-session database. The provider applies its SQLite busy timeout for every call.
      *
      * @returns Query results including rows, columns, and rows affected, or a filesystem error if execution failed.
      */
     sqliteQuery(params: SessionFsSqliteQueryRequest): Promise<SessionFsSqliteQueryResult>;
+    /**
+     * Executes SQLite statements atomically on the provider-owned connection.
+     *
+     * @param params Statements to execute atomically. Providers apply busy handling for every call.
+     *
+     * @returns Per-statement results, or a classified transaction error.
+     */
+    sqliteTransaction(params: SessionFsSqliteTransactionRequest): Promise<SessionFsSqliteTransactionResult>;
     /**
      * Checks whether the per-session SQLite database already exists, without creating it.
      *
@@ -17697,6 +25640,7 @@ export interface CanvasHandler {
 /** All client session API handler groups. */
 export interface ClientSessionApiHandlers {
     providerToken?: ProviderTokenHandler;
+    factory?: FactoryHandler;
     sessionFs?: SessionFsHandler;
     canvas?: CanvasHandler;
 }
@@ -17715,6 +25659,16 @@ export function registerClientSessionApiHandlers(
         const handler = getHandlers(params.sessionId).providerToken;
         if (!handler) throw new Error(`No providerToken handler registered for session: ${params.sessionId}`);
         return handler.getToken(params);
+    });
+    connection.onRequest("factory.execute", async (params: FactoryExecuteRequest) => {
+        const handler = getHandlers(params.sessionId).factory;
+        if (!handler) throw new Error(`No factory handler registered for session: ${params.sessionId}`);
+        return handler.execute(params);
+    });
+    connection.onRequest("factory.abort", async (params: FactoryAbortRequest) => {
+        const handler = getHandlers(params.sessionId).factory;
+        if (!handler) throw new Error(`No factory handler registered for session: ${params.sessionId}`);
+        return handler.abort(params);
     });
     connection.onRequest("sessionFs.readFile", async (params: SessionFsReadFileRequest) => {
         const handler = getHandlers(params.sessionId).sessionFs;
@@ -17771,6 +25725,11 @@ export function registerClientSessionApiHandlers(
         if (!handler) throw new Error(`No sessionFs handler registered for session: ${params.sessionId}`);
         return handler.sqliteQuery(params);
     });
+    connection.onRequest("sessionFs.sqliteTransaction", async (params: SessionFsSqliteTransactionRequest) => {
+        const handler = getHandlers(params.sessionId).sessionFs;
+        if (!handler) throw new Error(`No sessionFs handler registered for session: ${params.sessionId}`);
+        return handler.sqliteTransaction(params);
+    });
     connection.onRequest("sessionFs.sqliteExists", async (params: SessionFsSqliteExistsRequest) => {
         const handler = getHandlers(params.sessionId).sessionFs;
         if (!handler) throw new Error(`No sessionFs handler registered for session: ${params.sessionId}`);
@@ -17791,6 +25750,19 @@ export function registerClientSessionApiHandlers(
         if (!handler) throw new Error(`No canvas handler registered for session: ${params.sessionId}`);
         return handler.invoke(params);
     });
+}
+
+/** Handler for `extensionLaunchProvider` client global API methods. */
+/** @experimental */
+export interface ExtensionLaunchProviderHandler {
+    /**
+     * Asks the registered SDK client to resolve an opaque process launch profile for one discovered extension entrypoint immediately before launch or reload. The provider must respond within 15 seconds.
+     *
+     * @param params A discovered extension entrypoint that the registered integrator may classify and resolve to an opaque launch profile.
+     *
+     * @returns The launch profile for a supported entrypoint. Omit launch when the provider does not support the entrypoint.
+     */
+    resolve(params: ExtensionLaunchProviderResolveRequest): Promise<ExtensionLaunchProviderResolveResult>;
 }
 
 /** Handler for `llmInference` client global API methods. */
@@ -17827,6 +25799,7 @@ export interface GitHubTelemetryHandler {
 
 /** All client global API handler groups. */
 export interface ClientGlobalApiHandlers {
+    extensionLaunchProvider?: ExtensionLaunchProviderHandler;
     llmInference?: LlmInferenceHandler;
     gitHubTelemetry?: GitHubTelemetryHandler;
 }
@@ -17842,6 +25815,11 @@ export function registerClientGlobalApiHandlers(
     connection: MessageConnection,
     handlers: ClientGlobalApiHandlers,
 ): void {
+    connection.onRequest("extensionLaunchProvider.resolve", async (params: ExtensionLaunchProviderResolveRequest) => {
+        const handler = handlers.extensionLaunchProvider;
+        if (!handler) throw new Error("No extensionLaunchProvider client-global handler registered");
+        return handler.resolve(params);
+    });
     connection.onRequest("llmInference.httpRequestStart", async (params: LlmInferenceHttpRequestStartRequest) => {
         const handler = handlers.llmInference;
         if (!handler) throw new Error("No llmInference client-global handler registered");

@@ -28,7 +28,7 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         {
             await using var client = CreateSessionFsClient(providerRoot);
 
-            var session = await client.CreateSessionAsync(new SessionConfig
+            var session = await Ctx.CreateSessionAsync(client, new SessionConfig
             {
                 OnPermissionRequest = PermissionHandler.ApproveAll,
                 CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot),
@@ -58,7 +58,7 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             await using var client = CreateSessionFsClient(providerRoot);
             Func<CopilotSession, SessionFsProvider> createSessionFsHandler = s => new TestSessionFsHandler(s.SessionId, providerRoot);
 
-            var session1 = await client.CreateSessionAsync(new SessionConfig
+            var session1 = await Ctx.CreateSessionAsync(client, new SessionConfig
             {
                 OnPermissionRequest = PermissionHandler.ApproveAll,
                 CreateSessionFsProvider = createSessionFsHandler,
@@ -72,7 +72,7 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             var eventsPath = GetStoredPath(providerRoot, sessionId, $"{SessionFsConfig.SessionStatePath}/events.jsonl");
             await WaitForConditionAsync(() => File.Exists(eventsPath));
 
-            var session2 = await client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
+            var session2 = await Ctx.ResumeSessionAsync(client, sessionId, new ResumeSessionConfig
             {
                 OnPermissionRequest = PermissionHandler.ApproveAll,
                 CreateSessionFsProvider = createSessionFsHandler,
@@ -97,7 +97,7 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             await using var client1 = CreateSessionFsClient(providerRoot, useStdio: false, tcpConnectionToken: "session-fs-shared-token");
             var createSessionFsHandler = (Func<CopilotSession, SessionFsProvider>)(s => new TestSessionFsHandler(s.SessionId, providerRoot));
 
-            _ = await client1.CreateSessionAsync(new SessionConfig
+            _ = await Ctx.CreateSessionAsync(client1, new SessionConfig
             {
                 OnPermissionRequest = PermissionHandler.ApproveAll,
                 CreateSessionFsProvider = createSessionFsHandler,
@@ -319,7 +319,7 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             var suppliedFileContent = new string('x', largeContentSize);
 
             await using var client = CreateSessionFsClient(providerRoot);
-            var session = await client.CreateSessionAsync(new SessionConfig
+            var session = await Ctx.CreateSessionAsync(client, new SessionConfig
             {
                 OnPermissionRequest = PermissionHandler.ApproveAll,
                 CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot),
@@ -337,6 +337,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             var messages = await session.GetEventsAsync();
             var toolResult = FindToolCallResult(messages, "get_big_string");
             Assert.NotNull(toolResult);
+            // Windows reports the spilled file path with backslash separators.
+            toolResult = toolResult!.Replace('\\', '/');
             Assert.Contains($"{SessionFsConfig.SessionStatePath}/temp/", toolResult);
 
             var match = System.Text.RegularExpressions.Regex.Match(
@@ -361,7 +363,7 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         try
         {
             await using var client = CreateSessionFsClient(providerRoot);
-            var session = await client.CreateSessionAsync(new SessionConfig
+            var session = await Ctx.CreateSessionAsync(client, new SessionConfig
             {
                 OnPermissionRequest = PermissionHandler.ApproveAll,
                 CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot),
@@ -400,7 +402,7 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         try
         {
             await using var client = CreateSessionFsClient(providerRoot);
-            var session = await client.CreateSessionAsync(new SessionConfig
+            var session = await Ctx.CreateSessionAsync(client, new SessionConfig
             {
                 OnPermissionRequest = PermissionHandler.ApproveAll,
                 CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot),
@@ -433,7 +435,7 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         try
         {
             await using var client = CreateSessionFsClient(providerRoot);
-            var session = await client.CreateSessionAsync(new SessionConfig
+            var session = await Ctx.CreateSessionAsync(client, new SessionConfig
             {
                 OnPermissionRequest = PermissionHandler.ApproveAll,
                 CreateSessionFsProvider = s => new TestSessionFsHandler(s.SessionId, providerRoot),
@@ -581,7 +583,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         return normalized;
     }
 
-    private sealed class ThrowingSessionFsProvider(Exception exception) : SessionFsProvider, ISessionFsSqliteProvider
+    private sealed class ThrowingSessionFsProvider(Exception exception)
+        : SessionFsProvider, ISessionFsSqliteProvider, ISessionFsSqliteTransactionProvider
     {
         protected override Task<string> ReadFileAsync(string path, CancellationToken cancellationToken) =>
             Task.FromException<string>(exception);
@@ -615,6 +618,9 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
 
         Task<SessionFsSqliteResult?> ISessionFsSqliteProvider.QueryAsync(SessionFsSqliteQueryType queryType, string query, IDictionary<string, object?>? bindParams, CancellationToken cancellationToken) =>
             Task.FromException<SessionFsSqliteResult?>(exception);
+
+        Task<IList<SessionFsSqliteResult>> ISessionFsSqliteTransactionProvider.TransactionAsync(IList<SessionFsSqliteStatement> statements, CancellationToken cancellationToken) =>
+            Task.FromException<IList<SessionFsSqliteResult>>(exception);
 
         Task<bool> ISessionFsSqliteProvider.ExistsAsync(CancellationToken cancellationToken) =>
             Task.FromException<bool>(exception);

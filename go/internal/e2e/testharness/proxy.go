@@ -38,11 +38,14 @@ func (p *CapiProxy) Start() (string, error) {
 		return p.proxyURL, nil
 	}
 
-	// The harness server is in the shared test directory
-	serverPath := "../../../test/harness/server.ts"
+	// The harness server is in the shared test directory. Anchor the path to
+	// the repo root (not the process cwd), because the in-process (FFI)
+	// transport os.Chdir's into a per-test temp workdir, which would otherwise
+	// break the cwd-relative resolution.
+	serverPath := RepoPath("test", "harness", "server.ts")
 
 	p.cmd = exec.Command("npx", "tsx", serverPath)
-	p.cmd.Dir = "." // Will be resolved relative to test execution
+	p.cmd.Dir = RepoPath("test", "harness")
 
 	stdout, err := p.cmd.StdoutPipe()
 	if err != nil {
@@ -183,6 +186,38 @@ func (p *CapiProxy) GetExchanges() ([]ParsedHttpExchange, error) {
 	}
 
 	return exchanges, nil
+}
+
+// GetRequests retrieves all captured outbound HTTP requests from the proxy.
+func (p *CapiProxy) GetRequests() ([]CapturedRequest, error) {
+	p.mu.Lock()
+	url := p.proxyURL
+	p.mu.Unlock()
+
+	if url == "" {
+		return nil, fmt.Errorf("proxy not started")
+	}
+
+	resp, err := http.Get(url + "/requests")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get requests: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var requests []CapturedRequest
+	if err := json.NewDecoder(resp.Body).Decode(&requests); err != nil {
+		return nil, fmt.Errorf("failed to decode requests: %w", err)
+	}
+
+	return requests, nil
+}
+
+// CapturedRequest represents an outbound HTTP request captured by the proxy.
+type CapturedRequest struct {
+	Method  string                     `json:"method"`
+	URL     string                     `json:"url"`
+	Headers map[string]json.RawMessage `json:"headers"`
+	Body    string                     `json:"body"`
 }
 
 // ParsedHttpExchange represents a captured HTTP exchange.

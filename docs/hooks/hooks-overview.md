@@ -1,31 +1,34 @@
-# Session Hooks
+# Session hooks
 
 Hooks allow you to intercept and customize the behavior of Copilot sessions at key points in the conversation lifecycle. Use hooks to:
 
-- **Control tool execution** - approve, deny, or modify tool calls
-- **Transform results** - modify tool outputs before they're processed
-- **Add context** - inject additional information at session start
-- **Handle errors** - implement custom error handling
-- **Audit and log** - track all interactions for compliance
+* **Control tool execution** - approve, deny, or modify tool calls
+* **Transform results** - modify tool outputs before they're processed
+* **Add context** - inject additional information at session start
+* **Handle errors** - implement custom error handling
+* **Audit and log** - track all interactions for compliance
 
-## Available Hooks
+## Available hooks
 
 | Hook | Trigger | Use Case |
 |------|---------|----------|
 | [`onPreToolUse`](./pre-tool-use.md) | Before a tool executes | Permission control, argument validation |
-| [`onPostToolUse`](./post-tool-use.md) | After a tool executes | Result transformation, logging |
+| [`onPostToolUse`](./post-tool-use.md) | After a tool executes (success only) | Result transformation, logging |
+| [`onPostToolUseFailure`](./post-tool-use.md#failure-variant) | After a tool execution whose result was a failure | Inject retry guidance, log failures |
 | [`onUserPromptSubmitted`](./user-prompt-submitted.md) | When user sends a message | Prompt modification, filtering |
+| [`onUserPromptTransformed`](./user-prompt-transformed.md) | After runtime prompt transformation | Inspect or replace model-facing content |
 | [`onSessionStart`](./session-lifecycle.md#session-start) | Session begins | Add context, configure session |
 | [`onSessionEnd`](./session-lifecycle.md#session-end) | Session ends | Cleanup, analytics |
 | [`onErrorOccurred`](./error-handling.md) | Error happens | Custom error handling |
+| [`onAgentStop`](./session-lifecycle.md#agent-stop) | Top-level agent naturally stops | Validate completion or request another turn |
 
-## Quick Start
+## Quick start
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "copilot-sdk-supercharged";
+import { CopilotClient } from "@github/copilot-sdk";
 
 const client = new CopilotClient();
 
@@ -89,7 +92,7 @@ package main
 import (
     "context"
     "fmt"
-    copilot "github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/go"
+    copilot "github.com/github/copilot-sdk/go"
 )
 
 func main() {
@@ -124,7 +127,7 @@ func main() {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 
 var client = new CopilotClient();
 
@@ -160,8 +163,8 @@ var session = await client.CreateSessionAsync(new SessionConfig
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.sdk.*;
-import com.github.copilot.sdk.json.*;
+import com.github.copilot.*;
+import com.github.copilot.rpc.*;
 import java.util.concurrent.CompletableFuture;
 
 try (var client = new CopilotClient()) {
@@ -192,9 +195,7 @@ try (var client = new CopilotClient()) {
 
 </details>
 
-> **40 languages supported.** See the [full SDK list](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks) with cookbooks for Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V, and 18 more.
-
-## Hook Invocation Context
+## Hook invocation context
 
 Every hook receives an `invocation` parameter with context about the current session:
 
@@ -204,9 +205,9 @@ Every hook receives an `invocation` parameter with context about the current ses
 
 This allows hooks to maintain state or perform session-specific logic.
 
-## Common Patterns
+## Common patterns
 
-### Logging All Tool Calls
+### Logging all tool calls
 
 ```typescript
 const session = await client.createSession({
@@ -223,7 +224,7 @@ const session = await client.createSession({
 });
 ```
 
-### Blocking Dangerous Tools
+### Blocking dangerous tools
 
 ```typescript
 const BLOCKED_TOOLS = ["shell", "bash", "exec"];
@@ -243,7 +244,7 @@ const session = await client.createSession({
 });
 ```
 
-### Adding User Context
+### Adding user context
 
 ```typescript
 const session = await client.createSession({
@@ -258,16 +259,18 @@ const session = await client.createSession({
 });
 ```
 
-## Hook Guides
+## Hook guides
 
-- **[Pre-Tool Use Hook](./pre-tool-use.md)** - Control tool execution permissions
-- **[Post-Tool Use Hook](./post-tool-use.md)** - Transform tool results
-- **[User Prompt Submitted Hook](./user-prompt-submitted.md)** - Modify user prompts
-- **[Session Lifecycle Hooks](./session-lifecycle.md)** - Session start and end
-- **[Error Handling Hook](./error-handling.md)** - Custom error handling
+* **[Pre-Tool Use Hook](./pre-tool-use.md)** - Control tool execution permissions
+* **[Post-Tool Use Hook](./post-tool-use.md)** - Transform tool results
+* **[User Prompt Submitted Hook](./user-prompt-submitted.md)** - Modify user prompts
+* **[User Prompt Transformed Hook](./user-prompt-transformed.md)** - Replace model-facing prompts
+* **[Session Lifecycle Hooks](./session-lifecycle.md)** - Session start and end
+* **[Agent Stop Hook](./session-lifecycle.md#agent-stop)** - Validate completion before the agent stops
+* **[Error Handling Hook](./error-handling.md)** - Custom error handling
 
-## See Also
+## See also
 
-- [Getting Started Guide](../getting-started.md)
-- [Custom Tools](../getting-started.md#step-4-add-a-custom-tool)
-- [Debugging Guide](../troubleshooting/debugging.md)
+* [Getting Started Guide](../getting-started.md)
+* [Custom Tools](../getting-started.md#step-4-add-a-custom-tool)
+* [Debugging Guide](../troubleshooting/debugging.md)

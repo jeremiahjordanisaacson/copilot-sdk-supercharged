@@ -84,6 +84,7 @@ describe("session event codegen", () => {
         expect(code).toContain("payload: str");
         expect(code).toContain("encoded: str");
         expect(code).toContain("count: int");
+        expect(code).toContain("assert not isinstance(x, float) or x.is_integer()");
     });
 
     it("strips Ms suffixes from duration member names while preserving JSON names", () => {
@@ -207,6 +208,38 @@ describe("session event codegen", () => {
         expect(csharpCode).not.toContain(
             '[JsonConverter(typeof(MillisecondsTimeSpanConverter))]\n    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]\n    [JsonPropertyName("retryAfterSeconds")]'
         );
+    });
+
+    it("drops leading underscores from C# member names while preserving JSON names", () => {
+        const schema: JSONSchema7 = {
+            definitions: {
+                SessionEvent: {
+                    anyOf: [
+                        {
+                            type: "object",
+                            required: ["type", "data"],
+                            properties: {
+                                type: { const: "session.synthetic" },
+                                data: {
+                                    type: "object",
+                                    required: ["_meta"],
+                                    properties: {
+                                        _meta: { type: "string" },
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                },
+            },
+        };
+
+        const csharpCode = generateCSharpSessionEventsCode(schema);
+
+        expect(csharpCode).toContain(
+            '[JsonPropertyName("_meta")]\n    public required string Meta { get; set; }'
+        );
+        expect(csharpCode).not.toContain("public required string _meta");
     });
 
     it("collapses redundant callable wrapper lambdas", () => {

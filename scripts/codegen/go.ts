@@ -14,6 +14,7 @@ import { fileURLToPath } from "url";
 import { promisify } from "util";
 import wordwrap from "wordwrap";
 import {
+    addManagedApprovalRequiredToPermissionRequests,
     cloneSchemaForCodegen,
     collectDefinitionCollections,
     collectExperimentalOnlyRpcReferencedDefinitionNames,
@@ -559,6 +560,7 @@ interface GoCodegenCtx {
     discriminatedUnionRawVariantSuffix?: string;
     skipDefinitionTypeNames?: Set<string>;
     encodingBlocks?: Set<string>;
+    unionVariantMarshalers?: Set<string>;
     packageName?: string;
 }
 
@@ -581,7 +583,8 @@ function extractGoEventVariants(schema: JSONSchema7): GoEventVariant[] {
                 eventExperimental: isSchemaExperimental(variant),
                 dataExperimental: isSchemaExperimental(dataSchema),
             };
-        });
+        })
+        .filter((variant) => !isSchemaInternal(variant.dataSchema));
 }
 
 function getGoSharedEventEnvelopeProperties(schema: JSONSchema7, ctx: GoCodegenCtx): GoEventEnvelopeProperty[] {
@@ -1337,8 +1340,11 @@ function pushGoJSONSchemaMatchLines(
     }
 }
 
-function goVariantMatchFuncName(variantTypeName: string): string {
-    return goUnexportedFunctionName("matches", variantTypeName);
+function goVariantMatchFuncName(unionTypeName: string, variantTypeName: string): string {
+    const scopedVariantName = variantTypeName.startsWith(unionTypeName)
+        ? variantTypeName
+        : `${unionTypeName}${variantTypeName}`;
+    return goUnexportedFunctionName("matches", scopedVariantName);
 }
 
 // Minimal checks used to distinguish variants that share the same discriminator.
@@ -1710,13 +1716,14 @@ function pushGoJSONTargetedMatchSpecLines(
 }
 
 function goVariantMatchFunctionLines(
+    unionTypeName: string,
     variant: GoDiscriminatedUnionVariant,
     groupVariants: GoDiscriminatedUnionVariant[],
     discriminatorProp: string,
     ctx: GoCodegenCtx
 ): string[] {
     const lines: string[] = [];
-    lines.push(`func ${goVariantMatchFuncName(variant.typeName)}(data []byte) bool {`);
+    lines.push(`func ${goVariantMatchFuncName(unionTypeName, variant.typeName)}(data []byte) bool {`);
     const spec = goVariantTargetedMatchSpec(variant, groupVariants, discriminatorProp, ctx);
     if (spec.positiveTerms.length === 0 && spec.negativeExistsPaths.length === 0) {
         pushGoJSONSchemaMatchLines(lines, variant.schema, "data", ctx, "\t", "raw");
@@ -1811,6 +1818,9 @@ function emitGoFlatDiscriminatedUnion(
     lines.push(`type ${typeName} interface {`);
     lines.push(`\t${markerName}()`);
     lines.push(`\t${discriminatorMethodName}() ${discGoType}`);
+    if (typeName === "PermissionRequest") {
+        lines.push(`\tRequiresManagedApproval() bool`);
+    }
     lines.push(`}`);
     lines.push(``);
 
@@ -1825,7 +1835,7 @@ function emitGoFlatDiscriminatedUnion(
     for (const variant of unionVariants) {
         const groupVariants = ambiguousGroupsByVariantTypeName.get(variant.typeName);
         if (groupVariants) {
-            pushGoEncodingBlock(goVariantMatchFunctionLines(variant, groupVariants, discriminatorProp, ctx), ctx);
+            pushGoEncodingBlock(goVariantMatchFunctionLines(typeName, variant, groupVariants, discriminatorProp, ctx), ctx);
         }
     }
 
@@ -1863,7 +1873,7 @@ function emitGoFlatDiscriminatedUnion(
             unmarshalLines.push(`\t\treturn &d, nil`);
         } else {
             for (const mappedVariant of mappedVariants) {
-                unmarshalLines.push(`\t\tif ${goVariantMatchFuncName(mappedVariant.typeName)}(data) {`);
+                unmarshalLines.push(`\t\tif ${goVariantMatchFuncName(typeName, mappedVariant.typeName)}(data) {`);
                 unmarshalLines.push(`\t\t\tvar d ${mappedVariant.typeName}`);
                 unmarshalLines.push(`\t\t\tif err := json.Unmarshal(data, &d); err != nil {`);
                 unmarshalLines.push(`\t\t\t\treturn nil, err`);
@@ -1966,18 +1976,22 @@ function emitGoFlatDiscriminatedUnion(
             lines.push(`\treturn ${discGoType}(r.Discriminator)`);
         }
         lines.push(`}`);
-        pushGoEncodingBlock([
-            `func (r ${variantTypeName}) MarshalJSON() ([]byte, error) {`,
-            `\ttype alias ${variantTypeName}`,
-            `\treturn json.Marshal(struct {`,
-            `\t\t${discGoName} ${discGoType} \`json:"${discriminatorProp}"\``,
-            `\t\talias`,
-            `\t}{`,
-            `\t\t${discGoName}: r.${discriminatorMethodName}(),`,
-            `\t\talias: alias(r),`,
-            `\t})`,
-            `}`,
-        ], ctx);
+        ctx.unionVariantMarshalers ??= new Set<string>();
+        if (!ctx.unionVariantMarshalers.has(variantTypeName)) {
+            ctx.unionVariantMarshalers.add(variantTypeName);
+            pushGoEncodingBlock([
+                `func (r ${variantTypeName}) MarshalJSON() ([]byte, error) {`,
+                `\ttype alias ${variantTypeName}`,
+                `\treturn json.Marshal(struct {`,
+                `\t\t${discGoName} ${discGoType} \`json:"${discriminatorProp}"\``,
+                `\t\talias`,
+                `\t}{`,
+                `\t\t${discGoName}: r.${discriminatorMethodName}(),`,
+                `\t\talias: alias(r),`,
+                `\t})`,
+                `}`,
+            ], ctx);
+        }
     }
 
     ctx.structs.push(lines.join("\n"));
@@ -2012,7 +2026,7 @@ function emitGoRequiredFieldDiscriminatedUnion(
     lines.push(``);
 
     for (const variant of unionVariants) {
-        pushGoEncodingBlock(goVariantMatchFunctionLines(variant, unionVariants, "", ctx), ctx);
+        pushGoEncodingBlock(goVariantMatchFunctionLines(typeName, variant, unionVariants, "", ctx), ctx);
     }
 
     const unmarshalLines: string[] = [];
@@ -2021,7 +2035,7 @@ function emitGoRequiredFieldDiscriminatedUnion(
     unmarshalLines.push(`\t\treturn nil, nil`);
     unmarshalLines.push(`\t}`);
     for (const variant of unionVariants) {
-        unmarshalLines.push(`\tif ${goVariantMatchFuncName(variant.typeName)}(data) {`);
+        unmarshalLines.push(`\tif ${goVariantMatchFuncName(typeName, variant.typeName)}(data) {`);
         unmarshalLines.push(`\t\tvar d ${variant.typeName}`);
         unmarshalLines.push(`\t\tif err := json.Unmarshal(data, &d); err != nil {`);
         unmarshalLines.push(`\t\t\treturn nil, err`);
@@ -2885,10 +2899,13 @@ function emitGoUnionWrapperStruct(typeName: string, schema: JSONSchema7, ctx: Go
             discriminatorValues: [],
         }));
         for (const variant of matchVariants) {
-            pushGoEncodingBlock(goVariantMatchFunctionLines(variant, matchVariants, "", ctx), ctx);
+            pushGoEncodingBlock(goVariantMatchFunctionLines(typeName, variant, matchVariants, "", ctx), ctx);
         }
         for (const [index, variant] of matchVariants.entries()) {
-            matchFunctionsByField.set(objectVariantSchemas[index].field.name, goVariantMatchFuncName(variant.typeName));
+            matchFunctionsByField.set(
+                objectVariantSchemas[index].field.name,
+                goVariantMatchFuncName(typeName, variant.typeName)
+            );
         }
     }
     encodingLines.push(`func (r ${typeName}) MarshalJSON() ([]byte, error) {`);
@@ -3640,19 +3657,14 @@ function resolveSharedAnyOfVariant(
 async function collectHandWrittenGoPublicNames(): Promise<Set<string>> {
     const goDir = path.join(REPO_ROOT, "go");
     const names = new Set<string>();
-    let entries: string[];
-    try {
-        entries = await fs.readdir(goDir);
-    } catch {
-        return names;
-    }
+    // Read the directory entries with their types so the file check and the read
+    // are not separate operations on the same path.
+    const entries = await fs.readdir(goDir, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
-        if (!entry.endsWith(".go")) continue;
-        if (entry.startsWith("z")) continue;
-        const filePath = path.join(goDir, entry);
-        const stat = await fs.stat(filePath);
-        if (!stat.isFile()) continue;
-        const content = await fs.readFile(filePath, "utf-8");
+        if (!entry.isFile()) continue;
+        if (!entry.name.endsWith(".go")) continue;
+        if (entry.name.startsWith("z")) continue;
+        const content = await fs.readFile(path.join(goDir, entry.name), "utf-8");
         for (const name of collectGoTopLevelNames(content, "type")) names.add(name);
         for (const name of collectGoTopLevelNames(content, "const")) names.add(name);
     }
@@ -3678,7 +3690,9 @@ async function generateSessionEvents(schemaPath?: string, apiSchema?: ApiSchema)
     console.log("Go: generating session-events...");
 
     const resolvedPath = schemaPath ?? (await getSessionEventsSchemaPath());
-    const schema = cloneSchemaForCodegen((await loadSchemaJson(resolvedPath)) as JSONSchema7);
+    const schema = addManagedApprovalRequiredToPermissionRequests(
+        (await loadSchemaJson(resolvedPath)) as JSONSchema7
+    );
     const processed = propagateInternalVisibility(postProcessSchema(schema));
     const processedApiSchema = apiSchema
         ? propagateInternalVisibility(postProcessSchema(cloneSchemaForCodegen(apiSchema as JSONSchema7)) as JSONSchema7)

@@ -1,18 +1,18 @@
-# Custom Skills
+# Custom skills
 
 Skills are reusable prompt modules that extend Copilot's capabilities. Load skills from directories to give Copilot specialized abilities for specific domains or workflows.
 
 ## Overview
 
-A skill is a named directory containing a `SKILL.md` file — a markdown document that provides instructions to Copilot. When loaded, the skill's content is injected into the session context.
+A skill is a named directory containing a `SKILL.md` file—a markdown document that provides instructions to Copilot. When loaded, the skill's content is injected into the session context.
 
 Skills allow you to:
-- Package domain expertise into reusable modules
-- Share specialized behaviors across projects
-- Organize complex agent configurations
-- Enable/disable capabilities per session
+* Package domain expertise into reusable modules
+* Share specialized behaviors across projects
+* Organize complex agent configurations
+* Enable/disable capabilities per session
 
-## Loading Skills
+## Loading skills
 
 Specify directories containing skills when creating a session:
 
@@ -20,16 +20,16 @@ Specify directories containing skills when creating a session:
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-import { CopilotClient } from "copilot-sdk-supercharged";
+import { CopilotClient } from "@github/copilot-sdk";
 
 const client = new CopilotClient();
 const session = await client.createSession({
-    model: "gpt-4.1",
+    model: "gpt-5.4",
     skillDirectories: [
         "./skills/code-review",
         "./skills/documentation",
     ],
-    onPermissionRequest: async () => ({ kind: "approved" }),
+    onPermissionRequest: async () => ({ kind: "approve-once" }),
 });
 
 // Copilot now has access to skills in those directories
@@ -42,16 +42,15 @@ await session.sendAndWait({ prompt: "Review this code for security issues" });
 <summary><strong>Python</strong></summary>
 
 ```python
-from copilot import CopilotClient
-from copilot.session import PermissionRequestResult
+from copilot import CopilotClient, PermissionDecisionApproveOnce
 
 async def main():
     client = CopilotClient()
     await client.start()
 
     session = await client.create_session(
-        on_permission_request=lambda req, inv: {"kind": "approved"},
-        model="gpt-4.1",
+        on_permission_request=lambda req, inv: PermissionDecisionApproveOnce(),
+        model="gpt-5.4",
         skill_directories=[
             "./skills/code-review",
             "./skills/documentation",
@@ -75,7 +74,8 @@ package main
 import (
     "context"
     "log"
-    copilot "github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/go"
+    copilot "github.com/github/copilot-sdk/go"
+    "github.com/github/copilot-sdk/go/rpc"
 )
 
 func main() {
@@ -87,13 +87,13 @@ func main() {
     defer client.Stop()
 
     session, err := client.CreateSession(ctx, &copilot.SessionConfig{
-        Model: "gpt-4.1",
+        Model: "gpt-5.4",
         SkillDirectories: []string{
             "./skills/code-review",
             "./skills/documentation",
         },
-        OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-            return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+        OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+            return &rpc.PermissionDecisionApproveOnce{}, nil
         },
     })
     if err != nil {
@@ -116,19 +116,20 @@ func main() {
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
+using GitHub.Copilot.Rpc;
 
 await using var client = new CopilotClient();
 await using var session = await client.CreateSessionAsync(new SessionConfig
 {
-    Model = "gpt-4.1",
+    Model = "gpt-5.4",
     SkillDirectories = new List<string>
     {
         "./skills/code-review",
         "./skills/documentation",
     },
     OnPermissionRequest = (req, inv) =>
-        Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.Approved }),
+        Task.FromResult(PermissionDecision.ApproveOnce()),
 });
 
 // Copilot now has access to skills in those directories
@@ -144,9 +145,8 @@ await session.SendAndWaitAsync(new MessageOptions
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.events.*;
-import com.github.copilot.sdk.json.*;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.rpc.*;
 import java.util.List;
 
 try (var client = new CopilotClient()) {
@@ -154,7 +154,7 @@ try (var client = new CopilotClient()) {
 
     var session = client.createSession(
         new SessionConfig()
-            .setModel("gpt-4.1")
+            .setModel("gpt-5.4")
             .setSkillDirectories(List.of(
                 "./skills/code-review",
                 "./skills/documentation"
@@ -171,163 +171,7 @@ try (var client = new CopilotClient()) {
 
 </details>
 
-<details>
-<summary><strong>Rust</strong></summary>
-
-```rust
-use copilot_sdk::{CopilotClient, SessionConfig, MessageOptions};
-
-let client = CopilotClient::new(None);
-client.start().await?;
-
-let session = client.create_session(&SessionConfig {
-    model: "gpt-4.1".into(),
-    skill_directories: vec![
-        "./skills/code-review".into(),
-        "./skills/documentation".into(),
-    ],
-    ..Default::default()
-}).await?;
-
-// Copilot now has access to skills in those directories
-session.send_and_wait(&MessageOptions {
-    prompt: "Review this code for security issues".into(),
-    ..Default::default()
-}).await?;
-```
-
-</details>
-
-<details>
-<summary><strong>Ruby</strong></summary>
-
-```ruby
-require 'copilot_sdk'
-
-client = CopilotSdk::Client.new
-client.start
-
-session = client.create_session(
-  model: "gpt-4.1",
-  skill_directories: [
-    "./skills/code-review",
-    "./skills/documentation"
-  ]
-)
-
-# Copilot now has access to skills in those directories
-session.send_and_wait(prompt: "Review this code for security issues")
-
-client.stop
-```
-
-</details>
-
-<details>
-<summary><strong>PHP</strong></summary>
-
-```php
-use GitHub\Copilot\SDK\CopilotClient;
-
-$client = new CopilotClient();
-$client->start();
-
-$session = $client->createSession([
-    'model' => 'gpt-4.1',
-    'skillDirectories' => [
-        './skills/code-review',
-        './skills/documentation',
-    ],
-]);
-
-// Copilot now has access to skills in those directories
-$session->sendAndWait(['prompt' => 'Review this code for security issues']);
-
-$client->stop();
-```
-
-</details>
-
-<details>
-<summary><strong>Swift</strong></summary>
-
-```swift
-import CopilotSDK
-
-let client = CopilotClient()
-try await client.start()
-
-let session = try await client.createSession(config: SessionConfig(
-    model: "gpt-4.1",
-    skillDirectories: [
-        "./skills/code-review",
-        "./skills/documentation"
-    ]
-))
-
-// Copilot now has access to skills in those directories
-try await session.sendAndWait(prompt: "Review this code for security issues")
-
-try await client.stop()
-```
-
-</details>
-
-<details>
-<summary><strong>Kotlin</strong></summary>
-
-```kotlin
-import com.github.copilot.sdk.CopilotClient
-import com.github.copilot.sdk.SessionConfig
-import com.github.copilot.sdk.MessageOptions
-
-val client = CopilotClient()
-client.start()
-
-val session = client.createSession(SessionConfig(
-    model = "gpt-4.1",
-    skillDirectories = listOf(
-        "./skills/code-review",
-        "./skills/documentation"
-    )
-))
-
-// Copilot now has access to skills in those directories
-session.sendAndWait(MessageOptions(prompt = "Review this code for security issues"))
-
-client.stop()
-```
-
-</details>
-
-<details>
-<summary><strong>C++</strong></summary>
-
-```cpp
-#include <copilot/client.h>
-
-auto client = copilot::CopilotClient();
-client.start();
-
-auto session = client.createSession({
-    .model = "gpt-4.1",
-    .skillDirectories = {
-        "./skills/code-review",
-        "./skills/documentation",
-    },
-});
-
-// Copilot now has access to skills in those directories
-session.sendAndWait({.prompt = "Review this code for security issues"});
-
-client.stop();
-```
-
-</details>
-
-> **40 languages supported.** See the [full SDK list](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks) with cookbooks for Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V, and 18 more.
-
-## Disabling Skills
+## Disabling skills
 
 Disable specific skills while keeping others active:
 
@@ -368,6 +212,7 @@ package main
 import (
 	"context"
 	copilot "github.com/github/copilot-sdk/go"
+	"github.com/github/copilot-sdk/go/rpc"
 )
 
 func main() {
@@ -377,8 +222,8 @@ func main() {
 	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
 		SkillDirectories: []string{"./skills"},
 		DisabledSkills:   []string{"experimental-feature", "deprecated-tool"},
-		OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-			return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+		OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+			return &rpc.PermissionDecisionApproveOnce{}, nil
 		},
 	})
 	_ = session
@@ -400,7 +245,8 @@ session, _ := client.CreateSession(context.Background(), &copilot.SessionConfig{
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
+using GitHub.Copilot.Rpc;
 
 public static class SkillsExample
 {
@@ -413,7 +259,7 @@ public static class SkillsExample
             SkillDirectories = new List<string> { "./skills" },
             DisabledSkills = new List<string> { "experimental-feature", "deprecated-tool" },
             OnPermissionRequest = (req, inv) =>
-                Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.Approved }),
+                Task.FromResult(PermissionDecision.ApproveOnce()),
         });
     }
 }
@@ -433,8 +279,9 @@ var session = await client.CreateSessionAsync(new SessionConfig
 <details>
 <summary><strong>Java</strong></summary>
 
+<!-- docs-validate: skip -->
 ```java
-import com.github.copilot.sdk.json.*;
+import com.github.copilot.rpc.*;
 import java.util.List;
 
 var session = client.createSession(
@@ -447,80 +294,7 @@ var session = client.createSession(
 
 </details>
 
-<details>
-<summary><strong>Rust</strong></summary>
-
-```rust
-let session = client.create_session(&SessionConfig {
-    skill_directories: vec!["./skills".into()],
-    disabled_skills: vec!["experimental-feature".into(), "deprecated-tool".into()],
-    ..Default::default()
-}).await?;
-```
-
-</details>
-
-<details>
-<summary><strong>Ruby</strong></summary>
-
-```ruby
-session = client.create_session(
-  skill_directories: ["./skills"],
-  disabled_skills: ["experimental-feature", "deprecated-tool"]
-)
-```
-
-</details>
-
-<details>
-<summary><strong>PHP</strong></summary>
-
-```php
-$session = $client->createSession([
-    'skillDirectories' => ['./skills'],
-    'disabledSkills' => ['experimental-feature', 'deprecated-tool'],
-]);
-```
-
-</details>
-
-<details>
-<summary><strong>Swift</strong></summary>
-
-```swift
-let session = try await client.createSession(config: SessionConfig(
-    skillDirectories: ["./skills"],
-    disabledSkills: ["experimental-feature", "deprecated-tool"]
-))
-```
-
-</details>
-
-<details>
-<summary><strong>Kotlin</strong></summary>
-
-```kotlin
-val session = client.createSession(SessionConfig(
-    skillDirectories = listOf("./skills"),
-    disabledSkills = listOf("experimental-feature", "deprecated-tool")
-))
-```
-
-</details>
-
-<details>
-<summary><strong>C++</strong></summary>
-
-```cpp
-auto session = client.createSession({
-    .skillDirectories = {"./skills"},
-    .disabledSkills = {"experimental-feature", "deprecated-tool"},
-});
-```
-
-</details>
-
-## Skill Directory Structure
+## Skill directory structure
 
 Each skill is a named subdirectory containing a `SKILL.md` file:
 
@@ -534,7 +308,7 @@ skills/
 
 The `skillDirectories` option points to the parent directory (e.g., `./skills`). The CLI discovers all `SKILL.md` files in immediate subdirectories.
 
-### SKILL.md Format
+### SKILL.md format
 
 A `SKILL.md` file is a markdown document with optional YAML frontmatter:
 
@@ -557,14 +331,14 @@ Provide specific line-number references and suggested fixes.
 ```
 
 The frontmatter fields:
-- **`name`** — The skill's identifier (used with `disabledSkills` to selectively disable it). If omitted, the directory name is used.
-- **`description`** — A short description of what the skill does.
+* **`name`**: The skill's identifier (used with `disabledSkills` to selectively disable it). If omitted, the directory name is used.
+* **`description`**: A short description of what the skill does.
 
 The markdown body contains the instructions that are injected into the session context when the skill is loaded.
 
-## Configuration Options
+## Configuration options
 
-### SessionConfig Skill Fields
+### SessionConfig skill fields
 
 | Language | Field | Type | Description |
 |----------|-------|------|-------------|
@@ -577,23 +351,23 @@ The markdown body contains the instructions that are injected into the session c
 | .NET | `SkillDirectories` | `List<string>` | Directories to load skills from |
 | .NET | `DisabledSkills` | `List<string>` | Skills to disable |
 
-## Best Practices
+## Best practices
 
 1. **Organize by domain** - Group related skills together (e.g., `skills/security/`, `skills/testing/`)
 
-2. **Use frontmatter** - Include `name` and `description` in YAML frontmatter for clarity
+1. **Use frontmatter** - Include `name` and `description` in YAML frontmatter for clarity
 
-3. **Document dependencies** - Note any tools or MCP servers a skill requires
+1. **Document dependencies** - Note any tools or MCP servers a skill requires
 
-4. **Test skills in isolation** - Verify skills work before combining them
+1. **Test skills in isolation** - Verify skills work before combining them
 
-5. **Use relative paths** - Keep skills portable across environments
+1. **Use relative paths** - Keep skills portable across environments
 
-## Combining with Other Features
+## Combining with other features
 
-### Skills + Custom Agents
+### Skills + custom agents
 
-Skills listed in an agent's `skills` field are **eagerly preloaded** — their full content is injected into the agent's context at startup, so the agent has access to the skill instructions immediately without needing to invoke a skill tool. Skill names are resolved from the session-level `skillDirectories`.
+Skills listed in an agent's `skills` field are **eagerly preloaded**—their full content is injected into the agent's context at startup, so the agent has access to the skill instructions immediately without needing to invoke a skill tool. Skill names are resolved from the session-level `skillDirectories`.
 
 ```typescript
 const session = await client.createSession({
@@ -604,12 +378,13 @@ const session = await client.createSession({
         prompt: "Focus on OWASP Top 10 vulnerabilities",
         skills: ["security-scan", "dependency-check"],
     }],
-    onPermissionRequest: async () => ({ kind: "approved" }),
+    onPermissionRequest: async () => ({ kind: "approve-once" }),
 });
 ```
-> **Note:** Skills are opt-in — when `skills` is omitted, no skill content is injected. Sub-agents do not inherit skills from the parent; you must list them explicitly per agent.
+> [!NOTE]
+> Skills are opt-in—when `skills` is omitted, no skill content is injected. Sub-agents do not inherit skills from the parent; you must list them explicitly per agent.
 
-### Skills + MCP Servers
+### Skills + MCP servers
 
 Skills can complement MCP server capabilities:
 
@@ -624,27 +399,27 @@ const session = await client.createSession({
             tools: ["*"],
         },
     },
-    onPermissionRequest: async () => ({ kind: "approved" }),
+    onPermissionRequest: async () => ({ kind: "approve-once" }),
 });
 ```
 
 ## Troubleshooting
 
-### Skills Not Loading
+### Skills not loading
 
 1. **Check path exists** - Verify the skill directory path is correct and contains subdirectories with `SKILL.md` files
-2. **Check permissions** - Ensure the SDK can read the directory
-3. **Check SKILL.md format** - Verify the markdown is well-formed and any YAML frontmatter uses valid syntax
-4. **Enable debug logging** - Set `logLevel: "debug"` to see skill loading logs
+1. **Check permissions** - Ensure the SDK can read the directory
+1. **Check SKILL.md format** - Verify the markdown is well-formed and any YAML frontmatter uses valid syntax
+1. **Enable debug logging** - Set `logLevel: "debug"` to see skill loading logs
 
-### Skill Conflicts
+### Skill conflicts
 
 If multiple skills provide conflicting instructions:
-- Use `disabledSkills` to exclude conflicting skills
-- Reorganize skill directories to avoid overlaps
+* Use `disabledSkills` to exclude conflicting skills
+* Reorganize skill directories to avoid overlaps
 
-## See Also
+## See also
 
-- [Custom Agents](../getting-started.md#create-custom-agents) - Define specialized AI personas
-- [Custom Tools](../getting-started.md#step-4-add-a-custom-tool) - Build your own tools
-- [MCP Servers](./mcp.md) - Connect external tool providers
+* [Custom Agents](../getting-started.md#create-custom-agents) - Define specialized AI personas
+* [Custom Tools](../getting-started.md#step-4-add-a-custom-tool) - Build your own tools
+* [MCP Servers](./mcp.md) - Connect external tool providers

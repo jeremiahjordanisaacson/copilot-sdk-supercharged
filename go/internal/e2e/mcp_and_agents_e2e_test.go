@@ -88,11 +88,6 @@ func TestMCPServersE2E(t *testing.T) {
 		}
 		sessionID := session1.SessionID
 
-		_, err = session1.SendAndWait(t.Context(), copilot.MessageOptions{Prompt: "What is 1+1?"})
-		if err != nil {
-			t.Fatalf("Failed to send message: %v", err)
-		}
-
 		// Resume with MCP servers
 		mcpServers := testMCPServers(t, "test-server")
 
@@ -115,10 +110,7 @@ func TestMCPServersE2E(t *testing.T) {
 	t.Run("should pass literal env values to MCP server subprocess", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		mcpServerPath, err := filepath.Abs("../../../test/harness/test-mcp-server.mjs")
-		if err != nil {
-			t.Fatalf("Failed to resolve test-mcp-server path: %v", err)
-		}
+		mcpServerPath := testharness.RepoPath("test", "harness", "test-mcp-server.mjs")
 		mcpServerDir := filepath.Dir(mcpServerPath)
 
 		mcpServers := map[string]copilot.MCPServerConfig{

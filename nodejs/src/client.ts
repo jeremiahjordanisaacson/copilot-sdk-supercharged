@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { Socket } from "node:net";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
     createMessageConnection,
@@ -40,6 +40,7 @@ import type {
 } from "./generated/rpc.js";
 import { getSdkProtocolVersion } from "./sdkProtocolVersion.js";
 import { CopilotSession } from "./session.js";
+import type { FfiRuntimeHost } from "./ffiRuntimeHost.js";
 import { createSessionFsAdapter, type SessionFsProvider } from "./sessionFsProvider.js";
 import { createCopilotRequestAdapter } from "./copilotRequestHandler.js";
 import type { CopilotRequestHandler } from "./copilotRequestHandler.js";
@@ -53,11 +54,13 @@ import type {
     CustomAgentConfig,
     ExitPlanModeRequest,
     ExitPlanModeResult,
+    ExtensionJoinOptions,
     ForegroundSessionInfo,
     GetAuthStatusResponse,
     BearerTokenProvider,
     GetStatusResponse,
     InternalRuntimeConnection,
+    RuntimeConnection,
     LargeToolOutputConfig,
     MCPServerConfig,
     ModelInfo,
@@ -83,6 +86,7 @@ import type {
     TypedSessionLifecycleHandler,
 } from "./types.js";
 import { defaultJoinSessionPermissionHandler } from "./types.js";
+import type { FactoryHandle } from "./factory.js";
 
 /**
  * Minimum protocol version this SDK can communicate with.
@@ -374,11 +378,9 @@ function getBundledCliPath(): string {
         // ESM: resolve via import.meta.resolve
         for (const packageName of packageNames) {
             try {
-                const sdkUrl = import.meta.resolve(`${packageName}/sdk`);
-                const sdkPath = fileURLToPath(sdkUrl);
-                // sdkPath is like .../node_modules/@github/copilot-<platform>/sdk/index.js
-                // Go up two levels to get the package root, then append index.js
-                return join(dirname(dirname(sdkPath)), "index.js");
+                const packageEntryUrl = import.meta.resolve(packageName);
+                const packageEntryPath = fileURLToPath(packageEntryUrl);
+                return join(dirname(packageEntryPath), "index.js");
             } catch {
                 // Try the next candidate platform package.
             }
@@ -473,6 +475,7 @@ class TeardownResilientStreamMessageWriter extends StreamMessageWriter {
 export class CopilotClient {
     private cliStartTimeout: ReturnType<typeof setTimeout> | null = null;
     private cliProcess: ChildProcess | null = null;
+    private ffiHost: FfiRuntimeHost | null = null;
     private connection: MessageConnection | null = null;
     private messageWriter: TeardownResilientStreamMessageWriter | null = null;
     private socket: Socket | null = null;
@@ -518,6 +521,7 @@ export class CopilotClient {
     /** Connection-level session filesystem config, set via constructor option. */
     private sessionFsConfig: SessionFsConfig | null = null;
     private requestHandler: CopilotRequestHandler | null = null;
+    private builtinPluginDirectories: string[] = [];
     private onGitHubTelemetry?: (notification: GitHubTelemetryNotification) => void | Promise<void>;
     private clientGlobalHandlers: import("./generated/rpc.js").ClientGlobalApiHandlers = {};
 
@@ -564,6 +568,32 @@ export class CopilotClient {
     }
 
     /**
+     * Environment variable that overrides the transport when the caller does not set
+     * {@link CopilotClientOptions.connection}. Accepts `"inprocess"` or `"stdio"`
+     * (case-insensitive); unset preserves the default stdio transport. Any other value
+     * is an error.
+     */
+    private static readonly DEFAULT_CONNECTION_ENV_VAR = "COPILOT_SDK_DEFAULT_CONNECTION";
+
+    /**
+     * Resolves the default {@link RuntimeConnection} for the no-connection case,
+     * honoring {@link CopilotClient.DEFAULT_CONNECTION_ENV_VAR}.
+     */
+    private static resolveDefaultConnection(): RuntimeConnection {
+        const value = process.env[CopilotClient.DEFAULT_CONNECTION_ENV_VAR];
+        if (!value || value.toLowerCase() === "stdio") {
+            return { kind: "stdio" };
+        }
+        if (value.toLowerCase() === "inprocess") {
+            return { kind: "inprocess" };
+        }
+        throw new Error(
+            `Invalid ${CopilotClient.DEFAULT_CONNECTION_ENV_VAR} value '${value}'. ` +
+                `Expected 'inprocess', 'stdio', or unset.`
+        );
+    }
+
+    /**
      * Creates a new CopilotClient instance.
      *
      * @param options - Configuration options for the client
@@ -594,8 +624,10 @@ export class CopilotClient {
         // Resolve the connection mode. `_internalConnection` is set by
         // `joinSession()` to opt into the parent-process stdio path; consumers
         // should always go through the public `connection` field.
-        const conn: InternalRuntimeConnection = options._internalConnection ??
-            options.connection ?? { kind: "stdio" };
+        const conn: InternalRuntimeConnection =
+            options._internalConnection ??
+            options.connection ??
+            CopilotClient.resolveDefaultConnection();
 
         if (
             conn.kind === "uri" &&
@@ -603,6 +635,40 @@ export class CopilotClient {
         ) {
             throw new Error(
                 "gitHubToken and useLoggedInUser cannot be used with RuntimeConnection.forUri (external server manages its own auth)"
+            );
+        }
+        if (conn.kind === "inprocess" && options.workingDirectory !== undefined) {
+            throw new Error(
+                "workingDirectory is not supported with RuntimeConnection.forInProcess(): the in-process " +
+                    "transport hosts the runtime in this process, so honoring it would require mutating the " +
+                    "shared process-global cwd. Change the host process's working directory before " +
+                    "constructing the client instead."
+            );
+        }
+        if (conn.kind === "inprocess" && options.env !== undefined) {
+            throw new Error(
+                "env is not supported with RuntimeConnection.forInProcess(): the in-process transport loads " +
+                    "the native runtime into the shared host process, whose single environment block cannot " +
+                    "carry per-client values. Set the variables on the host process environment instead."
+            );
+        }
+        if (conn.kind === "inprocess" && options.telemetry !== undefined) {
+            throw new Error(
+                "telemetry is not supported with RuntimeConnection.forInProcess(): telemetry configuration " +
+                    "is lowered to environment variables read by native runtime code running in the shared " +
+                    "host process, so per-client telemetry cannot be honored in-process. Configure telemetry " +
+                    "via the host process environment, or use a child-process transport."
+            );
+        }
+        if (
+            (conn.kind === "stdio" || conn.kind === "tcp") &&
+            conn.env !== undefined &&
+            options.env !== undefined
+        ) {
+            throw new Error(
+                "Set environment variables via either the client-level env option or the connection's env " +
+                    "(RuntimeConnection.forStdio/forTcp), not both. Prefer the connection-level env for " +
+                    "child-process transports."
             );
         }
         if (conn.kind === "tcp" && conn.connectionToken !== undefined) {
@@ -615,6 +681,16 @@ export class CopilotClient {
 
         if (options.sessionFs) {
             this.validateSessionFsConfig(options.sessionFs);
+        }
+        if (options.builtinPluginDirectories) {
+            for (const path of options.builtinPluginDirectories) {
+                if (!isAbsolute(path)) {
+                    throw new Error(
+                        `builtinPluginDirectories must contain only absolute paths: ${path}`
+                    );
+                }
+            }
+            this.builtinPluginDirectories = [...options.builtinPluginDirectories];
         }
 
         // Pre-parse the URI host/port and mark as external if applicable.
@@ -642,7 +718,13 @@ export class CopilotClient {
         this.onGitHubTelemetry = options.onGitHubTelemetry;
         this.setupClientGlobalHandlers();
 
-        const effectiveEnv = options.env ?? process.env;
+        // Connection-level env (child-process transports only) takes precedence
+        // over the client-level env, which falls back to the ambient process env.
+        // The constructor guard above rejects setting both, so at most one of the
+        // first two is defined. Mirrors .NET/Python precedence.
+        const connEnv: Record<string, string> | undefined =
+            conn.kind === "stdio" || conn.kind === "tcp" ? conn.env : undefined;
+        const effectiveEnv = connEnv ?? options.env ?? process.env;
         this.resolvedEnv = effectiveEnv;
         this.resolvedCliPath =
             conn.kind === "stdio" || conn.kind === "tcp"
@@ -810,7 +892,9 @@ export class CopilotClient {
 
         try {
             // Only start CLI server process if not connecting to external server
-            if (!this.isExternalServer) {
+            if (this.connectionConfig.kind === "inprocess") {
+                await this.startInProcessFfi();
+            } else if (!this.isExternalServer) {
                 await this.startCLIServer();
             }
 
@@ -819,6 +903,17 @@ export class CopilotClient {
 
             // Verify protocol version compatibility
             await this.verifyProtocolVersion();
+
+            if (this.builtinPluginDirectories.length > 0) {
+                try {
+                    await this.connection!.sendRequest("plugins.builtin.set", {
+                        paths: this.builtinPluginDirectories,
+                    });
+                } catch (error) {
+                    await this.forceStop();
+                    throw error;
+                }
+            }
 
             // If a session filesystem provider was configured, register it
             if (this.sessionFsConfig) {
@@ -873,6 +968,20 @@ export class CopilotClient {
 
         // Disconnect all active sessions with retry logic
         const activeSessions = [...this.sessions.values()];
+        // TEMPORARY: over the in-process (FFI) transport the runtime shares this
+        // process, so a turn still running when the runtime disposes the session
+        // can leave that session's SQLite session.db handle open — it isn't
+        // reclaimed by terminating a child process, so the file stays locked
+        // (Windows) and the session-state directory can't be removed. Abort any
+        // in-flight turn first so it cancels and releases the handle. Best-effort
+        // and idempotent: a session with no active turn is a no-op. Scoped to
+        // in-process only: stdio/tcp runtimes run in a child process that we kill
+        // on shutdown (which frees the handle), and for external servers we don't
+        // own the runtime and aborting would cancel pending work other clients
+        // may still resume. Remove once the runtime cleans up fully on shutdown.
+        if (this.connectionConfig.kind === "inprocess") {
+            await Promise.allSettled(activeSessions.map((session) => session.abort()));
+        }
         for (const session of activeSessions) {
             const sessionId = session.sessionId;
             let lastError: Error | null = null;
@@ -910,7 +1019,7 @@ export class CopilotClient {
         // Ask SDK-owned runtimes to flush and clean up before we tear down
         // their transport/process. External runtimes may be shared, so only
         // close our connection to them.
-        if (this.connection && this.cliProcess && !this.isExternalServer) {
+        if (this.connection && (this.cliProcess || this.ffiHost) && !this.isExternalServer) {
             const runtimeShutdownStart = Date.now();
             const shutdownPromise = this.rpc.runtime.shutdown();
             void shutdownPromise.catch(() => undefined);
@@ -1007,6 +1116,21 @@ export class CopilotClient {
                 errors.push(
                     new Error(
                         `Failed to kill CLI process: ${error instanceof Error ? error.message : String(error)}`
+                    )
+                );
+            }
+        }
+        // Tear down the in-process FFI host (closes the native connection and
+        // shuts down the native runtime host) for SDK-owned in-process runtimes.
+        if (this.ffiHost) {
+            const host = this.ffiHost;
+            this.ffiHost = null;
+            try {
+                host.dispose();
+            } catch (error) {
+                errors.push(
+                    new Error(
+                        `Failed to dispose in-process runtime host: ${error instanceof Error ? error.message : String(error)}`
                     )
                 );
             }
@@ -1113,6 +1237,16 @@ export class CopilotClient {
             this.cliProcess = null;
         }
 
+        // Tear down the in-process FFI host (if any).
+        if (this.ffiHost) {
+            try {
+                this.ffiHost.dispose();
+            } catch {
+                // Ignore errors during force stop
+            }
+            this.ffiHost = null;
+        }
+
         if (this.cliStartTimeout) {
             clearTimeout(this.cliStartTimeout);
             this.cliStartTimeout = null;
@@ -1206,9 +1340,15 @@ export class CopilotClient {
                 enableSessionStore: false,
                 enableSkills: false,
                 memory: { enabled: false },
+                customAgentsLocalOnly: true,
             };
         }
         return {};
+    }
+
+    /** Mode-specific default for enableExperimentalMode. */
+    private experimentalModeForMode(supplied: boolean | undefined): boolean | undefined {
+        return this.options.mode === "empty" ? (supplied ?? false) : supplied;
     }
 
     /**
@@ -1308,7 +1448,9 @@ export class CopilotClient {
             await this.start();
         }
 
-        config = { ...this.configDefaultsForMode(), ...config };
+        const modeDefaults = this.configDefaultsForMode();
+        config = { ...modeDefaults, ...config };
+        config.customAgentsLocalOnly ??= modeDefaults.customAgentsLocalOnly;
         config.systemMessage = this.getSystemMessageConfigForMode(config.systemMessage);
 
         // For cloud sessions, let the CLI/server assign the session id and
@@ -1344,7 +1486,12 @@ export class CopilotClient {
                 this.connection!,
                 undefined,
                 this.onGetTraceContext,
-                { mcpAuthHandler: config.onMcpAuthRequest }
+                {
+                    mcpAuthHandler: config.onMcpAuthRequest,
+                    managedSettingsEnabled:
+                        config.enableManagedSettings === true ||
+                        config.managedSettings !== undefined,
+                }
             );
             s.registerTools(config.tools);
             s.registerCanvases(config.canvases);
@@ -1401,6 +1548,7 @@ export class CopilotClient {
                 clientName: config.clientName,
                 reasoningEffort: config.reasoningEffort,
                 reasoningSummary: config.reasoningSummary,
+                isExperimentalMode: this.experimentalModeForMode(config.enableExperimentalMode),
                 contextTier: config.contextTier,
                 tools: config.tools?.map((tool) => ({
                     name: tool.name,
@@ -1409,15 +1557,19 @@ export class CopilotClient {
                     overridesBuiltInTool: tool.overridesBuiltInTool,
                     skipPermission: tool.skipPermission,
                     defer: tool.defer,
+                    metadata: tool.metadata,
+                    isTerminal: tool.isTerminal,
                 })),
+                toolSearch: config.toolSearch,
                 canvases: config.canvases?.map((canvas) => canvas.declaration),
                 requestCanvasRenderer: config.requestCanvasRenderer,
                 requestExtensions: config.requestExtensions,
                 extensionSdkPath: config.extensionSdkPath,
                 extensionInfo: config.extensionInfo,
+                canvasProvider: config.canvasProvider,
                 commands: config.commands?.map((cmd) => ({
                     name: cmd.name,
-                    description: cmd.description,
+                    description: cmd.description ?? "",
                 })),
                 systemMessage: wireSystemMessage,
                 availableTools: toolFilterOptions.availableTools,
@@ -1430,6 +1582,7 @@ export class CopilotClient {
                 models: config.models,
                 enableSessionTelemetry: config.enableSessionTelemetry,
                 enableCitations: config.enableCitations,
+                enableFileChangeTracking: config.enableFileChangeTracking,
                 sessionLimits: config.sessionLimits,
                 modelCapabilities: config.modelCapabilities,
                 largeOutput: toWireLargeOutput(config.largeOutput),
@@ -1437,10 +1590,14 @@ export class CopilotClient {
                 requestUserInput: !!config.onUserInputRequest,
                 requestElicitation: !!config.onElicitationRequest,
                 ...(config.enableMcpApps ? { requestMcpApps: true } : {}),
+                ...(config.githubMcpToolConfig != null
+                    ? { githubMcpToolConfig: config.githubMcpToolConfig }
+                    : {}),
                 requestExitPlanMode: !!config.onExitPlanModeRequest,
                 requestAutoModeSwitch: !!config.onAutoModeSwitchRequest,
                 hooks: !!(config.hooks && Object.values(config.hooks).some(Boolean)),
                 workingDirectory: config.workingDirectory,
+                additionalDirectories: config.additionalDirectories,
                 streaming: config.streaming,
                 includeSubAgentStreamingEvents: config.includeSubAgentStreamingEvents ?? true,
                 ...(this.onGitHubTelemetry != null
@@ -1450,6 +1607,7 @@ export class CopilotClient {
                 mcpOAuthTokenStorage: config.mcpOAuthTokenStorage,
                 envValueMode: "direct",
                 customAgents: toWireCustomAgents(config.customAgents),
+                customAgentsLocalOnly: config.customAgentsLocalOnly,
                 defaultAgent: config.defaultAgent,
                 agent: config.agent,
                 configDir: config.configDirectory,
@@ -1466,12 +1624,15 @@ export class CopilotClient {
                 pluginDirectories: config.pluginDirectories,
                 instructionDirectories: config.instructionDirectories,
                 disabledSkills: config.disabledSkills,
+                disabledMcpServers: config.disabledMcpServers,
                 infiniteSessions: config.infiniteSessions,
                 memory: config.memory,
                 gitHubToken: config.gitHubToken,
                 remoteSession: config.remoteSession,
                 cloud: config.cloud,
                 expAssignments: config.expAssignments,
+                enableManagedSettings: config.enableManagedSettings,
+                managedSettings: config.managedSettings,
             });
 
             const {
@@ -1542,6 +1703,25 @@ export class CopilotClient {
      * ```
      */
     async resumeSession(sessionId: string, config: ResumeSessionConfig): Promise<CopilotSession> {
+        return this.resumeSessionInternal(sessionId, config);
+    }
+
+    /** @internal */
+    async resumeSessionForExtension(
+        sessionId: string,
+        config: ResumeSessionConfig,
+        factories?: FactoryHandle[],
+        extensionOptions?: ExtensionJoinOptions
+    ): Promise<CopilotSession> {
+        return this.resumeSessionInternal(sessionId, config, factories, extensionOptions);
+    }
+
+    private async resumeSessionInternal(
+        sessionId: string,
+        config: ResumeSessionConfig,
+        factories?: FactoryHandle[],
+        extensionOptions?: ExtensionJoinOptions
+    ): Promise<CopilotSession> {
         if (!this.connection) {
             await this.start();
         }
@@ -1553,11 +1733,16 @@ export class CopilotClient {
             this.connection!,
             undefined,
             this.onGetTraceContext,
-            { mcpAuthHandler: config.onMcpAuthRequest }
+            {
+                mcpAuthHandler: config.onMcpAuthRequest,
+                managedSettingsEnabled:
+                    config.enableManagedSettings === true || config.managedSettings !== undefined,
+            }
         );
         session.registerTools(config.tools);
         session.registerCanvases(config.canvases);
         session.registerCommands(config.commands);
+        session.registerFactories(factories);
         const {
             wireProvider: bearerWireProvider,
             wireProviders: bearerWireProviders,
@@ -1583,7 +1768,9 @@ export class CopilotClient {
             session.registerHooks(config.hooks);
         }
 
-        config = { ...this.configDefaultsForMode(), ...config };
+        const modeDefaults = this.configDefaultsForMode();
+        config = { ...modeDefaults, ...config };
+        config.customAgentsLocalOnly ??= modeDefaults.customAgentsLocalOnly;
         config.systemMessage = this.getSystemMessageConfigForMode(config.systemMessage);
 
         const { wirePayload: wireSystemMessage, transformCallbacks } = extractTransformCallbacks(
@@ -1609,6 +1796,7 @@ export class CopilotClient {
                 model: config.model,
                 reasoningEffort: config.reasoningEffort,
                 reasoningSummary: config.reasoningSummary,
+                isExperimentalMode: this.experimentalModeForMode(config.enableExperimentalMode),
                 contextTier: config.contextTier,
                 systemMessage: wireSystemMessage,
                 availableTools: toolFilterOptions.availableTools,
@@ -1617,6 +1805,7 @@ export class CopilotClient {
                 enableSessionTelemetry: config.enableSessionTelemetry,
                 excludedBuiltinAgents: config.excludedBuiltinAgents,
                 enableCitations: config.enableCitations,
+                enableFileChangeTracking: config.enableFileChangeTracking,
                 sessionLimits: config.sessionLimits,
                 tools: config.tools?.map((tool) => ({
                     name: tool.name,
@@ -1625,15 +1814,20 @@ export class CopilotClient {
                     overridesBuiltInTool: tool.overridesBuiltInTool,
                     skipPermission: tool.skipPermission,
                     defer: tool.defer,
+                    metadata: tool.metadata,
+                    isTerminal: tool.isTerminal,
                 })),
+                toolSearch: config.toolSearch,
                 canvases: config.canvases?.map((canvas) => canvas.declaration),
+                factories: factories?.map((factory) => factory.meta),
                 requestCanvasRenderer: config.requestCanvasRenderer,
                 requestExtensions: config.requestExtensions,
                 extensionSdkPath: config.extensionSdkPath,
                 extensionInfo: config.extensionInfo,
+                canvasProvider: config.canvasProvider,
                 commands: config.commands?.map((cmd) => ({
                     name: cmd.name,
-                    description: cmd.description,
+                    description: cmd.description ?? "",
                 })),
                 provider: bearerWireProvider,
                 capi: config.capi,
@@ -1646,10 +1840,14 @@ export class CopilotClient {
                 requestUserInput: !!config.onUserInputRequest,
                 requestElicitation: !!config.onElicitationRequest,
                 ...(config.enableMcpApps ? { requestMcpApps: true } : {}),
+                ...(config.githubMcpToolConfig != null
+                    ? { githubMcpToolConfig: config.githubMcpToolConfig }
+                    : {}),
                 requestExitPlanMode: !!config.onExitPlanModeRequest,
                 requestAutoModeSwitch: !!config.onAutoModeSwitchRequest,
                 hooks: !!(config.hooks && Object.values(config.hooks).some(Boolean)),
                 workingDirectory: config.workingDirectory,
+                additionalDirectories: config.additionalDirectories,
                 configDir: config.configDirectory,
                 enableConfigDiscovery: config.enableConfigDiscovery,
                 skipEmbeddingRetrieval: config.skipEmbeddingRetrieval,
@@ -1669,12 +1867,14 @@ export class CopilotClient {
                 mcpOAuthTokenStorage: config.mcpOAuthTokenStorage,
                 envValueMode: "direct",
                 customAgents: toWireCustomAgents(config.customAgents),
+                customAgentsLocalOnly: config.customAgentsLocalOnly,
                 defaultAgent: config.defaultAgent,
                 agent: config.agent,
                 skillDirectories: config.skillDirectories,
                 pluginDirectories: config.pluginDirectories,
                 instructionDirectories: config.instructionDirectories,
                 disabledSkills: config.disabledSkills,
+                disabledMcpServers: config.disabledMcpServers,
                 infiniteSessions: config.infiniteSessions,
                 memory: config.memory,
                 disableResume: config.suppressResumeEvent,
@@ -1683,7 +1883,32 @@ export class CopilotClient {
                 remoteSession: config.remoteSession,
                 openCanvases: config.openCanvases,
                 expAssignments: config.expAssignments,
+                enableManagedSettings: config.enableManagedSettings,
+                managedSettings: config.managedSettings,
+                ...(extensionOptions?.requestedEnvironmentVariables
+                    ? {
+                          requestedEnvironmentVariables:
+                              extensionOptions.requestedEnvironmentVariables,
+                      }
+                    : {}),
             });
+
+            // The host answers an approved environment request with the resolved
+            // values, and this method consumes the response, so the grant has to be
+            // applied here — no caller ever sees it. Only the names the user
+            // approved may reach the extension, so a host that answers with
+            // anything extra cannot widen the grant.
+            if (extensionOptions?.requestedEnvironmentVariables) {
+                const requested = new Set(extensionOptions.requestedEnvironmentVariables);
+                const { grantedEnvironmentVariables } = response as {
+                    grantedEnvironmentVariables?: Record<string, string>;
+                };
+                for (const [name, value] of Object.entries(grantedEnvironmentVariables ?? {})) {
+                    if (requested.has(name)) {
+                        process.env[name] = value;
+                    }
+                }
+            }
 
             const { workspacePath, capabilities, openCanvases } = response as {
                 sessionId: string;
@@ -1694,6 +1919,12 @@ export class CopilotClient {
             session["_workspacePath"] = workspacePath;
             session.setCapabilities(capabilities);
             session.setOpenCanvases(openCanvases ?? []);
+            if (config.mcpServers) {
+                await this.connection!.sendRequest("session.mcp.reloadWithConfig", {
+                    sessionId,
+                    config: { mcpServers: toWireMcpServers(config.mcpServers) },
+                });
+            }
             if (config.onMcpAuthRequest) {
                 await this.connection!.sendRequest("session.eventLog.registerInterest", {
                     sessionId,
@@ -2196,6 +2427,47 @@ export class CopilotClient {
     }
 
     /**
+     * Builds the environment for the spawned runtime child process (stdio/TCP): applies
+     * the auth token, connection token, `COPILOT_HOME`, keychain setting, and telemetry
+     * variables on top of the effective env. Not used by the in-process (FFI) transport,
+     * whose worker inherits the host process's ambient environment
+     * (see {@link CopilotClient.startInProcessFfi}).
+     */
+    private buildRuntimeEnv(): Record<string, string | undefined> {
+        const env: Record<string, string | undefined> = { ...this.resolvedEnv };
+        delete env.NODE_DEBUG;
+
+        if (this.options.gitHubToken) {
+            env.COPILOT_SDK_AUTH_TOKEN = this.options.gitHubToken;
+        }
+        if (this.effectiveConnectionToken) {
+            env.COPILOT_CONNECTION_TOKEN = this.effectiveConnectionToken;
+        }
+        if (this.options.baseDirectory) {
+            env.COPILOT_HOME = this.options.baseDirectory;
+        }
+        // In empty mode, disable the system keychain. Keytar reads from a
+        // process-wide store that's shared across sessions, which is unsafe
+        // for multi-tenant hosts. The runtime falls back to file-based
+        // credential storage scoped to COPILOT_HOME.
+        if (this.options.mode === "empty") {
+            env.COPILOT_DISABLE_KEYTAR = "1";
+        }
+        if (this.options.telemetry) {
+            const t = this.options.telemetry;
+            env.COPILOT_OTEL_ENABLED = "true";
+            if (t.otlpEndpoint !== undefined) env.OTEL_EXPORTER_OTLP_ENDPOINT = t.otlpEndpoint;
+            if (t.otlpProtocol !== undefined) env.OTEL_EXPORTER_OTLP_PROTOCOL = t.otlpProtocol;
+            if (t.filePath !== undefined) env.COPILOT_OTEL_FILE_EXPORTER_PATH = t.filePath;
+            if (t.exporterType !== undefined) env.COPILOT_OTEL_EXPORTER_TYPE = t.exporterType;
+            if (t.sourceName !== undefined) env.COPILOT_OTEL_SOURCE_NAME = t.sourceName;
+            if (t.captureContent !== undefined)
+                env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = String(t.captureContent);
+        }
+        return env;
+    }
+
+    /**
      * Start the CLI server process
      */
     private async startCLIServer(): Promise<void> {
@@ -2241,30 +2513,9 @@ export class CopilotClient {
                 args.push("--remote");
             }
 
-            // Suppress debug/trace output that might pollute stdout
-            const envWithoutNodeDebug = { ...this.resolvedEnv };
-            delete envWithoutNodeDebug.NODE_DEBUG;
-
-            // Set auth token in environment if provided
-            if (this.options.gitHubToken) {
-                envWithoutNodeDebug.COPILOT_SDK_AUTH_TOKEN = this.options.gitHubToken;
-            }
-
-            if (this.effectiveConnectionToken) {
-                envWithoutNodeDebug.COPILOT_CONNECTION_TOKEN = this.effectiveConnectionToken;
-            }
-
-            if (this.options.baseDirectory) {
-                envWithoutNodeDebug.COPILOT_HOME = this.options.baseDirectory;
-            }
-
-            // In empty mode, disable the system keychain. Keytar reads from a
-            // process-wide store that's shared across sessions, which is unsafe
-            // for multi-tenant hosts. The runtime falls back to file-based
-            // credential storage scoped to COPILOT_HOME.
-            if (this.options.mode === "empty") {
-                envWithoutNodeDebug.COPILOT_DISABLE_KEYTAR = "1";
-            }
+            // Suppress debug/trace output that might pollute stdout, and apply the
+            // shared runtime env (auth token, connection token, COPILOT_HOME, telemetry).
+            const envWithoutNodeDebug = this.buildRuntimeEnv();
 
             if (!this.resolvedCliPath) {
                 throw new Error(
@@ -2274,26 +2525,6 @@ export class CopilotClient {
                         "environment variable, or use `RuntimeConnection.forUri(...)` to " +
                         "connect to an already-running runtime."
                 );
-            }
-
-            // Set OpenTelemetry environment variables if telemetry is configured
-            if (this.options.telemetry) {
-                const t = this.options.telemetry;
-                envWithoutNodeDebug.COPILOT_OTEL_ENABLED = "true";
-                if (t.otlpEndpoint !== undefined)
-                    envWithoutNodeDebug.OTEL_EXPORTER_OTLP_ENDPOINT = t.otlpEndpoint;
-                if (t.otlpProtocol !== undefined)
-                    envWithoutNodeDebug.OTEL_EXPORTER_OTLP_PROTOCOL = t.otlpProtocol;
-                if (t.filePath !== undefined)
-                    envWithoutNodeDebug.COPILOT_OTEL_FILE_EXPORTER_PATH = t.filePath;
-                if (t.exporterType !== undefined)
-                    envWithoutNodeDebug.COPILOT_OTEL_EXPORTER_TYPE = t.exporterType;
-                if (t.sourceName !== undefined)
-                    envWithoutNodeDebug.COPILOT_OTEL_SOURCE_NAME = t.sourceName;
-                if (t.captureContent !== undefined)
-                    envWithoutNodeDebug.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = String(
-                        t.captureContent
-                    );
             }
 
             // Verify CLI exists before attempting to spawn
@@ -2432,10 +2663,118 @@ export class CopilotClient {
                 return this.connectToParentProcessViaStdio();
             case "stdio":
                 return this.connectToChildProcessViaStdio();
+            case "inprocess":
+                return this.connectViaFfi();
             case "tcp":
             case "uri":
                 return this.connectViaTcp();
         }
+    }
+
+    /** Starts the in-process FFI runtime with SDK-managed typed options. */
+    private async startInProcessFfi(): Promise<void> {
+        const entrypoint = this.resolveCliPathForFfi();
+        // Load the FFI host lazily so the native `koffi` addon (and its
+        // platform-specific `koffi.node`) is only loaded on the in-process path;
+        // out-of-process (stdio/tcp) consumers never touch the native dependency.
+        // The transpiled output is per-file (not bundled), so this resolves the
+        // sibling module at runtime in both the ESM and CJS builds.
+        const { FfiRuntimeHost } = await import("./ffiRuntimeHost.js");
+        const environment: Record<string, string> = {};
+        if (this.options.gitHubToken) {
+            environment.COPILOT_SDK_AUTH_TOKEN = this.options.gitHubToken;
+        }
+        if (this.options.baseDirectory) {
+            environment.COPILOT_HOME = this.options.baseDirectory;
+        }
+        if (this.options.mode === "empty") {
+            environment.COPILOT_DISABLE_KEYTAR = "1";
+        }
+
+        const args: string[] = [];
+        if (this.options.logLevel) {
+            args.push("--log-level", this.options.logLevel);
+        }
+        if (this.options.gitHubToken) {
+            args.push("--auth-token-env", "COPILOT_SDK_AUTH_TOKEN");
+        }
+        if (!this.options.useLoggedInUser) {
+            args.push("--no-auto-login");
+        }
+        if (this.options.sessionIdleTimeoutSeconds > 0) {
+            args.push("--session-idle-timeout", this.options.sessionIdleTimeoutSeconds.toString());
+        }
+        if (this.options.enableRemoteSessions) {
+            args.push("--remote");
+        }
+
+        const host = FfiRuntimeHost.create(
+            entrypoint,
+            CopilotClient.getNapiPrebuildsFolder(entrypoint),
+            environment,
+            args
+        );
+        this.ffiHost = host;
+        await host.start();
+    }
+
+    /**
+     * Connect to the in-process FFI runtime host over its receive/send streams,
+     * reusing the same `vscode-jsonrpc` framing as the stdio transport.
+     */
+    private async connectViaFfi(): Promise<void> {
+        if (!this.ffiHost) {
+            throw new Error("In-process FFI runtime host not started");
+        }
+        this.messageWriter = new TeardownResilientStreamMessageWriter(this.ffiHost.sendStream);
+        this.connection = createMessageConnection(
+            new StreamMessageReader(this.ffiHost.receiveStream),
+            this.messageWriter
+        );
+
+        this.attachConnectionHandlers();
+        this.connection.listen();
+    }
+
+    /**
+     * Resolves the CLI entrypoint used for in-process FFI hosting: `COPILOT_CLI_PATH`
+     * when set, otherwise the bundled platform-package entrypoint.
+     */
+    private resolveCliPathForFfi(): string {
+        return this.resolvedEnv.COPILOT_CLI_PATH ?? getBundledCliPath();
+    }
+
+    /**
+     * Returns the napi prebuilds folder name for the current host — the
+     * `<node-platform>-<arch>` convention (e.g. `win32-x64`, `darwin-arm64`,
+     * `linux-x64`, `linuxmusl-x64`) under which the runtime ships
+     * `prebuilds/<folder>/runtime.node`.
+     */
+    private static getNapiPrebuildsFolder(entrypoint: string): string {
+        const arch = process.arch;
+        if (arch !== "x64" && arch !== "arm64") {
+            throw new Error(`Unsupported architecture '${arch}' for in-process FFI hosting.`);
+        }
+        let platform: string = process.platform;
+        if (platform === "linux" && CopilotClient.isMusl(entrypoint)) {
+            platform = "linuxmusl";
+        }
+        return `${platform}-${arch}`;
+    }
+
+    private static isMusl(entrypoint: string): boolean {
+        if (entrypoint.includes(`copilot-linuxmusl-${process.arch}`)) {
+            return true;
+        }
+        if (entrypoint.includes(`copilot-linux-${process.arch}`)) {
+            return false;
+        }
+        const report = process.report?.getReport();
+        const header =
+            report && "header" in report
+                ? (report.header as { glibcVersionRuntime?: string })
+                : undefined;
+        return header !== undefined && header.glibcVersionRuntime === undefined;
     }
 
     /**
@@ -2569,15 +2908,6 @@ export class CopilotClient {
         );
 
         this.connection.onRequest(
-            "hooks.invoke",
-            async (params: {
-                sessionId: string;
-                hookType: string;
-                input: unknown;
-            }): Promise<{ output?: unknown }> => await this.handleHooksInvoke(params)
-        );
-
-        this.connection.onRequest(
             "systemMessage.transform",
             async (params: {
                 sessionId: string;
@@ -2598,6 +2928,17 @@ export class CopilotClient {
         // same connection. These methods carry no implicit sessionId dispatch
         // — the runtime calls into a single handler for the whole connection.
         registerClientGlobalApiHandlers(this.connection, this.clientGlobalHandlers);
+
+        // `hooks.invoke` is an internal RPC method: the runtime calls it to
+        // invoke a hook callback on the client. Route each call to the matching
+        // session's dispatcher. Not part of the public ClientGlobalApiHandlers
+        // interface because HookInvokeRequest/HookType are internal types.
+        this.connection.onRequest(
+            "hooks.invoke",
+            async (params: { sessionId: string; hookType: string; input: unknown }) => {
+                return await this.handleHooksInvoke(params);
+            }
+        );
 
         this.connection.onClose(() => {
             this.state = "disconnected";
@@ -2620,8 +2961,9 @@ export class CopilotClient {
         }
 
         const session = this.sessions.get((notification as { sessionId: string }).sessionId);
+        const event = (notification as { event: SessionEvent }).event;
         if (session) {
-            session._dispatchEvent((notification as { event: SessionEvent }).event);
+            session._dispatchEvent(event);
         }
     }
 

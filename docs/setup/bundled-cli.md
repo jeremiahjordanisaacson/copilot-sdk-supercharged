@@ -1,12 +1,20 @@
-# Default Setup (Bundled CLI)
+# Default setup (bundled CLI)
 
-The Node.js, Python, and .NET SDKs include the Copilot CLI as a dependency — your app ships with everything it needs, with no extra installation or configuration required.
+The Node.js and .NET SDKs include the Copilot CLI as a dependency—your app ships with everything it needs, with no extra installation or configuration required.
 
-**Best for:** Most applications — desktop apps, standalone tools, CLI utilities, prototypes, and more.
+The Python SDK recommends a one-time download step after installation:
 
-## How It Works
+```bash
+python -m copilot download-runtime
+```
 
-When you install the SDK, the Copilot CLI binary is included automatically. The SDK starts it as a child process and communicates over stdio. There's nothing extra to configure.
+This downloads the matching runtime and caches it locally. If you skip this step, the SDK will attempt to download it automatically on first use as a fallback.
+
+**Best for:** Most applications—desktop apps, standalone tools, CLI utilities, prototypes, and more.
+
+## How it works
+
+When you install the SDK, the Copilot runtime is included automatically (Node.js, .NET) or downloaded via `python -m copilot download-runtime` (Python). The SDK starts it as a child process and communicates over stdio. There's nothing extra to configure.
 
 ```mermaid
 flowchart TB
@@ -24,12 +32,12 @@ flowchart TB
 ```
 
 **Key characteristics:**
-- CLI binary is included with the SDK — no separate install needed
-- The SDK manages the CLI version to ensure compatibility
-- Users authenticate through your app (or use env vars / BYOK)
-- Sessions are managed per-user on their machine
+* CLI binary is included with the SDK—no separate install needed
+* The SDK manages the CLI version to ensure compatibility
+* Users authenticate through your app (or use env vars / BYOK)
+* Sessions are managed per-user on their machine
 
-## Quick Start
+## Quick start
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
@@ -39,7 +47,7 @@ import { CopilotClient } from "@github/copilot-sdk";
 
 const client = new CopilotClient();
 
-const session = await client.createSession({ model: "gpt-4.1" });
+const session = await client.createSession({ model: "gpt-5.4" });
 const response = await session.sendAndWait({ prompt: "Hello!" });
 console.log(response?.data.content);
 
@@ -58,7 +66,7 @@ from copilot.session import PermissionHandler
 client = CopilotClient()
 await client.start()
 
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all, model="gpt-4.1")
+session = await client.create_session(on_permission_request=PermissionHandler.approve_all, model="gpt-5.4")
 response = await session.send_and_wait("Hello!")
 print(response.data.content)
 
@@ -70,7 +78,8 @@ await client.stop()
 <details>
 <summary><strong>Go</strong></summary>
 
-> **Note:** The Go SDK does not bundle the CLI. You must install the CLI separately or set `CLIPath` to point to an existing binary. See [Local CLI Setup](./local-cli.md) for details.
+> [!NOTE]
+> Unlike Node.js, Python, and .NET, the Go SDK does not include a CLI as an automatic dependency. With no explicit path, `NewClient(nil)` uses an embedded CLI when available, then falls back to `copilot` on `PATH`. To embed a CLI, run the [bundler tool](../../go/README.md#distributing-your-application-with-an-embedded-github-copilot-cli) at build time. You can also set `COPILOT_CLI_PATH` or point a `Connection` at an existing binary. See [Local CLI Setup](./local-cli.md) for details.
 
 <!-- docs-validate: hidden -->
 ```go
@@ -92,7 +101,7 @@ func main() {
 	}
 	defer client.Stop()
 
-	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{Model: "gpt-4.1"})
+	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{Model: "gpt-5.4"})
 	response, _ := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: "Hello!"})
 	if d, ok := response.Data.(*copilot.AssistantMessageData); ok {
 		fmt.Println(d.Content)
@@ -108,7 +117,7 @@ if err := client.Start(ctx); err != nil {
 }
 defer client.Stop()
 
-session, _ := client.CreateSession(ctx, &copilot.SessionConfig{Model: "gpt-4.1"})
+session, _ := client.CreateSession(ctx, &copilot.SessionConfig{Model: "gpt-5.4"})
 response, _ := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: "Hello!"})
 if d, ok := response.Data.(*copilot.AssistantMessageData); ok {
     fmt.Println(d.Content)
@@ -123,7 +132,7 @@ if d, ok := response.Data.(*copilot.AssistantMessageData); ok {
 ```csharp
 await using var client = new CopilotClient();
 await using var session = await client.CreateSessionAsync(
-    new SessionConfig { Model = "gpt-4.1" });
+    new SessionConfig { Model = "gpt-5.4" });
 
 var response = await session.SendAndWaitAsync(
     new MessageOptions { Prompt = "Hello!" });
@@ -135,12 +144,12 @@ Console.WriteLine(response?.Data.Content);
 <details>
 <summary><strong>Java</strong></summary>
 
-> **Note:** The Java SDK does not bundle or embed the Copilot CLI. You must install the CLI separately and configure its path via `cliPath` or the `COPILOT_CLI_PATH` environment variable.
+> [!NOTE]
+> The Java SDK does not bundle or embed the Copilot CLI. Install the CLI separately and either make `copilot` available on your `PATH` or set its location with `setCliPath(...)` (or connect to a running CLI server with `setCliUrl(...)`).
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.events.*;
-import com.github.copilot.sdk.json.*;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.rpc.*;
 
 var client = new CopilotClient(new CopilotClientOptions()
     // Point to the CLI binary installed on the system
@@ -149,7 +158,7 @@ var client = new CopilotClient(new CopilotClientOptions()
 client.start().get();
 
 var session = client.createSession(new SessionConfig()
-    .setModel("gpt-4.1")
+    .setModel("gpt-5.4")
     .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
 ).get();
 
@@ -162,9 +171,7 @@ client.stop().get();
 
 </details>
 
-> **40 languages supported.** See the [full SDK list](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks) with cookbooks for Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V, and 18 more.
-
-## Authentication Strategies
+## Authentication strategies
 
 You need to decide how your users will authenticate. Here are the common patterns:
 
@@ -183,16 +190,16 @@ flowchart TB
     style App fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
 ```
 
-### Option A: User's Signed-In Credentials (Simplest)
+### Option A: user's signed-in credentials (simplest)
 
-The user signs in to the CLI once, and your app uses those credentials. No extra code needed — this is the default behavior.
+The user signs in to the CLI once, and your app uses those credentials. No extra code needed—this is the default behavior.
 
 ```typescript
 const client = new CopilotClient();
 // Default: uses signed-in user credentials
 ```
 
-### Option B: Token via Environment Variable
+### Option B: token via environment variable
 
 Ship your app with instructions to set a token, or set it programmatically:
 
@@ -204,7 +211,7 @@ const client = new CopilotClient({
 });
 ```
 
-### Option C: BYOK (No GitHub Auth Needed)
+### Option C: BYOK (no GitHub auth needed)
 
 If you manage your own model provider keys, users don't need GitHub accounts at all:
 
@@ -212,7 +219,7 @@ If you manage your own model provider keys, users don't need GitHub accounts at 
 const client = new CopilotClient();
 
 const session = await client.createSession({
-    model: "gpt-4.1",
+    model: "gpt-5.4",
     provider: {
         type: "openai",
         baseUrl: "https://api.openai.com/v1",
@@ -223,7 +230,7 @@ const session = await client.createSession({
 
 See the **[BYOK guide](../auth/byok.md)** for full details.
 
-## Session Management
+## Session management
 
 Apps typically want named sessions so users can resume conversations:
 
@@ -234,7 +241,7 @@ const client = new CopilotClient();
 const sessionId = `project-${projectName}`;
 const session = await client.createSession({
     sessionId,
-    model: "gpt-4.1",
+    model: "gpt-5.4",
 });
 
 // User closes app...
@@ -244,7 +251,7 @@ const resumed = await client.resumeSession(sessionId);
 
 Session state persists at `~/.copilot/session-state/{sessionId}/`.
 
-## When to Move On
+## When to move on
 
 | Need | Next Guide |
 |------|-----------|
@@ -252,8 +259,8 @@ Session state persists at `~/.copilot/session-state/{sessionId}/`.
 | Run on a server instead of user machines | [Backend Services](./backend-services.md) |
 | Use your own model keys | [BYOK](../auth/byok.md) |
 
-## Next Steps
+## Next steps
 
-- **[BYOK guide](../auth/byok.md)** — Use your own model provider keys
-- **[Session Persistence](../features/session-persistence.md)** — Advanced session management
-- **[Getting Started tutorial](../getting-started.md)** — Build a complete app
+* **[BYOK guide](../auth/byok.md)**: Use your own model provider keys
+* **[Session Persistence](../features/session-persistence.md)**: Advanced session management
+* **[Getting Started tutorial](../getting-started.md)**: Build a complete app

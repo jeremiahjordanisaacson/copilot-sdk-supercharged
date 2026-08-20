@@ -17,6 +17,7 @@ import { fileURLToPath } from "url";
 import { promisify } from "util";
 import type { JSONSchema7, JSONSchema7Definition } from "json-schema";
 import {
+	addManagedApprovalRequiredToPermissionRequests,
 	type ApiSchema,
 	type DefinitionCollections,
 	EXCLUDED_EVENT_TYPES,
@@ -299,6 +300,7 @@ function tryEmitRustUnion(
 	const enumName =
 		(typeof schema.title === "string" && schema.title) ||
 		parentTypeName + toPascalCase(jsonPropName);
+	const isAllowedUnionType = ctx.allowedUnionTypeNames.has(enumName);
 
 	const resolvedVariants: RustUnionVariant[] = [];
 	for (let i = 0; i < nonNull.length; i++) {
@@ -317,7 +319,20 @@ function tryEmitRustUnion(
 			resolveObjectSchema(variant, ctx.definitions) ??
 			resolveSchema(variant, ctx.definitions) ??
 			variant;
-		if (!isObjectSchema(resolved)) return null;
+		if (!isObjectSchema(resolved)) {
+			if (!isAllowedUnionType) return null;
+			resolvedVariants.push({
+				schema: resolved as JSONSchema7,
+				typeName: resolveRustType(
+					resolved as JSONSchema7,
+					enumName,
+					`variant${i + 1}`,
+					true,
+					ctx,
+				),
+			});
+			continue;
+		}
 		const discriminatorValue = Object.values(resolved.properties ?? {}).find(
 			(prop) => typeof prop === "object" && (prop as JSONSchema7).const !== undefined,
 		) as JSONSchema7 | undefined;
@@ -334,7 +349,6 @@ function tryEmitRustUnion(
 	}
 
 	const discriminator = findRustDiscriminator(resolvedVariants);
-	const isAllowedUnionType = ctx.allowedUnionTypeNames.has(enumName);
 	if (discriminator) {
 		if (
 			ctx.unionDiscriminatorProperties &&
@@ -343,7 +357,7 @@ function tryEmitRustUnion(
 		) {
 			return null;
 		}
-	} else if (!ctx.allowUntaggedUnions || !isAllowedUnionType) {
+	} else if (!ctx.allowUntaggedUnions && !isAllowedUnionType) {
 		return null;
 	}
 
@@ -573,6 +587,45 @@ function emitRustMapAlias(
 		ctx,
 		description,
 	);
+}
+
+/**
+ * Map a primitive JSON Schema type to its Rust equivalent, or `undefined` when
+ * the schema is not a plain scalar. Mirrors the primitive branches of
+ * {@link resolveRustType}.
+ */
+function rustScalarType(schema: JSONSchema7): string | undefined {
+	if (schema.enum || schema.const !== undefined) return undefined;
+	switch (schema.type) {
+		case "string":
+			return "String";
+		case "number":
+			return "f64";
+		case "integer":
+			return isIntegerSchemaBoundedToInt32(schema) ? "i32" : "i64";
+		case "boolean":
+			return "bool";
+		default:
+			return undefined;
+	}
+}
+
+/**
+ * Emit a type alias for a named schema that resolves to a primitive scalar
+ * (e.g. an RPC result declared as `{ "type": "integer" }`). Without this the
+ * generated RPC surface would reference a `*Result` type that was never
+ * defined.
+ */
+function emitRustScalarAlias(
+	typeName: string,
+	schema: JSONSchema7,
+	ctx: RustCodegenCtx,
+	description?: string,
+): void {
+	if (ctx.generatedNames.has(typeName)) return;
+	const scalarType = rustScalarType(schema);
+	if (!scalarType) return;
+	emitRustTypeAlias(typeName, schema, scalarType, ctx, description);
 }
 
 function rustRpcResultDescription(
@@ -1109,7 +1162,11 @@ function extractEventVariants(schema: JSONSchema7): EventVariant[] {
 				dataExperimental: isSchemaExperimental(dataSchema),
 			};
 		})
-		.filter((v) => !EXCLUDED_EVENT_TYPES.has(v.typeName));
+		.filter(
+			(v) =>
+				!EXCLUDED_EVENT_TYPES.has(v.typeName) &&
+				!isSchemaInternal(v.dataSchema),
+		);
 }
 
 export function generateSessionEventsCode(schema: JSONSchema7): string {
@@ -1403,7 +1460,10 @@ function generateApiTypesCode(
 	const defCollections = collectDefinitionCollections(
 		apiSchema as Record<string, unknown>,
 	);
-	const ctx = makeCtx(defCollections, { nonDefaultableTypes });
+	const ctx = makeCtx(defCollections, {
+		nonDefaultableTypes,
+		allowedUnionTypeNames: ["AuthInfo", "McpOauthProbeResult", "ToolResult"],
+	});
 
 	// Collect all RPC methods before emitting shared definitions so method stability
 	// can propagate to referenced data types.
@@ -1523,6 +1583,8 @@ function generateApiTypesCode(
 			} else {
 				tryEmitRustUnion(schema, name, "", ctx);
 			}
+		} else {
+			emitRustScalarAlias(name, schema, ctx, schema.description);
 		}
 	}
 
@@ -1572,6 +1634,8 @@ function generateApiTypesCode(
 					emitRustMapAlias(resultName, resolved, ctx, resolved.description);
 				} else if (isObjectSchema(resolved)) {
 					emitRustStruct(resultName, resolved, ctx, resolved.description);
+				} else {
+					emitRustScalarAlias(resultName, resolved, ctx, resolved.description);
 				}
 			}
 		}
@@ -2164,7 +2228,9 @@ async function generate(): Promise<void> {
 
 	const sessionEventsSchema = propagateInternalVisibility(
 		postProcessSchema(
-			stripBooleanLiterals(sessionEventsRaw) as JSONSchema7,
+			stripBooleanLiterals(
+				addManagedApprovalRequiredToPermissionRequests(sessionEventsRaw as JSONSchema7),
+			) as JSONSchema7,
 		),
 	);
 	const apiSchema = propagateInternalVisibility(

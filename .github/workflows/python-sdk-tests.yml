@@ -1,4 +1,4 @@
-name: "Test: Python SDK"
+name: "Python SDK Tests"
 
 env:
   PYTHONUTF8: 1
@@ -7,31 +7,16 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - 'python/**'
-      - 'test/**'
-      - 'nodejs/package.json'
-      - '.github/workflows/python-sdk-tests.yml'
-      - '!**/*.md'
-      - '!**/LICENSE*'
-      - '!**/.gitignore'
-      - '!**/.editorconfig'
-      - '!**/*.png'
-      - '!**/*.jpg'
-      - '!**/*.jpeg'
-      - '!**/*.gif'
-      - '!**/*.svg'
   workflow_dispatch:
-  merge_group:
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
   test:
-    name: "Test: Python SDK"
+    name: "Python SDK Tests (${{ matrix.os }}, ${{ matrix.transport }})"
+    if: github.event.repository.fork == false
     env:
       POWERSHELL_UPDATECHECK: Off
     strategy:
@@ -40,13 +25,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         # Test the oldest supported Python version to make sure compatibility is maintained.
         python-version: ["3.11"]
+        transport: ["default", "inprocess"]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
         working-directory: ./python
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
@@ -66,7 +52,7 @@ jobs:
 
       - name: Install Node.js dependencies (for CLI in tests)
         working-directory: ./nodejs
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts
 
       - name: Run ruff format check
         run: uv run ruff format --check .
@@ -75,24 +61,24 @@ jobs:
         run: uv run ruff check
 
       - name: Run ty type checking
-        run: |
-          uv run ty check copilot || echo "::warning::ty check reported errors (known false positives with type: ignore comments)"
+        run: uv run ty check copilot
 
       - name: Install test harness dependencies
         working-directory: ./test/harness
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts
 
       - name: Warm up PowerShell
         if: runner.os == 'Windows'
         run: pwsh.exe -Command "Write-Host 'PowerShell ready'"
 
+      - name: Select inprocess transport
+        if: matrix.transport == 'inprocess'
+        run: |
+          echo "COPILOT_SDK_DEFAULT_CONNECTION=inprocess" >> "$GITHUB_ENV"
+
       - name: Run Python SDK tests
         env:
           COPILOT_HMAC_KEY: ${{ secrets.COPILOT_DEVELOPER_CLI_INTEGRATION_HMAC_KEY }}
-        run: |
-          if [ -z "$COPILOT_HMAC_KEY" ]; then
-            echo "::warning::COPILOT_HMAC_KEY not set — running lint and type checks only"
-            uv run ruff check && uv run ruff format --check .
-          else
-            uv run pytest -v -s
-          fi
+        # Keep each module's shared E2E client and proxy on one process while
+        # running independent modules concurrently in isolated workers.
+        run: uv run pytest -v -s -n 2 --dist=loadfile

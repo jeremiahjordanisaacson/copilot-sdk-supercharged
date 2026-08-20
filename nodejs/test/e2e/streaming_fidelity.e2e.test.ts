@@ -3,11 +3,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, it, onTestFinished } from "vitest";
-import { CopilotClient, SessionEvent, approveAll } from "../../src/index.js";
+import { SessionEvent, approveAll } from "../../src/index.js";
 import { createSdkTestContext, isCI } from "./harness/sdkTestContext";
 
 describe("Streaming Fidelity", async () => {
-    const { copilotClient: client, env } = await createSdkTestContext();
+    const { copilotClient: client, createClient } = await createSdkTestContext();
 
     it("should produce delta events when streaming is enabled", async () => {
         const session = await client.createSession({
@@ -81,11 +81,10 @@ describe("Streaming Fidelity", async () => {
         await session.disconnect();
 
         // Resume using a new client
-        const newClient = new CopilotClient({
-            env,
+        const newClient = createClient({
             gitHubToken: isCI ? "fake-token-for-e2e-tests" : process.env.GITHUB_TOKEN,
         });
-        onTestFinished(() => newClient.forceStop());
+        onTestFinished(() => newClient.stop());
         const session2 = await newClient.resumeSession(session.sessionId, {
             onPermissionRequest: approveAll,
             streaming: true,
@@ -120,11 +119,10 @@ describe("Streaming Fidelity", async () => {
         await session.disconnect();
 
         // Resume using a new client with streaming DISABLED
-        const newClient = new CopilotClient({
-            env,
+        const newClient = createClient({
             gitHubToken: isCI ? "fake-token-for-e2e-tests" : process.env.GITHUB_TOKEN,
         });
-        onTestFinished(() => newClient.forceStop());
+        onTestFinished(() => newClient.stop());
         const session2 = await newClient.resumeSession(session.sessionId, {
             onPermissionRequest: approveAll,
             streaming: false,
@@ -147,32 +145,37 @@ describe("Streaming Fidelity", async () => {
         await session2.disconnect();
     });
 
-    it("should emit streaming deltas with reasoning effort configured", async () => {
-        const session = await client.createSession({
-            onPermissionRequest: approveAll,
-            streaming: true,
-            reasoningEffort: "high",
+    describe("reasoning effort (isolated to avoid models cache contamination)", async () => {
+        const { copilotClient: reasoningClient } = await createSdkTestContext();
+
+        it("should emit streaming deltas with reasoning effort configured", async () => {
+            const session = await reasoningClient.createSession({
+                onPermissionRequest: approveAll,
+                model: "gpt-5.4",
+                streaming: true,
+                reasoningEffort: "high",
+            });
+
+            const events: SessionEvent[] = [];
+            session.on((event) => events.push(event));
+
+            await session.sendAndWait({ prompt: "What is 15 * 17?" });
+
+            const deltaEvents = events.filter((e) => e.type === "assistant.message_delta");
+            expect(deltaEvents.length).toBeGreaterThanOrEqual(1);
+
+            const assistantEvents = events.filter((e) => e.type === "assistant.message");
+            expect(assistantEvents.length).toBeGreaterThanOrEqual(1);
+            const lastAssistant = assistantEvents[assistantEvents.length - 1]!;
+            expect(lastAssistant.data.content).toContain("255");
+
+            // Verify the session was created with reasoning effort via getMessages
+            const messages = await session.getEvents();
+            const startEvent = messages.find((m) => m.type === "session.start");
+            expect(startEvent).toBeDefined();
+            expect(startEvent!.data.reasoningEffort).toBe("high");
+
+            await session.disconnect();
         });
-
-        const events: SessionEvent[] = [];
-        session.on((event) => events.push(event));
-
-        await session.sendAndWait({ prompt: "What is 15 * 17?" });
-
-        const deltaEvents = events.filter((e) => e.type === "assistant.message_delta");
-        expect(deltaEvents.length).toBeGreaterThanOrEqual(1);
-
-        const assistantEvents = events.filter((e) => e.type === "assistant.message");
-        expect(assistantEvents.length).toBeGreaterThanOrEqual(1);
-        const lastAssistant = assistantEvents[assistantEvents.length - 1]!;
-        expect(lastAssistant.data.content).toContain("255");
-
-        // Verify the session was created with reasoning effort via getMessages
-        const messages = await session.getEvents();
-        const startEvent = messages.find((m) => m.type === "session.start");
-        expect(startEvent).toBeDefined();
-        expect(startEvent!.data.reasoningEffort).toBe("high");
-
-        await session.disconnect();
     });
 });

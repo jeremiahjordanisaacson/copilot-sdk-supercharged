@@ -1,4 +1,4 @@
-name: "Test: Node.js SDK"
+name: "Node.js SDK Tests"
 
 env:
   HUSKY: 0
@@ -7,51 +7,37 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - 'nodejs/**'
-      - 'test/**'
-      - '.github/workflows/nodejs-sdk-tests.yml'
-      - '!nodejs/scripts/**'
-      - '!**/*.md'
-      - '!**/LICENSE*'
-      - '!**/.gitignore'
-      - '!**/.editorconfig'
-      - '!**/*.png'
-      - '!**/*.jpg'
-      - '!**/*.jpeg'
-      - '!**/*.gif'
-      - '!**/*.svg'
   workflow_dispatch:
-  merge_group:
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
   test:
-    name: "Test: Node.js SDK"
+    name: "Node.js SDK Tests (${{ matrix.os }}, ${{ matrix.transport }})"
+    if: github.event.repository.fork == false
     env:
       POWERSHELL_UPDATECHECK: Off
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        transport: ["default", "inprocess"]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
         working-directory: ./nodejs
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - uses: actions/setup-node@v6
         with:
           cache: "npm"
           cache-dependency-path: "./nodejs/package-lock.json"
           node-version: 22
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts
 
       - name: Run prettier check
         if: runner.os == 'Linux'
@@ -68,19 +54,18 @@ jobs:
 
       - name: Install test harness dependencies
         working-directory: ./test/harness
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts
 
       - name: Warm up PowerShell
         if: runner.os == 'Windows'
         run: pwsh.exe -Command "Write-Host 'PowerShell ready'"
 
+      - name: Select inprocess transport
+        if: matrix.transport == 'inprocess'
+        run: |
+          echo "COPILOT_SDK_DEFAULT_CONNECTION=inprocess" >> "$GITHUB_ENV"
+
       - name: Run Node.js SDK tests
         env:
           COPILOT_HMAC_KEY: ${{ secrets.COPILOT_DEVELOPER_CLI_INTEGRATION_HMAC_KEY }}
-        run: |
-          if [ -z "$COPILOT_HMAC_KEY" ]; then
-            echo "::warning::COPILOT_HMAC_KEY not set — running unit tests only, skipping E2E auth tests"
-            npm run typecheck && npm run lint && npm run build
-          else
-            npm test
-          fi
+        run: npm test

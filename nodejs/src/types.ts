@@ -11,19 +11,25 @@ import type { Canvas } from "./canvas.js";
 import type { SessionFsProvider } from "./sessionFsProvider.js";
 import type { CopilotRequestHandler } from "./copilotRequestHandler.js";
 import type {
+    PermissionRequest as GeneratedPermissionRequest,
+    PermissionRequestedData as GeneratedPermissionRequestedData,
+    PermissionRequestedEvent as GeneratedPermissionRequestedEvent,
     ReasoningSummary,
     SessionLimitsConfig,
     SessionEvent as GeneratedSessionEvent,
 } from "./generated/session-events.js";
 import type { CopilotSession } from "./session.js";
+import type { FactoryJsonSchema, JsonValue } from "./factory.js";
 import type {
     GitHubTelemetryNotification,
     ModelBillingTokenPrices,
     OpenCanvasInstance,
     RemoteSessionMode,
+    CurrentToolMetadata,
 } from "./generated/rpc.js";
 import type { ToolSet } from "./toolSet.js";
 export type { RemoteSessionMode } from "./generated/rpc.js";
+export type { CurrentToolMetadata } from "./generated/rpc.js";
 export type {
     GitHubTelemetryNotification,
     GitHubTelemetryEvent,
@@ -33,7 +39,9 @@ export type {
     ModelBillingTokenPrices,
     ModelBillingTokenPricesLongContext,
 } from "./generated/rpc.js";
-export type SessionEvent = GeneratedSessionEvent;
+export type SessionEvent =
+    | Exclude<GeneratedSessionEvent, { type: "permission.requested" }>
+    | PermissionRequestedEvent;
 export type { ReasoningSummary } from "./generated/session-events.js";
 export type { SessionFsProvider } from "./sessionFsProvider.js";
 export { createSessionFsAdapter } from "./sessionFsProvider.js";
@@ -41,7 +49,16 @@ export type { SessionFsFileInfo } from "./sessionFsProvider.js";
 export type { SessionFsSqliteQueryResult } from "./sessionFsProvider.js";
 export type { SessionFsSqliteQueryType } from "./sessionFsProvider.js";
 export type { SessionFsSqliteProvider } from "./sessionFsProvider.js";
+export type { SessionFsSqliteStatement } from "./sessionFsProvider.js";
+export type { SessionFsSqliteTransactionErrorClass } from "./sessionFsProvider.js";
+export { SessionFsSqliteTransactionFailure } from "./sessionFsProvider.js";
 export type { LlmInferenceHeaders } from "./generated/rpc.js";
+export type {
+    PermissionDecisionContext,
+    PermissionDecisionOutcome,
+    PermissionDecisionSource,
+    PermissionDecisionSurface,
+} from "./generated/rpc.js";
 export type { CopilotRequestContext } from "./copilotRequestHandler.js";
 export {
     CopilotRequestHandler,
@@ -96,25 +113,60 @@ export interface TelemetryConfig {
  */
 export type RuntimeConnection =
     | StdioRuntimeConnection
+    | InProcessRuntimeConnection
     | TcpRuntimeConnection
     | UriRuntimeConnection;
+
+/**
+ * Shared shape for the transports that spawn a runtime **child process**
+ * ({@link StdioRuntimeConnection} and {@link TcpRuntimeConnection}).
+ */
+export interface ChildProcessRuntimeConnection {
+    /** Path to the runtime executable. When omitted, the bundled runtime is used. */
+    readonly path?: string;
+    /** Extra command-line arguments to pass to the runtime process. */
+    readonly args?: readonly string[];
+    /**
+     * Environment variables for the spawned runtime child process, replacing the
+     * inherited environment. Cannot be combined with
+     * {@link CopilotClientOptions.env}; setting both throws when the client is
+     * constructed. When omitted, the client-level env (or `process.env`) is used.
+     */
+    readonly env?: Record<string, string>;
+}
 
 /**
  * Spawns a runtime child process and communicates over its stdin/stdout.
  * This is the default if no {@link CopilotClientOptions.connection} is set.
  */
-export interface StdioRuntimeConnection {
+export interface StdioRuntimeConnection extends ChildProcessRuntimeConnection {
     readonly kind: "stdio";
-    /** Path to the runtime executable. When omitted, the bundled runtime is used. */
-    readonly path?: string;
-    /** Extra command-line arguments to pass to the runtime process. */
-    readonly args?: readonly string[];
+}
+
+/**
+ * Hosts the runtime in-process by loading the native runtime library and speaking
+ * JSON-RPC over its C ABI (FFI), instead of spawning a runtime child process. The
+ * native host spawns the CLI worker itself. Construct via
+ * {@link RuntimeConnection.forInProcess}.
+ *
+ * @experimental The in-process (FFI) transport is experimental and its behavior may
+ * change. Per-client options that are lowered to environment variables — including
+ * {@link CopilotClientOptions.env}, {@link CopilotClientOptions.telemetry},
+ * {@link CopilotClientOptions.gitHubToken}, and
+ * {@link CopilotClientOptions.baseDirectory} — are **not** honored with this
+ * transport, because the native runtime loads into the shared host process and its
+ * worker inherits that process's ambient environment. To configure the in-process
+ * runtime, set the corresponding environment variables on the host process before
+ * constructing the client. See https://github.com/github/copilot-sdk/issues/1934.
+ */
+export interface InProcessRuntimeConnection {
+    readonly kind: "inprocess";
 }
 
 /**
  * Spawns a runtime child process that listens on a TCP socket and connects to it.
  */
-export interface TcpRuntimeConnection {
+export interface TcpRuntimeConnection extends ChildProcessRuntimeConnection {
     readonly kind: "tcp";
     /**
      * TCP port to listen on. `0` (the default) auto-allocates a free port.
@@ -127,10 +179,6 @@ export interface TcpRuntimeConnection {
      * loopback listener is safe by default.
      */
     readonly connectionToken?: string;
-    /** Path to the runtime executable. When omitted, the bundled runtime is used. */
-    readonly path?: string;
-    /** Extra command-line arguments to pass to the runtime process. */
-    readonly args?: readonly string[];
 }
 
 /**
@@ -154,8 +202,10 @@ export const RuntimeConnection = {
      * Spawn a runtime child process and communicate over its stdin/stdout.
      * This is the default if no {@link CopilotClientOptions.connection} is set.
      */
-    forStdio(opts: { path?: string; args?: readonly string[] } = {}): StdioRuntimeConnection {
-        return { kind: "stdio", path: opts.path, args: opts.args };
+    forStdio(
+        opts: { path?: string; args?: readonly string[]; env?: Record<string, string> } = {}
+    ): StdioRuntimeConnection {
+        return { kind: "stdio", path: opts.path, args: opts.args, env: opts.env };
     },
     /**
      * Spawn a runtime child process that listens on a TCP socket and connect to it.
@@ -166,6 +216,7 @@ export const RuntimeConnection = {
             connectionToken?: string;
             path?: string;
             args?: readonly string[];
+            env?: Record<string, string>;
         } = {}
     ): TcpRuntimeConnection {
         return {
@@ -174,6 +225,7 @@ export const RuntimeConnection = {
             connectionToken: opts.connectionToken,
             path: opts.path,
             args: opts.args,
+            env: opts.env,
         };
     },
     /**
@@ -182,6 +234,18 @@ export const RuntimeConnection = {
      */
     forUri(url: string, opts: { connectionToken?: string } = {}): UriRuntimeConnection {
         return { kind: "uri", url, connectionToken: opts.connectionToken };
+    },
+    /**
+     * Host the runtime in-process over the native runtime library's C ABI (FFI).
+     *
+     * @experimental Per-client options lowered to environment variables (`env`,
+     * `telemetry`, `gitHubToken`, `baseDirectory`) are **not** honored in-process;
+     * the worker inherits the host process's ambient environment. Set the
+     * corresponding environment variables on the host process instead. See
+     * https://github.com/github/copilot-sdk/issues/1934.
+     */
+    forInProcess(): InProcessRuntimeConnection {
+        return { kind: "inprocess" };
     },
 } as const;
 
@@ -245,6 +309,13 @@ export interface CopilotClientOptions {
      * Ignored when connecting to an existing runtime via {@link RuntimeConnection.forUri}.
      */
     baseDirectory?: string;
+
+    /**
+     * Absolute paths to trusted plugin directories bundled by the host.
+     * When non-empty, the complete set is registered with the runtime during
+     * startup before any sessions can be created.
+     */
+    builtinPluginDirectories?: readonly string[];
 
     /**
      * Log level for the Copilot runtime. When omitted, the runtime uses its
@@ -394,7 +465,7 @@ export type ToolBinaryResult = {
     description?: string;
 };
 
-export type ToolTelemetry = Record<string, Record<string, unknown> | undefined>;
+export type ToolTelemetry = Record<string, Record<string, JsonValue> | undefined>;
 
 export type ToolResultObject = {
     textResultForLlm: string;
@@ -403,6 +474,10 @@ export type ToolResultObject = {
     error?: string;
     sessionLog?: string;
     toolTelemetry?: ToolTelemetry;
+    /**
+     * Names of tools returned by a tool-search tool.
+     */
+    toolReferences?: string[];
 };
 
 export type ToolResult = string | ToolResultObject;
@@ -527,6 +602,14 @@ export interface ToolInvocation {
     toolCallId: string;
     toolName: string;
     arguments: unknown;
+    /**
+     * Snapshot of the session's currently initialized tools. Populated by the
+     * SDK only when this invocation targets the built-in tool-search tool
+     * (`tool_search_tool`), so a tool-search override can rank/filter the live
+     * catalog — including MCP tools configured in settings — without issuing its
+     * own RPC. `undefined` for every other tool invocation.
+     */
+    availableTools?: CurrentToolMetadata[];
     /** W3C Trace Context traceparent from the CLI's execute_tool span. */
     traceparent?: string;
     /** W3C Trace Context tracestate from the CLI's execute_tool span. */
@@ -579,6 +662,25 @@ export interface Tool<TArgs = unknown> {
      * Optional; defaults to `"auto"`.
      */
     defer?: "auto" | "never";
+    /**
+     * Opaque, host-defined metadata associated with the tool definition.
+     *
+     * Keys are namespaced and are not part of the stable public API. Values are
+     * not interpreted and may be recognized to inform host-specific behavior.
+     * Unknown keys are preserved and round-tripped untouched.
+     */
+    metadata?: Record<string, unknown>;
+    /**
+     * When true, a successful call to this tool ends the agent turn: the runtime's
+     * tool phase halts instead of feeding the tool result back to the model for
+     * another round. A failed call (for example input validation) leaves the loop
+     * running so the model can read the error and retry.
+     *
+     * Use this for tools whose whole purpose is to terminate the turn, such as a
+     * context clear that replaces the conversation the model would otherwise
+     * continue from.
+     */
+    isTerminal?: boolean;
 }
 
 /**
@@ -594,9 +696,40 @@ export function defineTool<T = unknown>(
         overridesBuiltInTool?: boolean;
         skipPermission?: boolean;
         defer?: "auto" | "never";
+        metadata?: Record<string, unknown>;
+        isTerminal?: boolean;
     }
 ): Tool<T> {
     return { name, ...config };
+}
+
+/**
+ * SDK-supplied override for the runtime's built-in tool-search behavior.
+ *
+ * Tool search lets the model discover tools on demand instead of loading every
+ * tool definition up front. When the total tool count exceeds the deferral
+ * threshold, MCP and external tools are marked as deferred and surfaced through
+ * the built-in `tool_search_tool`.
+ *
+ * To override the tool-search tool's model-facing definition and/or its
+ * execution, register a {@link Tool} named `tool_search_tool` with
+ * `overridesBuiltInTool: true`. To customize the in-prompt tool-search
+ * guidance, use the `tool_instructions` section of {@link SystemMessageConfig}
+ * in `"customize"` mode.
+ */
+export interface ToolSearchConfig {
+    /**
+     * Toggle to enable/disable tool search. When disabled, all tools are pre-loaded
+     * and the model's active tool set is not deferred.
+     */
+    enabled?: boolean;
+
+    /**
+     * Overrides the total tool count at which MCP and external tools are
+     * automatically deferred behind tool search. Defaults to the built-in
+     * threshold (30) when omitted.
+     */
+    deferThreshold?: number;
 }
 
 // ============================================================================
@@ -993,16 +1126,33 @@ export type SystemMessageConfig =
     | SystemMessageReplaceConfig
     | SystemMessageCustomizeConfig;
 
+import type { PermissionDecisionRequest, PermissionDecisionContext } from "./generated/rpc.js";
+
 /**
  * Permission request types from the server. This is the generated
  * discriminated union from the runtime schema — switch on `kind` to
  * access the variant-specific fields (e.g. shell `commands`, write
  * `fileName`/`diff`, mcp `toolName`/`args`).
+ *
+ * `managedApprovalRequired` indicates that managed policy requires an explicit
+ * user decision. Hosts should bypass automatic approval and present their
+ * normal confirmation UI. The runtime currently emits it for managed Shell,
+ * Read, Edit, and Domain selector asks.
  */
-export type { PermissionRequest } from "./generated/session-events.js";
-import type { PermissionRequest } from "./generated/session-events.js";
+export type PermissionRequest = GeneratedPermissionRequest & {
+    readonly managedApprovalRequired?: boolean;
+};
 
-import type { PermissionDecisionRequest } from "./generated/rpc.js";
+export type PermissionRequestedData = Omit<
+    GeneratedPermissionRequestedData,
+    "permissionRequest"
+> & {
+    permissionRequest: PermissionRequest;
+};
+
+export type PermissionRequestedEvent = Omit<GeneratedPermissionRequestedEvent, "data"> & {
+    data: PermissionRequestedData;
+};
 
 /**
  * Permission decision result returned from a {@link PermissionHandler}.
@@ -1012,12 +1162,67 @@ import type { PermissionDecisionRequest } from "./generated/rpc.js";
  */
 export type PermissionRequestResult = PermissionDecisionRequest["result"] | { kind: "no-result" };
 
+/**
+ * A {@link PermissionRequestResult} annotated with the
+ * {@link PermissionDecisionContext} describing how and where the decision was
+ * reached. The context is informational only — it never changes permission
+ * behavior. Supplying it lets the runtime attribute auto-approval telemetry to
+ * the responding surface.
+ */
+export interface AttributedPermissionResult {
+    kind: "attributed";
+    result: PermissionRequestResult;
+    decisionContext: PermissionDecisionContext;
+}
+
+/**
+ * Narrows a {@link PermissionHandler} return value to an attributed result.
+ */
+export function isAttributedPermissionResult(
+    result: PermissionRequestResult | AttributedPermissionResult
+): result is AttributedPermissionResult {
+    return result.kind === "attributed";
+}
+
+/**
+ * Pair a permission decision with the context describing how and where it was
+ * made, so the runtime can attribute auto-approval telemetry.
+ *
+ * Passing an already-attributed result replaces the previous context rather
+ * than nesting it. The context is informational only and never changes
+ * permission behavior.
+ */
+export function createAttributedPermissionResult(
+    result: PermissionRequestResult | AttributedPermissionResult,
+    decisionContext: PermissionDecisionContext
+): AttributedPermissionResult {
+    const inner = isAttributedPermissionResult(result) ? result.result : result;
+    return { kind: "attributed", result: inner, decisionContext };
+}
+
 export type PermissionHandler = (
     request: PermissionRequest,
-    invocation: { sessionId: string }
-) => Promise<PermissionRequestResult> | PermissionRequestResult;
+    invocation: { sessionId: string; managedSettingsEnabled?: boolean }
+) =>
+    | Promise<PermissionRequestResult | AttributedPermissionResult>
+    | PermissionRequestResult
+    | AttributedPermissionResult;
 
-export const approveAll: PermissionHandler = () => ({ kind: "approve-once" });
+/**
+ * Approves permission requests when managed settings are disabled.
+ */
+export const approveAll: PermissionHandler = (request, invocation) => {
+    if (invocation.managedSettingsEnabled) {
+        throw new Error("approveAll cannot be used when managed settings are enabled");
+    }
+    if ("managedApprovalRequired" in request) {
+        const managedApprovalRequired = request.managedApprovalRequired;
+        if (managedApprovalRequired !== undefined && managedApprovalRequired !== false) {
+            return { kind: "no-result" };
+        }
+    }
+    return { kind: "approve-once" };
+};
 
 export const defaultJoinSessionPermissionHandler: PermissionHandler =
     (): PermissionRequestResult => ({
@@ -1300,6 +1505,33 @@ export type UserPromptSubmittedHandler = (
 ) => Promise<UserPromptSubmittedHookOutput | void> | UserPromptSubmittedHookOutput | void;
 
 /**
+ * Input for the user-prompt-transformed hook.
+ *
+ * This hook runs after the runtime has transformed the submitted prompt with
+ * generated context, but before it is persisted to session history or sent to
+ * the model.
+ */
+export interface UserPromptTransformedHookInput extends BaseHookInput {
+    prompt: string;
+    transformedPrompt: string;
+}
+
+/**
+ * Output for the user-prompt-transformed hook.
+ */
+export interface UserPromptTransformedHookOutput {
+    modifiedTransformedPrompt?: string;
+}
+
+/**
+ * Handler for the user-prompt-transformed hook.
+ */
+export type UserPromptTransformedHandler = (
+    input: UserPromptTransformedHookInput,
+    invocation: { sessionId: string }
+) => Promise<UserPromptTransformedHookOutput | void> | UserPromptTransformedHookOutput | void;
+
+/**
  * Input for session-start hook
  */
 export interface SessionStartHookInput extends BaseHookInput {
@@ -1377,6 +1609,49 @@ export type ErrorOccurredHandler = (
 ) => Promise<ErrorOccurredHookOutput | void> | ErrorOccurredHookOutput | void;
 
 /**
+ * Input for the agent-stop hook.
+ *
+ * Fires for the top-level (main) agent when it reaches a natural terminal stop
+ * — i.e. the agent has gone idle without a pending non-terminal tool call and
+ * was not aborted or blocked by a rejected tool. (For sub-agents, the runtime
+ * fires a separate sub-agent stop lifecycle.)
+ */
+export interface AgentStopHookInput extends BaseHookInput {
+    /** Why the agent stopped (for example, `"end_turn"`). */
+    stopReason?: string;
+    /** Path to the on-disk session transcript, when available. */
+    transcriptPath?: string;
+    /**
+     * True when this stop is a re-entry triggered by a previous agent-stop
+     * `block` decision (Claude-compatible `stop_hook_active` semantics). Lets a
+     * handler avoid blocking indefinitely.
+     */
+    stopHookActive?: boolean;
+}
+
+/**
+ * Output for the agent-stop hook.
+ *
+ * Return `{ decision: "block", reason }` to keep the agent running: the
+ * `reason` is enqueued as a follow-up user message so the agent continues
+ * working (for example, to remediate findings surfaced by the hook). The
+ * runtime caps consecutive blocks to prevent runaway loops. Returning nothing
+ * (or omitting `decision`) lets the agent stop normally.
+ */
+export interface AgentStopHookOutput {
+    decision?: "block";
+    reason?: string;
+}
+
+/**
+ * Handler for the agent-stop hook.
+ */
+export type AgentStopHandler = (
+    input: AgentStopHookInput,
+    invocation: { sessionId: string }
+) => Promise<AgentStopHookOutput | void> | AgentStopHookOutput | void;
+
+/**
  * Configuration for session hooks
  */
 export interface SessionHooks {
@@ -1413,6 +1688,11 @@ export interface SessionHooks {
     onUserPromptSubmitted?: UserPromptSubmittedHandler;
 
     /**
+     * Called after the runtime transforms a submitted prompt and before it is stored.
+     */
+    onUserPromptTransformed?: UserPromptTransformedHandler;
+
+    /**
      * Called when a session starts
      */
     onSessionStart?: SessionStartHandler;
@@ -1426,6 +1706,16 @@ export interface SessionHooks {
      * Called when an error occurs
      */
     onErrorOccurred?: ErrorOccurredHandler;
+
+    /**
+     * Called when the top-level agent reaches a natural terminal stop (it went
+     * idle without pending work and was not aborted). Return
+     * `{ decision: "block", reason }` to keep the agent running with `reason`
+     * enqueued as a follow-up message — for example, to have the agent
+     * remediate findings the handler surfaced. Returning nothing lets the
+     * agent stop.
+     */
+    onAgentStop?: AgentStopHandler;
 }
 
 // ============================================================================
@@ -1542,6 +1832,12 @@ export interface CustomAgentConfig {
      * falling back to the parent session model if unavailable.
      */
     model?: string;
+    /**
+     * Reasoning effort level for this agent's model.
+     * When omitted, the runtime resolves the effort from model configuration,
+     * then inherits the parent effort only if this agent uses the same model.
+     */
+    reasoningEffort?: ReasoningEffort;
 }
 
 /**
@@ -1626,7 +1922,7 @@ export interface LargeToolOutputConfig {
 /**
  * Valid reasoning effort levels for models that support it.
  */
-export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 /**
  * Context window tier for the session. "long_context" pins the session to the
@@ -1715,6 +2011,85 @@ export interface ExtensionInfo {
 }
 
 /**
+ * Stable identity for a host/SDK connection that supplies built-in canvases.
+ *
+ * When set on session create or resume, the runtime uses {@link id} verbatim
+ * as the agent-facing canvas extension id, so canvases declared on a control
+ * connection survive stdio reconnect and CLI process restart instead of being
+ * re-keyed to a per-connection id. The id is opaque to the runtime; a
+ * per-window-stable value such as `app:builtin:<windowId>` is recommended. An
+ * id beginning with `connection:` is reserved and ignored by the runtime.
+ */
+export interface CanvasProviderIdentity {
+    /** Opaque, stable provider id used verbatim as the canvas extension id. */
+    id: string;
+    /** Optional display name surfaced as the canvas extension name. */
+    name?: string;
+}
+
+/**
+ * Static resource ceilings declared by a factory before it runs.
+ *
+ * @experimental Part of the experimental Agent Factories surface and may
+ * change or be removed in future SDK or CLI releases.
+ */
+export interface FactoryLimits {
+    /** Maximum number of factory subagents that may run concurrently. Must be positive when present. */
+    maxConcurrentSubagents?: number;
+    /** Maximum total number of factory subagents that may be spawned. Must be positive when present. */
+    maxTotalSubagents?: number;
+    /** Maximum AI credits consumed by factory subagents and descendants. This post-paid ceiling is soft. */
+    maxAiCredits?: number;
+    /**
+     * Maximum accumulated active-execution time, in seconds. Active execution includes the entire extension body,
+     * subprocess waits, queued-agent waits, and sleeps. The limit is armed from the remaining headroom when a run
+     * resumes; time between attempts is not counted. Must be finite and positive when present.
+     */
+    timeoutSeconds?: number;
+}
+
+/**
+ * Registration metadata for an extension-authored factory.
+ *
+ * @experimental Part of the experimental Agent Factories surface and may
+ * change or be removed in future SDK or CLI releases.
+ */
+export interface FactoryMeta {
+    /** Stable factory name used for invocation. */
+    name: string;
+    /** Human-readable factory description. */
+    description: string;
+    /** Display metadata for the progress phases the factory may report. */
+    phases: Array<{ title: string; detail?: string }>;
+    /**
+     * Optional declared shape of the arguments this factory expects as `ctx.args`.
+     *
+     * Declaring one is strongly recommended for any factory that reads `ctx.args`.
+     * When the model invokes the factory through the `run_factory` tool, the CLI
+     * validates `args` against this declaration **before** the run starts, so a
+     * malformed call is rejected with a correction hint and retried without ever
+     * creating a run row, prompting the user for permission, or spending credits. A
+     * factory that declares nothing is never validated: a malformed call starts,
+     * takes an approval, spends credits, and then fails inside the factory body.
+     * `factories_manage` with `operation: "inspect"` reports the declared shape so an
+     * agent can read it before invoking.
+     *
+     * This covers the model's `run_factory` path only. `session.factory.run(...)` is
+     * not validated against the declaration, so a factory should still check
+     * `ctx.args` rather than assume the declared shape held.
+     *
+     * Enforcement covers structure — types, required properties, and enum/const
+     * values. Finer constraints such as `minLength`, `pattern`, and
+     * `additionalProperties` are recorded in the declaration but not enforced. See
+     * {@link FactoryJsonSchema} for the accepted subset. A declaration outside that
+     * subset is rejected at registration.
+     */
+    argsSchema?: FactoryJsonSchema;
+    /** Optional resource ceilings presented to the user before execution. */
+    limits?: FactoryLimits;
+}
+
+/**
  * Provider-scoped options for the Copilot API (CAPI).
  *
  * These settings apply to the built-in Copilot API provider only. They live
@@ -1737,6 +2112,98 @@ export interface CapiSessionOptions {
      * @default true
      */
     enableWebSocketResponses?: boolean;
+}
+
+/**
+ * A single ExP (Experiment Platform) flag value. ExP assignments resolve to a
+ * string, number, boolean, or `null`.
+ */
+export type ExpFlagValue = string | number | boolean | null;
+
+/**
+ * A single configuration entry in a {@link CopilotExpAssignmentResponse}. Each
+ * entry carries an identifier and a bag of typed parameter values.
+ */
+export interface ExpConfigEntry {
+    /** Identifier of the configuration entry. */
+    Id: string;
+    /** Parameter values keyed by parameter name. */
+    Parameters: Record<string, ExpFlagValue>;
+}
+
+/**
+ * ExP ("flight") assignment data, in the same JSON shape the Copilot CLI
+ * fetches from the experimentation service. Field names are PascalCase to match
+ * the on-the-wire contract consumed by the runtime.
+ */
+export interface CopilotExpAssignmentResponse {
+    /** Enabled feature names. */
+    Features: string[];
+    /** Assigned flights keyed by flight name. */
+    Flights: Record<string, string>;
+    /** Configuration entries carrying typed parameter values. */
+    Configs: ExpConfigEntry[];
+    /** Opaque parameter-group payload passed through untouched. */
+    ParameterGroups?: unknown;
+    /** Version of the flighting configuration. */
+    FlightingVersion?: number;
+    /** Impression identifier for the assignment. */
+    ImpressionId?: string;
+    /** Assignment context string forwarded to CAPI and telemetry. */
+    AssignmentContext: string;
+}
+
+/**
+ * Configuration for the built-in GitHub MCP server.
+ *
+ * `disableFormDeferral` only applies to the built-in GitHub MCP server and
+ * only has an effect when MCP Apps and form-backed GitHub tools are enabled.
+ */
+export interface GitHubMcpToolConfig {
+    enableAllTools?: boolean;
+    additionalToolsets?: string[];
+    additionalTools?: string[];
+    enableInsidersMode?: boolean;
+    disableFormDeferral?: boolean;
+}
+
+/**
+ * Permissions-only managed policy injected by the host via
+ * {@link SessionConfigBase.managedSettings}.
+ *
+ * Rule strings use the same vocabulary the runtime accepts for fetched managed
+ * policy (e.g. `"Read(**)"`, `"Shell(git push *)"`); malformed rules are
+ * rejected at session creation.
+ */
+export interface ManagedSettingsPermissions {
+    /**
+     * When set to `"disable"`, bypass-permissions ("yolo") mode is turned off
+     * for the session. This is deny-wins: it cannot be re-enabled by any other
+     * layer.
+     */
+    disableBypassPermissionsMode?: "disable";
+    /** Operations that must always be denied. Unioned across managed layers. */
+    deny?: string[];
+    /**
+     * Operations that must prompt for approval. Unioned across managed layers.
+     */
+    ask?: string[];
+    /**
+     * Operations permitted without prompting. Every declared `allow` list
+     * (across managed layers) must admit an operation for it to be allowed.
+     */
+    allow?: string[];
+}
+
+/**
+ * Host-injected enterprise managed settings. The first supported contract is
+ * permissions-only; unknown sibling keys are rejected by the runtime.
+ *
+ * @see {@link SessionConfigBase.managedSettings}
+ */
+export interface ManagedSettings {
+    /** Managed permission policy for the session. */
+    permissions?: ManagedSettingsPermissions;
 }
 
 /**
@@ -1770,6 +2237,12 @@ export interface SessionConfigBase {
     reasoningSummary?: ReasoningSummary;
 
     /**
+     * Controls whether the session enables experimental features.
+     * Defaults to `false` in `"empty"` mode; otherwise the runtime decides when unset.
+     */
+    enableExperimentalMode?: boolean;
+
+    /**
      * Context window tier for models that support it. Use "long_context" to pin
      * the session to the long-context tier; omit or use "default" otherwise.
      */
@@ -1793,13 +2266,8 @@ export interface SessionConfigBase {
     configDirectory?: string;
 
     /**
-     * When true, automatically discovers MCP server configurations (e.g. `.mcp.json`,
-     * `.vscode/mcp.json`) and skill directories from the working directory and merges
-     * them with any explicitly provided `mcpServers` and `skillDirectories`, with
-     * explicit values taking precedence on name collision.
-     *
-     * Note: custom instruction files (`.github/copilot-instructions.md`, `AGENTS.md`, etc.)
-     * are always loaded from the working directory regardless of this setting.
+     * Enables runtime discovery of supported configuration. Explicitly supplied
+     * configuration takes precedence over discovered values.
      *
      * @default false
      */
@@ -1859,6 +2327,14 @@ export interface SessionConfigBase {
     extensionInfo?: ExtensionInfo;
 
     /**
+     * Stable identity for a host/SDK connection that supplies built-in
+     * canvases. When set, the runtime uses `id` verbatim as the agent-facing
+     * canvas extension id, so canvases declared on a control connection survive
+     * reconnect and CLI restart. Honored on session create and resume.
+     */
+    canvasProvider?: CanvasProviderIdentity;
+
+    /**
      * Slash commands registered for this session.
      * When the CLI has a TUI, each command appears as `/name` for the user to invoke.
      * The handler is called when the user executes the command.
@@ -1870,6 +2346,15 @@ export interface SessionConfigBase {
      * Controls how the system prompt is constructed
      */
     systemMessage?: SystemMessageConfig;
+
+    /**
+     * Override for the runtime's built-in tool-search behavior.
+     *
+     * To also override the tool-search tool's implementation, register a
+     * {@link Tool} named `tool_search_tool` with `overridesBuiltInTool: true` in
+     * {@link SessionConfigBase.tools}.
+     */
+    toolSearch?: ToolSearchConfig;
 
     /**
      * List of tool names to allow. When specified, only these tools will be available.
@@ -1956,6 +2441,14 @@ export interface SessionConfigBase {
      * @experimental
      */
     enableCitations?: boolean;
+
+    /**
+     * Opt in to capturing file changes for session rewind and cumulative session
+     * diff. On create, capture starts with the first turn. On resume, this can
+     * enable tracking only when the session still has a valid baseline; it cannot
+     * reconstruct changes from earlier untracked turns.
+     */
+    enableFileChangeTracking?: boolean;
 
     /**
      * Limits applied to this session's current accounting window.
@@ -2057,6 +2550,14 @@ export interface SessionConfigBase {
     enableMcpApps?: boolean;
 
     /**
+     * Configuration for the built-in GitHub MCP server.
+     *
+     * `disableFormDeferral` only applies to the built-in GitHub MCP server and
+     * only has an effect when MCP Apps and form-backed GitHub tools are enabled.
+     */
+    githubMcpToolConfig?: GitHubMcpToolConfig;
+
+    /**
      * Handler for exit-plan-mode requests from the agent.
      * When provided, enables `exitPlanMode.request` callbacks.
      */
@@ -2079,6 +2580,13 @@ export interface SessionConfigBase {
      * Tool operations will be relative to this directory.
      */
     workingDirectory?: string;
+
+    /**
+     * Additional directories the agent may access beyond the working directory.
+     * Relative paths are resolved against the session's working directory.
+     * Re-supply these directories when resuming a session.
+     */
+    additionalDirectories?: string[];
 
     /**
      * Enable streaming of assistant message and reasoning chunks.
@@ -2166,6 +2674,13 @@ export interface SessionConfigBase {
     disabledSkills?: string[];
 
     /**
+     * Exact MCP server names to disable for this session. Disabled servers are not
+     * started or authenticated when creating or cold-resuming a session. Supplying
+     * this on a resident resume cannot stop servers that are already running.
+     */
+    disabledMcpServers?: string[];
+
+    /**
      * Infinite session configuration for persistent workspaces and automatic compaction.
      * When enabled (default), sessions automatically manage context limits and persist state.
      * Set to `{ enabled: false }` to disable.
@@ -2188,6 +2703,39 @@ export interface SessionConfigBase {
      * the identity used for content exclusion, model routing, and quota checks.
      */
     gitHubToken?: string;
+
+    /**
+     * Opt-in: when true, the runtime self-fetches enterprise managed settings
+     * (bypass-permissions policy) at session bootstrap using the session's
+     * `gitHubToken`. Requires {@link SessionConfigBase.gitHubToken} to be set;
+     * if omitted, the runtime is expected to reject session creation (fail-closed).
+     */
+    enableManagedSettings?: boolean;
+
+    /**
+     * Host-injected enterprise managed settings for this session.
+     *
+     * Unlike {@link SessionConfigBase.enableManagedSettings} — which asks the
+     * runtime to *self-fetch* account/org and device policy — this field lets
+     * the host supply the managed policy directly. The runtime validates it
+     * with the same managed-permission parser it uses for fetched policy and
+     * composes it restrictively with any self-fetched (server) and
+     * device-managed (MDM) layers: `deny`/`ask` rules are unioned, every
+     * declared `allow` list must admit an operation, and
+     * `disableBypassPermissionsMode: "disable"` is deny-wins.
+     *
+     * This is startup-only. It is **not** persisted: it must be re-supplied on
+     * {@link CopilotClient.resumeSession | resume}, where it replaces the prior
+     * injected layer (omitting it clears the layer, so warm and cold resume
+     * behave identically). It may be combined with `enableManagedSettings`;
+     * when both are supplied the injected, server, and device restrictions all
+     * apply.
+     *
+     * Requires a Copilot runtime whose RPC schema includes `managedSettings`.
+     * Older runtimes may ignore this additive field, so hosts must not rely on
+     * injected policy until they ship a compatible runtime.
+     */
+    managedSettings?: ManagedSettings;
 
     /**
      * When true, skips embedding-based retrieval for this session.
@@ -2281,7 +2829,7 @@ export interface SessionConfigBase {
      *
      * @internal
      */
-    expAssignments?: Record<string, unknown>;
+    expAssignments?: CopilotExpAssignmentResponse;
 }
 
 /**
@@ -2329,6 +2877,20 @@ export interface ResumeSessionConfig extends SessionConfigBase {
      * do not need to re-open canvases that were active before the previous shutdown.
      */
     openCanvases?: OpenCanvasInstance[];
+}
+
+/**
+ * Options that only an extension join may supply, kept off {@link ResumeSessionConfig}
+ * because the runtime ignores them for every other kind of connection.
+ *
+ * @internal
+ */
+export interface ExtensionJoinOptions {
+    /**
+     * Names of sensitive environment variables the extension asks the host to grant.
+     * Sent on the `session.resume` wire payload as `requestedEnvironmentVariables`.
+     */
+    requestedEnvironmentVariables?: string[];
 }
 
 /**
@@ -2433,7 +2995,7 @@ export interface ProviderConfig {
      */
     azure?: {
         /**
-         * API version. Defaults to "2024-10-21".
+         * API version. When omitted, the runtime uses the GA versionless v1 route.
          */
         apiVersion?: string;
     };

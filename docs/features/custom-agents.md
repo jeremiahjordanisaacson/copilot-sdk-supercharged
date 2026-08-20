@@ -1,10 +1,10 @@
-# Custom Agents & Sub-Agent Orchestration
+# Custom agents and sub-agent orchestration
 
-Define specialized agents with scoped tools and prompts, then let Copilot orchestrate them as sub-agents within a single session.
+Define specialized agents with scoped tools and prompts, then let Copilot orchestrate them as sub-agents within a single session. For dispatching multiple sub-agents in parallel, see [Fleet Mode](./fleet-mode.md).
 
 ## Overview
 
-Custom agents are lightweight agent definitions you attach to a session. Each agent has its own system prompt, tool restrictions, and optional MCP servers. When a user's request matches an agent's expertise, the Copilot runtime automatically delegates to that agent as a **sub-agent** — running it in an isolated context while streaming lifecycle events back to the parent session.
+Custom agents are lightweight agent definitions you attach to a session. Each agent has its own system prompt, tool restrictions, and optional MCP servers. When a user's request matches an agent's expertise, the Copilot runtime automatically delegates to that agent as a **sub-agent**—running it in an isolated context while streaming lifecycle events back to the parent session.
 
 ```mermaid
 flowchart TD
@@ -23,7 +23,7 @@ flowchart TD
 | **Inference** | The runtime's ability to auto-select an agent based on the user's intent |
 | **Parent session** | The session that spawned the sub-agent; receives all lifecycle events |
 
-## Defining Custom Agents
+## Defining custom agents
 
 Pass `customAgents` when creating a session. Each agent needs at minimum a `name` and `prompt`.
 
@@ -37,7 +37,7 @@ const client = new CopilotClient();
 await client.start();
 
 const session = await client.createSession({
-    model: "gpt-4.1",
+    model: "gpt-5.4",
     customAgents: [
         {
             name: "researcher",
@@ -54,7 +54,7 @@ const session = await client.createSession({
             prompt: "You are a code editor. Make minimal, surgical changes to files as requested.",
         },
     ],
-    onPermissionRequest: async () => ({ kind: "approved" }),
+    onPermissionRequest: async () => ({ kind: "approve-once" }),
 });
 ```
 
@@ -64,15 +64,14 @@ const session = await client.createSession({
 <summary><strong>Python</strong></summary>
 
 ```python
-from copilot import CopilotClient
-from copilot.session import PermissionRequestResult
+from copilot import CopilotClient, PermissionDecisionApproveOnce
 
 client = CopilotClient()
 await client.start()
 
 session = await client.create_session(
-    on_permission_request=lambda req, inv: PermissionRequestResult(kind="approved"),
-    model="gpt-4.1",
+    on_permission_request=lambda req, inv: PermissionDecisionApproveOnce(),
+    model="gpt-5.4",
     custom_agents=[
         {
             "name": "researcher",
@@ -104,6 +103,7 @@ package main
 import (
 	"context"
 	copilot "github.com/github/copilot-sdk/go"
+	"github.com/github/copilot-sdk/go/rpc"
 )
 
 func main() {
@@ -112,7 +112,7 @@ func main() {
 	client.Start(ctx)
 
 	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-		Model: "gpt-4.1",
+		Model: "gpt-5.4",
 		CustomAgents: []copilot.CustomAgentConfig{
 			{
 				Name:        "researcher",
@@ -129,8 +129,8 @@ func main() {
 				Prompt:      "You are a code editor. Make minimal, surgical changes to files as requested.",
 			},
 		},
-		OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-			return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+		OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+			return &rpc.PermissionDecisionApproveOnce{}, nil
 		},
 	})
 	_ = session
@@ -144,7 +144,7 @@ client := copilot.NewClient(nil)
 client.Start(ctx)
 
 session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-    Model: "gpt-4.1",
+    Model: "gpt-5.4",
     CustomAgents: []copilot.CustomAgentConfig{
         {
             Name:        "researcher",
@@ -161,8 +161,8 @@ session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
             Prompt:      "You are a code editor. Make minimal, surgical changes to files as requested.",
         },
     },
-    OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-        return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+    OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+        return &rpc.PermissionDecisionApproveOnce{}, nil
     },
 })
 ```
@@ -173,12 +173,13 @@ session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
 <summary><strong>.NET</strong></summary>
 
 ```csharp
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
+using GitHub.Copilot.Rpc;
 
 await using var client = new CopilotClient();
 await using var session = await client.CreateSessionAsync(new SessionConfig
 {
-    Model = "gpt-4.1",
+    Model = "gpt-5.4",
     CustomAgents = new List<CustomAgentConfig>
     {
         new()
@@ -199,7 +200,7 @@ await using var session = await client.CreateSessionAsync(new SessionConfig
         },
     },
     OnPermissionRequest = (req, inv) =>
-        Task.FromResult(new PermissionRequestResult { Kind = PermissionRequestResultKind.Approved }),
+        Task.FromResult(PermissionDecision.ApproveOnce()),
 });
 ```
 
@@ -209,9 +210,8 @@ await using var session = await client.CreateSessionAsync(new SessionConfig
 <summary><strong>Java</strong></summary>
 
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.events.*;
-import com.github.copilot.sdk.json.*;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.rpc.*;
 import java.util.List;
 
 try (var client = new CopilotClient()) {
@@ -219,7 +219,7 @@ try (var client = new CopilotClient()) {
 
     var session = client.createSession(
         new SessionConfig()
-            .setModel("gpt-4.1")
+            .setModel("gpt-5.4")
             .setCustomAgents(List.of(
                 new CustomAgentConfig()
                     .setName("researcher")
@@ -241,187 +241,25 @@ try (var client = new CopilotClient()) {
 
 </details>
 
-<details>
-<summary><strong>Rust</strong></summary>
-
-```rust
-let session = client.create_session(&SessionConfig {
-    model: "gpt-4.1".into(),
-    custom_agents: vec![
-        CustomAgentConfig {
-            name: "researcher".into(),
-            display_name: Some("Research Agent".into()),
-            description: Some("Explores codebases and answers questions using read-only tools".into()),
-            tools: Some(vec!["grep".into(), "glob".into(), "view".into()]),
-            prompt: "You are a research assistant. Analyze code and answer questions. Do not modify any files.".into(),
-            ..Default::default()
-        },
-        CustomAgentConfig {
-            name: "editor".into(),
-            display_name: Some("Editor Agent".into()),
-            description: Some("Makes targeted code changes".into()),
-            tools: Some(vec!["view".into(), "edit".into(), "bash".into()]),
-            prompt: "You are a code editor. Make minimal, surgical changes to files as requested.".into(),
-            ..Default::default()
-        },
-    ],
-    ..Default::default()
-}).await?;
-```
-
-</details>
-
-<details>
-<summary><strong>Ruby</strong></summary>
-
-```ruby
-session = client.create_session(
-  model: "gpt-4.1",
-  custom_agents: [
-    {
-      name: "researcher",
-      display_name: "Research Agent",
-      description: "Explores codebases and answers questions using read-only tools",
-      tools: %w[grep glob view],
-      prompt: "You are a research assistant. Analyze code and answer questions. Do not modify any files."
-    },
-    {
-      name: "editor",
-      display_name: "Editor Agent",
-      description: "Makes targeted code changes",
-      tools: %w[view edit bash],
-      prompt: "You are a code editor. Make minimal, surgical changes to files as requested."
-    }
-  ]
-)
-```
-
-</details>
-
-<details>
-<summary><strong>PHP</strong></summary>
-
-```php
-$session = $client->createSession([
-    'model' => 'gpt-4.1',
-    'customAgents' => [
-        [
-            'name' => 'researcher',
-            'displayName' => 'Research Agent',
-            'description' => 'Explores codebases and answers questions using read-only tools',
-            'tools' => ['grep', 'glob', 'view'],
-            'prompt' => 'You are a research assistant. Analyze code and answer questions. Do not modify any files.',
-        ],
-        [
-            'name' => 'editor',
-            'displayName' => 'Editor Agent',
-            'description' => 'Makes targeted code changes',
-            'tools' => ['view', 'edit', 'bash'],
-            'prompt' => 'You are a code editor. Make minimal, surgical changes to files as requested.',
-        ],
-    ],
-]);
-```
-
-</details>
-
-<details>
-<summary><strong>Swift</strong></summary>
-
-```swift
-let session = try await client.createSession(config: SessionConfig(
-    model: "gpt-4.1",
-    customAgents: [
-        CustomAgentConfig(
-            name: "researcher",
-            displayName: "Research Agent",
-            description: "Explores codebases and answers questions using read-only tools",
-            tools: ["grep", "glob", "view"],
-            prompt: "You are a research assistant. Analyze code and answer questions. Do not modify any files."
-        ),
-        CustomAgentConfig(
-            name: "editor",
-            displayName: "Editor Agent",
-            description: "Makes targeted code changes",
-            tools: ["view", "edit", "bash"],
-            prompt: "You are a code editor. Make minimal, surgical changes to files as requested."
-        ),
-    ]
-))
-```
-
-</details>
-
-<details>
-<summary><strong>Kotlin</strong></summary>
-
-```kotlin
-val session = client.createSession(SessionConfig(
-    model = "gpt-4.1",
-    customAgents = listOf(
-        CustomAgentConfig(
-            name = "researcher",
-            displayName = "Research Agent",
-            description = "Explores codebases and answers questions using read-only tools",
-            tools = listOf("grep", "glob", "view"),
-            prompt = "You are a research assistant. Analyze code and answer questions. Do not modify any files."
-        ),
-        CustomAgentConfig(
-            name = "editor",
-            displayName = "Editor Agent",
-            description = "Makes targeted code changes",
-            tools = listOf("view", "edit", "bash"),
-            prompt = "You are a code editor. Make minimal, surgical changes to files as requested."
-        )
-    )
-))
-```
-
-</details>
-
-<details>
-<summary><strong>C++</strong></summary>
-
-```cpp
-auto session = client.createSession({
-    .model = "gpt-4.1",
-    .customAgents = {
-        {
-            .name = "researcher",
-            .displayName = "Research Agent",
-            .description = "Explores codebases and answers questions using read-only tools",
-            .tools = {"grep", "glob", "view"},
-            .prompt = "You are a research assistant. Analyze code and answer questions. Do not modify any files.",
-        },
-        {
-            .name = "editor",
-            .displayName = "Editor Agent",
-            .description = "Makes targeted code changes",
-            .tools = {"view", "edit", "bash"},
-            .prompt = "You are a code editor. Make minimal, surgical changes to files as requested.",
-        },
-    },
-});
-```
-
-</details>
-
-> **40 languages supported.** See the [full SDK list](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks) with cookbooks for Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V, and 18 more.
-
-## Configuration Reference
+## Configuration reference
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `name` | `string` | ✅ | Unique identifier for the agent |
 | `displayName` | `string` | | Human-readable name shown in events |
-| `description` | `string` | | What the agent does — helps the runtime select it |
+| `description` | `string` | | What the agent does—helps the runtime select it |
 | `tools` | `string[]` or `null` | | Tool names the agent can use. `null` or omitted = all tools |
 | `prompt` | `string` | ✅ | System prompt for the agent |
 | `mcpServers` | `object` | | MCP server configurations specific to this agent |
 | `infer` | `boolean` | | Whether the runtime can auto-select this agent (default: `true`) |
 | `skills` | `string[]` | | Skill names to preload into the agent's context at startup |
+| `model` | `string` | | Model identifier to use while this agent runs |
+| `reasoningEffort` | `string` | | Reasoning effort to use while this agent runs. When omitted, the SDK sends no per-agent override and the runtime resolves the effort (see note below) |
 
-> **Tip:** A good `description` helps the runtime match user intent to the right agent. Be specific about the agent's expertise and capabilities.
+> [!TIP]
+> A good `description` helps the runtime match user intent to the right agent. Be specific about the agent's expertise and capabilities.
+
+Set `model` and `reasoningEffort` to override the parent session's model settings while a custom agent runs. When `reasoningEffort` is omitted, the SDK sends no per-agent override and the runtime resolves the effort from its own precedence: a per-call client option, the resolved model's default, or the agent definition all take priority; otherwise the runtime inherits the parent session's effort only when the subagent runs the same model as the parent. When the subagent resolves to a different model, it falls back to that model's default instead of inheriting the parent's effort. Python uses `reasoning_effort`, .NET uses `ReasoningEffort`, Go uses `ReasoningEffort`, Java uses `setReasoningEffort`, and Rust uses `with_reasoning_effort`.
 
 In addition to per-agent configuration above, you can set `agent` on the **session config** itself to pre-select which custom agent is active when the session starts. See [Selecting an Agent at Session Creation](#selecting-an-agent-at-session-creation) below.
 
@@ -429,9 +267,9 @@ In addition to per-agent configuration above, you can set `agent` on the **sessi
 |-------------------------|------|-------------|
 | `agent` | `string` | Name of the custom agent to pre-select at session creation. Must match a `name` in `customAgents`. |
 
-## Per-Agent Skills
+## Per-agent skills
 
-You can preload skills into an agent's context using the `skills` property. When specified, the **full content** of each listed skill is eagerly injected into the agent's context at startup — the agent doesn't need to invoke a skill tool; the instructions are already present. Skills are **opt-in**: agents receive no skills by default, and sub-agents do not inherit skills from the parent. Skill names are resolved from the session-level `skillDirectories`.
+You can preload skills into an agent's context using the `skills` property. When specified, the **full content** of each listed skill is eagerly injected into the agent's context at startup—the agent doesn't need to invoke a skill tool; the instructions are already present. Skills are **opt-in**: agents receive no skills by default, and sub-agents do not inherit skills from the parent. Skill names are resolved from the session-level `skillDirectories`.
 
 ```typescript
 const session = await client.createSession({
@@ -450,13 +288,13 @@ const session = await client.createSession({
             skills: ["markdown-lint"],
         },
     ],
-    onPermissionRequest: async () => ({ kind: "approved" }),
+    onPermissionRequest: async () => ({ kind: "approve-once" }),
 });
 ```
 
 In this example, `security-auditor` starts with `security-scan` and `dependency-check` already injected into its context, while `docs-writer` starts with `markdown-lint`. An agent without a `skills` field receives no skill content.
 
-## Selecting an Agent at Session Creation
+## Selecting an agent at session creation
 
 You can pass `agent` in the session config to pre-select which custom agent should be active when the session starts. The value must match the `name` of one of the agents defined in `customAgents`.
 
@@ -552,7 +390,7 @@ var session = await client.CreateSessionAsync(new SessionConfig
 
 <!-- docs-validate: skip -->
 ```java
-import com.github.copilot.sdk.json.*;
+import com.github.copilot.rpc.*;
 import java.util.List;
 
 var session = client.createSession(
@@ -572,116 +410,19 @@ var session = client.createSession(
 
 </details>
 
-<details>
-<summary><strong>Rust</strong></summary>
-
-<!-- docs-validate: skip -->
-```rust
-let session = client.create_session(&SessionConfig {
-    custom_agents: vec![
-        CustomAgentConfig { name: "researcher".into(), prompt: "You are a research assistant. Analyze code and answer questions.".into(), ..Default::default() },
-        CustomAgentConfig { name: "editor".into(), prompt: "You are a code editor. Make minimal, surgical changes.".into(), ..Default::default() },
-    ],
-    agent: Some("researcher".into()), // Pre-select the researcher agent
-    ..Default::default()
-}).await?;
-```
-
-</details>
-
-<details>
-<summary><strong>Ruby</strong></summary>
-
-<!-- docs-validate: skip -->
-```ruby
-session = client.create_session(
-  custom_agents: [
-    { name: "researcher", prompt: "You are a research assistant. Analyze code and answer questions." },
-    { name: "editor", prompt: "You are a code editor. Make minimal, surgical changes." },
-  ],
-  agent: "researcher" # Pre-select the researcher agent
-)
-```
-
-</details>
-
-<details>
-<summary><strong>PHP</strong></summary>
-
-<!-- docs-validate: skip -->
-```php
-$session = $client->createSession([
-    'customAgents' => [
-        ['name' => 'researcher', 'prompt' => 'You are a research assistant. Analyze code and answer questions.'],
-        ['name' => 'editor', 'prompt' => 'You are a code editor. Make minimal, surgical changes.'],
-    ],
-    'agent' => 'researcher', // Pre-select the researcher agent
-]);
-```
-
-</details>
-
-<details>
-<summary><strong>Swift</strong></summary>
-
-<!-- docs-validate: skip -->
-```swift
-let session = try await client.createSession(config: SessionConfig(
-    customAgents: [
-        CustomAgentConfig(name: "researcher", prompt: "You are a research assistant. Analyze code and answer questions."),
-        CustomAgentConfig(name: "editor", prompt: "You are a code editor. Make minimal, surgical changes."),
-    ],
-    agent: "researcher" // Pre-select the researcher agent
-))
-```
-
-</details>
-
-<details>
-<summary><strong>Kotlin</strong></summary>
-
-<!-- docs-validate: skip -->
-```kotlin
-val session = client.createSession(SessionConfig(
-    customAgents = listOf(
-        CustomAgentConfig(name = "researcher", prompt = "You are a research assistant. Analyze code and answer questions."),
-        CustomAgentConfig(name = "editor", prompt = "You are a code editor. Make minimal, surgical changes."),
-    ),
-    agent = "researcher" // Pre-select the researcher agent
-))
-```
-
-</details>
-
-<details>
-<summary><strong>C++</strong></summary>
-
-<!-- docs-validate: skip -->
-```cpp
-auto session = client.createSession({
-    .customAgents = {
-        {.name = "researcher", .prompt = "You are a research assistant. Analyze code and answer questions."},
-        {.name = "editor", .prompt = "You are a code editor. Make minimal, surgical changes."},
-    },
-    .agent = "researcher", // Pre-select the researcher agent
-});
-```
-
-</details>
-
-## How Sub-Agent Delegation Works
+## How sub-agent delegation works
 
 When you send a prompt to a session with custom agents, the runtime evaluates whether to delegate to a sub-agent:
 
-1. **Intent matching** — The runtime analyzes the user's prompt against each agent's `name` and `description`
-2. **Agent selection** — If a match is found and `infer` is not `false`, the runtime selects the agent
-3. **Isolated execution** — The sub-agent runs with its own prompt and restricted tool set
-4. **Event streaming** — Lifecycle events (`subagent.started`, `subagent.completed`, etc.) stream back to the parent session
-5. **Result integration** — The sub-agent's output is incorporated into the parent agent's response
+1. **Intent matching**—The runtime analyzes the user's prompt against each agent's `name` and `description`
+1. **Agent selection**—If a match is found and `infer` is not `false`, the runtime selects the agent
+1. **Isolated execution**—The sub-agent runs with its own prompt and restricted tool set
+1. **Event streaming**—Lifecycle events (`subagent.started`, `subagent.completed`, etc.) stream back to the parent session
+1. **Result integration**—The sub-agent's output is incorporated into the parent agent's response
 
-### Controlling Inference
+### Controlling inference
 
-By default, all custom agents are available for automatic selection (`infer: true`). Set `infer: false` to prevent the runtime from auto-selecting an agent — useful for agents you only want invoked through explicit user requests:
+By default, all custom agents are available for automatic selection (`infer: true`). Set `infer: false` to prevent the runtime from auto-selecting an agent—useful for agents you only want invoked through explicit user requests:
 
 ```typescript
 {
@@ -693,21 +434,23 @@ By default, all custom agents are available for automatic selection (`infer: tru
 }
 ```
 
-## Listening to Sub-Agent Events
+## Listening to sub-agent events
 
 When a sub-agent runs, the parent session emits lifecycle events. Subscribe to these events to build UIs that visualize agent activity.
 
-### Event Types
+Sub-agent-originated session events share the parent session stream and include envelope-level `agentId`. Root/main agent events and session-level events omit `agentId`, so renderers can keep the parent response separate from sub-agent traces by checking the event envelope.
+
+### Event types
 
 | Event | Emitted when | Data |
 |-------|-------------|------|
 | `subagent.selected` | Runtime selects an agent for the task | `agentName`, `agentDisplayName`, `tools` |
-| `subagent.started` | Sub-agent begins execution | `toolCallId`, `agentName`, `agentDisplayName`, `agentDescription` |
-| `subagent.completed` | Sub-agent finishes successfully | `toolCallId`, `agentName`, `agentDisplayName` |
-| `subagent.failed` | Sub-agent encounters an error | `toolCallId`, `agentName`, `agentDisplayName`, `error` |
-| `subagent.deselected` | Runtime switches away from the sub-agent | — |
+| `subagent.started` | Sub-agent begins execution | `toolCallId`, `agentName`, `agentDisplayName`, `agentDescription`, `model?` |
+| `subagent.completed` | Sub-agent finishes successfully | `toolCallId`, `agentName`, `agentDisplayName`, `model?`, `durationMs?`, `totalTokens?`, `totalToolCalls?` |
+| `subagent.failed` | Sub-agent encounters an error | `toolCallId`, `agentName`, `agentDisplayName`, `error`, `model?`, `durationMs?`, `totalTokens?`, `totalToolCalls?` |
+| `subagent.deselected` | Runtime switches away from the sub-agent |—|
 
-### Subscribing to Events
+### Subscribing to events
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
@@ -723,11 +466,15 @@ session.on((event) => {
 
         case "subagent.completed":
             console.log(`✅ Sub-agent completed: ${event.data.agentDisplayName}`);
+            if (event.data.durationMs !== undefined) console.log(`  Duration: ${event.data.durationMs}ms`);
+            if (event.data.totalTokens !== undefined) console.log(`  Tokens: ${event.data.totalTokens}`);
+            if (event.data.totalToolCalls !== undefined) console.log(`  Tool calls: ${event.data.totalToolCalls}`);
             break;
 
         case "subagent.failed":
             console.log(`❌ Sub-agent failed: ${event.data.agentDisplayName}`);
             console.log(`  Error: ${event.data.error}`);
+            if (event.data.durationMs !== undefined) console.log(`  Duration: ${event.data.durationMs}ms`);
             break;
 
         case "subagent.selected":
@@ -783,6 +530,7 @@ import (
 	"context"
 	"fmt"
 	copilot "github.com/github/copilot-sdk/go"
+	"github.com/github/copilot-sdk/go/rpc"
 )
 
 func main() {
@@ -791,9 +539,9 @@ func main() {
 	client.Start(ctx)
 
 	session, _ := client.CreateSession(ctx, &copilot.SessionConfig{
-		Model: "gpt-4.1",
-		OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-			return copilot.PermissionRequestResult{Kind: copilot.PermissionRequestResultKindApproved}, nil
+		Model: "gpt-5.4",
+		OnPermissionRequest: func(req copilot.PermissionRequest, inv copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+			return &rpc.PermissionDecisionApproveOnce{}, nil
 		},
 	})
 
@@ -848,13 +596,13 @@ _, err := session.SendAndWait(ctx, copilot.MessageOptions{
 
 <!-- docs-validate: hidden -->
 ```csharp
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 
 public static class SubAgentEventsExample
 {
     public static async Task Example(CopilotSession session)
     {
-        using var subscription = session.On(evt =>
+        using var subscription = session.On<SessionEvent>(evt =>
         {
             switch (evt)
             {
@@ -885,7 +633,7 @@ public static class SubAgentEventsExample
 <!-- /docs-validate: hidden -->
 
 ```csharp
-using var subscription = session.On(evt =>
+using var subscription = session.On<SessionEvent>(evt =>
 {
     switch (evt)
     {
@@ -917,6 +665,7 @@ await session.SendAndWaitAsync(new MessageOptions
 <details>
 <summary><strong>Java</strong></summary>
 
+<!-- docs-validate: skip -->
 ```java
 session.on(event -> {
     if (event instanceof SubagentStartedEvent e) {
@@ -942,170 +691,7 @@ var response = session.sendAndWait(
 
 </details>
 
-<details>
-<summary><strong>Rust</strong></summary>
-
-```rust
-session.on(|event| {
-    match &event.data {
-        SessionEventData::SubagentStarted(d) => {
-            println!("▶ Sub-agent started: {}", d.agent_display_name);
-            println!("  Description: {}", d.agent_description);
-            println!("  Tool call ID: {}", d.tool_call_id);
-        }
-        SessionEventData::SubagentCompleted(d) => {
-            println!("✅ Sub-agent completed: {}", d.agent_display_name);
-        }
-        SessionEventData::SubagentFailed(d) => {
-            println!("❌ Sub-agent failed: {} - {}", d.agent_display_name, d.error);
-        }
-        SessionEventData::SubagentSelected(d) => {
-            println!("🎯 Agent selected: {}", d.agent_display_name);
-        }
-        _ => {}
-    }
-});
-
-let response = session.send_and_wait(&MessageOptions {
-    prompt: "Research how authentication works in this codebase".into(),
-    ..Default::default()
-}).await?;
-```
-
-</details>
-
-<details>
-<summary><strong>Ruby</strong></summary>
-
-```ruby
-session.on do |event|
-  case event.type
-  when "subagent.started"
-    puts "▶ Sub-agent started: #{event.data[:agentDisplayName]}"
-    puts "  Description: #{event.data[:agentDescription]}"
-  when "subagent.completed"
-    puts "✅ Sub-agent completed: #{event.data[:agentDisplayName]}"
-  when "subagent.failed"
-    puts "❌ Sub-agent failed: #{event.data[:agentDisplayName]}"
-    puts "  Error: #{event.data[:error]}"
-  when "subagent.selected"
-    puts "🎯 Agent selected: #{event.data[:agentDisplayName]}"
-  end
-end
-
-response = session.send_and_wait(prompt: "Research how authentication works in this codebase")
-```
-
-</details>
-
-<details>
-<summary><strong>PHP</strong></summary>
-
-```php
-$session->on(function ($event) {
-    switch ($event->type) {
-        case 'subagent.started':
-            echo "▶ Sub-agent started: {$event->data->agentDisplayName}\n";
-            echo "  Description: {$event->data->agentDescription}\n";
-            break;
-        case 'subagent.completed':
-            echo "✅ Sub-agent completed: {$event->data->agentDisplayName}\n";
-            break;
-        case 'subagent.failed':
-            echo "❌ Sub-agent failed: {$event->data->agentDisplayName}\n";
-            echo "  Error: {$event->data->error}\n";
-            break;
-        case 'subagent.selected':
-            echo "🎯 Agent selected: {$event->data->agentDisplayName}\n";
-            break;
-    }
-});
-
-$response = $session->sendAndWait(['prompt' => 'Research how authentication works in this codebase']);
-```
-
-</details>
-
-<details>
-<summary><strong>Swift</strong></summary>
-
-```swift
-session.on { event in
-    switch event.type {
-    case "subagent.started":
-        print("▶ Sub-agent started: \(event.data.agentDisplayName ?? "")")
-        print("  Description: \(event.data.agentDescription ?? "")")
-    case "subagent.completed":
-        print("✅ Sub-agent completed: \(event.data.agentDisplayName ?? "")")
-    case "subagent.failed":
-        print("❌ Sub-agent failed: \(event.data.agentDisplayName ?? "")")
-        print("  Error: \(event.data.error ?? "")")
-    case "subagent.selected":
-        print("🎯 Agent selected: \(event.data.agentDisplayName ?? "")")
-    default:
-        break
-    }
-}
-
-let response = try await session.sendAndWait(prompt: "Research how authentication works in this codebase")
-```
-
-</details>
-
-<details>
-<summary><strong>Kotlin</strong></summary>
-
-```kotlin
-session.on { event ->
-    when (event) {
-        is SubagentStartedEvent -> {
-            println("▶ Sub-agent started: ${event.data.agentDisplayName}")
-            println("  Description: ${event.data.agentDescription}")
-        }
-        is SubagentCompletedEvent ->
-            println("✅ Sub-agent completed: ${event.data.agentDisplayName}")
-        is SubagentFailedEvent -> {
-            println("❌ Sub-agent failed: ${event.data.agentDisplayName}")
-            println("  Error: ${event.data.error}")
-        }
-        is SubagentSelectedEvent ->
-            println("🎯 Agent selected: ${event.data.agentDisplayName}")
-    }
-}
-
-val response = session.sendAndWait(MessageOptions(
-    prompt = "Research how authentication works in this codebase"
-))
-```
-
-</details>
-
-<details>
-<summary><strong>C++</strong></summary>
-
-```cpp
-session.on([](const SessionEvent& event) {
-    if (auto* d = std::get_if<SubagentStartedData>(&event.data)) {
-        std::cout << "▶ Sub-agent started: " << d->agentDisplayName << "\n";
-        std::cout << "  Description: " << d->agentDescription << "\n";
-    } else if (auto* d = std::get_if<SubagentCompletedData>(&event.data)) {
-        std::cout << "✅ Sub-agent completed: " << d->agentDisplayName << "\n";
-    } else if (auto* d = std::get_if<SubagentFailedData>(&event.data)) {
-        std::cout << "❌ Sub-agent failed: " << d->agentDisplayName << "\n";
-        std::cout << "  Error: " << d->error << "\n";
-    } else if (auto* d = std::get_if<SubagentSelectedData>(&event.data)) {
-        std::cout << "🎯 Agent selected: " << d->agentDisplayName << "\n";
-    }
-});
-
-auto response = session.sendAndWait({
-    .prompt = "Research how authentication works in this codebase",
-});
-```
-
-</details>
-
-## Building an Agent Tree UI
+## Building an agent tree UI
 
 Sub-agent events include `toolCallId` fields that let you reconstruct the execution tree. Here's a pattern for tracking agent activity:
 
@@ -1155,7 +741,7 @@ session.on((event) => {
 });
 ```
 
-## Scoping Tools per Agent
+## Scoping tools per agent
 
 Use the `tools` property to restrict which tools an agent can access. This is essential for security and for keeping agents focused:
 
@@ -1184,16 +770,17 @@ const session = await client.createSession({
 });
 ```
 
-> **Note:** When `tools` is `null` or omitted, the agent inherits access to all tools configured on the session. Use explicit tool lists to enforce the principle of least privilege.
+> [!NOTE]
+> When `tools` is `null` or omitted, the agent inherits access to all tools configured on the session. Use explicit tool lists to enforce the principle of least privilege.
 
-## Agent-Exclusive Tools
+## Agent-exclusive tools
 
 Use the `defaultAgent` property on the session configuration to hide specific tools from the default agent (the built-in agent that handles turns when no custom agent is selected). This forces the main agent to delegate to sub-agents when those tools' capabilities are needed, keeping the main agent's context clean.
 
 This is useful when:
-- Certain tools generate large amounts of context that would overwhelm the main agent
-- You want the main agent to act as an orchestrator, delegating heavy work to specialized sub-agents
-- You need strict separation between orchestration and execution
+* Certain tools generate large amounts of context that would overwhelm the main agent
+* You want the main agent to act as an orchestrator, delegating heavy work to specialized sub-agents
+* You need strict separation between orchestration and execution
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
@@ -1310,31 +897,32 @@ var session = await client.CreateSessionAsync(new SessionConfig
 
 </details>
 
-### How It Works
+### How it works
 
 Tools listed in `defaultAgent.excludedTools`:
 
-1. **Are registered** — their handlers are available for execution
-2. **Are hidden** from the main agent's tool list — the LLM won't see or call them directly
-3. **Remain available** to any custom sub-agent that includes them in its `tools` array
+1. **Are registered**—their handlers are available for execution
+1. **Are hidden** from the main agent's tool list—the LLM won't see or call them directly
+1. **Remain available** to any custom sub-agent that includes them in its `tools` array
 
-### Interaction with Other Tool Filters
+### Interaction with other tool filters
 
 `defaultAgent.excludedTools` is orthogonal to the session-level `availableTools` and `excludedTools`:
 
 | Filter | Scope | Effect |
 |--------|-------|--------|
-| `availableTools` | Session-wide | Allowlist — only these tools exist for anyone |
-| `excludedTools` | Session-wide | Blocklist — these tools are blocked for everyone |
+| `availableTools` | Session-wide | Allowlist—only these tools exist for anyone |
+| `excludedTools` | Session-wide | Blocklist—these tools are blocked for everyone |
 | `defaultAgent.excludedTools` | Main agent only | These tools are hidden from the main agent but available to sub-agents |
 
 Precedence:
 1. Session-level `availableTools`/`excludedTools` are applied first (globally)
-2. `defaultAgent.excludedTools` is applied on top, further restricting the main agent only
+1. `defaultAgent.excludedTools` is applied on top, further restricting the main agent only
 
-> **Note:** If a tool is in both `excludedTools` (session-level) and `defaultAgent.excludedTools`, the session-level exclusion takes precedence — the tool is unavailable to everyone.
+> [!NOTE]
+> If a tool is in both `excludedTools` (session-level) and `defaultAgent.excludedTools`, the session-level exclusion takes precedence—the tool is unavailable to everyone.
 
-## Attaching MCP Servers to Agents
+## Attaching MCP servers to agents
 
 Each custom agent can have its own MCP (Model Context Protocol) servers, giving it access to specialized data sources:
 
@@ -1356,7 +944,7 @@ const session = await client.createSession({
 });
 ```
 
-## Patterns & Best Practices
+## Patterns and best practices
 
 ### Pair a researcher with an editor
 

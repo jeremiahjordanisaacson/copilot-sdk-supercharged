@@ -309,6 +309,7 @@ public sealed class CopilotClientOptions
         Connection = other.Connection;
         WorkingDirectory = other.WorkingDirectory;
         BaseDirectory = other.BaseDirectory;
+        BuiltinPluginDirectories = other.BuiltinPluginDirectories is null ? null : [.. other.BuiltinPluginDirectories];
         Environment = other.Environment;
         GitHubToken = other.GitHubToken;
         Logger = other.Logger;
@@ -357,6 +358,13 @@ public sealed class CopilotClientOptions
     /// <see cref="RuntimeConnection.ForUri(string, string?)"/>.
     /// </summary>
     public string? BaseDirectory { get; set; }
+
+    /// <summary>
+    /// Absolute paths to trusted plugin directories bundled by the host.
+    /// When non-empty, the complete set is registered with the runtime during
+    /// startup before sessions can be created.
+    /// </summary>
+    public IList<string>? BuiltinPluginDirectories { get; set; }
 
     /// <summary>
     /// Log level for the Copilot runtime. Use the well-known values on
@@ -698,6 +706,12 @@ public sealed class ToolResultObject
     public IDictionary<string, object>? ToolTelemetry { get; set; }
 
     /// <summary>
+    /// Names of tools returned by a tool-search tool.
+    /// </summary>
+    [JsonPropertyName("toolReferences")]
+    public IList<string>? ToolReferences { get; set; }
+
+    /// <summary>
     /// Converts the result of an <see cref="AIFunction"/> invocation into a
     /// <see cref="ToolResultObject"/>. Handles <see cref="ToolResultAIContent"/>,
     /// <see cref="AIContent"/>, and falls back to JSON serialization.
@@ -808,6 +822,14 @@ public sealed class ToolInvocation
     /// Arguments passed to the tool by the language model.
     /// </summary>
     public JsonElement? Arguments { get; set; }
+    /// <summary>
+    /// Snapshot of the session's currently initialized tools. The SDK populates
+    /// this only when the invocation targets the built-in tool-search tool
+    /// (<c>tool_search_tool</c>), so a tool-search override can rank/filter the
+    /// live catalog — including MCP tools configured in settings — without
+    /// issuing its own RPC. <c>null</c> for every other tool invocation.
+    /// </summary>
+    public IList<CurrentToolMetadata>? AvailableTools { get; set; }
 }
 
 /// <summary>
@@ -819,6 +841,9 @@ public sealed class PermissionInvocation
     /// Identifier of the session that triggered the permission request.
     /// </summary>
     public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>Whether managed settings are enabled for this session.</summary>
+    public bool ManagedSettingsEnabled { get; set; }
 }
 
 // ============================================================================
@@ -1640,6 +1665,55 @@ public sealed class UserPromptSubmittedHookOutput
 }
 
 /// <summary>
+/// Input for a user-prompt-transformed hook.
+/// </summary>
+public sealed class UserPromptTransformedHookInput
+{
+    /// <summary>
+    /// The runtime session ID of the session that triggered the hook.
+    /// </summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Unix timestamp in milliseconds when the prompt was transformed.
+    /// </summary>
+    [JsonPropertyName("timestamp")]
+    [JsonConverter(typeof(UnixMillisecondsDateTimeOffsetConverter))]
+    public DateTimeOffset Timestamp { get; set; }
+
+    /// <summary>
+    /// Current working directory of the session.
+    /// </summary>
+    [JsonPropertyName("cwd")]
+    public string WorkingDirectory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The user prompt after any user-prompt-submitted hooks have run.
+    /// </summary>
+    [JsonPropertyName("prompt")]
+    public string Prompt { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The model-facing prompt after runtime transformations.
+    /// </summary>
+    [JsonPropertyName("transformedPrompt")]
+    public string TransformedPrompt { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Output for a user-prompt-transformed hook.
+/// </summary>
+public sealed class UserPromptTransformedHookOutput
+{
+    /// <summary>
+    /// Replacement model-facing prompt to persist and send to the model.
+    /// </summary>
+    [JsonPropertyName("modifiedTransformedPrompt")]
+    public string? ModifiedTransformedPrompt { get; set; }
+}
+
+/// <summary>
 /// Input for a session-start hook.
 /// </summary>
 public sealed class SessionStartHookInput
@@ -1858,6 +1932,67 @@ public sealed class ErrorOccurredHookOutput
 }
 
 /// <summary>
+/// Input for an agent-stop hook.
+/// </summary>
+public sealed class AgentStopHookInput
+{
+    /// <summary>
+    /// The runtime session ID of the session that triggered the hook.
+    /// </summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Unix timestamp in milliseconds when the agent stopped.
+    /// </summary>
+    [JsonPropertyName("timestamp")]
+    [JsonConverter(typeof(UnixMillisecondsDateTimeOffsetConverter))]
+    public DateTimeOffset Timestamp { get; set; }
+
+    /// <summary>
+    /// Current working directory of the session.
+    /// </summary>
+    [JsonPropertyName("cwd")]
+    public string WorkingDirectory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Reason the agent stopped.
+    /// </summary>
+    [JsonPropertyName("stopReason")]
+    public string? StopReason { get; set; }
+
+    /// <summary>
+    /// Path to the on-disk session transcript.
+    /// </summary>
+    [JsonPropertyName("transcriptPath")]
+    public string? TranscriptPath { get; set; }
+
+    /// <summary>
+    /// Whether this stop follows a previous block decision from the hook.
+    /// </summary>
+    [JsonPropertyName("stop_hook_active")]
+    public bool? StopHookActive { get; set; }
+}
+
+/// <summary>
+/// Output for an agent-stop hook.
+/// </summary>
+public sealed class AgentStopHookOutput
+{
+    /// <summary>
+    /// Set to <c>"block"</c> to keep the agent running.
+    /// </summary>
+    [JsonPropertyName("decision")]
+    public string? Decision { get; set; }
+
+    /// <summary>
+    /// Follow-up instruction supplied when the stop is blocked.
+    /// </summary>
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+/// <summary>
 /// Hook handlers configuration for a session.
 /// </summary>
 public sealed class SessionHooks
@@ -1890,6 +2025,11 @@ public sealed class SessionHooks
     public Func<UserPromptSubmittedHookInput, HookInvocation, Task<UserPromptSubmittedHookOutput?>>? OnUserPromptSubmitted { get; set; }
 
     /// <summary>
+    /// Handler called after the runtime transforms a submitted prompt and before it is stored.
+    /// </summary>
+    public Func<UserPromptTransformedHookInput, HookInvocation, Task<UserPromptTransformedHookOutput?>>? OnUserPromptTransformed { get; set; }
+
+    /// <summary>
     /// Handler called when a session starts.
     /// </summary>
     public Func<SessionStartHookInput, HookInvocation, Task<SessionStartHookOutput?>>? OnSessionStart { get; set; }
@@ -1903,6 +2043,11 @@ public sealed class SessionHooks
     /// Handler called when an error occurs.
     /// </summary>
     public Func<ErrorOccurredHookInput, HookInvocation, Task<ErrorOccurredHookOutput?>>? OnErrorOccurred { get; set; }
+
+    /// <summary>
+    /// Handler called when the top-level agent reaches a natural stop.
+    /// </summary>
+    public Func<AgentStopHookInput, HookInvocation, Task<AgentStopHookOutput?>>? OnAgentStop { get; set; }
 }
 
 /// <summary>
@@ -2261,7 +2406,7 @@ public sealed class CapiSessionOptions
 public sealed class AzureOptions
 {
     /// <summary>
-    /// Azure OpenAI API version to use (e.g., "2024-02-01").
+    /// Azure OpenAI API version. When omitted, the runtime uses the GA versionless v1 route.
     /// </summary>
     [JsonPropertyName("apiVersion")]
     public string? ApiVersion { get; set; }
@@ -2468,81 +2613,6 @@ public enum EmbeddingCacheStorageMode
     InMemory
 }
 
-/// <summary>Response format for a message (Supercharged extension).</summary>
-[JsonConverter(typeof(JsonStringEnumConverter<ResponseFormat>))]
-public enum ResponseFormat
-{
-    /// <summary>Plain text response.</summary>
-    [JsonStringEnumMemberName("text")]
-    Text,
-    /// <summary>Image generation response.</summary>
-    [JsonStringEnumMemberName("image")]
-    Image,
-    /// <summary>Structured JSON response.</summary>
-    [JsonStringEnumMemberName("json_object")]
-    JsonObject
-}
-
-/// <summary>Options for image generation (Supercharged extension).</summary>
-public class ImageOptions
-{
-    /// <summary>Image size (e.g. "1024x1024")</summary>
-    [JsonPropertyName("size")]
-    public string? Size { get; set; }
-
-    /// <summary>Image quality ("hd" or "standard")</summary>
-    [JsonPropertyName("quality")]
-    public string? Quality { get; set; }
-
-    /// <summary>Image style ("natural" or "vivid")</summary>
-    [JsonPropertyName("style")]
-    public string? Style { get; set; }
-}
-
-/// <summary>Image data from an assistant image response.</summary>
-public class AssistantImageData
-{
-    /// <summary>Image format ("png", "jpeg", "webp")</summary>
-    [JsonPropertyName("format")]
-    public string Format { get; set; } = "";
-
-    /// <summary>Base64-encoded image bytes</summary>
-    [JsonPropertyName("base64")]
-    public string Base64 { get; set; } = "";
-
-    /// <summary>Optional temporary URL for the image.</summary>
-    [JsonPropertyName("url")]
-    public string? Url { get; set; }
-
-    /// <summary>The prompt the model actually used.</summary>
-    [JsonPropertyName("revisedPrompt")]
-    public string? RevisedPrompt { get; set; }
-
-    /// <summary>Image width in pixels.</summary>
-    [JsonPropertyName("width")]
-    public int Width { get; set; }
-
-    /// <summary>Image height in pixels.</summary>
-    [JsonPropertyName("height")]
-    public int Height { get; set; }
-}
-
-/// <summary>A content block in a mixed text+image response.</summary>
-public class ContentBlock
-{
-    /// <summary>Block type ("text" or "image").</summary>
-    [JsonPropertyName("type")]
-    public string Type { get; set; } = "";
-
-    /// <summary>Text content (when type is "text").</summary>
-    [JsonPropertyName("text")]
-    public string? Text { get; set; }
-
-    /// <summary>Image data (when type is "image").</summary>
-    [JsonPropertyName("image")]
-    public AssistantImageData? Image { get; set; }
-}
-
 /// <summary>
 /// Abstract base class for MCP server configurations.
 /// </summary>
@@ -2718,6 +2788,14 @@ public sealed class CustomAgentConfig
     /// </summary>
     [JsonPropertyName("model")]
     public string? Model { get; set; }
+
+    /// <summary>
+    /// Reasoning effort level for this agent's model.
+    /// When omitted, the runtime resolves model configuration, then inherits
+    /// the parent effort only if this agent uses the same model.
+    /// </summary>
+    [JsonPropertyName("reasoningEffort")]
+    public string? ReasoningEffort { get; set; }
 }
 
 /// <summary>
@@ -2797,6 +2875,30 @@ public sealed class LargeToolOutputConfig
 }
 
 /// <summary>
+/// Overrides the runtime's built-in tool-search behavior.
+/// Defers tools to keep the model's active tool set small.
+/// To override the tool-search tool's implementation, register a tool
+/// named "tool_search_tool" with <c>OverridesBuiltInTool</c> set to
+/// <see langword="true"/>.
+/// </summary>
+public sealed class ToolSearchConfig
+{
+    /// <summary>
+    /// Enable or disable tool search.
+    /// </summary>
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; set; }
+
+    /// <summary>
+    /// The tool count above which MCP and external tools are deferred behind
+    /// tool search. When <see langword="null"/>, the runtime default (30)
+    /// applies.
+    /// </summary>
+    [JsonPropertyName("deferThreshold")]
+    public int? DeferThreshold { get; set; }
+}
+
+/// <summary>
 /// Configuration for session memory.
 /// </summary>
 public sealed class MemoryConfiguration
@@ -2863,6 +2965,158 @@ public struct SetModelOptions
 }
 
 /// <summary>
+/// A single configuration entry in a <see cref="CopilotExpAssignmentResponse"/>.
+/// Each entry carries an identifier and a bag of typed parameter values.
+/// </summary>
+public sealed class ExpConfigEntry
+{
+    /// <summary>Identifier of the configuration entry.</summary>
+    [JsonPropertyName("Id")]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Parameter values keyed by parameter name. Each value is a scalar string,
+    /// number, boolean, or <c>null</c>.
+    /// </summary>
+    [JsonPropertyName("Parameters")]
+    public IDictionary<string, JsonValue?> Parameters { get; set; } = new Dictionary<string, JsonValue?>();
+}
+
+/// <summary>
+/// ExP ("flight") assignment data, in the same JSON shape the Copilot CLI
+/// fetches from the experimentation service. Property names serialize as
+/// PascalCase (<c>Features</c>, <c>Flights</c>, ...) to match the on-the-wire
+/// contract consumed by the runtime.
+/// </summary>
+public sealed class CopilotExpAssignmentResponse
+{
+    /// <summary>Enabled feature names.</summary>
+    [JsonPropertyName("Features")]
+    public IList<string> Features { get; set; } = new List<string>();
+
+    /// <summary>Assigned flights keyed by flight name.</summary>
+    [JsonPropertyName("Flights")]
+    public IDictionary<string, string> Flights { get; set; } = new Dictionary<string, string>();
+
+    /// <summary>Configuration entries carrying typed parameter values.</summary>
+    [JsonPropertyName("Configs")]
+    public IList<ExpConfigEntry> Configs { get; set; } = new List<ExpConfigEntry>();
+
+    /// <summary>Opaque parameter-group payload passed through untouched. Optional.</summary>
+    [JsonPropertyName("ParameterGroups")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonNode? ParameterGroups { get; set; }
+
+    /// <summary>Version of the flighting configuration. Optional.</summary>
+    [JsonPropertyName("FlightingVersion")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? FlightingVersion { get; set; }
+
+    /// <summary>Impression identifier for the assignment. Optional.</summary>
+    [JsonPropertyName("ImpressionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ImpressionId { get; set; }
+
+    /// <summary>Assignment context string forwarded to CAPI and telemetry.</summary>
+    [JsonPropertyName("AssignmentContext")]
+    public string AssignmentContext { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Configuration for the built-in GitHub MCP server.
+/// </summary>
+public sealed class GitHubMcpToolConfig
+{
+    /// <summary>Enables all GitHub MCP tools.</summary>
+    [JsonPropertyName("enableAllTools")]
+    public bool? EnableAllTools { get; set; }
+
+    /// <summary>Additional GitHub MCP toolsets to enable.</summary>
+    [JsonPropertyName("additionalToolsets")]
+    public IList<string>? AdditionalToolsets { get; set; }
+
+    /// <summary>Additional GitHub MCP tools to enable.</summary>
+    [JsonPropertyName("additionalTools")]
+    public IList<string>? AdditionalTools { get; set; }
+
+    /// <summary>Enables GitHub MCP insiders-mode tools.</summary>
+    [JsonPropertyName("enableInsidersMode")]
+    public bool? EnableInsidersMode { get; set; }
+
+    /// <summary>
+    /// Disables form deferral for GitHub MCP tools. This only applies to the
+    /// built-in GitHub MCP server and only has an effect when MCP Apps and
+    /// form-backed GitHub tools are enabled.
+    /// </summary>
+    [JsonPropertyName("disableFormDeferral")]
+    public bool? DisableFormDeferral { get; set; }
+}
+
+/// <summary>
+/// Controls whether bypass-permissions mode is available in a managed session.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<DisableBypassPermissionsMode>))]
+public enum DisableBypassPermissionsMode
+{
+    /// <summary>Turn off bypass-permissions mode.</summary>
+    [JsonStringEnumMemberName("disable")]
+    Disable
+}
+
+/// <summary>
+/// Permission rules injected as a managed-settings layer at session bootstrap.
+/// All fields are optional; omitted fields impose no constraint from this layer.
+/// </summary>
+/// <remarks>
+/// This layer composes restrictively with any server- or device-level managed
+/// settings: <see cref="Deny"/> and <see cref="Ask"/> rules are unioned across
+/// layers, every present <see cref="Allow"/> list must admit a tool for it to be
+/// allowed, and <see cref="DisableBypassPermissionsMode"/> is honored if any
+/// layer sets it (deny-wins).
+/// </remarks>
+public sealed class ManagedSettingsPermissions
+{
+    /// <summary>
+    /// When set to <c>"disable"</c>, bypass-permissions mode is turned off for the
+    /// session regardless of other layers. Serialized as
+    /// <c>disableBypassPermissionsMode</c>.
+    /// </summary>
+    [JsonPropertyName("disableBypassPermissionsMode")]
+    public DisableBypassPermissionsMode? DisableBypassPermissionsMode { get; set; }
+
+    /// <summary>Tool-permission patterns that are always denied.</summary>
+    [JsonPropertyName("deny")]
+    public IList<string>? Deny { get; set; }
+
+    /// <summary>Tool-permission patterns that require an explicit ask.</summary>
+    [JsonPropertyName("ask")]
+    public IList<string>? Ask { get; set; }
+
+    /// <summary>Tool-permission patterns that are allowed without prompting.</summary>
+    [JsonPropertyName("allow")]
+    public IList<string>? Allow { get; set; }
+}
+
+/// <summary>
+/// Managed-settings layer injected at session startup. Currently carries only a
+/// <see cref="Permissions"/> object.
+/// </summary>
+/// <remarks>
+/// This layer is startup-only and is not persisted with the session. It must be
+/// re-supplied on <see cref="CopilotClient.ResumeSessionAsync"/> to remain in
+/// effect; omitting it on resume clears the previously injected layer. It can be
+/// combined with <see cref="SessionConfigBase.EnableManagedSettings"/>. Older
+/// runtimes may ignore this additive field, so hosts must not rely on injected
+/// policy until they ship a compatible runtime.
+/// </remarks>
+public sealed class ManagedSettings
+{
+    /// <summary>Permission rules for this managed-settings layer.</summary>
+    [JsonPropertyName("permissions")]
+    public ManagedSettingsPermissions? Permissions { get; set; }
+}
+
+/// <summary>
 /// Shared configuration properties for creating or resuming a Copilot session.
 /// Use <see cref="SessionConfig"/> when creating a new session, or
 /// <see cref="ResumeSessionConfig"/> when resuming an existing one.
@@ -2888,7 +3142,9 @@ public abstract class SessionConfigBase
         DefaultAgent = other.DefaultAgent;
         Agent = other.Agent;
         DisabledSkills = other.DisabledSkills is not null ? [.. other.DisabledSkills] : null;
+        DisabledMcpServers = other.DisabledMcpServers is not null ? [.. other.DisabledMcpServers] : null;
         EnableCitations = other.EnableCitations;
+        EnableFileChangeTracking = other.EnableFileChangeTracking;
         EnableConfigDiscovery = other.EnableConfigDiscovery;
         SkipEmbeddingRetrieval = other.SkipEmbeddingRetrieval;
         EmbeddingCacheStorage = other.EmbeddingCacheStorage;
@@ -2899,11 +3155,26 @@ public abstract class SessionConfigBase
         EnableSessionStore = other.EnableSessionStore;
         EnableSkills = other.EnableSkills;
         EnableMcpApps = other.EnableMcpApps;
+        GitHubMcpToolConfig = other.GitHubMcpToolConfig is null
+            ? null
+            : new GitHubMcpToolConfig
+            {
+                EnableAllTools = other.GitHubMcpToolConfig.EnableAllTools,
+                AdditionalToolsets = other.GitHubMcpToolConfig.AdditionalToolsets is not null
+                    ? [.. other.GitHubMcpToolConfig.AdditionalToolsets]
+                    : null,
+                AdditionalTools = other.GitHubMcpToolConfig.AdditionalTools is not null
+                    ? [.. other.GitHubMcpToolConfig.AdditionalTools]
+                    : null,
+                EnableInsidersMode = other.GitHubMcpToolConfig.EnableInsidersMode,
+                DisableFormDeferral = other.GitHubMcpToolConfig.DisableFormDeferral,
+            };
         ExcludedBuiltInAgents = other.ExcludedBuiltInAgents is not null ? [.. other.ExcludedBuiltInAgents] : null;
         ExcludedTools = other.ExcludedTools is not null ? [.. other.ExcludedTools] : null;
         Hooks = other.Hooks;
         InfiniteSessions = other.InfiniteSessions;
         LargeOutput = other.LargeOutput;
+        ToolSearch = other.ToolSearch;
         Memory = other.Memory;
         McpServers = other.McpServers is not null
             ? (other.McpServers is Dictionary<string, McpServerConfig> dict
@@ -2925,6 +3196,7 @@ public abstract class SessionConfigBase
         Providers = other.Providers is not null ? [.. other.Providers] : null;
         Models = other.Models is not null ? [.. other.Models] : null;
         EnableSessionTelemetry = other.EnableSessionTelemetry;
+        EnableExperimentalMode = other.EnableExperimentalMode;
         SkipCustomInstructions = other.SkipCustomInstructions;
         CustomAgentsLocalOnly = other.CustomAgentsLocalOnly;
         CoauthorEnabled = other.CoauthorEnabled;
@@ -2936,12 +3208,15 @@ public abstract class SessionConfigBase
         GitHubToken = other.GitHubToken;
         RemoteSession = other.RemoteSession;
         ExpAssignments = other.ExpAssignments;
+        EnableManagedSettings = other.EnableManagedSettings;
+        ManagedSettings = other.ManagedSettings;
 #pragma warning disable GHCP001
         Canvases = other.Canvases is not null ? [.. other.Canvases] : null;
         RequestCanvasRenderer = other.RequestCanvasRenderer;
         RequestExtensions = other.RequestExtensions;
         ExtensionSdkPath = other.ExtensionSdkPath;
         ExtensionInfo = other.ExtensionInfo;
+        CanvasProvider = other.CanvasProvider;
         CanvasHandler = other.CanvasHandler;
 #pragma warning restore GHCP001
         SkillDirectories = other.SkillDirectories is not null ? [.. other.SkillDirectories] : null;
@@ -2953,6 +3228,7 @@ public abstract class SessionConfigBase
         SystemMessage = other.SystemMessage;
         Tools = other.Tools is not null ? [.. other.Tools] : null;
         WorkingDirectory = other.WorkingDirectory;
+        AdditionalDirectories = other.AdditionalDirectories is not null ? [.. other.AdditionalDirectories] : null;
     }
 
     /// <summary>Client name to identify the application using the SDK.</summary>
@@ -2963,7 +3239,7 @@ public abstract class SessionConfigBase
 
     /// <summary>
     /// Reasoning effort level for models that support it.
-    /// Valid values: "low", "medium", "high", "xhigh".
+    /// Valid values: "low", "medium", "high", "xhigh", "max".
     /// Only applies to models where capabilities.supports.reasoningEffort is true.
     /// </summary>
     public string? ReasoningEffort { get; set; }
@@ -2997,21 +3273,25 @@ public abstract class SessionConfigBase
     public bool? EnableCitations { get; set; }
 
     /// <summary>
+    /// Opts in to capturing file changes for session rewind and cumulative
+    /// session diff.
+    /// </summary>
+    /// <remarks>
+    /// On create, capture starts with the first turn. On resume, tracking can be
+    /// enabled only when the session still has a valid baseline; earlier untracked
+    /// changes cannot be reconstructed.
+    /// </remarks>
+    public bool? EnableFileChangeTracking { get; set; }
+
+    /// <summary>
     /// Override the default configuration directory location.
     /// When specified, the session will use this directory for storing config and state.
     /// </summary>
     public string? ConfigDirectory { get; set; }
 
     /// <summary>
-    /// When <see langword="true"/>, automatically discovers MCP server configurations
-    /// (e.g. <c>.mcp.json</c>, <c>.vscode/mcp.json</c>) and skill directories from
-    /// the working directory and merges them with any explicitly provided
-    /// <see cref="McpServers"/> and <see cref="SkillDirectories"/>, with explicit
-    /// values taking precedence on name collision.
-    /// <para>
-    /// Custom instruction files (<c>.github/copilot-instructions.md</c>, <c>AGENTS.md</c>, etc.)
-    /// are always loaded from the working directory regardless of this setting.
-    /// </para>
+    /// Enables runtime discovery of supported configuration. Explicitly supplied
+    /// configuration takes precedence over discovered values.
     /// </summary>
     public bool? EnableConfigDiscovery { get; set; }
 
@@ -3133,6 +3413,15 @@ public abstract class SessionConfigBase
     public bool? EnableSessionTelemetry { get; set; }
 
     /// <summary>
+    /// Controls whether the session enables experimental features.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see langword="false"/> in <see cref="CopilotClientMode.Empty"/>.
+    /// Otherwise, the runtime decides when left <see langword="null"/>.
+    /// </remarks>
+    public bool? EnableExperimentalMode { get; set; }
+
+    /// <summary>
     /// When <see langword="true"/>, suppresses loading of custom instruction files
     /// (e.g. <c>.github/copilot-instructions.md</c>, <c>AGENTS.md</c>) from the working directory.
     /// When <see langword="null"/>, the SDK chooses based on
@@ -3211,11 +3500,24 @@ public abstract class SessionConfigBase
     [Experimental(Diagnostics.Experimental)]
     public bool EnableMcpApps { get; set; }
 
+    /// <summary>
+    /// Configuration for the built-in GitHub MCP server.
+    /// <c>DisableFormDeferral</c> only applies to that server and only has an
+    /// effect when MCP Apps and form-backed GitHub tools are enabled.
+    /// </summary>
+    public GitHubMcpToolConfig? GitHubMcpToolConfig { get; set; }
+
     /// <summary>Hook handlers for session lifecycle events.</summary>
     public SessionHooks? Hooks { get; set; }
 
     /// <summary>Working directory for the session.</summary>
     public string? WorkingDirectory { get; set; }
+
+    /// <summary>
+    /// Additional directories the agent may access beyond <see cref="WorkingDirectory"/>.
+    /// Relative paths resolve against the session working directory. Re-supply them when resuming.
+    /// </summary>
+    public IList<string>? AdditionalDirectories { get; set; }
 
     /// <summary>
     /// Enable streaming of assistant message and reasoning chunks.
@@ -3285,6 +3587,13 @@ public abstract class SessionConfigBase
     public IList<string>? DisabledSkills { get; set; }
 
     /// <summary>
+    /// Exact MCP server names to disable for this session. Disabled servers are not
+    /// started or authenticated on create or cold resume; a resident resume cannot
+    /// stop servers that are already running.
+    /// </summary>
+    public IList<string>? DisabledMcpServers { get; set; }
+
+    /// <summary>
     /// Infinite session configuration for persistent workspaces and automatic compaction.
     /// When enabled (default), sessions automatically manage context limits and persist state.
     /// </summary>
@@ -3307,6 +3616,13 @@ public abstract class SessionConfigBase
     /// payload.
     /// </summary>
     public LargeToolOutputConfig? LargeOutput { get; set; }
+
+    /// <summary>
+    /// Overrides the runtime's built-in tool-search behavior.
+    /// Tool search defers tools to keep the model's active tool set small. When <see langword="null"/>,
+    /// the runtime default applies.
+    /// </summary>
+    public ToolSearchConfig? ToolSearch { get; set; }
 
     /// <summary>
     /// Configuration for session memory. When set, controls whether the
@@ -3358,7 +3674,28 @@ public abstract class SessionConfigBase
     /// completion. It is not part of the broadly advertised public surface.
     /// </remarks>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public JsonElement? ExpAssignments { get; set; }
+    public CopilotExpAssignmentResponse? ExpAssignments { get; set; }
+
+    /// <summary>
+    /// Opt-in: when <c>true</c>, the runtime self-fetches enterprise managed
+    /// settings (bypass-permissions policy) at session bootstrap using the
+    /// session's <see cref="GitHubToken"/>. Requires <see cref="GitHubToken"/> to
+    /// be set; if omitted, the runtime is expected to reject session creation
+    /// (fail-closed). When unset, behaves exactly as before. Serialized on the
+    /// wire as <c>enableManagedSettings</c>.
+    /// </summary>
+    public bool? EnableManagedSettings { get; set; }
+
+    /// <summary>
+    /// Optional managed-settings layer injected at session bootstrap. Currently
+    /// carries a permissions object that composes restrictively with any
+    /// server- or device-level managed settings. This layer is startup-only and
+    /// is not persisted: it must be re-supplied on resume to remain in effect,
+    /// and omitting it on resume clears the previously injected layer. Can be
+    /// combined with <see cref="EnableManagedSettings"/>. Serialized on the wire
+    /// as <c>managedSettings</c>.
+    /// </summary>
+    public ManagedSettings? ManagedSettings { get; set; }
 
 #pragma warning disable GHCP001
     /// <summary>
@@ -3400,6 +3737,16 @@ public abstract class SessionConfigBase
     /// </summary>
     [Experimental(Diagnostics.Experimental)]
     public ExtensionInfo? ExtensionInfo { get; set; }
+
+    /// <summary>
+    /// Stable identity for a host/SDK connection that supplies built-in
+    /// canvases. When set, the runtime uses <see cref="CanvasProviderIdentity.Id"/>
+    /// verbatim as the agent-facing canvas extension id, so canvases declared on
+    /// a control connection survive reconnect and CLI restart. Honored on
+    /// session create and resume.
+    /// </summary>
+    [Experimental(Diagnostics.Experimental)]
+    public CanvasProviderIdentity? CanvasProvider { get; set; }
 
     /// <summary>
     /// Provider-side canvas lifecycle handler. The SDK routes inbound
@@ -4040,6 +4387,8 @@ public sealed class SystemMessageTransformRpcResponse
 [JsonSerializable(typeof(AutoModeSwitchRequest))]
 [JsonSerializable(typeof(AutoModeSwitchResponse))]
 [JsonSerializable(typeof(CustomAgentConfig))]
+[JsonSerializable(typeof(CopilotExpAssignmentResponse))]
+[JsonSerializable(typeof(ExpConfigEntry))]
 [JsonSerializable(typeof(ExitPlanModeRequest))]
 [JsonSerializable(typeof(ExitPlanModeResult))]
 [JsonSerializable(typeof(GetAuthStatusResponse))]
@@ -4085,8 +4434,6 @@ public sealed class SystemMessageTransformRpcResponse
 [JsonSerializable(typeof(CanvasProviderOpenResult))]
 [JsonSerializable(typeof(CanvasHostContext))]
 [JsonSerializable(typeof(ExtensionInfo))]
-[JsonSerializable(typeof(ImageOptions))]
-[JsonSerializable(typeof(AssistantImageData))]
-[JsonSerializable(typeof(ContentBlock))]
+[JsonSerializable(typeof(CanvasProviderIdentity))]
 #pragma warning restore GHCP001
 internal partial class TypesJsonContext : JsonSerializerContext;

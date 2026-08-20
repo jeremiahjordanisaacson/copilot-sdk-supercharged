@@ -12,7 +12,7 @@ namespace GitHub.Copilot.Test.E2E;
 /// <summary>
 /// E2E coverage for session-scoped RPC methods that were previously untested:
 /// completions, model.list, metadata.activity/context attribution/heaviest messages,
-/// permissions.getAllowAll/setAllowAll, plan.readSqlTodos, provider.add,
+/// permissions.getMode/setMode, plan.readSqlTodos, provider.add,
 /// telemetry.getEngagementId, tools.getCurrentMetadata/updateSubagentSettings,
 /// session visibility, and the session-scoped plugins.reload.
 /// </summary>
@@ -20,6 +20,7 @@ public class RpcSessionStateExtrasE2ETests(E2ETestFixture fixture, ITestOutputHe
     : E2ETestBase(fixture, "rpc_session_state_extras", output)
 {
     [Fact]
+    [Trait(E2ETestTraits.Backend, E2ETestTraits.CapiOnly)]
     public async Task Should_List_Models_For_Session()
     {
         // model.list resolves models through the session's own auth context, which requires the
@@ -29,7 +30,7 @@ public class RpcSessionStateExtrasE2ETests(E2ETestFixture fixture, ITestOutputHe
         const string token = "rpc-session-model-list-token";
         await ConfigureAuthenticatedUserAsync(token);
         await using var client = CreateAuthenticatedClient(token);
-        await using var session = await client.CreateSessionAsync(new SessionConfig
+        await using var session = await Ctx.CreateSessionAsync(client, new SessionConfig
         {
             Model = "claude-sonnet-4.5",
             OnPermissionRequest = PermissionHandler.ApproveAll,
@@ -44,6 +45,7 @@ public class RpcSessionStateExtrasE2ETests(E2ETestFixture fixture, ITestOutputHe
     }
 
     [Fact]
+    [Trait(E2ETestTraits.Backend, E2ETestTraits.SelfConfiguredBackend)]
     public async Task Should_Add_Byok_Provider_And_Model_At_Runtime()
     {
         await using var session = await CreateSessionAsync();
@@ -156,22 +158,22 @@ public class RpcSessionStateExtrasE2ETests(E2ETestFixture fixture, ITestOutputHe
 
         try
         {
-            var initial = await session.Rpc.Permissions.GetAllowAllAsync();
-            Assert.False(initial.Enabled, "Allow-all should be disabled on a fresh session.");
+            var initial = await session.Rpc.Permissions.GetModeAsync();
+            Assert.Equal(PermissionMode.Manual, initial.Mode);
 
-            var enable = await session.Rpc.Permissions.SetAllowAllAsync(enabled: true);
+            var enable = await session.Rpc.Permissions.SetModeAsync(PermissionMode.AllowAll);
             Assert.True(enable.Success);
-            Assert.True(enable.Enabled);
-            Assert.True((await session.Rpc.Permissions.GetAllowAllAsync()).Enabled);
+            Assert.Equal(PermissionMode.AllowAll, enable.Mode);
+            Assert.Equal(PermissionMode.AllowAll, (await session.Rpc.Permissions.GetModeAsync()).Mode);
 
-            var disable = await session.Rpc.Permissions.SetAllowAllAsync(enabled: false);
+            var disable = await session.Rpc.Permissions.SetModeAsync(PermissionMode.Manual);
             Assert.True(disable.Success);
-            Assert.False(disable.Enabled);
-            Assert.False((await session.Rpc.Permissions.GetAllowAllAsync()).Enabled);
+            Assert.Equal(PermissionMode.Manual, disable.Mode);
+            Assert.Equal(PermissionMode.Manual, (await session.Rpc.Permissions.GetModeAsync()).Mode);
         }
         finally
         {
-            await session.Rpc.Permissions.SetAllowAllAsync(enabled: false);
+            await session.Rpc.Permissions.SetModeAsync(PermissionMode.Manual);
         }
     }
 

@@ -108,7 +108,7 @@ describe("Session Fs", async () => {
             connection: RuntimeConnection.forTcp({ connectionToken: tcpConnectionToken }),
             env,
         });
-        onTestFinished(() => client.forceStop());
+        onTestFinished(() => client.stop());
         await client.createSession({ onPermissionRequest: approveAll, createSessionFsProvider });
 
         const { runtimePort: port } = client as unknown as { runtimePort: number };
@@ -123,7 +123,7 @@ describe("Session Fs", async () => {
             }),
             sessionFs: sessionFsConfig,
         });
-        onTestFinished(() => client2.forceStop());
+        onTestFinished(() => client2.stop());
 
         await expect(client2.start()).rejects.toThrow();
     });
@@ -145,9 +145,11 @@ describe("Session Fs", async () => {
             prompt: "Call the get_big_string tool and reply with the word DONE only.",
         });
 
-        // The tool result should reference a temp file under the session state path
+        // The tool result should reference a temp file under the session state path.
+        // The CLI joins the temp path using the host separator, so normalize before
+        // matching to keep the assertion valid on Windows.
         const messages = await session.getEvents();
-        const toolResult = findToolCallResult(messages, "get_big_string");
+        const toolResult = findToolCallResult(messages, "get_big_string")?.replaceAll("\\", "/");
         expect(toolResult).toContain(`${sessionStatePath}/temp/`);
         const filename = toolResult?.match(
             new RegExp(`(${escapeRegExp(sessionStatePath)}/temp/[^\\s]+)`)
@@ -299,6 +301,20 @@ describe("Session Fs Adapter", () => {
                         rowsAffected: 0,
                     };
                 },
+                async transaction(statements) {
+                    return statements.map((statement) => ({
+                        columns: ["sessionId", "query", "queryType", "answer"],
+                        rows: [
+                            {
+                                sessionId: "handler-session",
+                                query: statement.query,
+                                queryType: statement.queryType,
+                                answer: statement.params?.answer,
+                            },
+                        ],
+                        rowsAffected: 0,
+                    }));
+                },
                 async exists() {
                     return true;
                 },
@@ -431,6 +447,9 @@ describe("Session Fs Adapter", () => {
             },
             sqlite: {
                 query: async () => {
+                    throw enoent;
+                },
+                transaction: async () => {
                     throw enoent;
                 },
                 exists: async () => {
@@ -588,6 +607,13 @@ function createTestSessionFsHandler(
                     rows: [],
                     rowsAffected: 0,
                 };
+            },
+            async transaction(statements) {
+                return statements.map(() => ({
+                    columns: [],
+                    rows: [],
+                    rowsAffected: 0,
+                }));
             },
             async exists() {
                 return true;

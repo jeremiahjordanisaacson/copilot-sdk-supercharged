@@ -11,18 +11,66 @@ import re
 import shutil
 import tempfile
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from copilot import CopilotClient, RuntimeConnection
+from copilot._cli_version import get_npm_platform
 
 from .proxy import CapiProxy
+
+
+def _cli_platform_package_names(npm_platform: str | None = None) -> list[str]:
+    """Return candidate ``@github/copilot-*`` directory names, best match first.
+
+    Mirrors ``getCliPlatformPackageNames()`` in ``nodejs/src/client.ts``: as of CLI
+    1.0.64-1 the runnable ``index.js`` ships in a platform package such as
+    ``copilot-darwin-arm64``. On Linux both libc variants are listed (the detected
+    one first) because npm installs exactly one of them and musl probing can come up
+    empty in minimal containers.
+    """
+    primary = npm_platform or get_npm_platform()
+    names = [f"copilot-{primary}"]
+    if primary.startswith("linux"):
+        arch = primary.rsplit("-", 1)[-1]
+        for variant in (f"linux-{arch}", f"linuxmusl-{arch}"):
+            name = f"copilot-{variant}"
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def _find_cli_in_node_modules(github_modules: Path, package_names: Sequence[str]) -> str | None:
+    """Return the resolved ``index.js`` of the first installed candidate package.
+
+    Only exact package names are probed, so unrelated ``copilot-*`` directories
+    (e.g. ``copilot-language-server``) can never be mistaken for the CLI.
+    """
+    for name in package_names:
+        candidate = github_modules / name / "index.js"
+        if candidate.exists():
+            return str(candidate.resolve())
+    return None
+
+
+def _installed_cli_package_names(github_modules: Path) -> list[str]:
+    """Return the ``copilot-*`` directory names present, for error messages only.
+
+    Selection never globs — that was the #2103 bug. This exists so a failure can
+    say what *is* installed, which is the difference between a dead-end "run npm
+    install" and a message that diagnoses itself on a mixed-architecture host.
+    """
+    if not github_modules.is_dir():
+        return []
+    return sorted(path.name for path in github_modules.glob("copilot-*") if path.is_dir())
 
 
 def get_cli_path_for_tests() -> str:
     """Get CLI path for E2E tests.
 
-    Uses COPILOT_CLI_PATH env var if set, otherwise node_modules CLI.
+    Uses COPILOT_CLI_PATH env var if set, otherwise the platform-specific CLI
+    package in the sibling nodejs directory's node_modules.
     """
     env_path = os.environ.get("COPILOT_CLI_PATH")
     if env_path and Path(env_path).exists():
@@ -30,20 +78,36 @@ def get_cli_path_for_tests() -> str:
 
     # Look for CLI in sibling nodejs directory's node_modules. As of CLI 1.0.64-1
     # the @github/copilot package is a thin loader; the runnable index.js ships in
-    # the installed platform package (e.g. @github/copilot-linux-x64).
+    # the installed platform package (e.g. @github/copilot-linux-x64), so pick the
+    # one built for this host rather than whichever sorts first (#2103).
     base_path = Path(__file__).parents[3]
     github_modules = base_path / "nodejs" / "node_modules" / "@github"
-    for platform_pkg in sorted(github_modules.glob("copilot-*")):
-        candidate = platform_pkg / "index.js"
-        if candidate.exists():
-            return str(candidate.resolve())
+    package_names = _cli_platform_package_names()
+    found = _find_cli_in_node_modules(github_modules, package_names)
+    if found is not None:
+        return found
 
-    raise RuntimeError("CLI not found for tests. Run 'npm install' in the nodejs directory.")
+    installed = _installed_cli_package_names(github_modules)
+    raise RuntimeError(
+        f"CLI not found for tests under {github_modules} "
+        f"(tried: {', '.join(package_names)}; "
+        f"present: {', '.join(installed) or 'none'}). "
+        "Run 'npm install' in the nodejs directory, or set COPILOT_CLI_PATH."
+    )
 
 
 CLI_PATH = get_cli_path_for_tests()
 SNAPSHOTS_DIR = Path(__file__).parents[3] / "test" / "snapshots"
 DEFAULT_GITHUB_TOKEN = "fake-token-for-e2e-tests"
+
+
+def is_inprocess_transport() -> bool:
+    """Return True when the E2E suite should run over the in-process (FFI) transport.
+
+    Selected by the ``inprocess`` CI matrix cell via
+    ``COPILOT_SDK_DEFAULT_CONNECTION=inprocess``. Mirrors the Node/.NET harnesses.
+    """
+    return (os.environ.get("COPILOT_SDK_DEFAULT_CONNECTION") or "").lower() == "inprocess"
 
 
 class E2ETestContext:
@@ -56,6 +120,10 @@ class E2ETestContext:
         self.proxy_url: str = ""
         self._proxy: CapiProxy | None = None
         self._client: CopilotClient | None = None
+        self._inprocess: bool = is_inprocess_transport()
+        self._client_inprocess: bool = False
+        self._restore_env: list[tuple[str, str | None]] = []
+        self._restore_cwd: str | None = None
 
     async def setup(self, cli_args: list[str] | None = None):
         """Set up the test context with a shared client.
@@ -83,16 +151,87 @@ class E2ETestContext:
             },
         )
 
-        # Create the shared client (like Node.js/Go do)
-        self._client = CopilotClient(
-            connection=RuntimeConnection.for_stdio(
-                path=self.cli_path,
-                args=tuple(cli_args or []),
-            ),
-            working_directory=self.work_dir,
-            env=self.get_env(),
-            github_token=DEFAULT_GITHUB_TOKEN,
+        # Create the shared client (like Node.js/Go do). The in-process (FFI)
+        # transport loads the runtime into this test host process, so it cannot
+        # honor a per-client working_directory or env block: the worker inherits
+        # this process's ambient cwd and environment. We therefore mirror the
+        # per-test redirects, isolated home, and credentials onto the real process
+        # (os.environ writes reach native getenv on CPython) and chdir into the
+        # work dir, then create the client without working_directory/env. This
+        # matches the Node/.NET in-process harnesses.
+        self._client_inprocess = self._inprocess and not cli_args
+        if self._client_inprocess:
+            self._apply_inprocess_environment()
+            self._client = CopilotClient(
+                connection=RuntimeConnection.for_inprocess(),
+                github_token=DEFAULT_GITHUB_TOKEN,
+            )
+        else:
+            self._client = CopilotClient(
+                connection=RuntimeConnection.for_stdio(
+                    path=self.cli_path,
+                    args=tuple(cli_args or []),
+                ),
+                working_directory=self.work_dir,
+                env=self.get_env(),
+                github_token=DEFAULT_GITHUB_TOKEN,
+            )
+
+    def _apply_inprocess_environment(self) -> None:
+        """Mirror the isolated test environment onto the real process for in-process hosting.
+
+        The in-process worker inherits this process's environment and cwd at
+        spawn, so the per-test redirects must live on ``os.environ`` and the
+        process cwd. Auth flows via GH_TOKEN/GITHUB_TOKEN (the FFI argv omits the
+        stdio ``--auth-token-env`` wiring) and HMAC is disabled so host-side auth
+        resolution matches the replay snapshots. Restored in ``teardown``.
+        """
+        inprocess_env = dict(self.get_env())
+        inprocess_env.update(
+            {
+                "GH_TOKEN": DEFAULT_GITHUB_TOKEN,
+                "GITHUB_TOKEN": DEFAULT_GITHUB_TOKEN,
+                "COPILOT_CLI_PATH": self.cli_path,
+                "COPILOT_HMAC_KEY": "",
+                "CAPI_HMAC_KEY": "",
+            }
         )
+        for key, value in inprocess_env.items():
+            self._restore_env.append((key, os.environ.get(key)))
+            os.environ[key] = value
+
+        self._restore_cwd = os.getcwd()
+        os.chdir(self.work_dir)
+
+    def add_runtime_env(self, key: str, value: str) -> None:
+        """Set an env var seen by the runtime, honoring the active transport.
+
+        Child-process transports read env from the client's env block, but the
+        in-process worker inherits *this* process's environment, so the var must
+        live on ``os.environ`` (and be restored in teardown). Must be called
+        before the runtime starts (i.e., before the first ``create_session``).
+        """
+        if self._client_inprocess:
+            self._restore_env.append((key, os.environ.get(key)))
+            os.environ[key] = value
+        else:
+            options = self.client._options
+            if options.env is None:
+                options.env = {}
+            options.env[key] = value
+
+    def _restore_inprocess_environment(self) -> None:
+        """Undo the in-process environment mirror and cwd change from setup."""
+        for key, previous in reversed(self._restore_env):
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
+        self._restore_env = []
+        if self._restore_cwd is not None:
+            with contextlib.suppress(OSError):
+                os.chdir(self._restore_cwd)
+            self._restore_cwd = None
 
     async def teardown(self, test_failed: bool = False):
         """Clean up the test context.
@@ -106,6 +245,9 @@ class E2ETestContext:
             except ExceptionGroup:
                 pass  # stop() completes all cleanup before raising; safe to ignore in teardown
             self._client = None
+
+        if self._client_inprocess:
+            self._restore_inprocess_environment()
 
         if self._proxy:
             await self._proxy.stop(skip_writing_cache=test_failed)

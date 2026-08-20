@@ -11,6 +11,7 @@ import path from "path";
 import type { JSONSchema7, JSONSchema7Definition } from "json-schema";
 import { fileURLToPath } from "url";
 import {
+    addManagedApprovalRequiredToPermissionRequests,
     cloneSchemaForCodegen,
     filterNodeByVisibility,
     fixNullableRequiredRefsInApiSchema,
@@ -200,6 +201,17 @@ function collectPythonExternalEnumNames(
     return enumNames;
 }
 
+function preservePythonSessionEventConstructorOrder(schema: JSONSchema7): void {
+    for (const definitions of [schema.definitions, schema.$defs]) {
+        if (!definitions) continue;
+        const customTool = definitions.PermissionRequestCustomTool;
+        if (!customTool || typeof customTool !== "object") continue;
+        const skipPermission = (customTool as JSONSchema7).properties?.skipPermission;
+        if (!skipPermission || typeof skipPermission !== "object") continue;
+        (skipPermission as Record<string, unknown>)["x-copilot-sdk-append-last"] = true;
+    }
+}
+
 function preservePythonRpcStringDateFields(definitions: Record<string, JSONSchema7>): void {
     const quotaSnapshot = definitions.AccountQuotaSnapshot;
     const resetDate = quotaSnapshot?.properties?.resetDate as JSONSchema7 | undefined;
@@ -273,6 +285,39 @@ function postProcessExternalUnionAliasesForPython(code: string, aliases: Map<str
 }
 
 /**
+ * Literal value of a union discriminator. The API schema discriminates on
+ * string `const`s (`kind: "text"`) and on boolean ones
+ * (`SessionListEntry.isRemote`, `QueuedCommandResult.handled`), so the JSON
+ * type has to survive codegen: coercing `true` to `"true"` emits a dispatcher
+ * arm that the decoded Python `True` can never match. Mirrors
+ * `GoDiscriminatorValue` in `go.ts`.
+ */
+type PyDiscriminatorValue = string | boolean;
+
+/**
+ * Capture a schema `const` as a discriminator value, keeping booleans as
+ * booleans and stringifying everything else.
+ */
+function pyDiscriminatorValue(constValue: unknown): PyDiscriminatorValue {
+    return typeof constValue === "boolean" ? constValue : String(constValue);
+}
+
+/**
+ * Render a discriminator value as a Python literal. Booleans need Python's
+ * `True` / `False` spelling, since the JSON `true` would parse as a capture
+ * pattern in a `match` arm rather than as a literal.
+ */
+function pyDiscriminatorValueExpr(value: PyDiscriminatorValue): string {
+    if (typeof value === "boolean") return value ? "True" : "False";
+    return JSON.stringify(value);
+}
+
+/** Python type of a discriminator constant, for its `ClassVar` annotation. */
+function pyDiscriminatorValueType(value: PyDiscriminatorValue): string {
+    return typeof value === "boolean" ? "bool" : "str";
+}
+
+/**
  * Replace flat-merged dataclasses emitted by quicktype for $ref-based
  * discriminated unions with proper Python unions: a `Name = VariantA | ...`
  * alias plus a `_load_Name(obj)` dispatcher. Rewrites `Name.from_dict(x)` and
@@ -293,7 +338,7 @@ function postProcessExternalUnionAliasesForPython(code: string, aliases: Map<str
 interface ResolvedRefBasedUnion {
     aliasName: string;
     discriminatorProp: string;
-    dispatch: Array<{ value: string; typeName: string }>;
+    dispatch: Array<{ value: PyDiscriminatorValue; typeName: string }>;
 }
 function postProcessRefBasedDiscriminatedUnionsForPython(
     code: string,
@@ -304,7 +349,7 @@ function postProcessRefBasedDiscriminatedUnionsForPython(
         aliasName: string;
         variantNames: string[];
         discriminatorProp: string;
-        dispatch: Array<{ value: string; typeName: string }>;
+        dispatch: Array<{ value: PyDiscriminatorValue; typeName: string }>;
         description: string | undefined;
     }
     const unions: UnionInfo[] = [];
@@ -334,7 +379,7 @@ function postProcessRefBasedDiscriminatedUnionsForPython(
                 discriminator.property
             ];
             return {
-                value: String(discProp.const),
+                value: pyDiscriminatorValue(discProp.const),
                 typeName: toPascalCase(variantRefNames[i]),
             };
         });
@@ -387,7 +432,7 @@ function postProcessRefBasedDiscriminatedUnionsForPython(
     for (const union of unions) {
         const actualAliasName = resolveActualName(union.aliasName);
         const actualVariantNames: string[] = [];
-        const actualDispatch: Array<{ value: string; typeName: string }> = [];
+        const actualDispatch: Array<{ value: PyDiscriminatorValue; typeName: string }> = [];
         let allResolved = true;
         for (let i = 0; i < union.variantNames.length; i++) {
             const actual = resolveActualName(union.variantNames[i]);
@@ -450,7 +495,7 @@ function postProcessRefBasedDiscriminatedUnionsForPython(
         dispatcherLines.push(`    kind = obj.get(${JSON.stringify(union.discriminatorProp)})`);
         dispatcherLines.push(`    match kind:`);
         for (const m of actualDispatch) {
-            dispatcherLines.push(`        case ${JSON.stringify(m.value)}: return ${m.typeName}.from_dict(obj)`);
+            dispatcherLines.push(`        case ${pyDiscriminatorValueExpr(m.value)}: return ${m.typeName}.from_dict(obj)`);
         }
         dispatcherLines.push(
             `        case _: raise ValueError(f"Unknown ${actualAliasName} ${union.discriminatorProp}: {kind!r}")`
@@ -500,7 +545,7 @@ function postProcessDiscriminatorDefaultsForPython(
     unions: ResolvedRefBasedUnion[]
 ): string {
     // Build variant lookup: variant class name → { prop, value }.
-    const variantInfo = new Map<string, { prop: string; value: string }>();
+    const variantInfo = new Map<string, { prop: string; value: PyDiscriminatorValue }>();
     for (const union of unions) {
         for (const d of union.dispatch) {
             // First-wins; multiple unions referencing the same variant share a
@@ -571,9 +616,9 @@ function postProcessDiscriminatorDefaultsForPython(
             continue;
         }
         const fieldIndent = (block[fieldIdx].match(/^(\s+)/) ?? ["", ""])[1];
-        const literal = JSON.stringify(info.value);
+        const literal = pyDiscriminatorValueExpr(info.value);
         // Replace the field with a class-level constant.
-        block[fieldIdx] = `${fieldIndent}${info.prop}: ClassVar[str] = ${literal}`;
+        block[fieldIdx] = `${fieldIndent}${info.prop}: ClassVar[${pyDiscriminatorValueType(info.value)}] = ${literal}`;
         usedClassVar = true;
 
         // Drop any field-trailing docstring lines that immediately followed the
@@ -893,6 +938,95 @@ function collapsePlaceholderPythonDataclasses(code: string, knownDefinitionNames
     }
 
     return code.replace(/\n{3,}/g, "\n\n");
+}
+
+function removeUnusedSyntheticPythonDataclasses(code: string, knownDefinitionNames: Set<string>): string {
+    interface DataclassBlock {
+        name: string;
+        text: string;
+        start: number;
+        end: number;
+        synthetic: boolean;
+    }
+
+    const classBlockRe =
+        /((?:^# (?:Experimental|Deprecated|Internal):[^\n]*\r?\n)*@dataclass(?:\([^\r\n]*\))?\r?\nclass\s+(\w+):[\s\S]*?)(?=^(?:# (?:Experimental|Deprecated|Internal):[^\n]*\r?\n)*@dataclass(?:\([^\r\n]*\))?\r?\nclass\s+\w|^class\s+\w|^def\s+\w|^[A-Z]\w+\s*=|\Z)/gm;
+    const blocks: DataclassBlock[] = [...code.matchAll(classBlockRe)].map((match) => ({
+        name: match[2],
+        text: match[1],
+        start: match.index ?? 0,
+        end: (match.index ?? 0) + match[1].length,
+        synthetic: !knownDefinitionNames.has(match[2].toLowerCase()),
+    }));
+    const syntheticBlocks = blocks.filter((block) => block.synthetic);
+    if (syntheticBlocks.length === 0) return code;
+
+    let outsideSyntheticBlocks = "";
+    let cursor = 0;
+    for (const block of syntheticBlocks) {
+        outsideSyntheticBlocks += code.slice(cursor, block.start);
+        cursor = block.end;
+    }
+    outsideSyntheticBlocks += code.slice(cursor);
+
+    const syntheticNames = new Set(syntheticBlocks.map((block) => block.name));
+    const dependencies = new Map<string, Set<string>>();
+    const live = new Set<string>();
+
+    for (const block of syntheticBlocks) {
+        const referenceRe = new RegExp(`\\b${escapeRegExp(block.name)}\\b`);
+        if (referenceRe.test(outsideSyntheticBlocks)) {
+            live.add(block.name);
+        }
+
+        const blockDependencies = new Set<string>();
+        for (const dependency of syntheticNames) {
+            if (dependency === block.name) continue;
+            const dependencyRe = new RegExp(`\\b${escapeRegExp(dependency)}\\b`);
+            if (dependencyRe.test(block.text)) {
+                blockDependencies.add(dependency);
+            }
+        }
+        dependencies.set(block.name, blockDependencies);
+    }
+
+    const worklist = [...live];
+    while (worklist.length > 0) {
+        const name = worklist.pop()!;
+        for (const dependency of dependencies.get(name) ?? []) {
+            if (live.has(dependency)) continue;
+            live.add(dependency);
+            worklist.push(dependency);
+        }
+    }
+
+    const blocksToRemove = new Set(syntheticBlocks.filter((block) => !live.has(block.name)).map((block) => block.name));
+    if (blocksToRemove.size === 0) return code;
+
+    const appendSegment = (parts: string[], segment: string): void => {
+        if (parts.length === 0 || segment.length === 0) {
+            parts.push(segment);
+            return;
+        }
+        const previous = parts[parts.length - 1];
+        const trailingNewlines = previous.match(/\n+$/)?.[0].length ?? 0;
+        const leadingNewlines = segment.match(/^\n+/)?.[0].length ?? 0;
+        if (trailingNewlines + leadingNewlines > 2) {
+            segment = "\n".repeat(Math.max(0, 2 - trailingNewlines)) + segment.slice(leadingNewlines);
+        }
+        parts.push(segment);
+    };
+
+    const parts: string[] = [];
+    cursor = 0;
+    for (const block of blocks) {
+        if (!blocksToRemove.has(block.name)) continue;
+        appendSegment(parts, code.slice(cursor, block.start));
+        cursor = block.end;
+    }
+    appendSegment(parts, code.slice(cursor));
+
+    return parts.join("");
 }
 
 /**
@@ -1590,7 +1724,7 @@ function tryEmitPyRefBasedDiscriminatedUnion(
     if (!discriminator) return undefined;
 
     const variantTypeNames: string[] = [];
-    const dispatch: Array<{ value: string; typeName: string }> = [];
+    const dispatch: Array<{ value: PyDiscriminatorValue; typeName: string }> = [];
     for (let i = 0; i < variants.length; i++) {
         const variantTypeName = toPascalCase(variantRefNames[i]);
         const variantSchema = resolveObjectSchema(variants[i], ctx.definitions);
@@ -1599,7 +1733,7 @@ function tryEmitPyRefBasedDiscriminatedUnion(
         }
         variantTypeNames.push(variantTypeName);
         const discProp = resolvedVariants[i].properties?.[discriminator.property] as JSONSchema7;
-        dispatch.push({ value: String(discProp.const), typeName: variantTypeName });
+        dispatch.push({ value: pyDiscriminatorValue(discProp.const), typeName: variantTypeName });
     }
 
     if (!ctx.aliasesByName.has(aliasName)) {
@@ -1627,7 +1761,7 @@ function tryEmitPyRefBasedDiscriminatedUnion(
         lines.push(`    match kind:`);
         for (const m of dispatch) {
             lines.push(
-                `        case ${JSON.stringify(m.value)}: return ${m.typeName}.from_dict(obj)`
+                `        case ${pyDiscriminatorValueExpr(m.value)}: return ${m.typeName}.from_dict(obj)`
             );
         }
         lines.push(
@@ -1669,7 +1803,8 @@ function extractPyEventVariants(schema: JSONSchema7): PyEventVariant[] {
                 eventExperimental: isSchemaExperimental(variant),
                 dataExperimental: isSchemaExperimental(dataSchema),
             };
-        });
+        })
+        .filter((variant) => !isSchemaInternal(variant.dataSchema));
 }
 
 function getPySharedEventEnvelopeProperties(schema: JSONSchema7, ctx: PyCodegenCtx): PyEventEnvelopeProperty[] {
@@ -2218,9 +2353,19 @@ function emitPyClass(
     const fieldEntries = Object.entries(schema.properties || {}).filter(
         ([, value]) => typeof value === "object"
     ) as Array<[string, JSONSchema7]>;
+    const optionalFieldEntries = fieldEntries
+        .filter(([name]) => !required.has(name))
+        .sort(([left, leftSchema], [right, rightSchema]) => {
+            const leftAppendOnly =
+                (leftSchema as Record<string, unknown>)["x-copilot-sdk-append-last"] === true;
+            const rightAppendOnly =
+                (rightSchema as Record<string, unknown>)["x-copilot-sdk-append-last"] === true;
+            if (leftAppendOnly !== rightAppendOnly) return leftAppendOnly ? 1 : -1;
+            return left.localeCompare(right);
+        });
     const orderedFieldEntries = [
         ...fieldEntries.filter(([name]) => required.has(name)).sort(([a], [b]) => a.localeCompare(b)),
-        ...fieldEntries.filter(([name]) => !required.has(name)).sort(([a], [b]) => a.localeCompare(b)),
+        ...optionalFieldEntries,
     ];
 
     const fieldInfos = orderedFieldEntries.map(([propName, propSchema]) => {
@@ -2440,6 +2585,13 @@ function emitPyFlatDiscriminatedUnion(
     ctx.classes.push(lines.join("\n"));
 }
 
+const PYTHON_INTEGER_DECODER = [
+    `def from_int(x: Any) -> int:`,
+    `    assert isinstance(x, (int, float)) and not isinstance(x, bool)`,
+    `    assert not isinstance(x, float) or x.is_integer()`,
+    `    return int(x)`,
+].join("\n");
+
 export function generatePythonSessionEventsCode(schema: JSONSchema7): string {
     const variants = extractPyEventVariants(schema);
     const ctx: PyCodegenCtx = {
@@ -2508,9 +2660,7 @@ export function generatePythonSessionEventsCode(schema: JSONSchema7): string {
     out.push(`    return x`);
     out.push(``);
     out.push(``);
-    out.push(`def from_int(x: Any) -> int:`);
-    out.push(`    assert isinstance(x, int) and not isinstance(x, bool)`);
-    out.push(`    return x`);
+    out.push(PYTHON_INTEGER_DECODER);
     out.push(``);
     out.push(``);
     out.push(`def to_int(x: Any) -> int:`);
@@ -2807,7 +2957,10 @@ async function generateSessionEvents(schemaPath?: string): Promise<void> {
     console.log("Python: generating session-events...");
 
     const resolvedPath = schemaPath ?? (await getSessionEventsSchemaPath());
-    const schema = (await loadSchemaJson(resolvedPath)) as JSONSchema7;
+    const schema = addManagedApprovalRequiredToPermissionRequests(
+        (await loadSchemaJson(resolvedPath)) as JSONSchema7
+    );
+    preservePythonSessionEventConstructorOrder(schema);
     const processed = propagateInternalVisibility(postProcessSchema(schema));
     let code = generatePythonSessionEventsCode(processed);
     const { typeNames } = collectInternalSymbols(processed);
@@ -3212,6 +3365,14 @@ def _patch_model_capabilities(data: dict) -> dict:
     // Patch models.list to normalize capabilities before deserialization
     let finalCode = lines.join("\n");
     finalCode = finalCode.replace(
+        [
+            `def from_int(x: Any) -> int:`,
+            `    assert isinstance(x, int) and not isinstance(x, bool)`,
+            `    return x`,
+        ].join("\n"),
+        PYTHON_INTEGER_DECODER
+    );
+    finalCode = finalCode.replace(
         `ModelList.from_dict(await self._client.request("models.list"`,
         `ModelList.from_dict(_patch_model_capabilities(await self._client.request("models.list"`,
     );
@@ -3227,6 +3388,10 @@ def _patch_model_capabilities(data: dict) -> dict:
     finalCode = applyUnionRewritesToPython(finalCode, refBasedUnions);
     finalCode = postProcessDiscriminatorDefaultsForPython(finalCode, refBasedUnions);
     finalCode = unwrapRedundantPythonLambdas(finalCode);
+    finalCode = removeUnusedSyntheticPythonDataclasses(
+        finalCode,
+        new Set(Object.keys(allDefinitions).map((name) => name.toLowerCase()))
+    );
 
     // Apply `_`-prefix to type names of internal RPC types so the leading-underscore
     // Python convention signals "internal, no stability guarantees" to consumers.
