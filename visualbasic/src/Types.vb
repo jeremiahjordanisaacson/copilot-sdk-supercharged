@@ -70,6 +70,9 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>BYOK bearer-token provider invoked per session (receives <see cref="ProviderTokenArgs"/>).</summary>
         Public Property BearerTokenProvider As Func(Of ProviderTokenArgs, Task(Of String))
 
+        ''' <summary>Provider invoked per turn to supply the current W3C <see cref="TraceContext"/>.</summary>
+        Public Property OnGetTraceContext As TraceContextProvider
+
     End Class
 
     ' -----------------------------------------------------------------------
@@ -89,6 +92,9 @@ Namespace GitHub.Copilot.SDK
 
         ''' <summary>Handler for permission requests from the assistant.</summary>
         Public Property OnPermissionRequest As PermissionHandler
+
+        ''' <summary>Handler for exit-plan-mode requests from the assistant.</summary>
+        Public Property OnExitPlanMode As ExitPlanModeHandler
 
         ''' <summary>Handler for user input requests.</summary>
         Public Property OnUserInput As Func(Of UserInputRequest, Task(Of String))
@@ -170,6 +176,54 @@ Namespace GitHub.Copilot.SDK
 
         ''' <summary>Hook invoked before an MCP tool call (pre-MCP-tool-call).</summary>
         Public Property OnPreMcpToolCall As Func(Of ToolCallData, Task)
+
+        ''' <summary>Emit per-session telemetry events for this session.</summary>
+        Public Property EnableSessionTelemetry As Boolean? = Nothing
+
+        ''' <summary>Enable conversational rewind (restore an earlier turn).</summary>
+        Public Property RewindEnabled As Boolean? = Nothing
+
+        ''' <summary>Extra workspace directories to expose to the session.</summary>
+        Public Property AdditionalDirectories As List(Of String)
+
+        ''' <summary>Names of MCP servers to disable for this session.</summary>
+        Public Property DisabledMcpServers As List(Of String)
+
+        ''' <summary>GitHub MCP tool configuration (opaque passthrough).</summary>
+        Public Property GithubMcpToolConfig As Dictionary(Of String, Object)
+
+        ''' <summary>Canvas provider configuration (opaque passthrough).</summary>
+        Public Property CanvasProvider As Dictionary(Of String, Object)
+
+        ''' <summary>Restrict custom agents to locally-defined ones only.</summary>
+        Public Property CustomAgentsLocalOnly As Boolean? = Nothing
+
+        ''' <summary>Permission-reply decision context (opaque passthrough).</summary>
+        Public Property DecisionContext As Dictionary(Of String, Object)
+
+        ''' <summary>Hook invoked after a user prompt is transformed (userPromptTransformed).</summary>
+        Public Property OnUserPromptTransformed As Func(Of String, Task)
+
+        ''' <summary>Built-in plugin directories to load.</summary>
+        Public Property BuiltinPluginDirectories As List(Of String)
+
+        ''' <summary>Agent-factory authoring arguments schema (opaque object).</summary>
+        Public Property ArgsSchema As Dictionary(Of String, Object)
+
+        ''' <summary>Reasoning effort control ("low", "medium", "high").</summary>
+        Public Property ReasoningEffort As String
+
+        ''' <summary>Tool-search configuration (opaque passthrough).</summary>
+        Public Property ToolSearch As Dictionary(Of String, Object)
+
+        ''' <summary>Use the in-process FFI transport instead of a spawned CLI.</summary>
+        Public Property InProcess As Boolean? = Nothing
+
+        ''' <summary>Enable experimental mode features.</summary>
+        Public Property ExperimentalMode As Boolean? = Nothing
+
+        ''' <summary>Enable content exclusion policy enforcement.</summary>
+        Public Property ContentExclusion As Boolean? = Nothing
 
     End Class
 
@@ -903,5 +957,76 @@ Namespace GitHub.Copilot.SDK
         Public Const GitHubFile As String = "GitHubFile"
         Public Const GitHubSnippet As String = "GitHubSnippet"
     End Module
+
+    ' -----------------------------------------------------------------------
+    '  Exit-plan-mode and W3C Trace Context
+    ' -----------------------------------------------------------------------
+
+    ''' <summary>
+    ''' Request to exit plan mode and continue with a selected action.
+    ''' </summary>
+    Public Class ExitPlanModeRequest
+
+        ''' <summary>Summary of the plan or proposed next step.</summary>
+        <JsonPropertyName("summary")>
+        Public Property Summary As String
+
+        ''' <summary>Full plan content, when available.</summary>
+        <JsonPropertyName("planContent")>
+        Public Property PlanContent As String
+
+        ''' <summary>Available actions the user can select.</summary>
+        <JsonPropertyName("actions")>
+        Public Property Actions As List(Of String)
+
+        ''' <summary>The action recommended by the runtime.</summary>
+        <JsonPropertyName("recommendedAction")>
+        Public Property RecommendedAction As String = "autopilot"
+
+    End Class
+
+    ''' <summary>
+    ''' Response to an exit-plan-mode request.
+    ''' </summary>
+    Public Class ExitPlanModeResult
+
+        ''' <summary>Whether the user approved exiting plan mode.</summary>
+        <JsonPropertyName("approved")>
+        Public Property Approved As Boolean = True
+
+        ''' <summary>Selected action, if the user chose one.</summary>
+        <JsonPropertyName("selectedAction")>
+        Public Property SelectedAction As String
+
+        ''' <summary>Optional feedback provided by the user.</summary>
+        <JsonPropertyName("feedback")>
+        Public Property Feedback As String
+
+    End Class
+
+    ''' <summary>
+    ''' W3C Trace Context propagated to the runtime for distributed tracing of an agent turn.
+    ''' </summary>
+    Public Class TraceContext
+
+        ''' <summary>W3C Trace Context traceparent header for this agent turn.</summary>
+        <JsonPropertyName("traceparent")>
+        Public Property Traceparent As String
+
+        ''' <summary>W3C Trace Context tracestate header for distributed tracing.</summary>
+        <JsonPropertyName("tracestate")>
+        Public Property Tracestate As String
+
+    End Class
+
+    ''' <summary>
+    ''' Delegate that handles exit-plan-mode requests from the assistant.
+    ''' </summary>
+    Public Delegate Function ExitPlanModeHandler(request As ExitPlanModeRequest) As Task(Of ExitPlanModeResult)
+
+    ''' <summary>
+    ''' Delegate that supplies the current W3C <see cref="TraceContext"/> for a session turn.
+    ''' </summary>
+    Public Delegate Function TraceContextProvider() As Task(Of TraceContext)
 
 End Namespace

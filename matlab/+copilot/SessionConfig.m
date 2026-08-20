@@ -100,6 +100,51 @@ classdef SessionConfig
 
         % Custom HTTP request handler (function handle or empty).
         RequestHandler
+
+        % Enable conversational rewind (restore an earlier turn) (wire: rewindEnabled).
+        RewindEnabled (1,1) logical = false
+
+        % Extra workspace directories to expose (cell of char) (wire: additionalDirectories).
+        AdditionalDirectories (1,:) cell = {}
+
+        % MCP servers to disable for this session (cell of char) (wire: disabledMcpServers).
+        DisabledMcpServers (1,:) cell = {}
+
+        % GitHub MCP tool configuration (struct or containers.Map) (wire: githubMcpToolConfig).
+        GithubMcpToolConfig
+
+        % Canvas provider configuration (struct or containers.Map) (wire: canvasProvider).
+        CanvasProvider
+
+        % Restrict custom agents to locally-defined ones only (wire: customAgentsLocalOnly).
+        CustomAgentsLocalOnly (1,1) logical = false
+
+        % Permission-reply decision context (struct or containers.Map) (wire: decisionContext).
+        DecisionContext
+
+        % User-prompt-transformed hook (function handle or empty) (wire: userPromptTransformed).
+        OnUserPromptTransformed
+
+        % Built-in plugin directories to load (cell of char) (wire: builtinPluginDirectories).
+        BuiltinPluginDirectories (1,:) cell = {}
+
+        % Agent-factory authoring arguments schema (struct) (wire: argsSchema).
+        ArgsSchema
+
+        % Reasoning effort control, e.g. 'low'/'medium'/'high' (wire: reasoningEffort).
+        ReasoningEffort (1,:) char = ''
+
+        % Tool-search configuration (struct or logical) (wire: toolSearch).
+        ToolSearch
+
+        % Use the in-process FFI transport instead of a spawned CLI (wire: inProcess).
+        InProcess (1,1) logical = false
+
+        % Enable experimental mode features (wire: experimentalMode).
+        ExperimentalMode (1,1) logical = false
+
+        % Enable content exclusion policy enforcement (wire: contentExclusion).
+        ContentExclusion (1,1) logical = false
     end
 
     methods
@@ -141,6 +186,21 @@ classdef SessionConfig
             p.addParameter('OnPostToolUse',            []);
             p.addParameter('OnPreMcpToolCall',         []);
             p.addParameter('RequestHandler',           []);
+            p.addParameter('RewindEnabled',            obj.RewindEnabled);
+            p.addParameter('AdditionalDirectories',    obj.AdditionalDirectories);
+            p.addParameter('DisabledMcpServers',       obj.DisabledMcpServers);
+            p.addParameter('GithubMcpToolConfig',      []);
+            p.addParameter('CanvasProvider',           []);
+            p.addParameter('CustomAgentsLocalOnly',    obj.CustomAgentsLocalOnly);
+            p.addParameter('DecisionContext',          []);
+            p.addParameter('OnUserPromptTransformed',  []);
+            p.addParameter('BuiltinPluginDirectories', obj.BuiltinPluginDirectories);
+            p.addParameter('ArgsSchema',               []);
+            p.addParameter('ReasoningEffort',          obj.ReasoningEffort);
+            p.addParameter('ToolSearch',               []);
+            p.addParameter('InProcess',                obj.InProcess);
+            p.addParameter('ExperimentalMode',         obj.ExperimentalMode);
+            p.addParameter('ContentExclusion',         obj.ContentExclusion);
             p.parse(varargin{:});
 
             obj.Model              = p.Results.Model;
@@ -174,6 +234,21 @@ classdef SessionConfig
             obj.OnPostToolUse            = p.Results.OnPostToolUse;
             obj.OnPreMcpToolCall         = p.Results.OnPreMcpToolCall;
             obj.RequestHandler           = p.Results.RequestHandler;
+            obj.RewindEnabled            = p.Results.RewindEnabled;
+            obj.AdditionalDirectories    = p.Results.AdditionalDirectories;
+            obj.DisabledMcpServers       = p.Results.DisabledMcpServers;
+            obj.GithubMcpToolConfig      = p.Results.GithubMcpToolConfig;
+            obj.CanvasProvider           = p.Results.CanvasProvider;
+            obj.CustomAgentsLocalOnly    = p.Results.CustomAgentsLocalOnly;
+            obj.DecisionContext          = p.Results.DecisionContext;
+            obj.OnUserPromptTransformed  = p.Results.OnUserPromptTransformed;
+            obj.BuiltinPluginDirectories = p.Results.BuiltinPluginDirectories;
+            obj.ArgsSchema               = p.Results.ArgsSchema;
+            obj.ReasoningEffort          = p.Results.ReasoningEffort;
+            obj.ToolSearch               = p.Results.ToolSearch;
+            obj.InProcess                = p.Results.InProcess;
+            obj.ExperimentalMode         = p.Results.ExperimentalMode;
+            obj.ContentExclusion         = p.Results.ContentExclusion;
         end
 
         function s = toStruct(obj)
@@ -237,6 +312,49 @@ classdef SessionConfig
             if isa(obj.ExpAssignments, 'containers.Map') && obj.ExpAssignments.Count > 0
                 s.expAssignments = obj.ExpAssignments;
             end
+            % --- Newly-synced session configuration passthroughs (camelCase wire keys) ---
+            if obj.RewindEnabled
+                s.rewindEnabled = true;
+            end
+            if ~isempty(obj.AdditionalDirectories)
+                s.additionalDirectories = obj.AdditionalDirectories;
+            end
+            if ~isempty(obj.DisabledMcpServers)
+                s.disabledMcpServers = obj.DisabledMcpServers;
+            end
+            if ~isempty(obj.GithubMcpToolConfig)
+                s.githubMcpToolConfig = obj.GithubMcpToolConfig;
+            end
+            if ~isempty(obj.CanvasProvider)
+                s.canvasProvider = obj.CanvasProvider;
+            end
+            if obj.CustomAgentsLocalOnly
+                s.customAgentsLocalOnly = true;
+            end
+            if ~isempty(obj.DecisionContext)
+                s.decisionContext = obj.DecisionContext;
+            end
+            if ~isempty(obj.BuiltinPluginDirectories)
+                s.builtinPluginDirectories = obj.BuiltinPluginDirectories;
+            end
+            if ~isempty(obj.ArgsSchema)
+                s.argsSchema = obj.ArgsSchema;
+            end
+            if ~isempty(obj.ReasoningEffort)
+                s.reasoningEffort = obj.ReasoningEffort;
+            end
+            if ~isempty(obj.ToolSearch)
+                s.toolSearch = obj.ToolSearch;
+            end
+            if obj.InProcess
+                s.inProcess = true;
+            end
+            if obj.ExperimentalMode
+                s.experimentalMode = true;
+            end
+            if obj.ContentExclusion
+                s.contentExclusion = true;
+            end
             if ~isempty(obj.OnMcpAuthRequest)
                 s.mcpAuthHandler = true;
             end
@@ -246,6 +364,9 @@ classdef SessionConfig
             end
             if ~isempty(obj.OnPreMcpToolCall)
                 hooks.preMcpToolCall = true;
+            end
+            if ~isempty(obj.OnUserPromptTransformed)
+                hooks.userPromptTransformed = true;
             end
             if ~isempty(fieldnames(hooks))
                 s.hooks = hooks;

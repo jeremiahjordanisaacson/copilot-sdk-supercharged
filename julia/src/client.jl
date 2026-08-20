@@ -208,6 +208,36 @@ function create_session(client::CopilotClient, config::SessionConfig)
     if config.on_mcp_auth_request !== nothing
         params["mcpAuthHandler"] = true
     end
+    if config.rewind_enabled
+        params["rewindEnabled"] = true
+    end
+    if !isempty(config.additional_directories)
+        params["additionalDirectories"] = config.additional_directories
+    end
+    if !isempty(config.disabled_mcp_servers)
+        params["disabledMcpServers"] = config.disabled_mcp_servers
+    end
+    if config.github_mcp_tool_config !== nothing
+        params["githubMcpToolConfig"] = config.github_mcp_tool_config
+    end
+    if config.canvas_provider !== nothing
+        params["canvasProvider"] = config.canvas_provider
+    end
+    if config.custom_agents_local_only
+        params["customAgentsLocalOnly"] = true
+    end
+    if config.tool_search !== nothing
+        params["toolSearch"] = config.tool_search
+    end
+    if config.experimental_mode
+        params["experimentalMode"] = true
+    end
+    if config.content_exclusion
+        params["contentExclusion"] = true
+    end
+    if config.on_user_prompt_transformed !== nothing
+        params["userPromptTransformed"] = true
+    end
 
     # Convert tools
     tool_list = Tool[]

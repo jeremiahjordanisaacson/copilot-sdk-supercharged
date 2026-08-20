@@ -143,7 +143,10 @@
                 idle-timeout
                 enable-citations excluded-builtin-agents session-limits
                 memory-config otlp-protocol enable-web-socket-responses
-                exp-assignments on-mcp-auth-request]} config]
+                exp-assignments on-mcp-auth-request
+                rewind-enabled additional-directories disabled-mcp-servers
+                github-mcp-tool-config canvas-provider custom-agents-local-only
+                tool-search experimental-mode content-exclusion]} config]
     (cond-> {}
       model               (assoc :model model)
       session-id          (assoc :sessionId session-id)
@@ -180,6 +183,15 @@
       otlp-protocol            (assoc :otlpProtocol otlp-protocol)
       (some? enable-web-socket-responses) (assoc :enableWebSocketResponses enable-web-socket-responses)
       exp-assignments          (assoc :expAssignments exp-assignments)
+      (some? rewind-enabled)   (assoc :rewindEnabled rewind-enabled)
+      additional-directories   (assoc :additionalDirectories additional-directories)
+      disabled-mcp-servers     (assoc :disabledMcpServers disabled-mcp-servers)
+      github-mcp-tool-config   (assoc :githubMcpToolConfig github-mcp-tool-config)
+      canvas-provider          (assoc :canvasProvider canvas-provider)
+      (some? custom-agents-local-only) (assoc :customAgentsLocalOnly custom-agents-local-only)
+      (some? tool-search)      (assoc :toolSearch tool-search)
+      (some? experimental-mode) (assoc :experimentalMode experimental-mode)
+      (some? content-exclusion) (assoc :contentExclusion content-exclusion)
       on-mcp-auth-request      (assoc :mcpAuthHandler true)
       idle-timeout        (assoc :idleTimeout idle-timeout))))
 

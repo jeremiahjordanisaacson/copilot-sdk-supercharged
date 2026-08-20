@@ -219,6 +219,20 @@ CopilotClient <- R6::R6Class(
     #' @param otlp_protocol Character or NULL. OTLP telemetry protocol ("grpc" or "http/protobuf").
     #' @param enable_web_socket_responses Logical or NULL. Use the WebSocket response transport.
     #' @param exp_assignments Named list or NULL. Experiment assignment overrides.
+    #' @param rewind_enabled Logical or NULL. Enable session rewind.
+    #' @param additional_directories Character vector or NULL. Additional session directories.
+    #' @param disabled_mcp_servers Character vector or NULL. MCP server names to disable.
+    #' @param github_mcp_tool_config Named list or NULL. GitHub MCP tool configuration.
+    #' @param canvas_provider Named list, character, or NULL. Canvas provider config.
+    #' @param custom_agents_local_only Logical or NULL. Restrict custom agents to local only.
+    #' @param builtin_plugin_directories Character vector or NULL. Built-in plugin directories.
+    #' @param args_schema Named list or NULL. Agent-factory authoring args schema.
+    #' @param decision_context Named list or NULL. Permission decision context.
+    #' @param tool_search Named list, logical, or NULL. Tool search configuration.
+    #' @param in_process Logical or NULL. Use the in-process FFI transport.
+    #' @param experimental_mode Logical or NULL. Enable experimental mode.
+    #' @param content_exclusion Logical or NULL. Enable content exclusion.
+    #' @param reasoning_effort Character or NULL. Reasoning effort control (e.g. "low", "medium", "high").
     #' @param on_mcp_auth_request Function or NULL. MCP OAuth host token handler.
     #' @param bearer_token_provider Function or NULL. BYOK callback receiving ProviderTokenArgs.
     #' @param agent_mode Character or NULL. Default agent mode applied to sent messages.
@@ -247,6 +261,20 @@ CopilotClient <- R6::R6Class(
                               otlp_protocol = NULL,
                               enable_web_socket_responses = NULL,
                               exp_assignments = NULL,
+                              rewind_enabled = NULL,
+                              additional_directories = NULL,
+                              disabled_mcp_servers = NULL,
+                              github_mcp_tool_config = NULL,
+                              canvas_provider = NULL,
+                              custom_agents_local_only = NULL,
+                              builtin_plugin_directories = NULL,
+                              args_schema = NULL,
+                              decision_context = NULL,
+                              tool_search = NULL,
+                              in_process = NULL,
+                              experimental_mode = NULL,
+                              content_exclusion = NULL,
+                              reasoning_effort = NULL,
                               on_mcp_auth_request = NULL,
                               bearer_token_provider = NULL,
                               agent_mode = NULL,
@@ -341,6 +369,21 @@ CopilotClient <- R6::R6Class(
         payload$enableWebSocketResponses <- enable_web_socket_responses
       }
       if (!is.null(exp_assignments)) payload$expAssignments <- exp_assignments
+      # --- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk) ---
+      if (!is.null(rewind_enabled)) payload$rewindEnabled <- rewind_enabled
+      if (!is.null(additional_directories)) payload$additionalDirectories <- additional_directories
+      if (!is.null(disabled_mcp_servers)) payload$disabledMcpServers <- disabled_mcp_servers
+      if (!is.null(github_mcp_tool_config)) payload$githubMcpToolConfig <- github_mcp_tool_config
+      if (!is.null(canvas_provider)) payload$canvasProvider <- canvas_provider
+      if (!is.null(custom_agents_local_only)) payload$customAgentsLocalOnly <- custom_agents_local_only
+      if (!is.null(builtin_plugin_directories)) payload$builtinPluginDirectories <- builtin_plugin_directories
+      if (!is.null(args_schema)) payload$argsSchema <- args_schema
+      if (!is.null(decision_context)) payload$decisionContext <- decision_context
+      if (!is.null(tool_search)) payload$toolSearch <- tool_search
+      if (!is.null(in_process)) payload$inProcess <- in_process
+      if (!is.null(experimental_mode)) payload$experimentalMode <- experimental_mode
+      if (!is.null(content_exclusion)) payload$contentExclusion <- content_exclusion
+      if (!is.null(reasoning_effort)) payload$reasoningEffort <- reasoning_effort
       # MCP OAuth host token handler: signal the runtime that a handler is registered.
       if (!is.null(on_mcp_auth_request)) payload$mcpAuthHandler <- TRUE
       # BYOK: resolve an initial per-session token via the bearer_token_provider callback.
@@ -1029,6 +1072,7 @@ COPILOT_HOOK_NAMES <- c(
   "on_pre_tool_use",
   "on_post_tool_use",
   "on_user_prompt_submitted",
+  "on_user_prompt_transformed",
   "on_session_start",
   "on_session_end",
   "on_error_occurred",

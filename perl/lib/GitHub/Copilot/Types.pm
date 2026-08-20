@@ -604,6 +604,33 @@ has otlp_protocol           => (is => 'ro', default => sub { undef });
 has enable_web_socket_responses => (is => 'ro', default => sub { undef });
 # Experiment assignment overrides (hashref)
 has exp_assignments         => (is => 'ro', default => sub { undef });
+# --- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk) ---
+# Enable session rewind
+has rewind_enabled          => (is => 'ro', default => sub { undef });
+# Additional session working directories (arrayref of strings)
+has additional_directories  => (is => 'ro', default => sub { undef });
+# MCP server names to disable (arrayref of strings)
+has disabled_mcp_servers    => (is => 'ro', default => sub { undef });
+# GitHub MCP tool configuration (hashref)
+has github_mcp_tool_config  => (is => 'ro', default => sub { undef });
+# Canvas provider config (hashref or provider-name string)
+has canvas_provider         => (is => 'ro', default => sub { undef });
+# Restrict custom agents to locally-defined agents only
+has custom_agents_local_only => (is => 'ro', default => sub { undef });
+# Built-in plugin directories (arrayref of strings)
+has builtin_plugin_directories => (is => 'ro', default => sub { undef });
+# Agent-factory authoring args schema (hashref)
+has args_schema             => (is => 'ro', default => sub { undef });
+# Permission decision context (hashref)
+has decision_context        => (is => 'ro', default => sub { undef });
+# Tool search configuration (hashref or boolean)
+has tool_search             => (is => 'ro', default => sub { undef });
+# Use the in-process FFI transport
+has in_process              => (is => 'ro', default => sub { undef });
+# Enable experimental mode
+has experimental_mode       => (is => 'ro', default => sub { undef });
+# Enable content exclusion
+has content_exclusion       => (is => 'ro', default => sub { undef });
 # MCP OAuth authorization handler (code ref); sets mcpAuthHandler flag on wire
 has on_mcp_auth_request     => (is => 'ro', default => sub { undef });
 # Post-tool-use hook (code ref)
@@ -686,6 +713,20 @@ sub to_wire {
     if (defined $self->exp_assignments) {
         $payload{expAssignments} = $self->exp_assignments;
     }
+    # --- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk) ---
+    $payload{rewindEnabled}            = $self->rewind_enabled ? \1 : \0 if defined $self->rewind_enabled;
+    $payload{additionalDirectories}    = $self->additional_directories    if defined $self->additional_directories;
+    $payload{disabledMcpServers}       = $self->disabled_mcp_servers       if defined $self->disabled_mcp_servers;
+    $payload{githubMcpToolConfig}      = $self->github_mcp_tool_config      if defined $self->github_mcp_tool_config;
+    $payload{canvasProvider}           = $self->canvas_provider            if defined $self->canvas_provider;
+    $payload{customAgentsLocalOnly}    = $self->custom_agents_local_only ? \1 : \0 if defined $self->custom_agents_local_only;
+    $payload{builtinPluginDirectories} = $self->builtin_plugin_directories if defined $self->builtin_plugin_directories;
+    $payload{argsSchema}               = $self->args_schema                if defined $self->args_schema;
+    $payload{decisionContext}          = $self->decision_context           if defined $self->decision_context;
+    $payload{toolSearch}               = $self->tool_search                if defined $self->tool_search;
+    $payload{inProcess}                = $self->in_process ? \1 : \0        if defined $self->in_process;
+    $payload{experimentalMode}         = $self->experimental_mode ? \1 : \0 if defined $self->experimental_mode;
+    $payload{contentExclusion}         = $self->content_exclusion ? \1 : \0 if defined $self->content_exclusion;
     $payload{mcpAuthHandler} = \1 if defined $self->on_mcp_auth_request;
     $payload{onPostToolUse}  = \1 if defined $self->on_post_tool_use;
     $payload{onPreMcpToolCall} = \1 if defined $self->on_pre_mcp_tool_call;
@@ -848,6 +889,7 @@ sub TO_JSON {
 #   preToolUse           => on_pre_tool_use
 #   postToolUse          => on_post_tool_use
 #   userPromptSubmitted  => on_user_prompt_submitted
+#   userPromptTransformed => on_user_prompt_transformed
 #   sessionStart         => on_session_start
 #   sessionEnd           => on_session_end
 #   errorOccurred        => on_error_occurred

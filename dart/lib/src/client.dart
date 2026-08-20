@@ -309,6 +309,22 @@ class CopilotClient {
       if (config.expAssignments != null)
         'expAssignments': config.expAssignments,
       if (config.onMcpAuthRequest != null) 'mcpAuthHandler': true,
+      // --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+      if (config.rewindEnabled != null) 'rewindEnabled': config.rewindEnabled,
+      if (config.additionalDirectories != null)
+        'additionalDirectories': config.additionalDirectories,
+      if (config.disabledMcpServers != null)
+        'disabledMcpServers': config.disabledMcpServers,
+      if (config.githubMcpToolConfig != null)
+        'githubMcpToolConfig': config.githubMcpToolConfig,
+      if (config.canvasProvider != null) 'canvasProvider': config.canvasProvider,
+      if (config.customAgentsLocalOnly != null)
+        'customAgentsLocalOnly': config.customAgentsLocalOnly,
+      if (config.toolSearch != null) 'toolSearch': config.toolSearch,
+      if (config.experimentalMode != null)
+        'experimentalMode': config.experimentalMode,
+      if (config.contentExclusion != null)
+        'contentExclusion': config.contentExclusion,
     };
 
     // BYOK: resolve a per-session bearer token for the provider, if requested.

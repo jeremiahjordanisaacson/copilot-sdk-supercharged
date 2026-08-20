@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "github-copilot-sdk"
-# Placeholder; the real version is injected at publish time (see
-# .github/workflows/publish.yml). Kept as a dev sentinel so source/editable
-# installs never report a stale real version, matching the .NET and Rust SDKs.
-version = "0.0.0.dev0"
+# Canonical version for the whole monorepo — verify-version-sync.sh reads this
+# value and requires every SDK's manifest to match it. The publish workflow
+# re-injects the release tag version at publish time (which equals this value).
+version = "2.5.0"
 description = "Python SDK for GitHub Copilot CLI"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -294,6 +294,7 @@ sub _handle_hooks_invoke {
         preToolUse           => $self->{_hooks}{on_pre_tool_use},
         postToolUse          => $self->{_hooks}{on_post_tool_use},
         userPromptSubmitted  => $self->{_hooks}{on_user_prompt_submitted},
+        userPromptTransformed => $self->{_hooks}{on_user_prompt_transformed},
         sessionStart         => $self->{_hooks}{on_session_start},
         sessionEnd           => $self->{_hooks}{on_session_end},
         errorOccurred        => $self->{_hooks}{on_error_occurred},

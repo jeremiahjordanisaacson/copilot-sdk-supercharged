@@ -395,6 +395,7 @@ class CopilotSession
             'preToolUse' => $this->hooks->onPreToolUse,
             'postToolUse' => $this->hooks->onPostToolUse,
             'userPromptSubmitted' => $this->hooks->onUserPromptSubmitted,
+            'userPromptTransformed' => $this->hooks->onUserPromptTransformed,
             'sessionStart' => $this->hooks->onSessionStart,
             'sessionEnd' => $this->hooks->onSessionEnd,
             'errorOccurred' => $this->hooks->onErrorOccurred,

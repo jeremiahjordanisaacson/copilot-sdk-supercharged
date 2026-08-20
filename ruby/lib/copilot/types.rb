@@ -553,11 +553,13 @@ module Copilot
   # Hook configuration for a session. Each value is a callable or nil.
   SessionHooks = Struct.new(
     :on_pre_tool_use, :on_post_tool_use, :on_user_prompt_submitted,
+    :on_user_prompt_transformed,
     :on_session_start, :on_session_end, :on_error_occurred,
     keyword_init: true
   ) do
     def any_handler?
       [on_pre_tool_use, on_post_tool_use, on_user_prompt_submitted,
+       on_user_prompt_transformed,
        on_session_start, on_session_end, on_error_occurred].any?
     end
   end

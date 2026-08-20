@@ -13,6 +13,8 @@ public class SessionHooks {
     private HookHandler onPostToolUse;
     private HookHandler onPreMcpToolCall;
     private HookHandler onUserPromptSubmitted;
+    /** Invoked after the user prompt has been transformed. */
+    private HookHandler onUserPromptTransformed;
     private HookHandler onSessionStart;
     private HookHandler onSessionEnd;
     private HookHandler onErrorOccurred;
@@ -35,6 +37,7 @@ public class SessionHooks {
     public SessionHooks onPostToolUse(HookHandler handler) { this.onPostToolUse = handler; return this; }
     public SessionHooks onPreMcpToolCall(HookHandler handler) { this.onPreMcpToolCall = handler; return this; }
     public SessionHooks onUserPromptSubmitted(HookHandler handler) { this.onUserPromptSubmitted = handler; return this; }
+    public SessionHooks onUserPromptTransformed(HookHandler handler) { this.onUserPromptTransformed = handler; return this; }
     public SessionHooks onSessionStart(HookHandler handler) { this.onSessionStart = handler; return this; }
     public SessionHooks onSessionEnd(HookHandler handler) { this.onSessionEnd = handler; return this; }
     public SessionHooks onErrorOccurred(HookHandler handler) { this.onErrorOccurred = handler; return this; }
@@ -43,6 +46,7 @@ public class SessionHooks {
     public HookHandler getOnPostToolUse() { return onPostToolUse; }
     public HookHandler getOnPreMcpToolCall() { return onPreMcpToolCall; }
     public HookHandler getOnUserPromptSubmitted() { return onUserPromptSubmitted; }
+    public HookHandler getOnUserPromptTransformed() { return onUserPromptTransformed; }
     public HookHandler getOnSessionStart() { return onSessionStart; }
     public HookHandler getOnSessionEnd() { return onSessionEnd; }
     public HookHandler getOnErrorOccurred() { return onErrorOccurred; }
@@ -54,6 +58,7 @@ public class SessionHooks {
      */
     public boolean hasAnyHook() {
         return onPreToolUse != null || onPostToolUse != null || onPreMcpToolCall != null || onUserPromptSubmitted != null
+            || onUserPromptTransformed != null
             || onSessionStart != null || onSessionEnd != null || onErrorOccurred != null;
     }
 
@@ -64,6 +69,7 @@ public class SessionHooks {
             case "postToolUse" -> onPostToolUse;
             case "preMcpToolCall" -> onPreMcpToolCall;
             case "userPromptSubmitted" -> onUserPromptSubmitted;
+            case "userPromptTransformed" -> onUserPromptTransformed;
             case "sessionStart" -> onSessionStart;
             case "sessionEnd" -> onSessionEnd;
             case "errorOccurred" -> onErrorOccurred;

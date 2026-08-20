@@ -105,6 +105,8 @@ final class Types {
     static class PermissionRequestResult {
         String kind
         List<Object> rules
+        /** Opaque context forwarded on permission replies. */
+        Map<String, Object> decisionContext
 
         PermissionRequestResult() {}
         PermissionRequestResult(String kind) { this.kind = kind }
@@ -247,6 +249,8 @@ final class Types {
         Map<String, MCPServerConfig> mcpServers
         Boolean infer
         List<String> skills
+        /** JSON schema declaring a factory's arguments. */
+        Map<String, Object> argsSchema
     }
 
     /** Infinite session configuration. */

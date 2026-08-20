@@ -348,6 +348,19 @@ public actor CopilotSession {
             }
             return nil
 
+        case "userPromptTransformed":
+            guard let handler = hooks.onUserPromptTransformed else { return nil }
+            if let inputDict = input as? [String: Any] {
+                let data = try JSONSerialization.data(withJSONObject: inputDict, options: [])
+                let hookInput = try JSONDecoder().decode(
+                    UserPromptSubmittedHookInput.self, from: data)
+                let output = try await handler(hookInput, sessionId)
+                if let output = output {
+                    return encodeToDictionary(output)
+                }
+            }
+            return nil
+
         case "sessionStart":
             guard let handler = hooks.onSessionStart else { return nil }
             if let inputDict = input as? [String: Any] {

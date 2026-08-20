@@ -3,6 +3,7 @@
  *--------------------------------------------------------------------------------------------*/
 package com.github.copilot;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,6 +34,10 @@ public class CopilotClientOptions {
     private Types.CopilotRequestHandler requestHandler;
     /** BYOK provider that supplies per-session bearer tokens. */
     private Types.BearerTokenProvider bearerTokenProvider;
+    /** Directories to load built-in plugins from. */
+    private List<String> builtinPluginDirectories;
+    /** Use the in-process (FFI) transport instead of a subprocess. */
+    private Boolean inProcess;
 
     public CopilotClientOptions() {}
 
@@ -55,6 +60,8 @@ public class CopilotClientOptions {
     public CopilotClientOptions tcpConnectionToken(String tcpConnectionToken) { this.tcpConnectionToken = tcpConnectionToken; return this; }
     public CopilotClientOptions requestHandler(Types.CopilotRequestHandler handler) { this.requestHandler = handler; return this; }
     public CopilotClientOptions bearerTokenProvider(Types.BearerTokenProvider provider) { this.bearerTokenProvider = provider; return this; }
+    public CopilotClientOptions builtinPluginDirectories(List<String> dirs) { this.builtinPluginDirectories = dirs; return this; }
+    public CopilotClientOptions inProcess(boolean inProcess) { this.inProcess = inProcess; return this; }
 
     // Getters
     public String getCliPath() { return cliPath; }
@@ -75,4 +82,6 @@ public class CopilotClientOptions {
     public String getTcpConnectionToken() { return tcpConnectionToken; }
     public Types.CopilotRequestHandler getRequestHandler() { return requestHandler; }
     public Types.BearerTokenProvider getBearerTokenProvider() { return bearerTokenProvider; }
+    public List<String> getBuiltinPluginDirectories() { return builtinPluginDirectories; }
+    public Boolean getInProcess() { return inProcess; }
 }

@@ -55,6 +55,10 @@ pub const ClientOptions = struct {
     request_handler: ?CopilotRequestHandler = null,
     /// BYOK bearer-token provider used to mint fresh tokens for outbound model requests.
     bearer_token_provider: ?BearerTokenProvider = null,
+    /// Built-in plugin directories to load (`builtinPluginDirectories` wire key).
+    builtin_plugin_directories: ?[]const []const u8 = null,
+    /// Use the in-process FFI transport instead of spawning a CLI (`inProcess` wire key).
+    in_process: bool = false,
 };
 
 pub const SessionFsConfig = struct {
@@ -113,6 +117,30 @@ pub const SessionConfig = struct {
     exp_assignments_json: ?[]const u8 = null,
     /// Set true to signal a registered MCP OAuth host-token handler (mcpAuthHandler wire flag).
     mcp_auth_handler: bool = false,
+
+    // --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+    /// Enable session rewind so the conversation can be rolled back (`rewindEnabled` wire key).
+    rewind_enabled: ?bool = null,
+    /// Extra workspace directories the session may access (`additionalDirectories` wire key).
+    additional_directories: ?[]const []const u8 = null,
+    /// Names of MCP servers to disable for this session (`disabledMcpServers` wire key).
+    disabled_mcp_servers: ?[]const []const u8 = null,
+    /// GitHub MCP tool configuration as a JSON object string (`githubMcpToolConfig` wire key).
+    github_mcp_tool_config_json: ?[]const u8 = null,
+    /// Canvas provider configuration as a JSON object string (`canvasProvider` wire key).
+    canvas_provider_json: ?[]const u8 = null,
+    /// Restrict custom agents to locally-defined ones only (`customAgentsLocalOnly` wire key).
+    custom_agents_local_only: ?bool = null,
+    /// Reasoning-effort control for the model (`reasoningEffort` wire key).
+    reasoning_effort: ?[]const u8 = null,
+    /// Tool-search configuration as a JSON object string (`toolSearch` wire key).
+    tool_search_json: ?[]const u8 = null,
+    /// Enable experimental mode for this session (`experimentalMode` wire key).
+    experimental_mode: ?bool = null,
+    /// Enable content-exclusion enforcement (`contentExclusion` wire key).
+    content_exclusion: ?bool = null,
+    /// Agent-factory authoring args schema as a JSON object string (`argsSchema` wire key).
+    args_schema_json: ?[]const u8 = null,
 };
 
 pub const ProviderConfig = struct {
@@ -173,6 +201,8 @@ pub const PermissionResultKind = enum {
 
 pub const PermissionResult = struct {
     kind: PermissionResultKind = .approved,
+    /// Opaque decision context returned to the CLI under the `decisionContext` wire key.
+    decision_context: ?[]const u8 = null,
 };
 
 // ---------------------------------------------------------------------------
@@ -359,6 +389,7 @@ pub const HookType = struct {
     pub const pre_tool_use = "preToolUse";
     pub const post_tool_use = "postToolUse";
     pub const user_prompt_submitted = "userPromptSubmitted";
+    pub const user_prompt_transformed = "userPromptTransformed";
     pub const session_start = "sessionStart";
     pub const session_end = "sessionEnd";
     pub const error_occurred = "errorOccurred";

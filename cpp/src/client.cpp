@@ -973,6 +973,17 @@ nlohmann::json CopilotClient::buildCreateSessionParams(const SessionConfig& conf
     if (config.expAssignments) params["expAssignments"] = *config.expAssignments;
     if (config.onMcpAuthRequest) params["mcpAuthHandler"] = true;
 
+    // --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+    if (config.rewindEnabled) params["rewindEnabled"] = *config.rewindEnabled;
+    if (config.additionalDirectories) params["additionalDirectories"] = *config.additionalDirectories;
+    if (config.disabledMcpServers) params["disabledMcpServers"] = *config.disabledMcpServers;
+    if (config.githubMcpToolConfig) params["githubMcpToolConfig"] = *config.githubMcpToolConfig;
+    if (config.canvasProvider) params["canvasProvider"] = *config.canvasProvider;
+    if (config.customAgentsLocalOnly) params["customAgentsLocalOnly"] = *config.customAgentsLocalOnly;
+    if (config.toolSearch) params["toolSearch"] = *config.toolSearch;
+    if (config.experimentalMode) params["experimentalMode"] = *config.experimentalMode;
+    if (config.contentExclusion) params["contentExclusion"] = *config.contentExclusion;
+
     return params;
 }
 

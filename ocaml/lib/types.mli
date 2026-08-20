@@ -84,6 +84,7 @@ val mcp_server_config_to_yojson : mcp_server_config -> Yojson.Safe.t
 type command_definition = {
   cmd_name : string;
   cmd_description : string;
+  args_schema : Yojson.Safe.t option;
 }
 
 val command_definition_to_yojson : command_definition -> Yojson.Safe.t
@@ -156,6 +157,7 @@ val attachment_github_snippet : string
 val hook_on_pre_tool_use : string
 val hook_on_post_tool_use : string
 val hook_on_pre_mcp_tool_call : string
+val hook_on_user_prompt_transformed : string
 
 type session_config = {
   model : string option;
@@ -185,6 +187,15 @@ type session_config = {
   enable_web_socket_responses : bool;
   exp_assignments : (string * Yojson.Safe.t) list;
   on_mcp_auth_request : bool;
+  rewind_enabled : bool option;
+  additional_directories : string list option;
+  disabled_mcp_servers : string list option;
+  github_mcp_tool_config : (string * Yojson.Safe.t) list;
+  canvas_provider : (string * Yojson.Safe.t) list;
+  custom_agents_local_only : bool option;
+  tool_search : (string * Yojson.Safe.t) list;
+  experimental_mode : bool option;
+  content_exclusion : bool option;
 }
 
 val default_session_config : unit -> session_config
@@ -234,6 +245,11 @@ type permission_result = {
 
 val permission_result_to_yojson : permission_result -> Yojson.Safe.t
 
+(** Serialize a permission reply together with an opaque decision context,
+    emitted under the JSON key "decisionContext". *)
+val permission_result_to_yojson_with_context :
+  permission_result -> Yojson.Safe.t option -> Yojson.Safe.t
+
 (** {1 Status Types} *)
 
 type get_status_response = {
@@ -264,6 +280,10 @@ type client_options = {
   tcp_connection_token : string option;
   request_handler : copilot_request_handler option;
   bearer_token_provider : bearer_token_provider option;
+  (* JSON key: "builtinPluginDirectories" *)
+  builtin_plugin_directories : string list option;
+  (* JSON key: "inProcess" *)
+  in_process : bool option;
 }
 
 val default_client_options : unit -> client_options

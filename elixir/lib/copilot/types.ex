@@ -262,8 +262,8 @@ defmodule Copilot.Types do
             | :denied_no_approval_rule_and_could_not_request_from_user
             | :denied_interactively_by_user
 
-    @type t :: %__MODULE__{kind: kind(), rules: [any()] | nil}
-    defstruct [:kind, :rules]
+    @type t :: %__MODULE__{kind: kind(), rules: [any()] | nil, decision_context: map() | nil}
+    defstruct [:kind, :rules, :decision_context]
 
     @spec to_map(t()) :: map()
     def to_map(%__MODULE__{} = r) do
@@ -277,7 +277,8 @@ defmodule Copilot.Types do
         end
 
       m = %{"kind" => kind_str}
-      if r.rules, do: Map.put(m, "rules", r.rules), else: m
+      m = if r.rules, do: Map.put(m, "rules", r.rules), else: m
+      if r.decision_context, do: Map.put(m, "decisionContext", r.decision_context), else: m
     end
   end
 
@@ -346,6 +347,7 @@ defmodule Copilot.Types do
             on_post_tool_use: (map(), map() -> map() | nil) | nil,
             on_pre_mcp_tool_call: (map(), map() -> map() | nil) | nil,
             on_user_prompt_submitted: (map(), map() -> map() | nil) | nil,
+            on_user_prompt_transformed: (map(), map() -> map() | nil) | nil,
             on_session_start: (map(), map() -> map() | nil) | nil,
             on_session_end: (map(), map() -> map() | nil) | nil,
             on_error_occurred: (map(), map() -> map() | nil) | nil
@@ -355,6 +357,7 @@ defmodule Copilot.Types do
       :on_post_tool_use,
       :on_pre_mcp_tool_call,
       :on_user_prompt_submitted,
+      :on_user_prompt_transformed,
       :on_session_start,
       :on_session_end,
       :on_error_occurred
@@ -367,6 +370,7 @@ defmodule Copilot.Types do
         h.on_post_tool_use != nil or
         h.on_pre_mcp_tool_call != nil or
         h.on_user_prompt_submitted != nil or
+        h.on_user_prompt_transformed != nil or
         h.on_session_start != nil or
         h.on_session_end != nil or
         h.on_error_occurred != nil
@@ -380,6 +384,7 @@ defmodule Copilot.Types do
         "postToolUse" -> h.on_post_tool_use
         "preMcpToolCall" -> h.on_pre_mcp_tool_call
         "userPromptSubmitted" -> h.on_user_prompt_submitted
+        "userPromptTransformed" -> h.on_user_prompt_transformed
         "sessionStart" -> h.on_session_start
         "sessionEnd" -> h.on_session_end
         "errorOccurred" -> h.on_error_occurred
@@ -434,7 +439,8 @@ defmodule Copilot.Types do
             prompt: String.t(),
             mcp_servers: map() | nil,
             infer: boolean() | nil,
-            skills: [String.t()] | nil
+            skills: [String.t()] | nil,
+            args_schema: map() | nil
           }
     defstruct [
       :name,
@@ -445,7 +451,9 @@ defmodule Copilot.Types do
       :mcp_servers,
       :infer,
       # List of skill names to preload
-      :skills
+      :skills,
+      # JSON schema describing the agent's arguments
+      :args_schema
     ]
   end
 
@@ -633,7 +641,16 @@ defmodule Copilot.Types do
             otlp_protocol: String.t() | nil,
             enable_web_socket_responses: boolean() | nil,
             exp_assignments: map() | nil,
-            on_mcp_auth_request: Copilot.Types.mcp_auth_handler() | nil
+            on_mcp_auth_request: Copilot.Types.mcp_auth_handler() | nil,
+            rewind_enabled: boolean() | nil,
+            additional_directories: [String.t()] | nil,
+            disabled_mcp_servers: [String.t()] | nil,
+            github_mcp_tool_config: map() | nil,
+            canvas_provider: map() | nil,
+            custom_agents_local_only: boolean() | nil,
+            tool_search: map() | nil,
+            experimental_mode: boolean() | nil,
+            content_exclusion: boolean() | nil
           }
     defstruct [
       :session_id,
@@ -686,7 +703,25 @@ defmodule Copilot.Types do
       # Experiment assignment overrides
       :exp_assignments,
       # MCP OAuth host token handler
-      :on_mcp_auth_request
+      :on_mcp_auth_request,
+      # Enable session rewind (rewind to a prior checkpoint)
+      :rewind_enabled,
+      # Additional workspace directories the session may access
+      :additional_directories,
+      # MCP servers to disable for this session
+      :disabled_mcp_servers,
+      # Configuration for the built-in GitHub MCP tool
+      :github_mcp_tool_config,
+      # Canvas provider configuration
+      :canvas_provider,
+      # Restrict custom agents to local-only definitions
+      :custom_agents_local_only,
+      # Tool search configuration
+      :tool_search,
+      # Enable experimental mode
+      :experimental_mode,
+      # Enable content exclusion enforcement
+      :content_exclusion
     ]
   end
 
@@ -884,7 +919,9 @@ defmodule Copilot.Types do
             copilot_home: String.t() | nil,
             tcp_connection_token: String.t() | nil,
             request_handler: Copilot.Types.copilot_request_handler() | nil,
-            bearer_token_provider: Copilot.Types.bearer_token_provider() | nil
+            bearer_token_provider: Copilot.Types.bearer_token_provider() | nil,
+            builtin_plugin_directories: [String.t()] | nil,
+            in_process: boolean() | nil
           }
     defstruct [
       cli_path: nil,
@@ -907,7 +944,11 @@ defmodule Copilot.Types do
       # Intercept outbound LLM inference requests
       request_handler: nil,
       # BYOK bearer-token provider (per-session)
-      bearer_token_provider: nil
+      bearer_token_provider: nil,
+      # Directories to search for built-in plugins (wire: "builtinPluginDirectories")
+      builtin_plugin_directories: nil,
+      # Use in-process FFI transport instead of spawning a CLI (wire: "inProcess")
+      in_process: nil
     ]
   end
 

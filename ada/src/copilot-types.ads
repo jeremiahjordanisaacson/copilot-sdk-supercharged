@@ -201,6 +201,22 @@ package Copilot.Types is
       On_Mcp_Auth_Request           : Mcp_Auth_Handler_Access       := null;
       On_Post_Tool_Use              : Post_Tool_Use_Hook_Access     := null;
       On_Pre_Mcp_Tool_Call          : Pre_Mcp_Tool_Call_Hook_Access := null;
+      --  --- Newly-synced session options (parity with @github/copilot-sdk) ---
+      Rewind_Enabled                : Boolean  := False;
+      Additional_Directories_Json   : UString  := Null_UString;
+      Disabled_Mcp_Servers_Json     : UString  := Null_UString;
+      Github_Mcp_Tool_Config_Json   : UString  := Null_UString;
+      Canvas_Provider_Json          : UString  := Null_UString;
+      Custom_Agents_Local_Only      : Boolean  := False;
+      Decision_Context_Json         : UString  := Null_UString;
+      Builtin_Plugin_Directories_Json : UString := Null_UString;
+      Args_Schema_Json              : UString  := Null_UString;
+      Reasoning_Effort              : UString  := Null_UString;
+      Tool_Search_Json              : UString  := Null_UString;
+      In_Process                    : Boolean  := False;
+      Experimental_Mode             : Boolean  := False;
+      Content_Exclusion             : Boolean  := False;
+      On_User_Prompt_Transformed    : Post_Tool_Use_Hook_Access     := null;
    end record;
 
    Default_Session_Config : constant Session_Config :=
@@ -236,7 +252,22 @@ package Copilot.Types is
        Exp_Assignments_Json          => Null_UString,
        On_Mcp_Auth_Request           => null,
        On_Post_Tool_Use              => null,
-       On_Pre_Mcp_Tool_Call          => null);
+       On_Pre_Mcp_Tool_Call          => null,
+       Rewind_Enabled                => False,
+       Additional_Directories_Json   => Null_UString,
+       Disabled_Mcp_Servers_Json     => Null_UString,
+       Github_Mcp_Tool_Config_Json   => Null_UString,
+       Canvas_Provider_Json          => Null_UString,
+       Custom_Agents_Local_Only      => False,
+       Decision_Context_Json         => Null_UString,
+       Builtin_Plugin_Directories_Json => Null_UString,
+       Args_Schema_Json              => Null_UString,
+       Reasoning_Effort              => Null_UString,
+       Tool_Search_Json              => Null_UString,
+       In_Process                    => False,
+       Experimental_Mode             => False,
+       Content_Exclusion             => False,
+       On_User_Prompt_Transformed    => null);
 
    --  -----------------------------------------------------------------------
    --  Resume session configuration

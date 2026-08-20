@@ -14,6 +14,14 @@ import { execSync } from 'child_process';
 
 const ROOT = resolve(import.meta.dirname, '..');
 
+// Directories skipped during recursive feature scanning: VCS, test, and build/vendor output.
+// Excluding build/vendor dirs prevents false positives from compiled or vendored copies of source.
+const SKIP_SCAN_DIRS = new Set([
+  'node_modules', '.git', 'test', 'tests', 'e2e',
+  'bin', 'obj', 'build', 'target', '.build', 'dist', 'out',
+  'vendor', 'deps', '_build', '.dart_tool', '.gradle', '.stack-work', '.dub', '.cargo',
+]);
+
 // Gold standard: every RPC method that all SDKs must implement
 const REQUIRED_RPC_METHODS = [
   'session.create',
@@ -67,6 +75,22 @@ const REQUIRED_FEATURES = [
   ['HTTP request handler',          ['requestHandler', 'request_handler', 'RequestHandler', 'CopilotRequestHandler']],
   ['GitHub attachment variants',    ['GitHubCommit', 'github_commit', 'githubCommit', 'GitHubRepository', 'github_repository', 'GITHUB_COMMIT']],
   ['Experiment assignments',        ['expAssignments', 'exp_assignments', 'ExpAssignments']],
+  // --- Upstream-sync features (parity with @github/copilot-sdk, 2026-08) ---
+  ['Session rewind',                ['rewind', 'Rewind', 'REWIND']],
+  ['Additional session directories',['additionalDirectories', 'additional_directories', 'AdditionalDirectories', 'additionalDirs', 'additional_dirs']],
+  ['Disabled MCP servers',          ['disabledMcpServers', 'disabled_mcp_servers', 'DisabledMcpServers', 'disabledMCPServers', 'DisabledMCPServers']],
+  ['GitHub MCP tool config',        ['githubMcpToolConfig', 'github_mcp_tool_config', 'GitHubMcpToolConfig', 'githubMCPToolConfig', 'GithubMcpToolConfig']],
+  ['Canvas provider',               ['canvasProvider', 'canvas_provider', 'CanvasProvider']],
+  ['Custom agents local-only',      ['customAgentsLocalOnly', 'custom_agents_local_only', 'CustomAgentsLocalOnly', 'customAgentsLocalonly']],
+  ['User-prompt-transformed hook',  ['userPromptTransformed', 'user_prompt_transformed', 'UserPromptTransformed', 'onUserPromptTransformed', 'on_user_prompt_transformed']],
+  ['Permission decision context',   ['decisionContext', 'decision_context', 'DecisionContext']],
+  ['Built-in plugin directories',   ['builtinPluginDirectories', 'builtin_plugin_directories', 'BuiltinPluginDirectories', 'pluginDirectories', 'plugin_directories', 'PluginDirectories']],
+  ['Agent factories authoring',     ['argsSchema', 'args_schema', 'ArgsSchema', 'FactoryExecute', 'factory_execute', 'defineFactory', 'define_factory', 'DefineFactory']],
+  ['Reasoning effort control',      ['reasoningEffort', 'reasoning_effort', 'ReasoningEffort']],
+  ['Tool search configuration',     ['toolSearch', 'tool_search', 'ToolSearch']],
+  ['In-process FFI transport',      ['inProcess', 'in_process', 'InProcess', 'InProcessTransport', 'ffiTransport', 'ffi_transport']],
+  ['Experimental mode',             ['experimentalMode', 'experimental_mode', 'ExperimentalMode', 'enableExperimental', 'enable_experimental']],
+  ['Content exclusion',             ['contentExclusion', 'content_exclusion', 'ContentExclusion']],
 ];
 
 // SDK directories and their client file glob patterns
@@ -154,16 +178,18 @@ function checkSdkFeatures(sdk) {
   const sdkDir = sdk === 'dlang' ? 'dlang' : sdk;
   try {
     const dir = join(ROOT, sdkDir);
+    // Deep enough to reach JVM-style package layouts (e.g. src/main/java/com/github/copilot).
     function scanDir(d, depth = 0) {
-      if (depth > 3) return;
+      if (depth > 10) return;
       try {
         for (const entry of readdirSync(d)) {
           const full = join(d, entry);
-          if (entry === 'node_modules' || entry === '.git' || entry === 'test' || entry === 'tests' || entry === 'e2e') continue;
+          // Skip VCS, test, and build/vendor output dirs (avoids false positives from compiled/vendored code).
+          if (SKIP_SCAN_DIRS.has(entry)) continue;
           try {
             if (statSync(full).isDirectory()) {
               scanDir(full, depth + 1);
-            } else if (/\.(ts|js|py|go|rs|rb|php|swift|kt|java|cpp|h|c|dart|scala|ex|hs|fs|lua|sh|clj|vb|pas|f90|m|adb|ads|groovy|jl|cob|ml|zig|nim|d|erl|cr|tcl|sol|v)$/.test(entry)) {
+            } else if (/\.(ts|js|py|go|rs|rb|php|swift|kt|java|cpp|hpp|hh|cc|cxx|h|c|dart|scala|ex|hs|fs|lua|sh|clj|vb|pas|f90|m|mm|adb|ads|groovy|jl|cob|ml|zig|nim|d|erl|cr|tcl|sol|v|R|pm|pl)$/.test(entry)) {
               allContent += readFileSync(full, 'utf-8') + '\n';
             }
           } catch {}

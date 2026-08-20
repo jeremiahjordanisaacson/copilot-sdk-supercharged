@@ -349,6 +349,7 @@ module Copilot
         "preToolUse"          => hooks.on_pre_tool_use,
         "postToolUse"         => hooks.on_post_tool_use,
         "userPromptSubmitted" => hooks.on_user_prompt_submitted,
+        "userPromptTransformed" => hooks.on_user_prompt_transformed,
         "sessionStart"        => hooks.on_session_start,
         "sessionEnd"          => hooks.on_session_end,
         "errorOccurred"       => hooks.on_error_occurred,

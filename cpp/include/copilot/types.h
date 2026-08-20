@@ -273,6 +273,9 @@ struct CustomAgentConfig {
 
     /// List of skill names to preload into this agent's context.
     std::optional<std::vector<std::string>> skills;
+
+    /// JSON schema describing the arguments accepted by an agent factory.
+    std::optional<nlohmann::json> argsSchema;
 };
 
 inline void to_json(nlohmann::json& j, const CustomAgentConfig& c) {
@@ -283,6 +286,7 @@ inline void to_json(nlohmann::json& j, const CustomAgentConfig& c) {
     if (c.mcpServers) j["mcpServers"] = *c.mcpServers;
     if (c.infer) j["infer"] = *c.infer;
     if (c.skills) j["skills"] = *c.skills;
+    if (c.argsSchema) j["argsSchema"] = *c.argsSchema;
 }
 
 // ============================================================================
@@ -385,6 +389,8 @@ struct PreToolUseHookOutput {
     std::optional<nlohmann::json> modifiedArgs;
     std::optional<std::string> additionalContext;
     std::optional<bool> suppressOutput;
+    /// Opaque decision context returned with the permission reply.
+    std::optional<nlohmann::json> decisionContext;
 };
 
 inline void to_json(nlohmann::json& j, const PreToolUseHookOutput& o) {
@@ -394,6 +400,7 @@ inline void to_json(nlohmann::json& j, const PreToolUseHookOutput& o) {
     if (o.modifiedArgs) j["modifiedArgs"] = *o.modifiedArgs;
     if (o.additionalContext) j["additionalContext"] = *o.additionalContext;
     if (o.suppressOutput) j["suppressOutput"] = *o.suppressOutput;
+    if (o.decisionContext) j["decisionContext"] = *o.decisionContext;
 }
 
 using PreToolUseHandler = std::function<std::optional<PreToolUseHookOutput>(
@@ -578,6 +585,8 @@ struct SessionHooks {
     PreToolUseHandler onPreToolUse;
     PostToolUseHandler onPostToolUse;
     UserPromptSubmittedHandler onUserPromptSubmitted;
+    /// Invoked after the user prompt has been transformed, before submission.
+    UserPromptSubmittedHandler onUserPromptTransformed;
     SessionStartHandler onSessionStart;
     SessionEndHandler onSessionEnd;
     ErrorOccurredHandler onErrorOccurred;
@@ -587,7 +596,8 @@ struct SessionHooks {
     /// Returns true if any hook handler is registered.
     bool hasAny() const {
         return onPreToolUse || onPostToolUse || onUserPromptSubmitted ||
-               onSessionStart || onSessionEnd || onErrorOccurred || onPreMcpToolCall;
+               onUserPromptTransformed || onSessionStart || onSessionEnd ||
+               onErrorOccurred || onPreMcpToolCall;
     }
 };
 
@@ -832,6 +842,26 @@ struct SessionConfig {
     /// Handler invoked when an MCP server requests an OAuth host token.
     /// When set, the SDK sends the mcpAuthHandler wire flag on session.create.
     McpAuthHandler onMcpAuthRequest;
+
+    // --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+    /// Enable session rewind so the conversation can be rolled back.
+    std::optional<bool> rewindEnabled;
+    /// Extra workspace directories the session may access.
+    std::optional<std::vector<std::string>> additionalDirectories;
+    /// Names of MCP servers to disable for this session.
+    std::optional<std::vector<std::string>> disabledMcpServers;
+    /// GitHub MCP tool configuration.
+    std::optional<nlohmann::json> githubMcpToolConfig;
+    /// Canvas provider configuration.
+    std::optional<nlohmann::json> canvasProvider;
+    /// Restrict custom agents to locally-defined ones only.
+    std::optional<bool> customAgentsLocalOnly;
+    /// Tool-search configuration.
+    std::optional<nlohmann::json> toolSearch;
+    /// Enable experimental mode for this session.
+    std::optional<bool> experimentalMode;
+    /// Enable content-exclusion enforcement.
+    std::optional<bool> contentExclusion;
 };
 
 struct ResumeSessionConfig {
@@ -1280,6 +1310,12 @@ struct CopilotClientOptions {
 
     /// BYOK bearer-token provider used to mint fresh tokens for outbound model requests.
     BearerTokenProvider bearerTokenProvider;
+
+    /// Built-in plugin directories to load.
+    std::optional<std::vector<std::string>> builtinPluginDirectories;
+
+    /// Use the in-process FFI transport instead of spawning a CLI.
+    bool inProcess = false;
 };
 
 } // namespace copilot

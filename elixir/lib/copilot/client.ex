@@ -889,6 +889,15 @@ defmodule Copilot.Client do
     params = put_if(params, "otlpProtocol", c.otlp_protocol)
     params = put_if(params, "enableWebSocketResponses", c.enable_web_socket_responses)
     params = put_if(params, "expAssignments", c.exp_assignments)
+    params = put_if(params, "rewindEnabled", c.rewind_enabled)
+    params = put_if(params, "additionalDirectories", c.additional_directories)
+    params = put_if(params, "disabledMcpServers", c.disabled_mcp_servers)
+    params = put_if(params, "githubMcpToolConfig", c.github_mcp_tool_config)
+    params = put_if(params, "canvasProvider", c.canvas_provider)
+    params = put_if(params, "customAgentsLocalOnly", c.custom_agents_local_only)
+    params = put_if(params, "toolSearch", c.tool_search)
+    params = put_if(params, "experimentalMode", c.experimental_mode)
+    params = put_if(params, "contentExclusion", c.content_exclusion)
 
     params =
       if c.session_limits do
@@ -1003,6 +1012,7 @@ defmodule Copilot.Client do
     m = put_if(m, "tools", a.tools)
     m = put_if(m, "mcpServers", a.mcp_servers)
     m = put_if(m, "infer", a.infer)
+    m = put_if(m, "argsSchema", a.args_schema)
     m
   end
 

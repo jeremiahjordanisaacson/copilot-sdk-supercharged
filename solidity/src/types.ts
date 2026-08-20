@@ -577,6 +577,36 @@ export interface SolidityUpstreamSessionOptions {
     bearerTokenProvider?: BearerTokenProvider;
     /** Session lifecycle hooks (incl. onPostToolUse / onPreMcpToolCall). */
     hooks?: SolidityHooks;
+    /** Enable conversational rewind (restore an earlier turn). */
+    rewindEnabled?: boolean;
+    /** Extra workspace directories to expose to the session. */
+    additionalDirectories?: string[];
+    /** Names of MCP servers to disable for this session. */
+    disabledMcpServers?: string[];
+    /** GitHub MCP tool configuration (opaque passthrough). */
+    githubMcpToolConfig?: Record<string, unknown>;
+    /** Canvas provider configuration (opaque passthrough). */
+    canvasProvider?: Record<string, unknown>;
+    /** Restrict custom agents to locally-defined ones only. */
+    customAgentsLocalOnly?: boolean;
+    /** Permission-reply decision context (opaque object) forwarded with replies. */
+    decisionContext?: Record<string, unknown>;
+    /** Hook invoked after a user prompt is transformed (userPromptTransformed). */
+    onUserPromptTransformed?: (context: Record<string, unknown>) => unknown | Promise<unknown>;
+    /** Built-in plugin directories to load. */
+    builtinPluginDirectories?: string[];
+    /** Agent-factory authoring arguments schema (opaque object). */
+    argsSchema?: Record<string, unknown>;
+    /** Reasoning effort control ("low", "medium", "high"). */
+    reasoningEffort?: string;
+    /** Tool-search configuration (opaque object or boolean toggle). */
+    toolSearch?: Record<string, unknown> | boolean;
+    /** Use the in-process FFI transport instead of a spawned CLI. */
+    inProcess?: boolean;
+    /** Enable experimental mode features. */
+    experimentalMode?: boolean;
+    /** Enable content exclusion policy enforcement. */
+    contentExclusion?: boolean;
 }
 
 /** Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto"). */

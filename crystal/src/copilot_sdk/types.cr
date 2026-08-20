@@ -160,8 +160,10 @@ module CopilotSDK
 
     property allowed : Bool
     property reason : String?
+    @[JSON::Field(key: "decisionContext")]
+    property decision_context : Hash(String, JSON::Any)?
 
-    def initialize(@allowed, @reason = nil)
+    def initialize(@allowed, @reason = nil, @decision_context = nil)
     end
   end
 
@@ -286,6 +288,24 @@ module CopilotSDK
     property exp_assignments : Hash(String, JSON::Any)?
     @[JSON::Field(key: "mcpAuthHandler")]
     property mcp_auth_handler : Bool?
+    @[JSON::Field(key: "rewindEnabled")]
+    property rewind_enabled : Bool?
+    @[JSON::Field(key: "additionalDirectories")]
+    property additional_directories : Array(String)?
+    @[JSON::Field(key: "disabledMcpServers")]
+    property disabled_mcp_servers : Array(String)?
+    @[JSON::Field(key: "githubMcpToolConfig")]
+    property github_mcp_tool_config : Hash(String, JSON::Any)?
+    @[JSON::Field(key: "canvasProvider")]
+    property canvas_provider : JSON::Any?
+    @[JSON::Field(key: "customAgentsLocalOnly")]
+    property custom_agents_local_only : Bool?
+    @[JSON::Field(key: "toolSearch")]
+    property tool_search : JSON::Any?
+    @[JSON::Field(key: "experimentalMode")]
+    property experimental_mode : Bool?
+    @[JSON::Field(key: "contentExclusion")]
+    property content_exclusion : Bool?
 
     def initialize(@model = nil, @streaming = nil, @system_message = nil,
                    @tools = nil, @instructions = nil, @agent_mode = nil,
@@ -297,7 +317,11 @@ module CopilotSDK
                    @instruction_directories = nil, @enable_citations = nil,
                    @excluded_builtin_agents = nil, @session_limits = nil, @memory_config = nil,
                    @otlp_protocol = nil, @enable_web_socket_responses = nil,
-                   @exp_assignments = nil, @mcp_auth_handler = nil)
+                   @exp_assignments = nil, @mcp_auth_handler = nil,
+                   @rewind_enabled = nil, @additional_directories = nil,
+                   @disabled_mcp_servers = nil, @github_mcp_tool_config = nil,
+                   @canvas_provider = nil, @custom_agents_local_only = nil,
+                   @tool_search = nil, @experimental_mode = nil, @content_exclusion = nil)
     end
   end
 
@@ -399,12 +423,15 @@ module CopilotSDK
     property tcp_connection_token : String?
     property bearer_token_provider : BearerTokenProvider?
     property on_mcp_auth_request : McpAuthHandler?
+    property builtin_plugin_directories : Array(String)? # wire: builtinPluginDirectories
+    property in_process : Bool?                           # wire: inProcess
 
     def initialize(@cli_path = nil, @cli_url = nil, @auto_start = true, @request_timeout = 30,
                    @github_token = nil, @use_logged_in_user = nil,
                    @session_idle_timeout_seconds = nil, @session_fs = nil,
                    @copilot_home = nil, @tcp_connection_token = nil,
-                   @bearer_token_provider = nil, @on_mcp_auth_request = nil)
+                   @bearer_token_provider = nil, @on_mcp_auth_request = nil,
+                   @builtin_plugin_directories = nil, @in_process = nil)
     end
   end
 
@@ -472,12 +499,24 @@ module CopilotSDK
     end
   end
 
+  # Authoring options for a programmatic agent factory.
+  class AgentFactoryOptions
+    include JSON::Serializable
+
+    @[JSON::Field(key: "argsSchema")]
+    property args_schema : Hash(String, JSON::Any)?
+
+    def initialize(@args_schema = nil)
+    end
+  end
+
   # Session hook identifiers (includes post-tool-use and pre-MCP-tool-call).
   enum HookType
     PreToolUse
     PostToolUse
     PreMcpToolCall
     UserPromptSubmitted
+    UserPromptTransformed
     SessionStart
     SessionEnd
 
@@ -488,6 +527,7 @@ module CopilotSDK
       when PostToolUse         then "postToolUse"
       when PreMcpToolCall      then "preMcpToolCall"
       when UserPromptSubmitted then "userPromptSubmitted"
+      when UserPromptTransformed then "userPromptTransformed"
       when SessionStart        then "sessionStart"
       when SessionEnd          then "sessionEnd"
       else                          "preToolUse"

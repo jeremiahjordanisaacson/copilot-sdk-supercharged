@@ -488,6 +488,13 @@ static cJSON *on_permission_request(const char *method, cJSON *params, void *use
         cJSON_AddStringToObject(inner, "kind", kind_str);
     }
 
+    if (perm_result.decision_context_json) {
+        cJSON *dctx = cJSON_Parse(perm_result.decision_context_json);
+        if (dctx) {
+            cJSON_AddItemToObject(inner, "decisionContext", dctx);
+        }
+    }
+
     cJSON_AddItemToObject(result, "result", inner);
     return result;
 }
@@ -1066,6 +1073,58 @@ static cJSON *build_session_params(const copilot_session_config_t *config)
     }
     if (config->on_mcp_auth_request) {
         cJSON_AddBoolToObject(params, "mcpAuthHandler", true);
+    }
+
+    /* --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) --- */
+    if (config->has_rewind_enabled) {
+        cJSON_AddBoolToObject(params, "rewindEnabled", config->rewind_enabled);
+    }
+    if (config->additional_directories) {
+        cJSON *arr = cJSON_CreateArray();
+        for (const char **p = config->additional_directories; *p; p++) {
+            cJSON_AddItemToArray(arr, cJSON_CreateString(*p));
+        }
+        cJSON_AddItemToObject(params, "additionalDirectories", arr);
+    }
+    if (config->disabled_mcp_servers) {
+        cJSON *arr = cJSON_CreateArray();
+        for (const char **p = config->disabled_mcp_servers; *p; p++) {
+            cJSON_AddItemToArray(arr, cJSON_CreateString(*p));
+        }
+        cJSON_AddItemToObject(params, "disabledMcpServers", arr);
+    }
+    if (config->github_mcp_tool_config_json) {
+        cJSON *gh = cJSON_Parse(config->github_mcp_tool_config_json);
+        if (gh) {
+            cJSON_AddItemToObject(params, "githubMcpToolConfig", gh);
+        }
+    }
+    if (config->canvas_provider_json) {
+        cJSON *cv = cJSON_Parse(config->canvas_provider_json);
+        if (cv) {
+            cJSON_AddItemToObject(params, "canvasProvider", cv);
+        }
+    }
+    if (config->has_custom_agents_local_only) {
+        cJSON_AddBoolToObject(params, "customAgentsLocalOnly", config->custom_agents_local_only);
+    }
+    if (config->tool_search_json) {
+        cJSON *ts = cJSON_Parse(config->tool_search_json);
+        if (ts) {
+            cJSON_AddItemToObject(params, "toolSearch", ts);
+        }
+    }
+    if (config->has_experimental_mode) {
+        cJSON_AddBoolToObject(params, "experimentalMode", config->experimental_mode);
+    }
+    if (config->has_content_exclusion) {
+        cJSON_AddBoolToObject(params, "contentExclusion", config->content_exclusion);
+    }
+    if (config->args_schema_json) {
+        cJSON *as = cJSON_Parse(config->args_schema_json);
+        if (as) {
+            cJSON_AddItemToObject(params, "argsSchema", as);
+        }
     }
 
     return params;

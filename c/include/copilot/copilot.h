@@ -196,6 +196,7 @@ typedef enum {
 
 typedef struct {
     copilot_permission_kind_t kind;
+    const char *decision_context_json; /**< Opaque decision context (decisionContext) echoed on the reply as JSON, or NULL */
 } copilot_permission_result_t;
 
 /**
@@ -325,6 +326,7 @@ typedef struct {
 #define COPILOT_HOOK_PRE_TOOL_USE          "preToolUse"
 #define COPILOT_HOOK_POST_TOOL_USE         "postToolUse"
 #define COPILOT_HOOK_USER_PROMPT_SUBMITTED "userPromptSubmitted"
+#define COPILOT_HOOK_USER_PROMPT_TRANSFORMED "userPromptTransformed"
 #define COPILOT_HOOK_SESSION_START         "sessionStart"
 #define COPILOT_HOOK_SESSION_END           "sessionEnd"
 #define COPILOT_HOOK_ERROR_OCCURRED        "errorOccurred"
@@ -590,6 +592,8 @@ typedef struct {
     void *request_handler_user_data;            /**< User data passed to request_handler */
     copilot_bearer_token_provider_fn bearer_token_provider; /**< BYOK bearer-token provider, or NULL */
     void *bearer_token_user_data;               /**< User data passed to bearer_token_provider */
+    const char **builtin_plugin_directories;    /**< Built-in plugin directories (builtinPluginDirectories), NULL-terminated, or NULL */
+    bool in_process;                            /**< Use the in-process FFI transport (inProcess) instead of spawning a CLI */
 } copilot_client_options_t;
 
 /**
@@ -678,6 +682,22 @@ typedef struct {
     const char *exp_assignments_json;       /**< Experiment (feature-flag) assignment overrides as JSON, or NULL */
     copilot_mcp_auth_handler_fn on_mcp_auth_request; /**< MCP OAuth host-token handler, or NULL */
     void *mcp_auth_user_data;               /**< User data passed to on_mcp_auth_request */
+
+    /* --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) --- */
+    bool rewind_enabled;                    /**< Enable session rewind (rewindEnabled) */
+    bool has_rewind_enabled;                /**< Whether rewind_enabled was explicitly set */
+    const char **additional_directories;    /**< Extra workspace directories (additionalDirectories), NULL-terminated, or NULL */
+    const char **disabled_mcp_servers;      /**< MCP servers to disable (disabledMcpServers), NULL-terminated, or NULL */
+    const char *github_mcp_tool_config_json;/**< GitHub MCP tool config (githubMcpToolConfig) as JSON, or NULL */
+    const char *canvas_provider_json;       /**< Canvas provider config (canvasProvider) as JSON, or NULL */
+    bool custom_agents_local_only;          /**< Restrict custom agents to local only (customAgentsLocalOnly) */
+    bool has_custom_agents_local_only;      /**< Whether custom_agents_local_only was explicitly set */
+    const char *tool_search_json;           /**< Tool-search configuration (toolSearch) as JSON, or NULL */
+    bool experimental_mode;                 /**< Enable experimental mode (experimentalMode) */
+    bool has_experimental_mode;             /**< Whether experimental_mode was explicitly set */
+    bool content_exclusion;                 /**< Enable content-exclusion enforcement (contentExclusion) */
+    bool has_content_exclusion;             /**< Whether content_exclusion was explicitly set */
+    const char *args_schema_json;           /**< Agent-factory authoring args schema (argsSchema) as JSON, or NULL */
 } copilot_session_config_t;
 
 /**

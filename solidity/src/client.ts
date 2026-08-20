@@ -240,6 +240,36 @@ export class CopilotSolidityClient {
             params.expAssignments = options.expAssignments;
         if (options.bearerTokenProvider !== undefined)
             params.bearerTokenProvider = options.bearerTokenProvider;
+        if (options.rewindEnabled !== undefined)
+            params.rewindEnabled = options.rewindEnabled;
+        if (options.additionalDirectories !== undefined)
+            params.additionalDirectories = options.additionalDirectories;
+        if (options.disabledMcpServers !== undefined)
+            params.disabledMcpServers = options.disabledMcpServers;
+        if (options.githubMcpToolConfig !== undefined)
+            params.githubMcpToolConfig = options.githubMcpToolConfig;
+        if (options.canvasProvider !== undefined)
+            params.canvasProvider = options.canvasProvider;
+        if (options.customAgentsLocalOnly !== undefined)
+            params.customAgentsLocalOnly = options.customAgentsLocalOnly;
+        if (options.decisionContext !== undefined)
+            params.decisionContext = options.decisionContext;
+        if (options.onUserPromptTransformed !== undefined)
+            params.userPromptTransformed = true;
+        if (options.builtinPluginDirectories !== undefined)
+            params.builtinPluginDirectories = options.builtinPluginDirectories;
+        if (options.argsSchema !== undefined)
+            params.argsSchema = options.argsSchema;
+        if (options.reasoningEffort !== undefined)
+            params.reasoningEffort = options.reasoningEffort;
+        if (options.toolSearch !== undefined)
+            params.toolSearch = options.toolSearch;
+        if (options.inProcess !== undefined)
+            params.inProcess = options.inProcess;
+        if (options.experimentalMode !== undefined)
+            params.experimentalMode = options.experimentalMode;
+        if (options.contentExclusion !== undefined)
+            params.contentExclusion = options.contentExclusion;
         if (options.onMcpAuthRequest !== undefined) params.mcpAuthHandler = true;
         return params;
     }

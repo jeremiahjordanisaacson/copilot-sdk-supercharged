@@ -269,6 +269,62 @@ package body Copilot.Client is
          Append (Params, """expAssignments"":"
                        & To_String (Config.Exp_Assignments_Json) & ",");
       end if;
+      --  --- Newly-synced session config passthroughs (camelCase wire keys) ---
+      if Config.Rewind_Enabled then
+         Append (Params, """rewindEnabled"":true,");
+      end if;
+      if Length (Config.Additional_Directories_Json) > 0 then
+         Append (Params, """additionalDirectories"":"
+                       & To_String (Config.Additional_Directories_Json) & ",");
+      end if;
+      if Length (Config.Disabled_Mcp_Servers_Json) > 0 then
+         Append (Params, """disabledMcpServers"":"
+                       & To_String (Config.Disabled_Mcp_Servers_Json) & ",");
+      end if;
+      if Length (Config.Github_Mcp_Tool_Config_Json) > 0 then
+         Append (Params, """githubMcpToolConfig"":"
+                       & To_String (Config.Github_Mcp_Tool_Config_Json) & ",");
+      end if;
+      if Length (Config.Canvas_Provider_Json) > 0 then
+         Append (Params, """canvasProvider"":"
+                       & To_String (Config.Canvas_Provider_Json) & ",");
+      end if;
+      if Config.Custom_Agents_Local_Only then
+         Append (Params, """customAgentsLocalOnly"":true,");
+      end if;
+      if Length (Config.Decision_Context_Json) > 0 then
+         Append (Params, """decisionContext"":"
+                       & To_String (Config.Decision_Context_Json) & ",");
+      end if;
+      --  User-prompt-transformed hook: signal the runtime that a handler exists.
+      if Config.On_User_Prompt_Transformed /= null then
+         Append (Params, """userPromptTransformed"":true,");
+      end if;
+      if Length (Config.Builtin_Plugin_Directories_Json) > 0 then
+         Append (Params, """builtinPluginDirectories"":"
+                       & To_String (Config.Builtin_Plugin_Directories_Json) & ",");
+      end if;
+      if Length (Config.Args_Schema_Json) > 0 then
+         Append (Params, """argsSchema"":"
+                       & To_String (Config.Args_Schema_Json) & ",");
+      end if;
+      if Length (Config.Reasoning_Effort) > 0 then
+         Append (Params, """reasoningEffort"":"""
+                       & Escape (To_String (Config.Reasoning_Effort)) & """,");
+      end if;
+      if Length (Config.Tool_Search_Json) > 0 then
+         Append (Params, """toolSearch"":"
+                       & To_String (Config.Tool_Search_Json) & ",");
+      end if;
+      if Config.In_Process then
+         Append (Params, """inProcess"":true,");
+      end if;
+      if Config.Experimental_Mode then
+         Append (Params, """experimentalMode"":true,");
+      end if;
+      if Config.Content_Exclusion then
+         Append (Params, """contentExclusion"":true,");
+      end if;
       --  MCP OAuth host token handler: signal the runtime that a handler exists.
       if Config.On_Mcp_Auth_Request /= null then
          Append (Params, """mcpAuthHandler"":true,");

@@ -917,6 +917,20 @@ function CopilotClient:_build_create_session_request(config)
     if config.otlpProtocol then req.otlpProtocol = config.otlpProtocol end
     if config.enableWebSocketResponses ~= nil then req.enableWebSocketResponses = config.enableWebSocketResponses end
     if config.expAssignments then req.expAssignments = config.expAssignments end
+    -- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk)
+    if config.rewindEnabled ~= nil then req.rewindEnabled = config.rewindEnabled end
+    if config.additionalDirectories then req.additionalDirectories = config.additionalDirectories end
+    if config.disabledMcpServers then req.disabledMcpServers = config.disabledMcpServers end
+    if config.githubMcpToolConfig then req.githubMcpToolConfig = config.githubMcpToolConfig end
+    if config.canvasProvider then req.canvasProvider = config.canvasProvider end
+    if config.customAgentsLocalOnly ~= nil then req.customAgentsLocalOnly = config.customAgentsLocalOnly end
+    if config.builtinPluginDirectories then req.builtinPluginDirectories = config.builtinPluginDirectories end
+    if config.argsSchema then req.argsSchema = config.argsSchema end
+    if config.decisionContext then req.decisionContext = config.decisionContext end
+    if config.toolSearch ~= nil then req.toolSearch = config.toolSearch end
+    if config.inProcess ~= nil then req.inProcess = config.inProcess end
+    if config.experimentalMode ~= nil then req.experimentalMode = config.experimentalMode end
+    if config.contentExclusion ~= nil then req.contentExclusion = config.contentExclusion end
     if config.onMcpAuthRequest then req.mcpAuthHandler = true end
 
     if config.streaming then req.streaming = true end

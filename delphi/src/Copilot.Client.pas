@@ -487,6 +487,68 @@ begin
     Params.AddPair('expAssignments', ExpObj);
   end;
 
+  // --- Newly-synced session config passthroughs (camelCase wire keys) ---
+  if Config.RewindEnabled then
+    Params.AddPair('rewindEnabled', TJSONBool.Create(True));
+
+  if Length(Config.AdditionalDirectories) > 0 then
+  begin
+    var DirsArr := TJSONArray.Create;
+    for var D in Config.AdditionalDirectories do
+      DirsArr.Add(D);
+    Params.AddPair('additionalDirectories', DirsArr);
+  end;
+
+  if Length(Config.DisabledMcpServers) > 0 then
+  begin
+    var McpArr := TJSONArray.Create;
+    for var M in Config.DisabledMcpServers do
+      McpArr.Add(M);
+    Params.AddPair('disabledMcpServers', McpArr);
+  end;
+
+  if Config.GithubMcpToolConfig <> '' then
+    Params.AddPair('githubMcpToolConfig', Config.GithubMcpToolConfig);
+
+  if Config.CanvasProvider <> '' then
+    Params.AddPair('canvasProvider', Config.CanvasProvider);
+
+  if Config.CustomAgentsLocalOnly then
+    Params.AddPair('customAgentsLocalOnly', TJSONBool.Create(True));
+
+  if Config.DecisionContext <> '' then
+    Params.AddPair('decisionContext', Config.DecisionContext);
+
+  // User-prompt-transformed hook: signal the runtime that a handler is registered.
+  if Assigned(Config.Hooks.OnUserPromptTransformed) then
+    Params.AddPair('userPromptTransformed', TJSONBool.Create(True));
+
+  if Length(Config.BuiltinPluginDirectories) > 0 then
+  begin
+    var PluginArr := TJSONArray.Create;
+    for var P in Config.BuiltinPluginDirectories do
+      PluginArr.Add(P);
+    Params.AddPair('builtinPluginDirectories', PluginArr);
+  end;
+
+  if Config.ArgsSchema <> '' then
+    Params.AddPair('argsSchema', Config.ArgsSchema);
+
+  if Config.ReasoningEffort <> '' then
+    Params.AddPair('reasoningEffort', Config.ReasoningEffort);
+
+  if Config.ToolSearch <> '' then
+    Params.AddPair('toolSearch', Config.ToolSearch);
+
+  if Config.InProcess then
+    Params.AddPair('inProcess', TJSONBool.Create(True));
+
+  if Config.ExperimentalMode then
+    Params.AddPair('experimentalMode', TJSONBool.Create(True));
+
+  if Config.ContentExclusion then
+    Params.AddPair('contentExclusion', TJSONBool.Create(True));
+
   // MCP OAuth host token handler: signal the runtime that a handler is registered.
   if Assigned(Config.OnMcpAuthRequest) then
     Params.AddPair('mcpAuthHandler', TJSONBool.Create(True));

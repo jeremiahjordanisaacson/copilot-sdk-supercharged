@@ -207,7 +207,12 @@ data class CustomAgentConfig(
     /**
      * List of skill names to preload into this agent's context.
      */
-    val skills: List<String>? = null
+    val skills: List<String>? = null,
+
+    /**
+     * JSON schema declaring a factory's arguments.
+     */
+    val argsSchema: JsonElement? = null
 )
 
 /**
@@ -346,6 +351,24 @@ data class SessionConfig(
     val enableWebSocketResponses: Boolean? = null,
     /** Experiment assignment overrides forwarded to the runtime. */
     val expAssignments: Map<String, Any?>? = null,
+    /** Enable session rewind to restore earlier session points. */
+    val rewindEnabled: Boolean? = null,
+    /** Extra working directories available to the session. */
+    val additionalDirectories: List<String>? = null,
+    /** Names of configured MCP servers to disable for this session. */
+    val disabledMcpServers: List<String>? = null,
+    /** Configuration for the built-in GitHub MCP tools. */
+    val githubMcpToolConfig: Map<String, Any?>? = null,
+    /** Identity of the canvas provider to register. */
+    val canvasProvider: Map<String, Any?>? = null,
+    /** Only load workspace-local custom agents. */
+    val customAgentsLocalOnly: Boolean? = null,
+    /** Tool search configuration for large tool sets. */
+    val toolSearch: Map<String, Any?>? = null,
+    /** Enable experimental runtime features. */
+    val experimentalMode: Boolean? = null,
+    /** Respect repository content-exclusion rules. */
+    val contentExclusion: Boolean? = null,
     /** Handler invoked when an MCP server requests an OAuth host token. */
     val onMcpAuthRequest: McpAuthHandler? = null,
 )
@@ -447,7 +470,9 @@ data class PermissionRequest(
 @Serializable
 data class PermissionRequestResult(
     val kind: String,
-    val rules: List<JsonElement>? = null
+    val rules: List<JsonElement>? = null,
+    /** Opaque context forwarded on permission replies. */
+    val decisionContext: Map<String, JsonElement>? = null
 )
 
 /**
@@ -501,6 +526,7 @@ data class SessionHooks(
     val onPostToolUse: HookHandler? = null,
     val onPreMcpToolCall: HookHandler? = null,
     val onUserPromptSubmitted: HookHandler? = null,
+    val onUserPromptTransformed: HookHandler? = null,
     val onSessionStart: HookHandler? = null,
     val onSessionEnd: HookHandler? = null,
     val onErrorOccurred: HookHandler? = null
@@ -510,6 +536,7 @@ data class SessionHooks(
      */
     fun hasAnyHook(): Boolean =
         onPreToolUse != null || onPostToolUse != null || onPreMcpToolCall != null || onUserPromptSubmitted != null ||
+            onUserPromptTransformed != null ||
             onSessionStart != null || onSessionEnd != null || onErrorOccurred != null
 
     /**
@@ -520,6 +547,7 @@ data class SessionHooks(
         "postToolUse" -> onPostToolUse
         "preMcpToolCall" -> onPreMcpToolCall
         "userPromptSubmitted" -> onUserPromptSubmitted
+        "userPromptTransformed" -> onUserPromptTransformed
         "sessionStart" -> onSessionStart
         "sessionEnd" -> onSessionEnd
         "errorOccurred" -> onErrorOccurred
@@ -910,7 +938,17 @@ data class CopilotClientOptions(
     /**
      * BYOK provider that supplies per-session bearer tokens.
      */
-    val bearerTokenProvider: BearerTokenProvider? = null
+    val bearerTokenProvider: BearerTokenProvider? = null,
+
+    /**
+     * Directories to load built-in plugins from.
+     */
+    val builtinPluginDirectories: List<String>? = null,
+
+    /**
+     * Use the in-process (FFI) transport instead of a subprocess.
+     */
+    val inProcess: Boolean? = null
 )
 
 // ============================================================================

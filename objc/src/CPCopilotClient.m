@@ -284,7 +284,11 @@ static NSString *const kCPClientErrorDomain = @"CPCopilotClientErrorDomain";
     }
 
     // Default: approve all permissions
-    respond(@{@"kind": @"approved"}, nil);
+    NSMutableDictionary *reply = [@{@"kind": @"approved"} mutableCopy];
+    if (session.config.decisionContext) {
+        reply[@"decisionContext"] = session.config.decisionContext;
+    }
+    respond(reply, nil);
 }
 
 - (void)handleExitPlanModeRequest:(NSDictionary *)params

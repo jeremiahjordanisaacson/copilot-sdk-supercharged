@@ -115,6 +115,8 @@ public final class Types {
     public static class PermissionRequestResult {
         public String kind;
         public List<Object> rules;
+        /** Opaque context forwarded on permission replies. */
+        public Map<String, Object> decisionContext;
 
         public PermissionRequestResult() {}
         public PermissionRequestResult(String kind) { this.kind = kind; }
@@ -279,6 +281,8 @@ public final class Types {
         public Boolean infer;
         /** List of skill names to preload into this agent's context. */
         public List<String> skills;
+        /** JSON schema declaring a factory's arguments. */
+        @JsonProperty("argsSchema") public Map<String, Object> argsSchema;
     }
 
     /** Infinite session configuration. */

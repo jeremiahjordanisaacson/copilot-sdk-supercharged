@@ -232,6 +232,18 @@ type CopilotClient(options: CopilotClientOptions) =
                otlpProtocol = config.OtlpProtocol
                enableWebSocketResponses = config.EnableWebSocketResponses
                expAssignments = config.ExpAssignments
+               rewindEnabled = config.RewindEnabled
+               additionalDirectories = config.AdditionalDirectories
+               disabledMcpServers = config.DisabledMcpServers
+               githubMcpToolConfig = config.GithubMcpToolConfig
+               canvasProvider = config.CanvasProvider
+               customAgentsLocalOnly = config.CustomAgentsLocalOnly
+               toolSearch = config.ToolSearch
+               experimentalMode = config.ExperimentalMode
+               contentExclusion = config.ContentExclusion
+               reasoningEffort = config.ReasoningEffort
+               // Signal to the runtime that a user-prompt-transformed hook is registered.
+               userPromptTransformed = (config.OnUserPromptTransformed |> Option.map (fun _ -> true))
                // Signal to the runtime that an MCP OAuth host-token handler is registered.
                mcpAuthHandler = (config.OnMcpAuthRequest |> Option.map (fun _ -> true)) |}
 

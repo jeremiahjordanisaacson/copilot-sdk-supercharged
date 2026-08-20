@@ -236,6 +236,35 @@ public actor CopilotClient {
         }
         params["mcpAuthHandler"] = config.onMcpAuthRequest != nil
 
+        // --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+        if let rewind = config.rewindEnabled {
+            params["rewindEnabled"] = rewind
+        }
+        if let dirs = config.additionalDirectories {
+            params["additionalDirectories"] = dirs
+        }
+        if let servers = config.disabledMcpServers {
+            params["disabledMcpServers"] = servers
+        }
+        if let gh = config.githubMcpToolConfig {
+            params["githubMcpToolConfig"] = gh.mapValues { $0.value }
+        }
+        if let canvas = config.canvasProvider {
+            params["canvasProvider"] = canvas.mapValues { $0.value }
+        }
+        if let localOnly = config.customAgentsLocalOnly {
+            params["customAgentsLocalOnly"] = localOnly
+        }
+        if let toolSearch = config.toolSearch {
+            params["toolSearch"] = toolSearch.mapValues { $0.value }
+        }
+        if let experimental = config.experimentalMode {
+            params["experimentalMode"] = experimental
+        }
+        if let exclusion = config.contentExclusion {
+            params["contentExclusion"] = exclusion
+        }
+
         await injectTraceContext(&params)
 
         let response = try await rpc.sendRequest(method: "session.create", params: params)

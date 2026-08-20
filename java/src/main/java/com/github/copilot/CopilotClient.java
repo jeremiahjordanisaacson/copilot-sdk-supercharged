@@ -461,6 +461,7 @@ public class CopilotClient {
             if (hooks.getOnPostToolUse() != null) hookTypes.add("postToolUse");
             if (hooks.getOnPreMcpToolCall() != null) hookTypes.add("preMcpToolCall");
             if (hooks.getOnUserPromptSubmitted() != null) hookTypes.add("userPromptSubmitted");
+            if (hooks.getOnUserPromptTransformed() != null) hookTypes.add("userPromptTransformed");
             if (hooks.getOnSessionStart() != null) hookTypes.add("sessionStart");
             if (hooks.getOnSessionEnd() != null) hookTypes.add("sessionEnd");
             if (hooks.getOnErrorOccurred() != null) hookTypes.add("errorOccurred");
@@ -512,6 +513,15 @@ public class CopilotClient {
         if (config.getOtlpProtocol() != null) payload.put("otlpProtocol", config.getOtlpProtocol());
         if (config.getEnableWebSocketResponses() != null) payload.put("enableWebSocketResponses", config.getEnableWebSocketResponses());
         if (config.getExpAssignments() != null) payload.put("expAssignments", config.getExpAssignments());
+        if (config.getRewindEnabled() != null) payload.put("rewindEnabled", config.getRewindEnabled());
+        if (config.getAdditionalDirectories() != null) payload.put("additionalDirectories", config.getAdditionalDirectories());
+        if (config.getDisabledMcpServers() != null) payload.put("disabledMcpServers", config.getDisabledMcpServers());
+        if (config.getGithubMcpToolConfig() != null) payload.put("githubMcpToolConfig", config.getGithubMcpToolConfig());
+        if (config.getCanvasProvider() != null) payload.put("canvasProvider", config.getCanvasProvider());
+        if (config.getCustomAgentsLocalOnly() != null) payload.put("customAgentsLocalOnly", config.getCustomAgentsLocalOnly());
+        if (config.getToolSearch() != null) payload.put("toolSearch", config.getToolSearch());
+        if (config.getExperimentalMode() != null) payload.put("experimentalMode", config.getExperimentalMode());
+        if (config.getContentExclusion() != null) payload.put("contentExclusion", config.getContentExclusion());
         // MCP OAuth host token handler: signal to the runtime that a handler is registered.
         if (config.getOnMcpAuthRequest() != null) payload.put("mcpAuthHandler", true);
         return payload;

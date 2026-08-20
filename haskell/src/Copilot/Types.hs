@@ -603,6 +603,7 @@ data CustomAgentConfig = CustomAgentConfig
   , cacMcpServers  :: !(Maybe (Map.Map Text MCPServerConfig))
   , cacInfer       :: !(Maybe Bool)
   , cacSkills      :: !(Maybe [Text])  -- ^ List of skill names to preload
+  , cacArgsSchema  :: !(Maybe Value)  -- ^ JSON schema for agent factory authoring arguments (argsSchema)
   } deriving (Show, Eq, Generic)
 
 instance ToJSON CustomAgentConfig where
@@ -615,6 +616,7 @@ instance ToJSON CustomAgentConfig where
     , "mcpServers"  .= cacMcpServers
     , "infer"       .= cacInfer
     , "skills"      .= cacSkills
+    , "argsSchema"  .= cacArgsSchema
     ]
 
 instance FromJSON CustomAgentConfig where
@@ -628,6 +630,7 @@ instance FromJSON CustomAgentConfig where
       <*> o .:? "mcpServers"
       <*> o .:? "infer"
       <*> o .:? "skills"
+      <*> o .:? "argsSchema"
 
 -- ============================================================================
 -- Infinite Session Configuration
@@ -743,6 +746,16 @@ data SessionConfig = SessionConfig
   , scEnableWebSocketResponses       :: !(Maybe Bool)  -- ^ Stream model responses over a WebSocket transport
   , scExpAssignments                 :: !(Maybe (Map.Map Text Value))  -- ^ Experiment assignment overrides
   , scOnMcpAuthRequest               :: !(Maybe McpAuthHandler)  -- ^ MCP OAuth host token handler
+  -- --- Upstream-sync 2026-08 session options (parity with @github/copilot-sdk) ---
+  , scRewindEnabled                  :: !(Maybe Bool)  -- ^ Enable session rewind support
+  , scAdditionalDirectories          :: !(Maybe [Text])  -- ^ Additional directories to include in the session
+  , scDisabledMcpServers             :: !(Maybe [Text])  -- ^ MCP servers to disable for this session
+  , scGithubMcpToolConfig            :: !(Maybe (Map.Map Text Value))  -- ^ GitHub MCP tool configuration
+  , scCanvasProvider                 :: !(Maybe Value)  -- ^ Canvas provider configuration
+  , scCustomAgentsLocalOnly          :: !(Maybe Bool)  -- ^ Restrict custom agents to local-only definitions
+  , scToolSearch                     :: !(Maybe Value)  -- ^ Tool search configuration
+  , scExperimentalMode               :: !(Maybe Bool)  -- ^ Enable experimental mode
+  , scContentExclusion               :: !(Maybe Bool)  -- ^ Enable content exclusion
   }
 
 -- | Default (empty) session configuration.
@@ -782,6 +795,15 @@ defaultSessionConfig = SessionConfig
   , scEnableWebSocketResponses       = Nothing
   , scExpAssignments                 = Nothing
   , scOnMcpAuthRequest               = Nothing
+  , scRewindEnabled                  = Nothing
+  , scAdditionalDirectories          = Nothing
+  , scDisabledMcpServers             = Nothing
+  , scGithubMcpToolConfig            = Nothing
+  , scCanvasProvider                 = Nothing
+  , scCustomAgentsLocalOnly          = Nothing
+  , scToolSearch                     = Nothing
+  , scExperimentalMode               = Nothing
+  , scContentExclusion               = Nothing
   }
 
 -- | Configuration for resuming a session.
@@ -1172,6 +1194,7 @@ data PreToolUseHookOutput = PreToolUseHookOutput
   , ptuoModifiedArgs             :: !(Maybe Value)
   , ptuoAdditionalContext        :: !(Maybe Text)
   , ptuoSuppressOutput           :: !(Maybe Bool)
+  , ptuoDecisionContext          :: !(Maybe Value)  -- ^ Opaque context accompanying the permission decision (decisionContext)
   } deriving (Show, Eq, Generic)
 
 instance ToJSON PreToolUseHookOutput where
@@ -1181,6 +1204,7 @@ instance ToJSON PreToolUseHookOutput where
     , "modifiedArgs"             .= ptuoModifiedArgs
     , "additionalContext"        .= ptuoAdditionalContext
     , "suppressOutput"           .= ptuoSuppressOutput
+    , "decisionContext"          .= ptuoDecisionContext
     ]
 
 -- | Input for post-tool-use hook.
@@ -1346,11 +1370,12 @@ data SessionHooks = SessionHooks
   , shOnSessionStart        :: !(Maybe (SessionStartHookInput -> HookInvocation -> IO (Maybe SessionStartHookOutput)))
   , shOnSessionEnd          :: !(Maybe (SessionEndHookInput -> HookInvocation -> IO (Maybe SessionEndHookOutput)))
   , shOnErrorOccurred       :: !(Maybe (ErrorOccurredHookInput -> HookInvocation -> IO (Maybe ErrorOccurredHookOutput)))
+  , shOnUserPromptTransformed :: !(Maybe (UserPromptSubmittedHookInput -> HookInvocation -> IO (Maybe UserPromptSubmittedHookOutput)))  -- ^ Hook fired for userPromptTransformed events
   }
 
 -- | Default (empty) session hooks.
 defaultSessionHooks :: SessionHooks
-defaultSessionHooks = SessionHooks Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+defaultSessionHooks = SessionHooks Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 -- ============================================================================
 -- Session Events
@@ -1752,6 +1777,8 @@ data CopilotClientOptions = CopilotClientOptions
   , ccoTcpConnectionToken        :: !(Maybe Text)  -- ^ Token for TCP connections
   , ccoRequestHandler            :: !(Maybe CopilotRequestHandler)  -- ^ Intercept outbound LLM inference requests
   , ccoBearerTokenProvider       :: !(Maybe BearerTokenProvider)  -- ^ BYOK bearer-token provider (per-session)
+  , ccoBuiltinPluginDirectories  :: !(Maybe [Text])  -- ^ Built-in plugin directories (builtinPluginDirectories)
+  , ccoInProcess                 :: !(Maybe Bool)  -- ^ Use in-process FFI transport (inProcess)
   }
 
 -- | Default client options.
@@ -1772,4 +1799,6 @@ defaultClientOptions = CopilotClientOptions
   , ccoTcpConnectionToken        = Nothing
   , ccoRequestHandler            = Nothing
   , ccoBearerTokenProvider       = Nothing
+  , ccoBuiltinPluginDirectories  = Nothing
+  , ccoInProcess                 = Nothing
   }

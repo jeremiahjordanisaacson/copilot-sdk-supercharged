@@ -859,6 +859,20 @@ module Copilot
       payload[:otlpProtocol] = config[:otlp_protocol] if config[:otlp_protocol]
       payload[:enableWebSocketResponses] = config[:enable_web_socket_responses] unless config[:enable_web_socket_responses].nil?
       payload[:expAssignments] = config[:exp_assignments] if config[:exp_assignments]
+      # --- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk) ---
+      payload[:rewindEnabled] = config[:rewind_enabled] unless config[:rewind_enabled].nil? # enable session rewind
+      payload[:additionalDirectories] = config[:additional_directories] if config[:additional_directories]
+      payload[:disabledMcpServers] = config[:disabled_mcp_servers] if config[:disabled_mcp_servers]
+      payload[:githubMcpToolConfig] = config[:github_mcp_tool_config] if config[:github_mcp_tool_config]
+      payload[:canvasProvider] = config[:canvas_provider] if config[:canvas_provider]
+      payload[:customAgentsLocalOnly] = config[:custom_agents_local_only] unless config[:custom_agents_local_only].nil?
+      payload[:builtinPluginDirectories] = config[:builtin_plugin_directories] if config[:builtin_plugin_directories]
+      payload[:argsSchema] = config[:args_schema] if config[:args_schema] # agent-factory authoring schema
+      payload[:decisionContext] = config[:decision_context] if config[:decision_context] # permission decision context
+      payload[:toolSearch] = config[:tool_search] unless config[:tool_search].nil?
+      payload[:inProcess] = config[:in_process] unless config[:in_process].nil?
+      payload[:experimentalMode] = config[:experimental_mode] unless config[:experimental_mode].nil?
+      payload[:contentExclusion] = config[:content_exclusion] unless config[:content_exclusion].nil?
       # MCP OAuth host token handler: signal to the runtime that a handler is registered.
       payload[:mcpAuthHandler] = true if config[:on_mcp_auth_request]
 

@@ -198,6 +198,39 @@ module copilot_types
     procedure(pre_mcp_tool_call_hook_interface), pointer, nopass :: on_pre_mcp_tool_call => null()
     !> MCP OAuth host token handler; when set, session.create signals mcpAuthHandler=true.
     procedure(mcp_auth_handler_interface), pointer, nopass :: on_mcp_auth_request => null()
+    ! --- Newly-synced session options (parity with @github/copilot-sdk) ---
+    !> Enable session telemetry (wire: enableSessionTelemetry).
+    logical :: enable_session_telemetry = .false.
+    !> Enable conversational rewind (restore an earlier turn) (wire: rewindEnabled).
+    logical :: rewind_enabled = .false.
+    !> Extra workspace directories to expose (wire: additionalDirectories).
+    character(len=:), allocatable :: additional_directories(:)
+    !> MCP servers to disable for this session (wire: disabledMcpServers).
+    character(len=:), allocatable :: disabled_mcp_servers(:)
+    !> GitHub MCP tool config as a JSON string (wire: githubMcpToolConfig).
+    character(len=:), allocatable :: github_mcp_tool_config_json
+    !> Canvas provider config as a JSON string (wire: canvasProvider).
+    character(len=:), allocatable :: canvas_provider_json
+    !> Restrict custom agents to locally-defined ones only (wire: customAgentsLocalOnly).
+    logical :: custom_agents_local_only = .false.
+    !> Permission-reply decision context as a JSON string (wire: decisionContext).
+    character(len=:), allocatable :: decision_context_json
+    !> Built-in plugin directories to load (wire: builtinPluginDirectories).
+    character(len=:), allocatable :: builtin_plugin_directories(:)
+    !> Agent-factory authoring arguments schema as a JSON string (wire: argsSchema).
+    character(len=:), allocatable :: args_schema_json
+    !> Reasoning effort control, e.g. 'low'/'medium'/'high' (wire: reasoningEffort).
+    character(len=:), allocatable :: reasoning_effort
+    !> Tool-search configuration as a JSON string (wire: toolSearch).
+    character(len=:), allocatable :: tool_search_json
+    !> Use the in-process FFI transport instead of a spawned CLI (wire: inProcess).
+    logical :: in_process = .false.
+    !> Enable experimental mode features (wire: experimentalMode).
+    logical :: experimental_mode = .false.
+    !> Enable content exclusion policy enforcement (wire: contentExclusion).
+    logical :: content_exclusion = .false.
+    !> User-prompt-transformed hook; when set, session.create signals userPromptTransformed=true.
+    procedure(post_tool_use_hook_interface), pointer, nopass :: on_user_prompt_transformed => null()
   end type session_config
 
   ! --------------------------------------------------------------------------

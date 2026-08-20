@@ -375,6 +375,49 @@ pub const CopilotClient = struct {
         if (config.mcp_auth_handler) {
             params.put("mcpAuthHandler", .{ .bool = true }) catch return SdkError.AllocationFailed;
         }
+
+        // --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+        if (config.rewind_enabled) |re| {
+            params.put("rewindEnabled", .{ .bool = re }) catch return SdkError.AllocationFailed;
+        }
+        if (config.additional_directories) |dirs| {
+            var arr = std.json.Array.init(self.allocator);
+            for (dirs) |d| {
+                arr.append(.{ .string = d }) catch return SdkError.AllocationFailed;
+            }
+            params.put("additionalDirectories", .{ .array = arr }) catch return SdkError.AllocationFailed;
+        }
+        if (config.disabled_mcp_servers) |servers| {
+            var arr = std.json.Array.init(self.allocator);
+            for (servers) |s| {
+                arr.append(.{ .string = s }) catch return SdkError.AllocationFailed;
+            }
+            params.put("disabledMcpServers", .{ .array = arr }) catch return SdkError.AllocationFailed;
+        }
+        if (config.github_mcp_tool_config_json) |g| {
+            params.put("githubMcpToolConfig", .{ .string = g }) catch return SdkError.AllocationFailed;
+        }
+        if (config.canvas_provider_json) |cp| {
+            params.put("canvasProvider", .{ .string = cp }) catch return SdkError.AllocationFailed;
+        }
+        if (config.custom_agents_local_only) |cal| {
+            params.put("customAgentsLocalOnly", .{ .bool = cal }) catch return SdkError.AllocationFailed;
+        }
+        if (config.reasoning_effort) |re| {
+            params.put("reasoningEffort", .{ .string = re }) catch return SdkError.AllocationFailed;
+        }
+        if (config.tool_search_json) |ts| {
+            params.put("toolSearch", .{ .string = ts }) catch return SdkError.AllocationFailed;
+        }
+        if (config.experimental_mode) |em| {
+            params.put("experimentalMode", .{ .bool = em }) catch return SdkError.AllocationFailed;
+        }
+        if (config.content_exclusion) |ce| {
+            params.put("contentExclusion", .{ .bool = ce }) catch return SdkError.AllocationFailed;
+        }
+        if (config.args_schema_json) |as| {
+            params.put("argsSchema", .{ .string = as }) catch return SdkError.AllocationFailed;
+        }
     }
 
     fn sessionFromResult(self: *CopilotClient, result: JsonValue, config: SessionConfig) SdkError!*CopilotSession {

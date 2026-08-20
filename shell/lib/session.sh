@@ -82,6 +82,7 @@ COPILOT_REQUEST_HANDLER=""
 #   copilot_on_pre_tool_use      <context_json>
 #   copilot_on_post_tool_use     <context_json>   (post_tool_use)
 #   copilot_on_pre_mcp_tool_call <context_json>   (pre_mcp_tool_call)
+#   copilot_on_user_prompt_transformed <context_json>   (user_prompt_transformed)
 #   copilot_on_mcp_auth_request  <context_json>
 COPILOT_ON_POST_TOOL_USE=""
 COPILOT_ON_PRE_MCP_TOOL_CALL=""

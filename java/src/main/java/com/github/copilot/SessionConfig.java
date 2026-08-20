@@ -66,6 +66,24 @@ public class SessionConfig {
     private Map<String, Object> expAssignments;
     /** Handler invoked when an MCP server requests an OAuth host token. */
     private McpAuthHandler onMcpAuthRequest;
+    /** Enable session rewind to restore earlier session points. */
+    private Boolean rewindEnabled;
+    /** Extra working directories available to the session. */
+    private List<String> additionalDirectories;
+    /** Names of configured MCP servers to disable for this session. */
+    private List<String> disabledMcpServers;
+    /** Configuration for the built-in GitHub MCP tools. */
+    private Map<String, Object> githubMcpToolConfig;
+    /** Identity of the canvas provider to register. */
+    private Map<String, Object> canvasProvider;
+    /** Only load workspace-local custom agents. */
+    private Boolean customAgentsLocalOnly;
+    /** Tool search configuration for large tool sets. */
+    private Map<String, Object> toolSearch;
+    /** Enable experimental runtime features. */
+    private Boolean experimentalMode;
+    /** Respect repository content-exclusion rules. */
+    private Boolean contentExclusion;
 
     public SessionConfig() {}
 
@@ -107,6 +125,15 @@ public class SessionConfig {
     public SessionConfig enableWebSocketResponses(boolean enable) { this.enableWebSocketResponses = enable; return this; }
     public SessionConfig expAssignments(Map<String, Object> assignments) { this.expAssignments = assignments; return this; }
     public SessionConfig onMcpAuthRequest(McpAuthHandler handler) { this.onMcpAuthRequest = handler; return this; }
+    public SessionConfig rewindEnabled(boolean enable) { this.rewindEnabled = enable; return this; }
+    public SessionConfig additionalDirectories(List<String> dirs) { this.additionalDirectories = dirs; return this; }
+    public SessionConfig disabledMcpServers(List<String> servers) { this.disabledMcpServers = servers; return this; }
+    public SessionConfig githubMcpToolConfig(Map<String, Object> config) { this.githubMcpToolConfig = config; return this; }
+    public SessionConfig canvasProvider(Map<String, Object> provider) { this.canvasProvider = provider; return this; }
+    public SessionConfig customAgentsLocalOnly(boolean localOnly) { this.customAgentsLocalOnly = localOnly; return this; }
+    public SessionConfig toolSearch(Map<String, Object> toolSearch) { this.toolSearch = toolSearch; return this; }
+    public SessionConfig experimentalMode(boolean enable) { this.experimentalMode = enable; return this; }
+    public SessionConfig contentExclusion(boolean enable) { this.contentExclusion = enable; return this; }
 
     // Getters
     public String getSessionId() { return sessionId; }
@@ -146,4 +173,13 @@ public class SessionConfig {
     public Boolean getEnableWebSocketResponses() { return enableWebSocketResponses; }
     public Map<String, Object> getExpAssignments() { return expAssignments; }
     public McpAuthHandler getOnMcpAuthRequest() { return onMcpAuthRequest; }
+    public Boolean getRewindEnabled() { return rewindEnabled; }
+    public List<String> getAdditionalDirectories() { return additionalDirectories; }
+    public List<String> getDisabledMcpServers() { return disabledMcpServers; }
+    public Map<String, Object> getGithubMcpToolConfig() { return githubMcpToolConfig; }
+    public Map<String, Object> getCanvasProvider() { return canvasProvider; }
+    public Boolean getCustomAgentsLocalOnly() { return customAgentsLocalOnly; }
+    public Map<String, Object> getToolSearch() { return toolSearch; }
+    public Boolean getExperimentalMode() { return experimentalMode; }
+    public Boolean getContentExclusion() { return contentExclusion; }
 }

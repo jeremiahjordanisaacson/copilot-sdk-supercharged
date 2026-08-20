@@ -341,6 +341,14 @@ class CopilotSession {
           );
           return result?.toJson();
 
+        case 'userPromptTransformed':
+          if (_hooks!.onUserPromptTransformed == null) return null;
+          final result = await _hooks!.onUserPromptTransformed!(
+            UserPromptSubmittedHookInput.fromJson(inputMap),
+            context,
+          );
+          return result?.toJson();
+
         case 'sessionStart':
           if (_hooks!.onSessionStart == null) return null;
           final result = await _hooks!.onSessionStart!(

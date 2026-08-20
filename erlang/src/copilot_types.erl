@@ -14,6 +14,7 @@
     tool_result/2,
     tool_result/3,
     permission_result/1,
+    permission_result/2,
     user_input_response/2,
     image_options/1,
     elicitation_result/1,
@@ -23,7 +24,9 @@
     github_attachment/1,
     hook_type/1,
     session_limits/1,
-    memory_configuration/1
+    memory_configuration/1,
+    client_options_params/1,
+    agent_definition/1
 ]).
 
 %% ---------------------------------------------------------------------------
@@ -56,7 +59,9 @@
     copilot_home     :: binary() | undefined,
     tcp_connection_token :: binary() | undefined,
     request_handler       :: fun() | undefined,
-    bearer_token_provider :: fun() | undefined
+    bearer_token_provider :: fun() | undefined,
+    builtin_plugin_directories :: [binary()] | undefined,
+    in_process            :: boolean() | undefined
 }).
 
 -record(session_config, {
@@ -91,6 +96,15 @@
     otlp_protocol            :: binary() | undefined,
     enable_web_socket_responses :: boolean() | undefined,
     exp_assignments          :: map() | undefined,
+    rewind_enabled           :: boolean() | undefined,
+    additional_directories   :: [binary()] | undefined,
+    disabled_mcp_servers     :: [binary()] | undefined,
+    github_mcp_tool_config   :: map() | undefined,
+    canvas_provider          :: map() | undefined,
+    custom_agents_local_only :: boolean() | undefined,
+    tool_search              :: map() | undefined,
+    experimental_mode        :: boolean() | undefined,
+    content_exclusion        :: boolean() | undefined,
     on_mcp_auth_request      :: fun() | undefined
 }).
 
@@ -277,6 +291,13 @@ tool_result(Text, Type, Error) ->
 permission_result(Kind) ->
     #{<<"kind">> => atom_to_binary(Kind, utf8)}.
 
+%% @doc Permission reply including an opaque decision context surfaced to the CLI.
+-spec permission_result(approved | denied, map() | undefined) -> map().
+permission_result(Kind, undefined) ->
+    permission_result(Kind);
+permission_result(Kind, DecisionContext) ->
+    (permission_result(Kind))#{<<"decisionContext">> => DecisionContext}.
+
 -spec user_input_response(binary(), boolean()) -> map().
 user_input_response(Answer, WasFreeform) ->
     #{
@@ -339,6 +360,7 @@ hook_type(pre_tool_use)          -> <<"preToolUse">>;
 hook_type(post_tool_use)         -> <<"postToolUse">>;
 hook_type(pre_mcp_tool_call)     -> <<"preMcpToolCall">>;
 hook_type(user_prompt_submitted) -> <<"userPromptSubmitted">>;
+hook_type(user_prompt_transformed) -> <<"userPromptTransformed">>;
 hook_type(session_start)         -> <<"sessionStart">>;
 hook_type(session_end)           -> <<"sessionEnd">>.
 
@@ -354,4 +376,23 @@ session_limits(Opts) ->
 memory_configuration(Opts) ->
     maps:filter(fun(_K, V) -> V =/= undefined end, #{
         <<"enabled">> => maps:get(enabled, Opts, undefined)
+    }).
+
+%% @doc Build a wire map of transport-level client options (builtin plugin
+%% directories and in-process FFI transport), parity with @github/copilot-sdk.
+-spec client_options_params(map()) -> map().
+client_options_params(Opts) ->
+    maps:filter(fun(_K, V) -> V =/= undefined end, #{
+        <<"builtinPluginDirectories">> => maps:get(builtin_plugin_directories, Opts, undefined),
+        <<"inProcess">>                => maps:get(in_process, Opts, undefined)
+    }).
+
+%% @doc Build a custom-agent/factory definition wire map, including the optional
+%% input argument JSON schema (argsSchema).
+-spec agent_definition(map()) -> map().
+agent_definition(Opts) ->
+    maps:filter(fun(_K, V) -> V =/= undefined end, #{
+        <<"name">>        => maps:get(name, Opts, undefined),
+        <<"description">> => maps:get(description, Opts, undefined),
+        <<"argsSchema">>  => maps:get(args_schema, Opts, undefined)
     }).

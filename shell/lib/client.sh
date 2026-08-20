@@ -81,6 +81,39 @@ COPILOT_ENABLE_WEB_SOCKET_RESPONSES=""
 # Experiment assignment overrides (JSON object string, optional)
 # Example: '{"my-experiment":"treatment"}'
 COPILOT_EXP_ASSIGNMENTS=""
+# --- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk) ---
+# Reasoning effort control (string: minimal|low|medium|high|max, optional)
+COPILOT_REASONING_EFFORT=""
+# Enable session rewind (boolean string "true"/"false", optional)
+COPILOT_REWIND_ENABLED=""
+# Additional session directories (JSON array string, optional)
+COPILOT_ADDITIONAL_DIRECTORIES=""
+# MCP server names to disable (JSON array string, optional)
+COPILOT_DISABLED_MCP_SERVERS=""
+# GitHub MCP tool configuration (JSON object string, optional)
+COPILOT_GITHUB_MCP_TOOL_CONFIG=""
+# Canvas provider config (JSON object string or provider name, optional)
+COPILOT_CANVAS_PROVIDER=""
+# Restrict custom agents to locally-defined agents only (boolean string, optional)
+COPILOT_CUSTOM_AGENTS_LOCAL_ONLY=""
+# Built-in plugin directories (JSON array string, optional)
+COPILOT_BUILTIN_PLUGIN_DIRECTORIES=""
+# Agent-factory authoring args schema (JSON object string, optional)
+COPILOT_ARGS_SCHEMA=""
+# Permission decision context (JSON object string, optional)
+COPILOT_DECISION_CONTEXT=""
+# Tool search configuration (JSON object string or boolean, optional)
+COPILOT_TOOL_SEARCH=""
+# Use the in-process FFI transport (boolean string "true"/"false", optional)
+COPILOT_IN_PROCESS=""
+# Enable experimental mode (boolean string "true"/"false", optional)
+COPILOT_EXPERIMENTAL_MODE=""
+# Enable content exclusion (boolean string "true"/"false", optional)
+COPILOT_CONTENT_EXCLUSION=""
+# User-prompt-transformed hook function name (optional).
+# When set, session.create signals userPromptTransformed=true. Convention:
+#   copilot_on_user_prompt_transformed <context_json>  → echoes JSON result
+COPILOT_ON_USER_PROMPT_TRANSFORMED=""
 # MCP OAuth host token handler function name (optional).
 # When set, session.create signals mcpAuthHandler=true so the runtime routes
 # MCP OAuth token requests to this handler. Convention:
@@ -392,6 +425,73 @@ copilot_client_create_session() {
     fi
     if [[ -n "$COPILOT_EXP_ASSIGNMENTS" ]]; then
         params=$(echo "$params" | jq -c --argjson ea "$COPILOT_EXP_ASSIGNMENTS" '. + {"expAssignments":$ea}')
+    fi
+    # --- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk) ---
+    if [[ -n "$COPILOT_REASONING_EFFORT" ]]; then
+        params=$(echo "$params" | jq -c --arg re "$COPILOT_REASONING_EFFORT" '. + {"reasoningEffort":$re}')
+    fi
+    if [[ -n "$COPILOT_REWIND_ENABLED" ]]; then
+        if [[ "$COPILOT_REWIND_ENABLED" == "true" ]]; then
+            params=$(echo "$params" | jq -c '. + {"rewindEnabled":true}')
+        else
+            params=$(echo "$params" | jq -c '. + {"rewindEnabled":false}')
+        fi
+    fi
+    if [[ -n "$COPILOT_ADDITIONAL_DIRECTORIES" ]]; then
+        params=$(echo "$params" | jq -c --argjson ad "$COPILOT_ADDITIONAL_DIRECTORIES" '. + {"additionalDirectories":$ad}')
+    fi
+    if [[ -n "$COPILOT_DISABLED_MCP_SERVERS" ]]; then
+        params=$(echo "$params" | jq -c --argjson dms "$COPILOT_DISABLED_MCP_SERVERS" '. + {"disabledMcpServers":$dms}')
+    fi
+    if [[ -n "$COPILOT_GITHUB_MCP_TOOL_CONFIG" ]]; then
+        params=$(echo "$params" | jq -c --argjson gmtc "$COPILOT_GITHUB_MCP_TOOL_CONFIG" '. + {"githubMcpToolConfig":$gmtc}')
+    fi
+    if [[ -n "$COPILOT_CANVAS_PROVIDER" ]]; then
+        params=$(echo "$params" | jq -c --arg cp "$COPILOT_CANVAS_PROVIDER" '. + {"canvasProvider":$cp}')
+    fi
+    if [[ -n "$COPILOT_CUSTOM_AGENTS_LOCAL_ONLY" ]]; then
+        if [[ "$COPILOT_CUSTOM_AGENTS_LOCAL_ONLY" == "true" ]]; then
+            params=$(echo "$params" | jq -c '. + {"customAgentsLocalOnly":true}')
+        else
+            params=$(echo "$params" | jq -c '. + {"customAgentsLocalOnly":false}')
+        fi
+    fi
+    if [[ -n "$COPILOT_BUILTIN_PLUGIN_DIRECTORIES" ]]; then
+        params=$(echo "$params" | jq -c --argjson bpd "$COPILOT_BUILTIN_PLUGIN_DIRECTORIES" '. + {"builtinPluginDirectories":$bpd}')
+    fi
+    if [[ -n "$COPILOT_ARGS_SCHEMA" ]]; then
+        params=$(echo "$params" | jq -c --argjson as "$COPILOT_ARGS_SCHEMA" '. + {"argsSchema":$as}')
+    fi
+    if [[ -n "$COPILOT_DECISION_CONTEXT" ]]; then
+        params=$(echo "$params" | jq -c --argjson dc "$COPILOT_DECISION_CONTEXT" '. + {"decisionContext":$dc}')
+    fi
+    if [[ -n "$COPILOT_TOOL_SEARCH" ]]; then
+        params=$(echo "$params" | jq -c --argjson ts "$COPILOT_TOOL_SEARCH" '. + {"toolSearch":$ts}')
+    fi
+    if [[ -n "$COPILOT_IN_PROCESS" ]]; then
+        if [[ "$COPILOT_IN_PROCESS" == "true" ]]; then
+            params=$(echo "$params" | jq -c '. + {"inProcess":true}')
+        else
+            params=$(echo "$params" | jq -c '. + {"inProcess":false}')
+        fi
+    fi
+    if [[ -n "$COPILOT_EXPERIMENTAL_MODE" ]]; then
+        if [[ "$COPILOT_EXPERIMENTAL_MODE" == "true" ]]; then
+            params=$(echo "$params" | jq -c '. + {"experimentalMode":true}')
+        else
+            params=$(echo "$params" | jq -c '. + {"experimentalMode":false}')
+        fi
+    fi
+    if [[ -n "$COPILOT_CONTENT_EXCLUSION" ]]; then
+        if [[ "$COPILOT_CONTENT_EXCLUSION" == "true" ]]; then
+            params=$(echo "$params" | jq -c '. + {"contentExclusion":true}')
+        else
+            params=$(echo "$params" | jq -c '. + {"contentExclusion":false}')
+        fi
+    fi
+    # User-prompt-transformed hook: signal to the runtime that a handler is registered.
+    if [[ -n "$COPILOT_ON_USER_PROMPT_TRANSFORMED" ]]; then
+        params=$(echo "$params" | jq -c '. + {"userPromptTransformed":true}')
     fi
     # MCP OAuth host token handler: signal to the runtime that a handler is registered.
     if [[ -n "$COPILOT_ON_MCP_AUTH_REQUEST" ]]; then

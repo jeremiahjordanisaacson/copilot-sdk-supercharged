@@ -105,6 +105,8 @@ Base.@kwdef mutable struct CopilotClientOptions
     session_fs::Union{SessionFsConfig, Nothing} = nothing
     copilot_home::Union{String, Nothing} = nothing
     tcp_connection_token::Union{String, Nothing} = nothing
+    builtin_plugin_directories::Vector{String} = String[]  # wire: builtinPluginDirectories
+    in_process::Bool = false                               # wire: inProcess
 end
 
 """Per-session spending / credit limits."""
@@ -159,6 +161,17 @@ Base.@kwdef mutable struct SessionConfig
     on_post_tool_use::Union{Function, Nothing} = nothing
     on_pre_mcp_tool_call::Union{Function, Nothing} = nothing
     request_handler::Union{Function, Nothing} = nothing
+    # --- Additional upstream-sync session configuration (2026-08) ---
+    rewind_enabled::Bool = false                                         # wire: rewindEnabled
+    additional_directories::Vector{String} = String[]                   # wire: additionalDirectories
+    disabled_mcp_servers::Vector{String} = String[]                     # wire: disabledMcpServers
+    github_mcp_tool_config::Union{Dict{String, Any}, Nothing} = nothing # wire: githubMcpToolConfig
+    canvas_provider::Any = nothing                                      # wire: canvasProvider
+    custom_agents_local_only::Bool = false                              # wire: customAgentsLocalOnly
+    tool_search::Any = nothing                                          # wire: toolSearch
+    experimental_mode::Bool = false                                     # wire: experimentalMode
+    content_exclusion::Bool = false                                     # wire: contentExclusion
+    on_user_prompt_transformed::Union{Function, Nothing} = nothing      # wire: userPromptTransformed
 end
 
 """Payload for sending a message to a session."""
@@ -305,3 +318,15 @@ const OTLP_PROTOCOL_HTTP = "http/protobuf"
 
 """Signature alias for a custom Copilot HTTP request handler."""
 const CopilotRequestHandler = Function
+
+"""Authoring options for a programmatic agent factory."""
+Base.@kwdef struct AgentFactoryOptions
+    args_schema::Union{Dict{String, Any}, Nothing} = nothing  # wire: argsSchema
+end
+
+"""Reply to a permission request, including optional decision context."""
+Base.@kwdef struct PermissionResponse
+    allowed::Bool = false
+    reason::Union{String, Nothing} = nothing
+    decision_context::Union{Dict{String, Any}, Nothing} = nothing  # wire: decisionContext
+end

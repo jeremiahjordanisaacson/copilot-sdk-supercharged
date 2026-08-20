@@ -332,19 +332,23 @@ public struct PreToolUseHookOutput: Codable, Sendable {
     public var modifiedArgs: AnyCodable?
     public var additionalContext: String?
     public var suppressOutput: Bool?
+    /// Opaque decision context returned with the permission reply.
+    public var decisionContext: [String: AnyCodable]?
 
     public init(
         permissionDecision: String? = nil,
         permissionDecisionReason: String? = nil,
         modifiedArgs: AnyCodable? = nil,
         additionalContext: String? = nil,
-        suppressOutput: Bool? = nil
+        suppressOutput: Bool? = nil,
+        decisionContext: [String: AnyCodable]? = nil
     ) {
         self.permissionDecision = permissionDecision
         self.permissionDecisionReason = permissionDecisionReason
         self.modifiedArgs = modifiedArgs
         self.additionalContext = additionalContext
         self.suppressOutput = suppressOutput
+        self.decisionContext = decisionContext
     }
 }
 
@@ -506,6 +510,8 @@ public struct SessionHooks: Sendable {
     public var onPostToolUse: PostToolUseHandler?
     public var onPreMcpToolCall: PostToolUseHandler?
     public var onUserPromptSubmitted: UserPromptSubmittedHandler?
+    /// Invoked after the user prompt has been transformed, before submission.
+    public var onUserPromptTransformed: UserPromptSubmittedHandler?
     public var onSessionStart: SessionStartHandler?
     public var onSessionEnd: SessionEndHandler?
     public var onErrorOccurred: ErrorOccurredHandler?
@@ -515,6 +521,7 @@ public struct SessionHooks: Sendable {
         onPostToolUse: PostToolUseHandler? = nil,
         onPreMcpToolCall: PostToolUseHandler? = nil,
         onUserPromptSubmitted: UserPromptSubmittedHandler? = nil,
+        onUserPromptTransformed: UserPromptSubmittedHandler? = nil,
         onSessionStart: SessionStartHandler? = nil,
         onSessionEnd: SessionEndHandler? = nil,
         onErrorOccurred: ErrorOccurredHandler? = nil
@@ -523,6 +530,7 @@ public struct SessionHooks: Sendable {
         self.onPostToolUse = onPostToolUse
         self.onPreMcpToolCall = onPreMcpToolCall
         self.onUserPromptSubmitted = onUserPromptSubmitted
+        self.onUserPromptTransformed = onUserPromptTransformed
         self.onSessionStart = onSessionStart
         self.onSessionEnd = onSessionEnd
         self.onErrorOccurred = onErrorOccurred
@@ -531,7 +539,7 @@ public struct SessionHooks: Sendable {
     /// Returns true if any hook handler is set.
     public var hasAnyHandler: Bool {
         onPreToolUse != nil || onPostToolUse != nil || onPreMcpToolCall != nil
-            || onUserPromptSubmitted != nil
+            || onUserPromptSubmitted != nil || onUserPromptTransformed != nil
             || onSessionStart != nil || onSessionEnd != nil || onErrorOccurred != nil
     }
 }
@@ -606,6 +614,8 @@ public struct CustomAgentConfig: Codable, Sendable {
     public var infer: Bool?
     /// List of skill names to preload into this agent's context.
     public var skills: [String]?
+    /// JSON schema describing the arguments accepted by an agent factory.
+    public var argsSchema: [String: AnyCodable]?
 
     public init(
         name: String,
@@ -615,7 +625,8 @@ public struct CustomAgentConfig: Codable, Sendable {
         tools: [String]? = nil,
         mcpServers: [String: MCPServerConfig]? = nil,
         infer: Bool? = nil,
-        skills: [String]? = nil
+        skills: [String]? = nil,
+        argsSchema: [String: AnyCodable]? = nil
     ) {
         self.name = name
         self.prompt = prompt
@@ -625,6 +636,7 @@ public struct CustomAgentConfig: Codable, Sendable {
         self.mcpServers = mcpServers
         self.infer = infer
         self.skills = skills
+        self.argsSchema = argsSchema
     }
 }
 
@@ -879,6 +891,26 @@ public struct SessionConfig: Sendable {
     /// Handler invoked when an MCP server requires OAuth authorization.
     public var onMcpAuthRequest: McpAuthHandler?
 
+    // --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+    /// Enable session rewind so the conversation can be rolled back.
+    public var rewindEnabled: Bool?
+    /// Extra workspace directories the session may access.
+    public var additionalDirectories: [String]?
+    /// Names of MCP servers to disable for this session.
+    public var disabledMcpServers: [String]?
+    /// GitHub MCP tool configuration.
+    public var githubMcpToolConfig: [String: AnyCodable]?
+    /// Canvas provider configuration.
+    public var canvasProvider: [String: AnyCodable]?
+    /// Restrict custom agents to locally-defined ones only.
+    public var customAgentsLocalOnly: Bool?
+    /// Tool-search configuration.
+    public var toolSearch: [String: AnyCodable]?
+    /// Enable experimental mode for this session.
+    public var experimentalMode: Bool?
+    /// Enable content-exclusion enforcement.
+    public var contentExclusion: Bool?
+
     public init(
         sessionId: String? = nil,
         model: String? = nil,
@@ -913,7 +945,16 @@ public struct SessionConfig: Sendable {
         otlpProtocol: String? = nil,
         enableWebSocketResponses: Bool? = nil,
         expAssignments: [String: AnyCodable]? = nil,
-        onMcpAuthRequest: McpAuthHandler? = nil
+        onMcpAuthRequest: McpAuthHandler? = nil,
+        rewindEnabled: Bool? = nil,
+        additionalDirectories: [String]? = nil,
+        disabledMcpServers: [String]? = nil,
+        githubMcpToolConfig: [String: AnyCodable]? = nil,
+        canvasProvider: [String: AnyCodable]? = nil,
+        customAgentsLocalOnly: Bool? = nil,
+        toolSearch: [String: AnyCodable]? = nil,
+        experimentalMode: Bool? = nil,
+        contentExclusion: Bool? = nil
     ) {
         self.sessionId = sessionId
         self.model = model
@@ -949,6 +990,15 @@ public struct SessionConfig: Sendable {
         self.enableWebSocketResponses = enableWebSocketResponses
         self.expAssignments = expAssignments
         self.onMcpAuthRequest = onMcpAuthRequest
+        self.rewindEnabled = rewindEnabled
+        self.additionalDirectories = additionalDirectories
+        self.disabledMcpServers = disabledMcpServers
+        self.githubMcpToolConfig = githubMcpToolConfig
+        self.canvasProvider = canvasProvider
+        self.customAgentsLocalOnly = customAgentsLocalOnly
+        self.toolSearch = toolSearch
+        self.experimentalMode = experimentalMode
+        self.contentExclusion = contentExclusion
     }
 }
 
@@ -1482,6 +1532,12 @@ public struct CopilotClientOptions: Sendable {
     /// Supplies bearer tokens for outbound model requests (bring-your-own-key).
     public var bearerTokenProvider: BearerTokenProvider?
 
+    /// Built-in plugin directories to load.
+    public var builtinPluginDirectories: [String]?
+
+    /// Use the in-process FFI transport instead of spawning a CLI.
+    public var inProcess: Bool?
+
     public init(
         cliPath: String? = nil,
         cliArgs: [String]? = nil,
@@ -1500,7 +1556,9 @@ public struct CopilotClientOptions: Sendable {
         copilotHome: String? = nil,
         tcpConnectionToken: String? = nil,
         requestHandler: CopilotRequestHandler? = nil,
-        bearerTokenProvider: BearerTokenProvider? = nil
+        bearerTokenProvider: BearerTokenProvider? = nil,
+        builtinPluginDirectories: [String]? = nil,
+        inProcess: Bool? = nil
     ) {
         self.cliPath = cliPath
         self.cliArgs = cliArgs
@@ -1520,6 +1578,8 @@ public struct CopilotClientOptions: Sendable {
         self.tcpConnectionToken = tcpConnectionToken
         self.requestHandler = requestHandler
         self.bearerTokenProvider = bearerTokenProvider
+        self.builtinPluginDirectories = builtinPluginDirectories
+        self.inProcess = inProcess
     }
 }
 

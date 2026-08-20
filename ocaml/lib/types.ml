@@ -160,13 +160,21 @@ let mcp_server_config_to_yojson (c : mcp_server_config) : Yojson.Safe.t =
 type command_definition = {
   cmd_name : string;
   cmd_description : string;
+  args_schema : Yojson.Safe.t option;
 }
 
 let command_definition_to_yojson (c : command_definition) : Yojson.Safe.t =
-  `Assoc
+  let fields =
     [ ("name", `String c.cmd_name)
     ; ("description", `String c.cmd_description)
     ]
+  in
+  let fields =
+    match c.args_schema with
+    | Some s -> ("argsSchema", s) :: fields
+    | None -> fields
+  in
+  `Assoc fields
 
 (* ========================================================================== *)
 (* Image Response Format                                                      *)
@@ -309,6 +317,7 @@ let attachment_github_snippet = "GitHubSnippet"
 let hook_on_pre_tool_use = "onPreToolUse"
 let hook_on_post_tool_use = "onPostToolUse"
 let hook_on_pre_mcp_tool_call = "onPreMcpToolCall"
+let hook_on_user_prompt_transformed = "userPromptTransformed"
 
 type session_config = {
   model : string option;
@@ -339,6 +348,15 @@ type session_config = {
   enable_web_socket_responses : bool;
   exp_assignments : (string * Yojson.Safe.t) list;
   on_mcp_auth_request : bool;
+  rewind_enabled : bool option;
+  additional_directories : string list option;
+  disabled_mcp_servers : string list option;
+  github_mcp_tool_config : (string * Yojson.Safe.t) list;
+  canvas_provider : (string * Yojson.Safe.t) list;
+  custom_agents_local_only : bool option;
+  tool_search : (string * Yojson.Safe.t) list;
+  experimental_mode : bool option;
+  content_exclusion : bool option;
 }
 
 let default_session_config () =
@@ -369,6 +387,15 @@ let default_session_config () =
   ; enable_web_socket_responses = false
   ; exp_assignments = []
   ; on_mcp_auth_request = false
+  ; rewind_enabled = None
+  ; additional_directories = None
+  ; disabled_mcp_servers = None
+  ; github_mcp_tool_config = []
+  ; canvas_provider = []
+  ; custom_agents_local_only = None
+  ; tool_search = []
+  ; experimental_mode = None
+  ; content_exclusion = None
   }
 
 let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
@@ -511,6 +538,53 @@ let session_config_to_yojson (c : session_config) : Yojson.Safe.t =
     if c.on_mcp_auth_request then ("mcpAuthHandler", `Bool true) :: fields
     else fields
   in
+  let fields =
+    match c.rewind_enabled with
+    | Some b -> ("rewindEnabled", `Bool b) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.additional_directories with
+    | Some dirs ->
+      ("additionalDirectories", `List (List.map (fun s -> `String s) dirs)) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.disabled_mcp_servers with
+    | Some servers ->
+      ("disabledMcpServers", `List (List.map (fun s -> `String s) servers)) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.github_mcp_tool_config with
+    | [] -> fields
+    | assigns -> ("githubMcpToolConfig", `Assoc assigns) :: fields
+  in
+  let fields =
+    match c.canvas_provider with
+    | [] -> fields
+    | assigns -> ("canvasProvider", `Assoc assigns) :: fields
+  in
+  let fields =
+    match c.custom_agents_local_only with
+    | Some b -> ("customAgentsLocalOnly", `Bool b) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.tool_search with
+    | [] -> fields
+    | assigns -> ("toolSearch", `Assoc assigns) :: fields
+  in
+  let fields =
+    match c.experimental_mode with
+    | Some b -> ("experimentalMode", `Bool b) :: fields
+    | None -> fields
+  in
+  let fields =
+    match c.content_exclusion with
+    | Some b -> ("contentExclusion", `Bool b) :: fields
+    | None -> fields
+  in
   `Assoc fields
 
 (* ========================================================================== *)
@@ -591,6 +665,14 @@ let permission_result_to_yojson (r : permission_result) : Yojson.Safe.t =
   in
   `Assoc fields
 
+(** Serialize a permission reply together with an opaque decision context.
+    The context is emitted under the JSON key "decisionContext". *)
+let permission_result_to_yojson_with_context (r : permission_result)
+    (decision_context : Yojson.Safe.t option) : Yojson.Safe.t =
+  match decision_context, permission_result_to_yojson r with
+  | Some ctx, `Assoc fields -> `Assoc (("decisionContext", ctx) :: fields)
+  | _, json -> json
+
 (* ========================================================================== *)
 (* Status Types                                                               *)
 (* ========================================================================== *)
@@ -642,6 +724,10 @@ type client_options = {
   tcp_connection_token : string option;
   request_handler : copilot_request_handler option;
   bearer_token_provider : bearer_token_provider option;
+  (* JSON key: "builtinPluginDirectories" *)
+  builtin_plugin_directories : string list option;
+  (* JSON key: "inProcess" *)
+  in_process : bool option;
 }
 
 let default_client_options () =
@@ -656,6 +742,8 @@ let default_client_options () =
   ; tcp_connection_token = None
   ; request_handler = None
   ; bearer_token_provider = None
+  ; builtin_plugin_directories = None
+  ; in_process = None
   }
 
 (* ========================================================================== *)

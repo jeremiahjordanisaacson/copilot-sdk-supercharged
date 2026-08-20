@@ -77,6 +77,7 @@ const
   HookPreToolUse* = "preToolUse"
   HookPostToolUse* = "postToolUse"
   HookUserPromptSubmitted* = "userPromptSubmitted"
+  HookUserPromptTransformed* = "userPromptTransformed"
   HookSessionStart* = "sessionStart"
   HookSessionEnd* = "sessionEnd"
   HookErrorOccurred* = "errorOccurred"
@@ -107,6 +108,8 @@ type
     tcpConnectionToken*: string
     requestHandler*: CopilotRequestHandler
     bearerTokenProvider*: BearerTokenProvider
+    builtinPluginDirectories*: seq[string]
+    inProcess*: bool
 
   SessionFsConfig* = object
     initialCwd*: string
@@ -145,6 +148,18 @@ type
     expAssignmentsJson*: string
     onMcpAuthRequest*: McpAuthHandler
     mcpAuthHandler*: bool
+    # --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+    rewindEnabled*: bool
+    additionalDirectories*: seq[string]
+    disabledMcpServers*: seq[string]
+    githubMcpToolConfigJson*: string
+    canvasProvider*: string
+    customAgentsLocalOnly*: bool
+    reasoningEffort*: string
+    toolSearchJson*: string
+    experimentalMode*: bool
+    contentExclusion*: bool
+    argsSchemaJson*: string
 
   ResumeSessionConfig* = object
     sessionId*: string
@@ -246,6 +261,8 @@ type
     id*: string
     toolName*: string
     description*: string
+    ## Opaque decision context echoed back on the permission reply (`decisionContext`).
+    decisionContextJson*: string
 
   PermissionDecision* = enum
     pdAllow = "allow"
@@ -316,7 +333,18 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
                        enableWebSocketResponses = false;
                        expAssignmentsJson = "";
                        onMcpAuthRequest: McpAuthHandler = nil;
-                       mcpAuthHandler = false): SessionConfig =
+                       mcpAuthHandler = false;
+                       rewindEnabled = false;
+                       additionalDirectories: seq[string] = @[];
+                       disabledMcpServers: seq[string] = @[];
+                       githubMcpToolConfigJson = "";
+                       canvasProvider = "";
+                       customAgentsLocalOnly = false;
+                       reasoningEffort = "";
+                       toolSearchJson = "";
+                       experimentalMode = false;
+                       contentExclusion = false;
+                       argsSchemaJson = ""): SessionConfig =
   SessionConfig(
     systemPrompt: systemPrompt,
     githubToken: githubToken,
@@ -344,6 +372,17 @@ proc newSessionConfig*(systemPrompt = ""; githubToken = "";
     expAssignmentsJson: expAssignmentsJson,
     onMcpAuthRequest: onMcpAuthRequest,
     mcpAuthHandler: mcpAuthHandler,
+    rewindEnabled: rewindEnabled,
+    additionalDirectories: additionalDirectories,
+    disabledMcpServers: disabledMcpServers,
+    githubMcpToolConfigJson: githubMcpToolConfigJson,
+    canvasProvider: canvasProvider,
+    customAgentsLocalOnly: customAgentsLocalOnly,
+    reasoningEffort: reasoningEffort,
+    toolSearchJson: toolSearchJson,
+    experimentalMode: experimentalMode,
+    contentExclusion: contentExclusion,
+    argsSchemaJson: argsSchemaJson,
   )
 
 proc newResumeSessionConfig*(sessionId: string; systemPrompt = "";

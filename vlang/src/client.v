@@ -131,6 +131,39 @@ pub fn (mut c CopilotClient) create_session(config SessionConfig) !&CopilotSessi
 	if !isnil(config.on_mcp_auth_request) {
 		params['"mcpAuthHandler"'] = 'true'
 	}
+	if config.reasoning_effort.len > 0 {
+		params['"reasoningEffort"'] = '"${config.reasoning_effort}"'
+	}
+	if config.rewind_enabled {
+		params['"rewindEnabled"'] = 'true'
+	}
+	if config.additional_directories.len > 0 {
+		params['"additionalDirectories"'] = json.encode(config.additional_directories)
+	}
+	if config.disabled_mcp_servers.len > 0 {
+		params['"disabledMcpServers"'] = json.encode(config.disabled_mcp_servers)
+	}
+	if config.github_mcp_tool_config.len > 0 {
+		params['"githubMcpToolConfig"'] = json.encode(config.github_mcp_tool_config)
+	}
+	if config.canvas_provider.len > 0 {
+		params['"canvasProvider"'] = json.encode(config.canvas_provider)
+	}
+	if config.custom_agents_local_only {
+		params['"customAgentsLocalOnly"'] = 'true'
+	}
+	if config.tool_search.len > 0 {
+		params['"toolSearch"'] = json.encode(config.tool_search)
+	}
+	if config.experimental_mode {
+		params['"experimentalMode"'] = 'true'
+	}
+	if config.content_exclusion {
+		params['"contentExclusion"'] = 'true'
+	}
+	if !isnil(config.on_user_prompt_transformed) {
+		params['"userPromptTransformed"'] = 'true'
+	}
 
 	raw_result := c.transport.send_request('session.create', build_params(params))!
 	result := parse_response_result(raw_result)!

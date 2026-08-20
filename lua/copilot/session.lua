@@ -395,6 +395,12 @@ function CopilotSession:_handle_hooks_invoke(hook_type, input)
         if not ok then return nil, tostring(result) end
         return result, nil
 
+    elseif hook_type == "userPromptTransformed" then
+        if not hooks.onUserPromptTransformed then return nil, nil end
+        local ok, result = pcall(hooks.onUserPromptTransformed, input, invocation)
+        if not ok then return nil, tostring(result) end
+        return result, nil
+
     elseif hook_type == "sessionStart" then
         if not hooks.onSessionStart then return nil, nil end
         local ok, result = pcall(hooks.onSessionStart, input, invocation)

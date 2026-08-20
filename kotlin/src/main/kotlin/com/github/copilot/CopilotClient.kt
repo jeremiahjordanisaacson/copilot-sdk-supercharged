@@ -537,6 +537,7 @@ class CopilotClient(
                         if (hooks.onPostToolUse != null) add(JsonPrimitive("postToolUse"))
                         if (hooks.onPreMcpToolCall != null) add(JsonPrimitive("preMcpToolCall"))
                         if (hooks.onUserPromptSubmitted != null) add(JsonPrimitive("userPromptSubmitted"))
+                        if (hooks.onUserPromptTransformed != null) add(JsonPrimitive("userPromptTransformed"))
                         if (hooks.onSessionStart != null) add(JsonPrimitive("sessionStart"))
                         if (hooks.onSessionEnd != null) add(JsonPrimitive("sessionEnd"))
                         if (hooks.onErrorOccurred != null) add(JsonPrimitive("errorOccurred"))
@@ -576,6 +577,15 @@ class CopilotClient(
             config.otlpProtocol?.let { put("otlpProtocol", JsonPrimitive(it)) }
             config.enableWebSocketResponses?.let { put("enableWebSocketResponses", JsonPrimitive(it)) }
             config.expAssignments?.let { put("expAssignments", json.encodeToJsonElement(it)) }
+            config.rewindEnabled?.let { put("rewindEnabled", JsonPrimitive(it)) }
+            config.additionalDirectories?.let { put("additionalDirectories", json.encodeToJsonElement(it)) }
+            config.disabledMcpServers?.let { put("disabledMcpServers", json.encodeToJsonElement(it)) }
+            config.githubMcpToolConfig?.let { put("githubMcpToolConfig", json.encodeToJsonElement(it)) }
+            config.canvasProvider?.let { put("canvasProvider", json.encodeToJsonElement(it)) }
+            config.customAgentsLocalOnly?.let { put("customAgentsLocalOnly", JsonPrimitive(it)) }
+            config.toolSearch?.let { put("toolSearch", json.encodeToJsonElement(it)) }
+            config.experimentalMode?.let { put("experimentalMode", JsonPrimitive(it)) }
+            config.contentExclusion?.let { put("contentExclusion", JsonPrimitive(it)) }
             // MCP OAuth host token handler: signal to the runtime that a handler is registered.
             if (config.onMcpAuthRequest != null) put("mcpAuthHandler", true)
         }

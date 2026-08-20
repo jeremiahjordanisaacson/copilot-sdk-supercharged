@@ -72,6 +72,10 @@ class CopilotClient {
     private String tcpConnectionToken
     private Closure requestHandler
     private Closure bearerTokenProvider
+    /** Directories to load built-in plugins from. */
+    private List<String> builtinPluginDirectories
+    /** Use the in-process (FFI) transport instead of a subprocess. */
+    private Boolean inProcess
 
     // Session config defaults (stored for createSession)
     private List<Tool> defaultTools
@@ -160,6 +164,8 @@ class CopilotClient {
             if (options.tcpConnectionToken) this.tcpConnectionToken = options.tcpConnectionToken as String
             if (options.requestHandler) this.requestHandler = options.requestHandler as Closure
             if (options.bearerTokenProvider) this.bearerTokenProvider = options.bearerTokenProvider as Closure
+            if (options.builtinPluginDirectories) this.builtinPluginDirectories = options.builtinPluginDirectories as List<String>
+            if (options.inProcess != null) this.inProcess = options.inProcess as Boolean
         }
 
         this.isExternalServer = external
@@ -574,6 +580,8 @@ class CopilotClient {
             if (hooks.onPostToolUse) hookTypes.add('postToolUse')
             if (hooks.onPreMcpToolCall) hookTypes.add('preMcpToolCall')
             if (hooks.onUserPromptSubmitted) hookTypes.add('userPromptSubmitted')
+            // Invoked after the user prompt has been transformed.
+            if (hooks.onUserPromptTransformed) hookTypes.add('userPromptTransformed')
             if (hooks.onSessionStart) hookTypes.add('sessionStart')
             if (hooks.onSessionEnd) hookTypes.add('sessionEnd')
             if (hooks.onErrorOccurred) hookTypes.add('errorOccurred')
@@ -612,6 +620,24 @@ class CopilotClient {
         if (config.otlpProtocol) payload.otlpProtocol = config.otlpProtocol
         if (config.enableWebSocketResponses != null) payload.enableWebSocketResponses = config.enableWebSocketResponses
         if (config.expAssignments) payload.expAssignments = config.expAssignments
+        // Enable session rewind to restore earlier session points.
+        if (config.rewindEnabled != null) payload.rewindEnabled = config.rewindEnabled
+        // Extra working directories available to the session.
+        if (config.additionalDirectories) payload.additionalDirectories = config.additionalDirectories
+        // Names of configured MCP servers to disable for this session.
+        if (config.disabledMcpServers) payload.disabledMcpServers = config.disabledMcpServers
+        // Configuration for the built-in GitHub MCP tools.
+        if (config.githubMcpToolConfig) payload.githubMcpToolConfig = config.githubMcpToolConfig
+        // Identity of the canvas provider to register.
+        if (config.canvasProvider) payload.canvasProvider = config.canvasProvider
+        // Only load workspace-local custom agents.
+        if (config.customAgentsLocalOnly != null) payload.customAgentsLocalOnly = config.customAgentsLocalOnly
+        // Tool search configuration for large tool sets.
+        if (config.toolSearch) payload.toolSearch = config.toolSearch
+        // Enable experimental runtime features.
+        if (config.experimentalMode != null) payload.experimentalMode = config.experimentalMode
+        // Respect repository content-exclusion rules.
+        if (config.contentExclusion != null) payload.contentExclusion = config.contentExclusion
         if (config.onMcpAuthRequest) payload.mcpAuthHandler = true
         payload
     }

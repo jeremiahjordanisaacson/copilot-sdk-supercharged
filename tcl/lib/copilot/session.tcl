@@ -87,6 +87,62 @@ proc ::copilot::session::create_session {write_ch read_ch config} {
     if {[dict size $exp_assignments] > 0} {
         dict set params expAssignments $exp_assignments
     }
+    # --- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk) ---
+    set reasoning_effort [dict get $config reasoning_effort]
+    if {$reasoning_effort ne ""} {
+        dict set params reasoningEffort $reasoning_effort
+    }
+    if {[dict get $config rewind_enabled]} {
+        dict set params rewindEnabled true
+    }
+    set additional_directories [dict get $config additional_directories]
+    if {[llength $additional_directories] > 0} {
+        dict set params additionalDirectories $additional_directories
+    }
+    set disabled_mcp_servers [dict get $config disabled_mcp_servers]
+    if {[llength $disabled_mcp_servers] > 0} {
+        dict set params disabledMcpServers $disabled_mcp_servers
+    }
+    set github_mcp_tool_config [dict get $config github_mcp_tool_config]
+    if {[dict size $github_mcp_tool_config] > 0} {
+        dict set params githubMcpToolConfig $github_mcp_tool_config
+    }
+    set canvas_provider [dict get $config canvas_provider]
+    if {$canvas_provider ne ""} {
+        dict set params canvasProvider $canvas_provider
+    }
+    if {[dict get $config custom_agents_local_only]} {
+        dict set params customAgentsLocalOnly true
+    }
+    set builtin_plugin_directories [dict get $config builtin_plugin_directories]
+    if {[llength $builtin_plugin_directories] > 0} {
+        dict set params builtinPluginDirectories $builtin_plugin_directories
+    }
+    set args_schema [dict get $config args_schema]
+    if {[dict size $args_schema] > 0} {
+        dict set params argsSchema $args_schema
+    }
+    set decision_context [dict get $config decision_context]
+    if {[dict size $decision_context] > 0} {
+        dict set params decisionContext $decision_context
+    }
+    set tool_search [dict get $config tool_search]
+    if {$tool_search ne ""} {
+        dict set params toolSearch $tool_search
+    }
+    if {[dict get $config in_process]} {
+        dict set params inProcess true
+    }
+    if {[dict get $config experimental_mode]} {
+        dict set params experimentalMode true
+    }
+    if {[dict get $config content_exclusion]} {
+        dict set params contentExclusion true
+    }
+    # User-prompt-transformed hook: signal to the runtime that a handler is registered.
+    if {[dict get $config on_user_prompt_transformed] ne ""} {
+        dict set params userPromptTransformed true
+    }
     # Signal to the runtime that an MCP OAuth host-token handler is registered.
     if {[dict get $config on_mcp_auth_request] ne ""} {
         dict set params mcpAuthHandler true

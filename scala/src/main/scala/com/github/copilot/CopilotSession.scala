@@ -328,6 +328,15 @@ class CopilotSession(
                   case Right(parsed) =>
                     handler(parsed, invocation).map(_.map(_.asJson)).recover { case _ => None }
 
+          case "userPromptTransformed" =>
+            h.onUserPromptTransformed match
+              case None => Future.successful(None)
+              case Some(handler) =>
+                input.as[UserPromptSubmittedHookInput] match
+                  case Left(_) => Future.successful(None)
+                  case Right(parsed) =>
+                    handler(parsed, invocation).map(_.map(_.asJson)).recover { case _ => None }
+
           case "sessionStart" =>
             h.onSessionStart match
               case None => Future.successful(None)

@@ -323,6 +323,16 @@ createSession client config = do
         , "enableWebSocketResponses" .= scEnableWebSocketResponses config
         , "expAssignments"           .= scExpAssignments config
         , "mcpAuthHandler"           .= (if isJust (scOnMcpAuthRequest config) then Just True else Nothing)
+        -- Upstream-sync 2026-08 session options (parity with @github/copilot-sdk)
+        , "rewindEnabled"            .= scRewindEnabled config
+        , "additionalDirectories"    .= scAdditionalDirectories config
+        , "disabledMcpServers"       .= scDisabledMcpServers config
+        , "githubMcpToolConfig"      .= scGithubMcpToolConfig config
+        , "canvasProvider"           .= scCanvasProvider config
+        , "customAgentsLocalOnly"    .= scCustomAgentsLocalOnly config
+        , "toolSearch"               .= scToolSearch config
+        , "experimentalMode"         .= scExperimentalMode config
+        , "contentExclusion"         .= scContentExclusion config
         ]
 
   result <- sendRequest rpc "session.create" reqParams
@@ -588,6 +598,7 @@ hasHooks (Just sh) = isJust (shOnPreToolUse sh)
                   || isJust (shOnSessionStart sh)
                   || isJust (shOnSessionEnd sh)
                   || isJust (shOnErrorOccurred sh)
+                  || isJust (shOnUserPromptTransformed sh)
 
 -- | Convert a Tool to its JSON wire representation (without handler).
 toolToJson :: Tool -> Value

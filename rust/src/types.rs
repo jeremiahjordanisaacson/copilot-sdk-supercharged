@@ -222,6 +222,9 @@ pub struct PermissionRequestResult {
     pub kind: PermissionResultKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rules: Option<Vec<serde_json::Value>>,
+    /// Opaque context forwarded on permission replies.
+    #[serde(rename = "decisionContext", skip_serializing_if = "Option::is_none")]
+    pub decision_context: Option<serde_json::Value>,
 }
 
 // ============================================================================
@@ -319,6 +322,26 @@ pub struct UserPromptSubmittedHookInput {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UserPromptSubmittedHookOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_context: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suppress_output: Option<bool>,
+}
+
+/// Input for user-prompt-transformed hook.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserPromptTransformedHookInput {
+    pub timestamp: f64,
+    pub cwd: String,
+    pub prompt: String,
+}
+
+/// Output for user-prompt-transformed hook.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UserPromptTransformedHookOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modified_prompt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -465,6 +488,9 @@ pub struct CustomAgentConfig {
     /// List of skill names to preload into this agent's context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<String>>,
+    /// JSON schema declaring a factory's arguments (`argsSchema`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args_schema: Option<serde_json::Value>,
 }
 
 // ============================================================================
@@ -621,6 +647,35 @@ pub struct SessionConfig {
     /// Set by the SDK to signal a registered MCP OAuth host-token handler (not user-set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mcp_auth_handler: Option<bool>,
+
+    // --- Upstream-sync session options, 2026-08 batch (parity with @github/copilot-sdk) ---
+    /// Enable session rewind to restore earlier session points (`rewindEnabled`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rewind_enabled: Option<bool>,
+    /// Extra working directories available to the session (`additionalDirectories`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_directories: Option<Vec<String>>,
+    /// Names of configured MCP servers to disable for this session (`disabledMcpServers`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_mcp_servers: Option<Vec<String>>,
+    /// Configuration for the built-in GitHub MCP tools (`githubMcpToolConfig`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub github_mcp_tool_config: Option<serde_json::Value>,
+    /// Identity of the canvas provider to register (`canvasProvider`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canvas_provider: Option<serde_json::Value>,
+    /// Only load workspace-local custom agents (`customAgentsLocalOnly`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_agents_local_only: Option<bool>,
+    /// Tool search configuration for large tool sets (`toolSearch`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_search: Option<serde_json::Value>,
+    /// Enable experimental runtime features (`experimentalMode`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub experimental_mode: Option<bool>,
+    /// Respect repository content-exclusion rules (`contentExclusion`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_exclusion: Option<bool>,
 
     /// Slash commands registered for this session (not serialized).
     #[serde(skip)]
@@ -1353,6 +1408,10 @@ pub struct CopilotClientOptions {
     pub request_handler: Option<CopilotRequestHandler>,
     /// BYOK bearer-token provider used to mint fresh tokens for outbound model requests.
     pub bearer_token_provider: Option<BearerTokenProviderFn>,
+    /// Directories to load built-in plugins from (`builtinPluginDirectories`).
+    pub builtin_plugin_directories: Option<Vec<String>>,
+    /// Use the in-process (FFI) transport instead of a subprocess (`inProcess`).
+    pub in_process: Option<bool>,
 }
 
 impl Default for CopilotClientOptions {
@@ -1376,6 +1435,8 @@ impl Default for CopilotClientOptions {
             tcp_connection_token: None,
             request_handler: None,
             bearer_token_provider: None,
+            builtin_plugin_directories: None,
+            in_process: None,
         }
     }
 }

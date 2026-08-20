@@ -234,6 +234,83 @@ contains
       if (allocated(config%exp_assignments_json)) then
         params = params // '"expAssignments":' // config%exp_assignments_json // ','
       end if
+      ! --- Newly-synced session config passthroughs (camelCase wire keys) ---
+      if (config%rewind_enabled) then
+        params = params // '"rewindEnabled":true,'
+      end if
+      if (allocated(config%additional_directories)) then
+        block
+          integer :: ai
+          character(len=:), allocatable :: arr
+          arr = '['
+          do ai = 1, size(config%additional_directories)
+            if (ai > 1) arr = arr // ','
+            arr = arr // '"' // trim(config%additional_directories(ai)) // '"'
+          end do
+          arr = arr // ']'
+          params = params // '"additionalDirectories":' // arr // ','
+        end block
+      end if
+      if (allocated(config%disabled_mcp_servers)) then
+        block
+          integer :: ai
+          character(len=:), allocatable :: arr
+          arr = '['
+          do ai = 1, size(config%disabled_mcp_servers)
+            if (ai > 1) arr = arr // ','
+            arr = arr // '"' // trim(config%disabled_mcp_servers(ai)) // '"'
+          end do
+          arr = arr // ']'
+          params = params // '"disabledMcpServers":' // arr // ','
+        end block
+      end if
+      if (allocated(config%github_mcp_tool_config_json)) then
+        params = params // '"githubMcpToolConfig":' // config%github_mcp_tool_config_json // ','
+      end if
+      if (allocated(config%canvas_provider_json)) then
+        params = params // '"canvasProvider":' // config%canvas_provider_json // ','
+      end if
+      if (config%custom_agents_local_only) then
+        params = params // '"customAgentsLocalOnly":true,'
+      end if
+      if (allocated(config%decision_context_json)) then
+        params = params // '"decisionContext":' // config%decision_context_json // ','
+      end if
+      ! User-prompt-transformed hook: signal the runtime that a handler is registered.
+      if (associated(config%on_user_prompt_transformed)) then
+        params = params // '"userPromptTransformed":true,'
+      end if
+      if (allocated(config%builtin_plugin_directories)) then
+        block
+          integer :: ai
+          character(len=:), allocatable :: arr
+          arr = '['
+          do ai = 1, size(config%builtin_plugin_directories)
+            if (ai > 1) arr = arr // ','
+            arr = arr // '"' // trim(config%builtin_plugin_directories(ai)) // '"'
+          end do
+          arr = arr // ']'
+          params = params // '"builtinPluginDirectories":' // arr // ','
+        end block
+      end if
+      if (allocated(config%args_schema_json)) then
+        params = params // '"argsSchema":' // config%args_schema_json // ','
+      end if
+      if (allocated(config%reasoning_effort)) then
+        params = params // '"reasoningEffort":"' // config%reasoning_effort // '",'
+      end if
+      if (allocated(config%tool_search_json)) then
+        params = params // '"toolSearch":' // config%tool_search_json // ','
+      end if
+      if (config%in_process) then
+        params = params // '"inProcess":true,'
+      end if
+      if (config%experimental_mode) then
+        params = params // '"experimentalMode":true,'
+      end if
+      if (config%content_exclusion) then
+        params = params // '"contentExclusion":true,'
+      end if
       ! MCP OAuth host token handler: signal the runtime that a handler is registered.
       if (associated(config%on_mcp_auth_request)) then
         params = params // '"mcpAuthHandler":true,'

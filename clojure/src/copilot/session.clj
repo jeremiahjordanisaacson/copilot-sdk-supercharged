@@ -136,7 +136,7 @@
 
   `hooks` - map with optional keys:
     :on-pre-tool-use, :on-post-tool-use, :on-pre-mcp-tool-call,
-    :on-user-prompt-submitted,
+    :on-user-prompt-submitted, :on-user-prompt-transformed,
     :on-session-start, :on-session-end, :on-error-occurred"
   [session-atom hooks]
   (swap! session-atom assoc :hooks hooks))
@@ -159,6 +159,7 @@
                          "postToolUse"           :on-post-tool-use
                          "preMcpToolCall"        :on-pre-mcp-tool-call
                          "userPromptSubmitted"   :on-user-prompt-submitted
+                         "userPromptTransformed" :on-user-prompt-transformed
                          "sessionStart"          :on-session-start
                          "sessionEnd"            :on-session-end
                          "errorOccurred"         :on-error-occurred}

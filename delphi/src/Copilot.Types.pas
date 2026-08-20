@@ -92,10 +92,18 @@ type
   TPreMcpToolCallHandler = reference to function(const Input: TPreMcpToolCallHookInput;
     const SessionId: string): TPreMcpToolCallHookOutput;
 
+  // User-prompt-transformed hook (runs after a user prompt is transformed)
+  TUserPromptTransformedHookInput = record
+    Prompt: string;
+  end;
+  TUserPromptTransformedHandler = reference to procedure(const Input: TUserPromptTransformedHookInput;
+    const SessionId: string);
+
   TSessionHooks = record
     OnPreToolUse: TPreToolUseHandler;
     OnPostToolUse: TPostToolUseHandler;
     OnPreMcpToolCall: TPreMcpToolCallHandler;
+    OnUserPromptTransformed: TUserPromptTransformedHandler;
   end;
 
   // Session event
@@ -262,6 +270,21 @@ type
     EnableWebSocketResponses: Boolean;
     ExpAssignments: TDictionary<string, string>;
     OnMcpAuthRequest: TMcpAuthHandler;
+    // --- Newly-synced session options (parity with @github/copilot-sdk) ---
+    RewindEnabled: Boolean;
+    AdditionalDirectories: TArray<string>;
+    DisabledMcpServers: TArray<string>;
+    GithubMcpToolConfig: string;
+    CanvasProvider: string;
+    CustomAgentsLocalOnly: Boolean;
+    DecisionContext: string;
+    BuiltinPluginDirectories: TArray<string>;
+    ArgsSchema: string;
+    ReasoningEffort: string;
+    ToolSearch: string;
+    InProcess: Boolean;
+    ExperimentalMode: Boolean;
+    ContentExclusion: Boolean;
   end;
 
   // Resume session config

@@ -129,6 +129,9 @@
     :instruction-directories (list of directories to search for instruction files)
     :enable-citations :excluded-builtin-agents :session-limits :memory-config
     :otlp-protocol :enable-web-socket-responses :exp-assignments
+    :rewind-enabled :additional-directories :disabled-mcp-servers
+    :github-mcp-tool-config :canvas-provider :custom-agents-local-only
+    :tool-search :experimental-mode :content-exclusion
     :on-mcp-auth-request (fn invoked to supply an MCP OAuth host token)"
   [& {:as opts}]
   (or opts {}))
@@ -203,9 +206,13 @@
   "Construct a permission result map.
   `kind` is one of :approved :denied-by-rules
    :denied-no-approval-rule-and-could-not-request-from-user
-   :denied-interactively-by-user"
+   :denied-interactively-by-user
+  Optional :decision-context (opaque map emitted as decisionContext)."
   [kind & {:as extra}]
-  (merge {:kind (name kind)} extra))
+  (let [decision-context (:decision-context extra)
+        extra            (dissoc extra :decision-context)]
+    (cond-> (merge {:kind (name kind)} extra)
+      decision-context (assoc :decisionContext decision-context))))
 
 ;; ============================================================================
 ;; User input types
@@ -378,7 +385,8 @@
   `name`   - unique agent name
   `prompt` - agent prompt content
   Optional: :display-name :description :tools :mcp-servers :infer
-            :skills (vector of skill name strings to preload)"
+            :skills (vector of skill name strings to preload)
+            :args-schema (opaque map emitted as argsSchema)"
   [name prompt & {:as opts}]
   (cond-> {:name name :prompt prompt}
     (:display-name opts) (assoc :displayName (:display-name opts))
@@ -386,7 +394,8 @@
     (contains? opts :tools) (assoc :tools (:tools opts))
     (:mcp-servers opts)  (assoc :mcpServers (:mcp-servers opts))
     (contains? opts :infer) (assoc :infer (:infer opts))
-    (:skills opts)       (assoc :skills (:skills opts))))
+    (:skills opts)       (assoc :skills (:skills opts))
+    (:args-schema opts)  (assoc :argsSchema (:args-schema opts))))
 
 ;; ============================================================================
 ;; Infinite session configuration
@@ -813,6 +822,8 @@
     :copilot-home     - custom path to the copilot home directory
     :tcp-connection-token - token for TCP connections
     :bearer-token-provider - BYOK bearer-token provider map (see bearer-token-provider)
+    :builtin-plugin-directories - extra builtin plugin dirs (JSON: builtinPluginDirectories)
+    :in-process       - use in-process FFI transport (JSON: inProcess)
     :request-handler  - CopilotRequestHandler map for outbound HTTP (see copilot-request-handler)"
   [& {:as opts}]
   (or opts {}))

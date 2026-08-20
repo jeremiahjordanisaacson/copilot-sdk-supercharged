@@ -435,6 +435,7 @@ impl CopilotSession {
             Ok(PermissionRequestResult {
                 kind: PermissionResultKind::DeniedNoApprovalRuleAndCouldNotRequestFromUser,
                 rules: None,
+                decision_context: None,
             })
         }
     }

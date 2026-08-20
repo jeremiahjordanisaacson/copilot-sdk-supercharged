@@ -736,12 +736,16 @@ class PreToolUseHookOutput {
   final String? additionalContext;
   final bool? suppressOutput;
 
+  /// Opaque decision context returned with the permission reply.
+  final Map<String, dynamic>? decisionContext;
+
   const PreToolUseHookOutput({
     this.permissionDecision,
     this.permissionDecisionReason,
     this.modifiedArgs,
     this.additionalContext,
     this.suppressOutput,
+    this.decisionContext,
   });
 
   Map<String, dynamic> toJson() => {
@@ -751,6 +755,7 @@ class PreToolUseHookOutput {
         if (modifiedArgs != null) 'modifiedArgs': modifiedArgs,
         if (additionalContext != null) 'additionalContext': additionalContext,
         if (suppressOutput != null) 'suppressOutput': suppressOutput,
+        if (decisionContext != null) 'decisionContext': decisionContext,
       };
 }
 
@@ -1006,6 +1011,9 @@ class SessionHooks {
   final PostToolUseHandler? onPostToolUse;
   final PreMcpToolCallHandler? onPreMcpToolCall;
   final UserPromptSubmittedHandler? onUserPromptSubmitted;
+
+  /// Invoked after the user prompt has been transformed, before submission.
+  final UserPromptSubmittedHandler? onUserPromptTransformed;
   final SessionStartHandler? onSessionStart;
   final SessionEndHandler? onSessionEnd;
   final ErrorOccurredHandler? onErrorOccurred;
@@ -1015,6 +1023,7 @@ class SessionHooks {
     this.onPostToolUse,
     this.onPreMcpToolCall,
     this.onUserPromptSubmitted,
+    this.onUserPromptTransformed,
     this.onSessionStart,
     this.onSessionEnd,
     this.onErrorOccurred,
@@ -1026,6 +1035,7 @@ class SessionHooks {
       onPostToolUse != null ||
       onPreMcpToolCall != null ||
       onUserPromptSubmitted != null ||
+      onUserPromptTransformed != null ||
       onSessionStart != null ||
       onSessionEnd != null ||
       onErrorOccurred != null;
@@ -1120,6 +1130,9 @@ class CustomAgentConfig {
   /// List of skill names to preload into this agent's context.
   final List<String>? skills;
 
+  /// JSON schema describing the arguments accepted by an agent factory.
+  final Map<String, dynamic>? argsSchema;
+
   const CustomAgentConfig({
     required this.name,
     this.displayName,
@@ -1129,6 +1142,7 @@ class CustomAgentConfig {
     this.mcpServers,
     this.infer,
     this.skills,
+    this.argsSchema,
   });
 
   Map<String, dynamic> toJson() => {
@@ -1142,6 +1156,7 @@ class CustomAgentConfig {
               mcpServers!.map((k, v) => MapEntry(k, v.toJson())),
         if (infer != null) 'infer': infer,
         if (skills != null) 'skills': skills,
+        if (argsSchema != null) 'argsSchema': argsSchema,
       };
 }
 
@@ -2139,6 +2154,34 @@ class SessionConfig {
   /// BYOK callback resolving a bearer token from [ProviderTokenArgs].
   final BearerTokenProvider? bearerTokenProvider;
 
+  // --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+  /// Enable session rewind so the conversation can be rolled back.
+  final bool? rewindEnabled;
+
+  /// Extra workspace directories the session may access.
+  final List<String>? additionalDirectories;
+
+  /// Names of MCP servers to disable for this session.
+  final List<String>? disabledMcpServers;
+
+  /// GitHub MCP tool configuration.
+  final Map<String, dynamic>? githubMcpToolConfig;
+
+  /// Canvas provider configuration.
+  final Map<String, dynamic>? canvasProvider;
+
+  /// Restrict custom agents to locally-defined ones only.
+  final bool? customAgentsLocalOnly;
+
+  /// Tool-search configuration.
+  final Map<String, dynamic>? toolSearch;
+
+  /// Enable experimental mode for this session.
+  final bool? experimentalMode;
+
+  /// Enable content-exclusion enforcement.
+  final bool? contentExclusion;
+
   const SessionConfig({
     this.sessionId,
     this.model,
@@ -2177,6 +2220,15 @@ class SessionConfig {
     this.expAssignments,
     this.onMcpAuthRequest,
     this.bearerTokenProvider,
+    this.rewindEnabled,
+    this.additionalDirectories,
+    this.disabledMcpServers,
+    this.githubMcpToolConfig,
+    this.canvasProvider,
+    this.customAgentsLocalOnly,
+    this.toolSearch,
+    this.experimentalMode,
+    this.contentExclusion,
   });
 }
 
@@ -2412,6 +2464,12 @@ class CopilotClientOptions {
   /// Callback that returns the current W3C Trace Context for distributed tracing.
   final TraceContextProvider? onGetTraceContext;
 
+  /// Built-in plugin directories to load.
+  final List<String>? builtinPluginDirectories;
+
+  /// Use the in-process FFI transport instead of spawning a CLI.
+  final bool? inProcess;
+
   const CopilotClientOptions({
     this.cliPath,
     this.cliArgs,
@@ -2430,6 +2488,8 @@ class CopilotClientOptions {
     this.copilotHome,
     this.tcpConnectionToken,
     this.onGetTraceContext,
+    this.builtinPluginDirectories,
+    this.inProcess,
   });
 }
 

@@ -77,6 +77,20 @@ proc ::copilot::types::make_session_config {args} {
         otlp_protocol                       "" \
         enable_web_socket_responses         0 \
         exp_assignments                     {} \
+        rewind_enabled                      0 \
+        additional_directories              {} \
+        disabled_mcp_servers                {} \
+        github_mcp_tool_config              {} \
+        canvas_provider                     "" \
+        custom_agents_local_only            0 \
+        builtin_plugin_directories          {} \
+        args_schema                         {} \
+        decision_context                    {} \
+        tool_search                         "" \
+        in_process                          0 \
+        experimental_mode                   0 \
+        content_exclusion                   0 \
+        on_user_prompt_transformed          "" \
         on_mcp_auth_request                 "" \
         on_post_tool_use                    "" \
         on_pre_mcp_tool_call                "" \

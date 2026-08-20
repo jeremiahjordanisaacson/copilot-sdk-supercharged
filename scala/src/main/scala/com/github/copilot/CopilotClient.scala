@@ -221,6 +221,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
           Option.when(h.onPostToolUse.isDefined)("postToolUse"),
           Option.when(h.onPreMcpToolCall.isDefined)("preMcpToolCall"),
           Option.when(h.onUserPromptSubmitted.isDefined)("userPromptSubmitted"),
+          Option.when(h.onUserPromptTransformed.isDefined)("userPromptTransformed"),
           Option.when(h.onSessionStart.isDefined)("sessionStart"),
           Option.when(h.onSessionEnd.isDefined)("sessionEnd"),
           Option.when(h.onErrorOccurred.isDefined)("errorOccurred")
@@ -267,6 +268,15 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "otlpProtocol" -> config.otlpProtocol.asJson,
         "enableWebSocketResponses" -> config.enableWebSocketResponses.asJson,
         "expAssignments" -> config.expAssignments.asJson,
+        "rewindEnabled" -> config.rewindEnabled.asJson,
+        "additionalDirectories" -> config.additionalDirectories.asJson,
+        "disabledMcpServers" -> config.disabledMcpServers.asJson,
+        "githubMcpToolConfig" -> config.githubMcpToolConfig.asJson,
+        "canvasProvider" -> config.canvasProvider.asJson,
+        "customAgentsLocalOnly" -> config.customAgentsLocalOnly.asJson,
+        "toolSearch" -> config.toolSearch.asJson,
+        "experimentalMode" -> config.experimentalMode.asJson,
+        "contentExclusion" -> config.contentExclusion.asJson,
         "mcpAuthHandler" -> config.onMcpAuthRequest.isDefined.asJson,
       ).dropNullValues
 

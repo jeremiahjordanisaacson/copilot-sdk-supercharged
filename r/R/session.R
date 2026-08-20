@@ -339,6 +339,7 @@ CopilotSession <- R6::R6Class(
         postToolUse = private$hooks$on_post_tool_use,
         preMcpToolCall = private$hooks$on_pre_mcp_tool_call,
         userPromptSubmitted = private$hooks$on_user_prompt_submitted,
+        userPromptTransformed = private$hooks$on_user_prompt_transformed,
         sessionStart = private$hooks$on_session_start,
         sessionEnd = private$hooks$on_session_end,
         errorOccurred = private$hooks$on_error_occurred

@@ -53,6 +53,7 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
 - (BOOL)hasAnyHandler {
     return self.onPreToolUse != nil || self.onPostToolUse != nil
         || self.onPreMcpToolCall != nil || self.onUserPromptSubmitted != nil
+        || self.onUserPromptTransformed != nil
         || self.onSessionStart != nil || self.onSessionEnd != nil
         || self.onErrorOccurred != nil;
 }
@@ -63,6 +64,7 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
     if (self.onPostToolUse) [types addObject:@"postToolUse"];
     if (self.onPreMcpToolCall) [types addObject:@"preMcpToolCall"];
     if (self.onUserPromptSubmitted) [types addObject:@"userPromptSubmitted"];
+    if (self.onUserPromptTransformed) [types addObject:@"userPromptTransformed"];
     if (self.onSessionStart) [types addObject:@"sessionStart"];
     if (self.onSessionEnd) [types addObject:@"sessionEnd"];
     if (self.onErrorOccurred) [types addObject:@"errorOccurred"];
@@ -684,6 +686,17 @@ NSString * const CPGitHubAttachmentIssue = @"GitHubIssue";
     if (self.enableWebSocketResponses) dict[@"enableWebSocketResponses"] = self.enableWebSocketResponses;
     if (self.expAssignments) dict[@"expAssignments"] = self.expAssignments;
     if (self.onMcpAuthRequest) dict[@"mcpAuthHandler"] = @YES;
+    // --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+    if (self.rewindEnabled) dict[@"rewindEnabled"] = self.rewindEnabled;
+    if (self.additionalDirectories) dict[@"additionalDirectories"] = self.additionalDirectories;
+    if (self.disabledMcpServers) dict[@"disabledMcpServers"] = self.disabledMcpServers;
+    if (self.githubMcpToolConfig) dict[@"githubMcpToolConfig"] = self.githubMcpToolConfig;
+    if (self.canvasProvider) dict[@"canvasProvider"] = self.canvasProvider;
+    if (self.customAgentsLocalOnly) dict[@"customAgentsLocalOnly"] = self.customAgentsLocalOnly;
+    if (self.toolSearch) dict[@"toolSearch"] = self.toolSearch;
+    if (self.experimentalMode) dict[@"experimentalMode"] = self.experimentalMode;
+    if (self.contentExclusion) dict[@"contentExclusion"] = self.contentExclusion;
+    if (self.argsSchema) dict[@"argsSchema"] = self.argsSchema;
 
     return [dict copy];
 }

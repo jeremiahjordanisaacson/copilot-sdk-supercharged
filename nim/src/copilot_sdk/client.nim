@@ -116,6 +116,7 @@ proc handleServerRequest(client: CopilotClient; msg: JsonNode) =
 
   of "permission.request":
     var decision = pdAllow
+    var decisionContext = ""
     if not client.permissionHandler.isNil:
       let req = PermissionRequest(
         id: params{"id"}.getStr(),
@@ -123,8 +124,12 @@ proc handleServerRequest(client: CopilotClient; msg: JsonNode) =
         description: params{"description"}.getStr(),
       )
       decision = client.permissionHandler(req)
+      decisionContext = req.decisionContextJson
 
-    let resp = buildResponse(id, %*{"decision": $decision})
+    var replyBody = %*{"decision": $decision}
+    if decisionContext.len > 0:
+      replyBody["decisionContext"] = parseJson(decisionContext)
+    let resp = buildResponse(id, replyBody)
     client.writeMessage(resp)
 
   of "userInput.request":
@@ -341,6 +346,30 @@ proc createSession*(client: CopilotClient;
     params["expAssignments"] = parseJson(config.expAssignmentsJson)
   if config.mcpAuthHandler or not config.onMcpAuthRequest.isNil:
     params["mcpAuthHandler"] = %true
+
+  # --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+  if config.rewindEnabled:
+    params["rewindEnabled"] = %true
+  if config.additionalDirectories.len > 0:
+    params["additionalDirectories"] = %config.additionalDirectories
+  if config.disabledMcpServers.len > 0:
+    params["disabledMcpServers"] = %config.disabledMcpServers
+  if config.githubMcpToolConfigJson.len > 0:
+    params["githubMcpToolConfig"] = parseJson(config.githubMcpToolConfigJson)
+  if config.canvasProvider.len > 0:
+    params["canvasProvider"] = %config.canvasProvider
+  if config.customAgentsLocalOnly:
+    params["customAgentsLocalOnly"] = %true
+  if config.reasoningEffort.len > 0:
+    params["reasoningEffort"] = %config.reasoningEffort
+  if config.toolSearchJson.len > 0:
+    params["toolSearch"] = parseJson(config.toolSearchJson)
+  if config.experimentalMode:
+    params["experimentalMode"] = %true
+  if config.contentExclusion:
+    params["contentExclusion"] = %true
+  if config.argsSchemaJson.len > 0:
+    params["argsSchema"] = parseJson(config.argsSchemaJson)
 
   let res = await client.sendRpcRequest("session.create", params)
   let sessionId = res["sessionId"].getStr()

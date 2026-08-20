@@ -154,6 +154,7 @@ typedef void (^CPHookHandler)(NSDictionary<NSString *, id> *input,
 @property (nonatomic, copy, nullable) CPHookHandler onPostToolUse;
 @property (nonatomic, copy, nullable) CPHookHandler onPreMcpToolCall;
 @property (nonatomic, copy, nullable) CPHookHandler onUserPromptSubmitted;
+@property (nonatomic, copy, nullable) CPHookHandler onUserPromptTransformed;
 @property (nonatomic, copy, nullable) CPHookHandler onSessionStart;
 @property (nonatomic, copy, nullable) CPHookHandler onSessionEnd;
 @property (nonatomic, copy, nullable) CPHookHandler onErrorOccurred;
@@ -301,6 +302,30 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 /// Handler invoked when an MCP server requires OAuth authorization.
 @property (nonatomic, copy, nullable) CPMcpAuthHandler onMcpAuthRequest;
 
+// --- 2026-08 upstream-sync session options (parity with @github/copilot-sdk) ---
+/// Enable session rewind so the conversation can be rolled back.
+@property (nonatomic, copy, nullable) NSNumber *rewindEnabled;
+/// Extra workspace directories the session may access.
+@property (nonatomic, copy, nullable) NSArray<NSString *> *additionalDirectories;
+/// Names of MCP servers to disable for this session.
+@property (nonatomic, copy, nullable) NSArray<NSString *> *disabledMcpServers;
+/// GitHub MCP tool configuration.
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *githubMcpToolConfig;
+/// Canvas provider configuration.
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *canvasProvider;
+/// Restrict custom agents to locally-defined ones only.
+@property (nonatomic, copy, nullable) NSNumber *customAgentsLocalOnly;
+/// Tool-search configuration.
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *toolSearch;
+/// Enable experimental mode for this session.
+@property (nonatomic, copy, nullable) NSNumber *experimentalMode;
+/// Enable content-exclusion enforcement.
+@property (nonatomic, copy, nullable) NSNumber *contentExclusion;
+/// JSON schema describing arguments accepted by an agent factory (authoring).
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *argsSchema;
+/// Decision context echoed on permission replies.
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *decisionContext;
+
 - (NSDictionary<NSString *, id> *)toDictionary;
 
 @end
@@ -327,6 +352,10 @@ typedef NS_ENUM(NSInteger, CPAttachmentType) {
 @property (nonatomic, copy, nullable) CPCopilotRequestHandler requestHandler;
 /// Supplies bearer tokens for outbound model requests (bring-your-own-key).
 @property (nonatomic, copy, nullable) CPBearerTokenProvider bearerTokenProvider;
+/// Built-in plugin directories to load.
+@property (nonatomic, copy, nullable) NSArray<NSString *> *builtinPluginDirectories;
+/// Use the in-process FFI transport instead of spawning a CLI.
+@property (nonatomic, assign) BOOL inProcess;
 
 + (instancetype)defaultOptions;
 

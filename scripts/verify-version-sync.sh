@@ -48,10 +48,20 @@ fi
 PY_VER=$(python3 -c "
 import re
 with open('python/copilot/__init__.py') as f:
-    m = re.search(r'__version__\s*=\s*\"(.+?)\"', f.read())
+    content = f.read()
+# When __version__ is resolved dynamically from installed package metadata
+# (importlib.metadata), it is inherently derived from pyproject at build/install
+# time, so it can never drift. Treat that as in-sync instead of comparing the
+# dev sentinel fallback string.
+if 'importlib.metadata' in content and '_pkg_version' in content:
+    print('DYNAMIC')
+else:
+    m = re.search(r'__version__\s*=\s*\"(.+?)\"', content)
     print(m.group(1) if m else 'MISSING')
 ")
-if [ "$PY_VER" = "$CANONICAL" ]; then
+if [ "$PY_VER" = "DYNAMIC" ]; then
+    ok "python/copilot/__init__.py (version sourced from package metadata via importlib.metadata)"
+elif [ "$PY_VER" = "$CANONICAL" ]; then
     ok "python/copilot/__init__.py (__version__ = \"$PY_VER\")"
 else
     fail "python/copilot/__init__.py has __version__ = \"$PY_VER\" (expected \"$CANONICAL\")"

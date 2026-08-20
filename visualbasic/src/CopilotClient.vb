@@ -545,6 +545,67 @@ Namespace GitHub.Copilot.SDK
                 request("expAssignments") = cfg.ExpAssignments
             End If
 
+            If cfg.RewindEnabled.HasValue Then
+                request("rewindEnabled") = cfg.RewindEnabled.Value
+            End If
+
+            If cfg.AdditionalDirectories IsNot Nothing AndAlso cfg.AdditionalDirectories.Count > 0 Then
+                request("additionalDirectories") = cfg.AdditionalDirectories
+            End If
+
+            If cfg.DisabledMcpServers IsNot Nothing AndAlso cfg.DisabledMcpServers.Count > 0 Then
+                request("disabledMcpServers") = cfg.DisabledMcpServers
+            End If
+
+            If cfg.GithubMcpToolConfig IsNot Nothing AndAlso cfg.GithubMcpToolConfig.Count > 0 Then
+                request("githubMcpToolConfig") = cfg.GithubMcpToolConfig
+            End If
+
+            If cfg.CanvasProvider IsNot Nothing AndAlso cfg.CanvasProvider.Count > 0 Then
+                request("canvasProvider") = cfg.CanvasProvider
+            End If
+
+            If cfg.CustomAgentsLocalOnly.HasValue Then
+                request("customAgentsLocalOnly") = cfg.CustomAgentsLocalOnly.Value
+            End If
+
+            If cfg.DecisionContext IsNot Nothing AndAlso cfg.DecisionContext.Count > 0 Then
+                request("decisionContext") = cfg.DecisionContext
+            End If
+
+            ' Signal to the runtime that a user-prompt-transformed hook is registered.
+            If cfg.OnUserPromptTransformed IsNot Nothing Then
+                request("userPromptTransformed") = True
+            End If
+
+            If cfg.BuiltinPluginDirectories IsNot Nothing AndAlso cfg.BuiltinPluginDirectories.Count > 0 Then
+                request("builtinPluginDirectories") = cfg.BuiltinPluginDirectories
+            End If
+
+            If cfg.ArgsSchema IsNot Nothing AndAlso cfg.ArgsSchema.Count > 0 Then
+                request("argsSchema") = cfg.ArgsSchema
+            End If
+
+            If Not String.IsNullOrEmpty(cfg.ReasoningEffort) Then
+                request("reasoningEffort") = cfg.ReasoningEffort
+            End If
+
+            If cfg.ToolSearch IsNot Nothing AndAlso cfg.ToolSearch.Count > 0 Then
+                request("toolSearch") = cfg.ToolSearch
+            End If
+
+            If cfg.InProcess.HasValue Then
+                request("inProcess") = cfg.InProcess.Value
+            End If
+
+            If cfg.ExperimentalMode.HasValue Then
+                request("experimentalMode") = cfg.ExperimentalMode.Value
+            End If
+
+            If cfg.ContentExclusion.HasValue Then
+                request("contentExclusion") = cfg.ContentExclusion.Value
+            End If
+
             ' Signal to the runtime that an MCP OAuth host-token handler is registered.
             If cfg.OnMcpAuthRequest IsNot Nothing Then
                 request("mcpAuthHandler") = True

@@ -61,6 +61,48 @@
            05 WS-MCP-AUTH-HANDLER   PIC 9       VALUE 0.
                88 MCP-AUTH-ON                   VALUE 1.
                88 MCP-AUTH-OFF                  VALUE 0.
+      *    Session rewind: rewindEnabled
+           05 WS-REWIND-ENABLED     PIC 9       VALUE 0.
+               88 REWIND-ON                     VALUE 1.
+               88 REWIND-OFF                    VALUE 0.
+      *    Additional session directories (JSON array): additionalDirectories
+           05 WS-ADDITIONAL-DIRS    PIC X(1024) VALUE SPACES.
+      *    Disabled MCP servers (JSON array): disabledMcpServers
+           05 WS-DISABLED-MCP       PIC X(1024) VALUE SPACES.
+      *    GitHub MCP tool config (JSON object): githubMcpToolConfig
+           05 WS-GITHUB-MCP-CONFIG  PIC X(1024) VALUE SPACES.
+      *    Canvas provider (JSON object): canvasProvider
+           05 WS-CANVAS-PROVIDER    PIC X(1024) VALUE SPACES.
+      *    Custom agents local-only: customAgentsLocalOnly
+           05 WS-CUSTOM-AGENTS-LCL  PIC 9       VALUE 0.
+               88 CUSTOM-AGENTS-LOCAL-ON        VALUE 1.
+               88 CUSTOM-AGENTS-LOCAL-OFF       VALUE 0.
+      *    Permission-reply decision context (JSON object): decisionContext
+           05 WS-DECISION-CONTEXT   PIC X(1024) VALUE SPACES.
+      *    User-prompt-transformed hook: userPromptTransformed
+           05 WS-USER-PROMPT-XFORM  PIC 9       VALUE 0.
+               88 USER-PROMPT-XFORM-ON          VALUE 1.
+               88 USER-PROMPT-XFORM-OFF         VALUE 0.
+      *    Built-in plugin directories (JSON array): builtinPluginDirectories
+           05 WS-BUILTIN-PLUGIN-DIR PIC X(1024) VALUE SPACES.
+      *    Agent-factory authoring args schema (JSON object): argsSchema
+           05 WS-ARGS-SCHEMA        PIC X(1024) VALUE SPACES.
+      *    Reasoning effort control: reasoningEffort
+           05 WS-REASONING-EFFORT   PIC X(16)   VALUE SPACES.
+      *    Tool search configuration (JSON object): toolSearch
+           05 WS-TOOL-SEARCH        PIC X(1024) VALUE SPACES.
+      *    In-process FFI transport: inProcess
+           05 WS-IN-PROCESS         PIC 9       VALUE 0.
+               88 IN-PROCESS-ON                 VALUE 1.
+               88 IN-PROCESS-OFF                VALUE 0.
+      *    Experimental mode: experimentalMode
+           05 WS-EXPERIMENTAL-MODE  PIC 9       VALUE 0.
+               88 EXPERIMENTAL-ON               VALUE 1.
+               88 EXPERIMENTAL-OFF              VALUE 0.
+      *    Content exclusion: contentExclusion
+           05 WS-CONTENT-EXCLUSION  PIC 9       VALUE 0.
+               88 CONTENT-EXCLUSION-ON          VALUE 1.
+               88 CONTENT-EXCLUSION-OFF         VALUE 0.
 
       *----------------------------------------------------------------*
       * Upstream-sync host callbacks.  The host enables a callback by
@@ -272,6 +314,152 @@
            IF MCP-AUTH-ON
                STRING
                    ',"mcpAuthHandler":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+      *    Newly-synced session-config passthroughs (camelCase keys).
+           IF REWIND-ON
+               STRING
+                   ',"rewindEnabled":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-ADDITIONAL-DIRS NOT = SPACES
+               STRING
+                   ',"additionalDirectories":'
+                   FUNCTION TRIM(WS-ADDITIONAL-DIRS)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-DISABLED-MCP NOT = SPACES
+               STRING
+                   ',"disabledMcpServers":'
+                   FUNCTION TRIM(WS-DISABLED-MCP)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-GITHUB-MCP-CONFIG NOT = SPACES
+               STRING
+                   ',"githubMcpToolConfig":'
+                   FUNCTION TRIM(WS-GITHUB-MCP-CONFIG)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-CANVAS-PROVIDER NOT = SPACES
+               STRING
+                   ',"canvasProvider":'
+                   FUNCTION TRIM(WS-CANVAS-PROVIDER)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF CUSTOM-AGENTS-LOCAL-ON
+               STRING
+                   ',"customAgentsLocalOnly":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-DECISION-CONTEXT NOT = SPACES
+               STRING
+                   ',"decisionContext":'
+                   FUNCTION TRIM(WS-DECISION-CONTEXT)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF USER-PROMPT-XFORM-ON
+               STRING
+                   ',"userPromptTransformed":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-BUILTIN-PLUGIN-DIR NOT = SPACES
+               STRING
+                   ',"builtinPluginDirectories":'
+                   FUNCTION TRIM(WS-BUILTIN-PLUGIN-DIR)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-ARGS-SCHEMA NOT = SPACES
+               STRING
+                   ',"argsSchema":'
+                   FUNCTION TRIM(WS-ARGS-SCHEMA)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-REASONING-EFFORT NOT = SPACES
+               STRING
+                   ',"reasoningEffort":"'
+                   FUNCTION TRIM(WS-REASONING-EFFORT)
+                   '"'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF WS-TOOL-SEARCH NOT = SPACES
+               STRING
+                   ',"toolSearch":'
+                   FUNCTION TRIM(WS-TOOL-SEARCH)
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF IN-PROCESS-ON
+               STRING
+                   ',"inProcess":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF EXPERIMENTAL-ON
+               STRING
+                   ',"experimentalMode":true'
+                   DELIMITED SIZE
+                   INTO WS-PARAMS-BUFFER
+                   WITH POINTER WS-PARAMS-PTR
+               END-STRING
+           END-IF
+
+           IF CONTENT-EXCLUSION-ON
+               STRING
+                   ',"contentExclusion":true'
                    DELIMITED SIZE
                    INTO WS-PARAMS-BUFFER
                    WITH POINTER WS-PARAMS-PTR

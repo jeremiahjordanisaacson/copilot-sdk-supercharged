@@ -866,6 +866,32 @@ class SessionConfig
         public readonly ?bool $enableWebSocketResponses = null,
         /** @var array<string,mixed>|null $expAssignments Experiment assignments forwarded to the runtime */
         public readonly ?array $expAssignments = null,
+        /** Enable session rewind. */
+        public readonly ?bool $rewindEnabled = null,
+        /** @var string[]|null $additionalDirectories Additional session working directories */
+        public readonly ?array $additionalDirectories = null,
+        /** @var string[]|null $disabledMcpServers MCP server names to disable */
+        public readonly ?array $disabledMcpServers = null,
+        /** @var array<string,mixed>|null $githubMcpToolConfig GitHub MCP tool configuration */
+        public readonly ?array $githubMcpToolConfig = null,
+        /** @var array<string,mixed>|string|null $canvasProvider Canvas provider config (object or provider name) */
+        public /* readonly */ $canvasProvider = null,
+        /** Restrict custom agents to locally-defined agents only. */
+        public readonly ?bool $customAgentsLocalOnly = null,
+        /** @var string[]|null $builtinPluginDirectories Built-in plugin directories */
+        public readonly ?array $builtinPluginDirectories = null,
+        /** @var array<string,mixed>|null $argsSchema Agent-factory authoring args schema */
+        public readonly ?array $argsSchema = null,
+        /** @var array<string,mixed>|null $decisionContext Permission decision context */
+        public readonly ?array $decisionContext = null,
+        /** @var array<string,mixed>|bool|null $toolSearch Tool search configuration */
+        public /* readonly */ $toolSearch = null,
+        /** Use the in-process FFI transport. */
+        public readonly ?bool $inProcess = null,
+        /** Enable experimental mode. */
+        public readonly ?bool $experimentalMode = null,
+        /** Enable content exclusion. */
+        public readonly ?bool $contentExclusion = null,
         /** @var callable|null $onMcpAuthRequest MCP OAuth host-token handler fn(ProviderTokenArgs): string */
         public /* readonly */ $onMcpAuthRequest = null,
     ) {}
@@ -970,6 +996,46 @@ class SessionConfig
         }
         if ($this->expAssignments !== null) {
             $params['expAssignments'] = $this->expAssignments;
+        }
+        // --- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk) ---
+        if ($this->rewindEnabled !== null) {
+            $params['rewindEnabled'] = $this->rewindEnabled;
+        }
+        if ($this->additionalDirectories !== null) {
+            $params['additionalDirectories'] = $this->additionalDirectories;
+        }
+        if ($this->disabledMcpServers !== null) {
+            $params['disabledMcpServers'] = $this->disabledMcpServers;
+        }
+        if ($this->githubMcpToolConfig !== null) {
+            $params['githubMcpToolConfig'] = $this->githubMcpToolConfig;
+        }
+        if ($this->canvasProvider !== null) {
+            $params['canvasProvider'] = $this->canvasProvider;
+        }
+        if ($this->customAgentsLocalOnly !== null) {
+            $params['customAgentsLocalOnly'] = $this->customAgentsLocalOnly;
+        }
+        if ($this->builtinPluginDirectories !== null) {
+            $params['builtinPluginDirectories'] = $this->builtinPluginDirectories;
+        }
+        if ($this->argsSchema !== null) {
+            $params['argsSchema'] = $this->argsSchema;
+        }
+        if ($this->decisionContext !== null) {
+            $params['decisionContext'] = $this->decisionContext;
+        }
+        if ($this->toolSearch !== null) {
+            $params['toolSearch'] = $this->toolSearch;
+        }
+        if ($this->inProcess !== null) {
+            $params['inProcess'] = $this->inProcess;
+        }
+        if ($this->experimentalMode !== null) {
+            $params['experimentalMode'] = $this->experimentalMode;
+        }
+        if ($this->contentExclusion !== null) {
+            $params['contentExclusion'] = $this->contentExclusion;
         }
         // Signal to the runtime that an MCP OAuth host-token handler is registered.
         if ($this->onMcpAuthRequest !== null) {
@@ -1654,6 +1720,7 @@ class SessionHooks
      * @param callable|null $onPreToolUse fn(PreToolUseHookInput, array{sessionId:string}): ?PreToolUseHookOutput
      * @param callable|null $onPostToolUse fn(PostToolUseHookInput, array{sessionId:string}): ?PostToolUseHookOutput
      * @param callable|null $onUserPromptSubmitted fn(UserPromptSubmittedHookInput, array{sessionId:string}): ?UserPromptSubmittedHookOutput
+     * @param callable|null $onUserPromptTransformed fn(array, array{sessionId:string}): mixed User-prompt-transformed hook
      * @param callable|null $onSessionStart fn(SessionStartHookInput, array{sessionId:string}): ?SessionStartHookOutput
      * @param callable|null $onSessionEnd fn(SessionEndHookInput, array{sessionId:string}): ?SessionEndHookOutput
      * @param callable|null $onErrorOccurred fn(ErrorOccurredHookInput, array{sessionId:string}): ?ErrorOccurredHookOutput
@@ -1663,6 +1730,7 @@ class SessionHooks
         public /* readonly */ $onPreToolUse = null,
         public /* readonly */ $onPostToolUse = null,
         public /* readonly */ $onUserPromptSubmitted = null,
+        public /* readonly */ $onUserPromptTransformed = null,
         public /* readonly */ $onSessionStart = null,
         public /* readonly */ $onSessionEnd = null,
         public /* readonly */ $onErrorOccurred = null,
@@ -1674,6 +1742,7 @@ class SessionHooks
         return $this->onPreToolUse !== null
             || $this->onPostToolUse !== null
             || $this->onUserPromptSubmitted !== null
+            || $this->onUserPromptTransformed !== null
             || $this->onSessionStart !== null
             || $this->onSessionEnd !== null
             || $this->onErrorOccurred !== null

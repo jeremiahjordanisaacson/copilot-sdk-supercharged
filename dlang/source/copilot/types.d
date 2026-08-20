@@ -68,6 +68,12 @@ struct CopilotClientOptions
 
     /// BYOK bearer-token provider invoked for authenticated model requests.
     BearerTokenProvider bearerTokenProvider;
+
+    /// Directories scanned for built-in plugins.
+    string[] builtinPluginDirectories;
+
+    /// Use the in-process FFI transport instead of a child CLI process.
+    bool inProcess = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +237,7 @@ enum HookType : string
     preToolUse          = "preToolUse",
     postToolUse         = "postToolUse",
     userPromptSubmitted = "userPromptSubmitted",
+    userPromptTransformed = "userPromptTransformed",
     sessionStart        = "sessionStart",
     sessionEnd          = "sessionEnd",
     errorOccurred       = "errorOccurred",
@@ -359,6 +366,33 @@ struct SessionConfig
     /// When true, the client handles MCP OAuth authorization requests.
     bool mcpAuthHandler = false;
 
+    /// Enable session rewind (revert the session to an earlier turn).
+    bool rewindEnabled = false;
+
+    /// Additional working directories exposed to the session.
+    string[] additionalDirectories;
+
+    /// MCP servers to disable for this session.
+    string[] disabledMcpServers;
+
+    /// GitHub MCP tool configuration (opaque object).
+    JSONValue githubMcpToolConfig;
+
+    /// Canvas provider configuration (opaque object).
+    JSONValue canvasProvider;
+
+    /// Restrict custom agents to locally-defined ones only.
+    bool customAgentsLocalOnly = false;
+
+    /// Tool-search configuration (opaque object).
+    JSONValue toolSearch;
+
+    /// Enable experimental mode.
+    bool experimentalMode = false;
+
+    /// Enable content exclusion.
+    bool contentExclusion = false;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
@@ -481,6 +515,41 @@ struct SessionConfig
 
         if (mcpAuthHandler || onMcpAuthRequest !is null)
             obj["mcpAuthHandler"] = true;
+
+        if (rewindEnabled)
+            obj["rewindEnabled"] = true;
+
+        if (additionalDirectories.length > 0)
+        {
+            JSONValue[] arr;
+            foreach (s; additionalDirectories) arr ~= JSONValue(s);
+            obj["additionalDirectories"] = JSONValue(arr);
+        }
+
+        if (disabledMcpServers.length > 0)
+        {
+            JSONValue[] arr;
+            foreach (s; disabledMcpServers) arr ~= JSONValue(s);
+            obj["disabledMcpServers"] = JSONValue(arr);
+        }
+
+        if (githubMcpToolConfig.type == JSONType.object)
+            obj["githubMcpToolConfig"] = githubMcpToolConfig;
+
+        if (canvasProvider.type == JSONType.object)
+            obj["canvasProvider"] = canvasProvider;
+
+        if (customAgentsLocalOnly)
+            obj["customAgentsLocalOnly"] = true;
+
+        if (toolSearch.type == JSONType.object)
+            obj["toolSearch"] = toolSearch;
+
+        if (experimentalMode)
+            obj["experimentalMode"] = true;
+
+        if (contentExclusion)
+            obj["contentExclusion"] = true;
 
         return obj;
     }
@@ -729,4 +798,47 @@ SessionEventType parseEventType(string s) @safe pure nothrow
             return m;
     }
     return SessionEventType.unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Agent factories & permissions (2026-08 upstream sync)
+// ---------------------------------------------------------------------------
+
+/// Authoring options for a programmatic agent factory.
+struct AgentFactoryOptions
+{
+    /// JSON schema describing the factory's arguments (opaque object).
+    JSONValue argsSchema;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        if (argsSchema.type == JSONType.object)
+            obj["argsSchema"] = argsSchema;
+        return obj;
+    }
+}
+
+/// Reply to a permission request, including optional decision context.
+struct PermissionResponse
+{
+    /// Whether the requested action is allowed.
+    bool allowed = false;
+
+    /// Optional human-readable reason for the decision.
+    Nullable!string reason;
+
+    /// Opaque decision context forwarded with the reply.
+    JSONValue decisionContext;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["allowed"] = allowed;
+        if (!reason.isNull)
+            obj["reason"] = reason.get;
+        if (decisionContext.type == JSONType.object)
+            obj["decisionContext"] = decisionContext;
+        return obj;
+    }
 }

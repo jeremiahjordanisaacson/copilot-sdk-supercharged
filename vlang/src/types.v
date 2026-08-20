@@ -25,6 +25,8 @@ pub mut:
 	session_fs                    SessionFsConfig // session filesystem config
 	copilot_home                  string // override path to the Copilot home directory
 	tcp_connection_token          string // token for TCP connection authentication
+	builtin_plugin_directories    []string // built-in plugin directories (wire: builtinPluginDirectories)
+	in_process                    bool   // use in-process FFI transport (wire: inProcess)
 }
 
 // SessionConfig defines how to create a new conversation session.
@@ -66,6 +68,17 @@ pub mut:
 	on_post_tool_use                    PostToolUseHandler = unsafe { nil } // post-tool-use hook
 	on_pre_mcp_tool_call                PreMcpToolCallHandler = unsafe { nil } // pre-MCP-tool-call hook
 	request_handler                     CopilotRequestHandler = unsafe { nil } // custom HTTP request handler
+	// --- Additional upstream-sync session configuration (2026-08) ---
+	rewind_enabled                      bool // enable session rewind (wire: rewindEnabled)
+	additional_directories              []string // extra session directories (wire: additionalDirectories)
+	disabled_mcp_servers                []string // disabled MCP servers (wire: disabledMcpServers)
+	github_mcp_tool_config              map[string]string // GitHub MCP tool config (wire: githubMcpToolConfig)
+	canvas_provider                     map[string]string // canvas provider config (wire: canvasProvider)
+	custom_agents_local_only            bool // restrict custom agents to local (wire: customAgentsLocalOnly)
+	tool_search                         map[string]string // tool search configuration (wire: toolSearch)
+	experimental_mode                   bool // enable experimental mode (wire: experimentalMode)
+	content_exclusion                   bool // enable content exclusion (wire: contentExclusion)
+	on_user_prompt_transformed          UserPromptTransformedHandler = unsafe { nil } // user-prompt-transformed hook (wire: userPromptTransformed)
 }
 
 // HistoryEntry is a single turn in a conversation.
@@ -146,8 +159,9 @@ pub:
 // PermissionResponse is the answer to a permission request.
 pub struct PermissionResponse {
 pub:
-	approved bool   [json: 'approved']
-	reason   string [json: 'reason']
+	approved         bool              [json: 'approved']
+	reason           string            [json: 'reason']
+	decision_context map[string]string [json: 'decisionContext'] // opaque decision context
 }
 
 // ModelInfo describes a model the server can use.
@@ -293,6 +307,13 @@ pub:
 	arguments   string [json: 'arguments']  // JSON-encoded call arguments
 }
 
+// UserPromptTransformedPayload is delivered to the user-prompt-transformed hook.
+pub struct UserPromptTransformedPayload {
+pub:
+	original_prompt    string [json: 'originalPrompt']    // the user's original prompt
+	transformed_prompt string [json: 'transformedPrompt'] // the transformed prompt
+}
+
 // CopilotHttpRequest is passed to a custom HTTP request handler.
 pub struct CopilotHttpRequest {
 pub:
@@ -338,8 +359,17 @@ pub type PostToolUseHandler = fn (PostToolUsePayload)
 // PreMcpToolCallHandler is invoked before an MCP tool call is dispatched.
 pub type PreMcpToolCallHandler = fn (PreMcpToolCallPayload)
 
+// UserPromptTransformedHandler is invoked after the user prompt is transformed.
+pub type UserPromptTransformedHandler = fn (UserPromptTransformedPayload)
+
 // CopilotRequestHandler intercepts outbound Copilot HTTP requests.
 pub type CopilotRequestHandler = fn (CopilotHttpRequest) CopilotHttpResponse
+
+// AgentFactoryOptions holds authoring options for a programmatic agent factory.
+pub struct AgentFactoryOptions {
+pub:
+	args_schema map[string]string [json: 'argsSchema'] // JSON schema for factory arguments
+}
 
 // System message section name constants.
 pub const system_message_preamble = 'preamble'

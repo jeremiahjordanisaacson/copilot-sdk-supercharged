@@ -439,7 +439,16 @@ build_session_params(Config, _State) ->
         {memory_config, <<"memory">>},
         {otlp_protocol, <<"otlpProtocol">>},
         {enable_web_socket_responses, <<"enableWebSocketResponses">>},
-        {exp_assignments, <<"expAssignments">>}
+        {exp_assignments, <<"expAssignments">>},
+        {rewind_enabled, <<"rewindEnabled">>},
+        {additional_directories, <<"additionalDirectories">>},
+        {disabled_mcp_servers, <<"disabledMcpServers">>},
+        {github_mcp_tool_config, <<"githubMcpToolConfig">>},
+        {canvas_provider, <<"canvasProvider">>},
+        {custom_agents_local_only, <<"customAgentsLocalOnly">>},
+        {tool_search, <<"toolSearch">>},
+        {experimental_mode, <<"experimentalMode">>},
+        {content_exclusion, <<"contentExclusion">>}
     ],
     Params1 = lists:foldl(fun({Key, JsonKey}, Acc) ->
         case maps:get(Key, Config, undefined) of

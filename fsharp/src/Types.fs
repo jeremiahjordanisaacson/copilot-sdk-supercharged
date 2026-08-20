@@ -37,7 +37,9 @@ module PermissionResultKind =
 /// Result returned by a permission-request handler.
 type PermissionRequestResult =
     { Kind: PermissionResultKind
-      UpdraftMessage: string option }
+      UpdraftMessage: string option
+      /// Opaque decision context forwarded with the permission reply.
+      DecisionContext: IDictionary<string, obj> option }
 
 /// Permission-request payload sent by the server.
 type PermissionRequest =
@@ -123,6 +125,9 @@ type PostToolUseHandler = JsonElement option -> Async<unit>
 /// Hook invoked before an MCP tool call (pre-MCP-tool-call).
 type PreMcpToolCallHandler = JsonElement option -> Async<unit>
 
+/// Hook invoked after the user prompt is transformed (user-prompt-transformed).
+type UserPromptTransformedHandler = JsonElement option -> Async<unit>
+
 /// Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto").
 module ToolDefer =
     [<Literal>]
@@ -205,7 +210,11 @@ type CopilotClientOptions =
       /// HTTP request handler for intercepting outbound LLM inference requests.
       RequestHandler: CopilotRequestHandler option
       /// BYOK bearer-token provider invoked per session (receives ProviderTokenArgs).
-      BearerTokenProvider: (ProviderTokenArgs -> Async<string>) option }
+      BearerTokenProvider: (ProviderTokenArgs -> Async<string>) option
+      /// Directories to search for built-in plugins.
+      BuiltinPluginDirectories: string list option
+      /// Run the CLI in-process via the FFI transport instead of spawning a process.
+      InProcess: bool option }
 
 module CopilotClientOptions =
     /// Default client options (stdio, auto-start, info log level).
@@ -227,7 +236,9 @@ module CopilotClientOptions =
           CopilotHome = None
           TcpConnectionToken = None
           RequestHandler = None
-          BearerTokenProvider = None }
+          BearerTokenProvider = None
+          BuiltinPluginDirectories = None
+          InProcess = None }
 
 // ---------------------------------------------------------------------------
 // MCP server configuration
@@ -258,7 +269,9 @@ type MCPHttpServerConfig =
 /// Definition of a slash command.
 type CommandDefinition =
     { Name: string
-      Description: string option }
+      Description: string option
+      /// JSON Schema describing the command's arguments.
+      ArgsSchema: IDictionary<string, obj> option }
 
 // ---------------------------------------------------------------------------
 // Response format / image options
@@ -384,16 +397,38 @@ type SessionConfig =
       /// Hook invoked after a tool completes (post-tool-use).
       OnPostToolUse: PostToolUseHandler option
       /// Hook invoked before an MCP tool call (pre-MCP-tool-call).
-      OnPreMcpToolCall: PreMcpToolCallHandler option }
+      OnPreMcpToolCall: PreMcpToolCallHandler option
+      /// Hook invoked after the user prompt is transformed (user-prompt-transformed).
+      OnUserPromptTransformed: UserPromptTransformedHandler option
+      /// Enable rewinding the session to an earlier point.
+      RewindEnabled: bool option
+      /// Additional workspace directories the session may access.
+      AdditionalDirectories: string list option
+      /// MCP servers to disable for this session.
+      DisabledMcpServers: string list option
+      /// Configuration for the GitHub MCP tool.
+      GithubMcpToolConfig: IDictionary<string, obj> option
+      /// Canvas provider configuration.
+      CanvasProvider: IDictionary<string, obj> option
+      /// Load custom agents from local directories only.
+      CustomAgentsLocalOnly: bool option
+      /// Tool-search configuration.
+      ToolSearch: IDictionary<string, obj> option
+      /// Enable experimental runtime mode.
+      ExperimentalMode: bool option
+      /// Enable content-exclusion enforcement.
+      ContentExclusion: bool option
+      /// Reasoning effort hint for the model ("low", "medium", "high").
+      ReasoningEffort: string option }
 
 module SessionConfig =
     /// Approve all permission requests automatically.
     let approveAll : PermissionRequestHandler =
-        fun _ -> async { return { Kind = ApproveOnce; UpdraftMessage = None } }
+        fun _ -> async { return { Kind = ApproveOnce; UpdraftMessage = None; DecisionContext = None } }
 
     /// Reject all permission requests.
     let rejectAll : PermissionRequestHandler =
-        fun _ -> async { return { Kind = Reject; UpdraftMessage = None } }
+        fun _ -> async { return { Kind = Reject; UpdraftMessage = None; DecisionContext = None } }
 
     /// Default session config with approveAll handler.
     let defaults =
@@ -424,7 +459,18 @@ module SessionConfig =
           ExpAssignments = None
           OnMcpAuthRequest = None
           OnPostToolUse = None
-          OnPreMcpToolCall = None }
+          OnPreMcpToolCall = None
+          OnUserPromptTransformed = None
+          RewindEnabled = None
+          AdditionalDirectories = None
+          DisabledMcpServers = None
+          GithubMcpToolConfig = None
+          CanvasProvider = None
+          CustomAgentsLocalOnly = None
+          ToolSearch = None
+          ExperimentalMode = None
+          ContentExclusion = None
+          ReasoningEffort = None }
 
 // ---------------------------------------------------------------------------
 // Resume session configuration

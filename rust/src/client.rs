@@ -1010,6 +1010,7 @@ impl CopilotClient {
                     Err(_) => PermissionRequestResult {
                         kind: PermissionResultKind::DeniedNoApprovalRuleAndCouldNotRequestFromUser,
                         rules: None,
+                        decision_context: None,
                     },
                 };
 

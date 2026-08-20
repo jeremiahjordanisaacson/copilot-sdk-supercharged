@@ -257,7 +257,10 @@ case class CustomAgentConfig(
   infer: Option[Boolean] = None,
 
   /** List of skill names to preload into this agent's context. */
-  skills: Option[List[String]] = None
+  skills: Option[List[String]] = None,
+
+  /** JSON schema declaring a factory's arguments. */
+  argsSchema: Option[Map[String, Json]] = None
 )
 
 object CustomAgentConfig:
@@ -457,6 +460,33 @@ case class SessionConfig(
 
   /** Handler invoked when an MCP server requires OAuth authorization. */
   onMcpAuthRequest: Option[McpAuthHandler] = None,
+
+  /** Enable session rewind to restore earlier session points. */
+  rewindEnabled: Option[Boolean] = None,
+
+  /** Extra working directories available to the session. */
+  additionalDirectories: Option[List[String]] = None,
+
+  /** Names of configured MCP servers to disable for this session. */
+  disabledMcpServers: Option[List[String]] = None,
+
+  /** Configuration for the built-in GitHub MCP tools. */
+  githubMcpToolConfig: Option[Map[String, Json]] = None,
+
+  /** Identity of the canvas provider to register. */
+  canvasProvider: Option[Map[String, Json]] = None,
+
+  /** Only load workspace-local custom agents. */
+  customAgentsLocalOnly: Option[Boolean] = None,
+
+  /** Tool search configuration for large tool sets. */
+  toolSearch: Option[Map[String, Json]] = None,
+
+  /** Enable experimental runtime features. */
+  experimentalMode: Option[Boolean] = None,
+
+  /** Respect repository content-exclusion rules. */
+  contentExclusion: Option[Boolean] = None,
 )
 
 /** Configuration for resuming an existing session. */
@@ -651,7 +681,10 @@ object PermissionRequest:
 /** Result of a permission request. */
 case class PermissionRequestResult(
   kind: String,
-  rules: Option[List[Json]] = None
+  rules: Option[List[Json]] = None,
+
+  /** Opaque context forwarded on permission replies. */
+  decisionContext: Option[Map[String, Json]] = None
 )
 
 object PermissionRequestResult:
@@ -855,6 +888,9 @@ case class SessionHooks(
   onPostToolUse: Option[PostToolUseHandler] = None,
   onPreMcpToolCall: Option[PostToolUseHandler] = None,
   onUserPromptSubmitted: Option[UserPromptSubmittedHandler] = None,
+
+  /** Invoked after the user prompt has been transformed. */
+  onUserPromptTransformed: Option[UserPromptSubmittedHandler] = None,
   onSessionStart: Option[SessionStartHandler] = None,
   onSessionEnd: Option[SessionEndHandler] = None,
   onErrorOccurred: Option[ErrorOccurredHandler] = None
@@ -863,7 +899,8 @@ case class SessionHooks(
   def hasAny: Boolean =
     onPreToolUse.isDefined || onPostToolUse.isDefined ||
       onPreMcpToolCall.isDefined ||
-      onUserPromptSubmitted.isDefined || onSessionStart.isDefined ||
+      onUserPromptSubmitted.isDefined || onUserPromptTransformed.isDefined ||
+      onSessionStart.isDefined ||
       onSessionEnd.isDefined || onErrorOccurred.isDefined
 
 // ============================================================================
@@ -1444,7 +1481,13 @@ case class CopilotClientOptions(
   requestHandler: Option[CopilotRequestHandler] = None,
 
   /** Supplies bearer tokens for outbound model requests (bring-your-own-key). */
-  bearerTokenProvider: Option[BearerTokenProvider] = None
+  bearerTokenProvider: Option[BearerTokenProvider] = None,
+
+  /** Directories to load built-in plugins from. */
+  builtinPluginDirectories: Option[List[String]] = None,
+
+  /** Use the in-process (FFI) transport instead of a subprocess. */
+  inProcess: Option[Boolean] = None
 )
 
 // ============================================================================

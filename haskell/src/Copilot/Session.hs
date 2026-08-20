@@ -358,6 +358,15 @@ handleSessionHooksInvoke session hookType input sid = do
                 pure $ fmap Aeson.toJSON result
               Aeson.Error _ -> pure Nothing
 
+        "userPromptTransformed" -> case shOnUserPromptTransformed hooks of
+          Nothing -> pure Nothing
+          Just handler -> do
+            case Aeson.fromJSON input of
+              Aeson.Success inp -> do
+                result <- handler inp inv
+                pure $ fmap Aeson.toJSON result
+              Aeson.Error _ -> pure Nothing
+
         "sessionStart" -> case shOnSessionStart hooks of
           Nothing -> pure Nothing
           Just handler -> do

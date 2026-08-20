@@ -284,6 +284,10 @@ nlohmann::json CopilotSession::handleHooksInvoke(const std::string& hookType,
             auto hookInput = input.get<UserPromptSubmittedHookInput>();
             auto result = hooks->onUserPromptSubmitted(hookInput, sessionId);
             if (result) return *result;
+        } else if (hookType == "userPromptTransformed" && hooks->onUserPromptTransformed) {
+            auto hookInput = input.get<UserPromptSubmittedHookInput>();
+            auto result = hooks->onUserPromptTransformed(hookInput, sessionId);
+            if (result) return *result;
         } else if (hookType == "sessionStart" && hooks->onSessionStart) {
             auto hookInput = input.get<SessionStartHookInput>();
             auto result = hooks->onSessionStart(hookInput, sessionId);

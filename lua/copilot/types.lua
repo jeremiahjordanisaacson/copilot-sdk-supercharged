@@ -340,6 +340,20 @@ function M.SessionConfig(fields)
         otlpProtocol                    = fields.otlpProtocol,                    -- string, OTLP telemetry protocol
         enableWebSocketResponses        = fields.enableWebSocketResponses,        -- boolean, stream responses over WebSocket
         expAssignments                  = fields.expAssignments,                  -- table, experiment assignments
+        -- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk)
+        rewindEnabled                   = fields.rewindEnabled,                   -- boolean, enable session rewind
+        additionalDirectories           = fields.additionalDirectories,           -- array of strings, additional session directories
+        disabledMcpServers              = fields.disabledMcpServers,              -- array of strings, MCP servers to disable
+        githubMcpToolConfig             = fields.githubMcpToolConfig,             -- table, GitHub MCP tool configuration
+        canvasProvider                  = fields.canvasProvider,                  -- table or string, canvas provider
+        customAgentsLocalOnly           = fields.customAgentsLocalOnly,           -- boolean, restrict custom agents to local only
+        builtinPluginDirectories        = fields.builtinPluginDirectories,        -- array of strings, built-in plugin directories
+        argsSchema                      = fields.argsSchema,                       -- table, agent-factory authoring schema
+        decisionContext                 = fields.decisionContext,                 -- table, permission decision context
+        toolSearch                      = fields.toolSearch,                       -- table or boolean, tool search configuration
+        inProcess                       = fields.inProcess,                        -- boolean, use in-process FFI transport
+        experimentalMode                = fields.experimentalMode,                 -- boolean, enable experimental mode
+        contentExclusion                = fields.contentExclusion,                 -- boolean, enable content exclusion
         onMcpAuthRequest                = fields.onMcpAuthRequest,                -- function(ProviderTokenArgs) -> string, MCP OAuth host token handler
     }
 end
@@ -519,6 +533,7 @@ function M.SessionHooks(fields)
         onPreToolUse          = fields.onPreToolUse,
         onPostToolUse         = fields.onPostToolUse,
         onUserPromptSubmitted = fields.onUserPromptSubmitted,
+        onUserPromptTransformed = fields.onUserPromptTransformed,
         onSessionStart        = fields.onSessionStart,
         onSessionEnd          = fields.onSessionEnd,
         onErrorOccurred       = fields.onErrorOccurred,
