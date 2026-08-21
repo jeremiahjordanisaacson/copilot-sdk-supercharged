@@ -125,7 +125,7 @@ class CopilotE2ESpec
     }
 
     val response = Await.result(
-      session.sendAndWait(MessageOptions(prompt = "Hello")),
+      session.sendAndWait(MessageOptions(prompt = "What is 2+2?")),
       60.seconds
     )
 
@@ -346,23 +346,22 @@ class CopilotE2ESpec
     val toolCalled = new java.util.concurrent.atomic.AtomicBoolean(false)
 
     val tool = DefineTool(
-      name = "get_weather",
-      description = "Get current weather for a location",
+      name = "get_secret_number",
+      description = "Get a secret number for a given key",
       parameters = JsonObject(
         "type" -> "object".asJson,
         "properties" -> Json.obj(
-          "location" -> Json.obj(
+          "key" -> Json.obj(
             "type" -> "string".asJson,
-            "description" -> "City name".asJson
+            "description" -> "The key to look up".asJson
           )
         ),
-        "required" -> Json.arr("location".asJson)
+        "required" -> Json.arr("key".asJson)
       )
     ) { (args, _) =>
       toolCalled.set(true)
-      val location = args.hcursor.get[String]("location").getOrElse("unknown")
       Future.successful(ToolResultObject(
-        textResultForLlm = s"Weather in $location: 72°F, sunny",
+        textResultForLlm = "54321",
         resultType = ToolResultType.Success
       ))
     }
@@ -384,7 +383,7 @@ class CopilotE2ESpec
 
     // Send a message that should trigger the tool
     val response = Await.result(
-      session.sendAndWait(MessageOptions(prompt = "What is the weather in Seattle?")),
+      session.sendAndWait(MessageOptions(prompt = "What is the secret number for key ALPHA?")),
       60.seconds
     )
 
@@ -413,7 +412,7 @@ class CopilotE2ESpec
     }
 
     val response = Await.result(
-      session.sendAndWait(MessageOptions(prompt = "Hello")),
+      session.sendAndWait(MessageOptions(prompt = "What is 2+2?")),
       60.seconds
     )
 
@@ -441,7 +440,7 @@ class CopilotE2ESpec
     session.sessionId should not be empty
 
     val response = Await.result(
-      session.sendAndWait(MessageOptions(prompt = "Hello")),
+      session.sendAndWait(MessageOptions(prompt = "What is your full name?")),
       60.seconds
     )
     response shouldBe defined
@@ -464,7 +463,7 @@ class CopilotE2ESpec
     session.sessionId should not be empty
 
     val response = Await.result(
-      session.sendAndWait(MessageOptions(prompt = "Hello")),
+      session.sendAndWait(MessageOptions(prompt = "What is 2+2?")),
       60.seconds
     )
     response shouldBe defined

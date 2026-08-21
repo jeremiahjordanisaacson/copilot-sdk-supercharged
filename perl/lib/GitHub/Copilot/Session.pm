@@ -50,6 +50,7 @@ sub new {
 # --------------------------------------------------------------------------
 
 sub session_id     { return $_[0]->{session_id} }
+sub id             { return $_[0]->{session_id} }
 sub workspace_path { return $_[0]->{workspace_path} }
 
 # --------------------------------------------------------------------------

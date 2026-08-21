@@ -210,7 +210,7 @@ final class SessionE2ETests: XCTestCase {
             XCTAssertFalse(sessionId.isEmpty)
 
             let response = try await session.sendAndWait(
-                MessageOptions(prompt: "What is 1+1?")
+                MessageOptions(prompt: "What is 2+2?")
             )
 
             // Verify we received an assistant message event
@@ -308,7 +308,7 @@ final class SessionE2ETests: XCTestCase {
     func testSessionResume() async throws {
         try await configureSnapshot(
             category: "session",
-            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
+            testName: "should_resume_a_session_using_a_new_client"
         )
 
         let client = CopilotClient(options: CopilotClientOptions(
@@ -327,6 +327,13 @@ final class SessionE2ETests: XCTestCase {
             )
             savedSessionId = await session.sessionId
             XCTAssertFalse(savedSessionId.isEmpty)
+
+            // Send a message so there is persisted state to resume.
+            let initial = try await session.sendAndWait(
+                MessageOptions(prompt: "What is 1+1?")
+            )
+            XCTAssertNotNil(initial, "Initial send should succeed")
+
             try await session.destroy()
         }
 
@@ -338,6 +345,13 @@ final class SessionE2ETests: XCTestCase {
             )
             let resumedId = await resumed.sessionId
             XCTAssertEqual(resumedId, savedSessionId, "Resumed session ID should match original")
+
+            // Continue the conversation on the resumed session.
+            let continued = try await resumed.sendAndWait(
+                MessageOptions(prompt: "Now if you double that, what do you get?")
+            )
+            XCTAssertNotNil(continued, "Resumed send should succeed")
+
             try await resumed.destroy()
         }
 
@@ -587,12 +601,11 @@ final class SessionE2ETests: XCTestCase {
 
         do {
             let tool = defineTool(
-                name: "get_weather",
-                description: "Get current weather for a city",
-                parameters: ["city": "string"]
-            ) { params, _ in
-                let dict = params as? [String: Any] ?? [:]
-                return ["temperature": "72F", "city": dict["city"] ?? "unknown"]
+                name: "get_secret_number",
+                description: "Get a secret number for a given key",
+                parameters: ["key": "string"]
+            ) { _, _ in
+                return "54321"
             }
 
             let session = try await client.createSession(
@@ -640,7 +653,7 @@ final class SessionE2ETests: XCTestCase {
             }
 
             let response = try await session.sendAndWait(
-                MessageOptions(prompt: "Say hello")
+                MessageOptions(prompt: "What is 2+2?")
             )
             XCTAssertNotNil(response, "Streaming session should return a final response")
 
