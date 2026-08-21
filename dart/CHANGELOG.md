@@ -1,3 +1,18 @@
+## 2.5.0
+- Upstream sync: 210 commits from @github/copilot-sdk
+- New features ported to all 40 SDKs: session rewind, additional session
+  directories, disabled MCP servers, GitHub MCP tool config, canvas provider,
+  custom-agents local-only, userPromptTransformed hook, permission decision
+  context, built-in plugin directories, agent factory argsSchema,
+  reasoningEffort: max, tool search config, in-process (FFI) transport,
+  experimental mode, and content exclusion
+- All 40 SDKs fully tested
+
+## 2.4.0
+- Upstream sync: 369 commits from @github/copilot-sdk (through java/v1.0.5-01)
+- Feature parity across all 40 SDKs
+- All 40 SDKs fully tested
+
 ## 2.3.0
 - Upstream sync with @github/copilot 1.0.47
 - Canvas, cloud sessions, experimental schema types support

@@ -61,7 +61,6 @@ class CopilotClient {
   late final String _cwd;
   late final int _port;
   late final bool _useStdio;
-  late final String? _cliUrl;
   late final String _logLevel;
   late final bool _autoStart;
   late final bool _autoRestart;
@@ -103,7 +102,6 @@ class CopilotClient {
     _cwd = options.cwd ?? Directory.current.path;
     _port = options.port ?? 0;
     _useStdio = options.cliUrl != null ? false : (options.useStdio ?? true);
-    _cliUrl = options.cliUrl;
     _logLevel = options.logLevel ?? 'info';
     _autoStart = options.autoStart ?? true;
     _autoRestart = options.autoRestart ?? true;

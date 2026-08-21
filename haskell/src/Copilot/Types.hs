@@ -94,6 +94,15 @@ module Copilot.Types
   , UserInputResponse (..)
   , UserInputHandler
 
+    -- * Exit plan mode types
+  , ExitPlanModeRequest (..)
+  , ExitPlanModeResponse (..)
+  , ExitPlanModeHandler
+
+    -- * Trace context types
+  , TraceContext (..)
+  , TraceContextProvider
+
     -- * Hook types
   , HookInvocation (..)
   , PreToolUseHookInput (..)
@@ -1161,6 +1170,66 @@ instance FromJSON UserInputResponse where
 
 -- | User input handler callback.
 type UserInputHandler = UserInputRequest -> Text -> IO UserInputResponse
+
+-- ============================================================================
+-- Exit Plan Mode Types
+-- ============================================================================
+
+-- | Request to exit plan mode, sent by the agent when it wants to leave
+-- planning and begin acting on a plan.
+newtype ExitPlanModeRequest = ExitPlanModeRequest
+  { epmrSessionId :: Text
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON ExitPlanModeRequest where
+  parseJSON = withObject "ExitPlanModeRequest" $ \o ->
+    ExitPlanModeRequest <$> o .:? "sessionId" .!= ""
+
+instance ToJSON ExitPlanModeRequest where
+  toJSON ExitPlanModeRequest{..} = object
+    [ "sessionId" .= epmrSessionId ]
+
+-- | Response to an exit-plan-mode request. 'True' approves exiting plan mode.
+newtype ExitPlanModeResponse = ExitPlanModeResponse
+  { epmApproved :: Bool
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON ExitPlanModeResponse where
+  toJSON ExitPlanModeResponse{..} = object
+    [ "approved" .= epmApproved ]
+
+instance FromJSON ExitPlanModeResponse where
+  parseJSON = withObject "ExitPlanModeResponse" $ \o ->
+    ExitPlanModeResponse <$> o .:? "approved" .!= True
+
+-- | Exit-plan-mode handler callback.
+type ExitPlanModeHandler = ExitPlanModeRequest -> IO ExitPlanModeResponse
+
+-- ============================================================================
+-- Trace Context Types
+-- ============================================================================
+
+-- | W3C Trace Context (@traceparent@/@tracestate@) for distributed tracing.
+data TraceContext = TraceContext
+  { tcTraceparent :: !(Maybe Text)
+  , tcTracestate  :: !(Maybe Text)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON TraceContext where
+  toJSON TraceContext{..} = object
+    [ "traceparent" .= tcTraceparent
+    , "tracestate"  .= tcTracestate
+    ]
+
+instance FromJSON TraceContext where
+  parseJSON = withObject "TraceContext" $ \o ->
+    TraceContext
+      <$> o .:? "traceparent"
+      <*> o .:? "tracestate"
+
+-- | Callback that returns the current W3C Trace Context. Wire this up to your
+-- OpenTelemetry (or other tracing) SDK to propagate traces to the Copilot CLI.
+type TraceContextProvider = IO TraceContext
 
 -- ============================================================================
 -- Hook Types
