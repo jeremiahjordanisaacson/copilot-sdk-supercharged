@@ -360,12 +360,11 @@ class CopilotClient
     public function ping(?string $message = null): PingResponse
     {
         $this->ensureConnected();
-        $params = [];
-        if ($message !== null) {
-            $params['message'] = $message;
-        }
-        $result = $this->connection->request('ping', $params);
-        return PingResponse::fromArray($result);
+        // Always send an object carrying a `message` key (mirrors the wire
+        // request other SDKs use); the server returns `protocolVersion` in the
+        // result. Tolerate a null/non-array result to avoid a fatal TypeError.
+        $result = $this->connection->request('ping', ['message' => $message]);
+        return PingResponse::fromArray(is_array($result) ? $result : []);
     }
 
     /**
@@ -637,7 +636,8 @@ class CopilotClient
 
         try {
             // Modern servers implement the `connect` handshake (carrying the optional
-            // connection token). Legacy servers without it fall back to `ping` below.
+            // connection token). Servers without it — or that report no protocol
+            // version — fall back to the legacy `ping` handshake below.
             $connectParams = [];
             if ($this->options->tcpConnectionToken !== null) {
                 $connectParams['token'] = $this->options->tcpConnectionToken;
@@ -647,12 +647,16 @@ class CopilotClient
                 $serverVersion = $result['protocolVersion'];
             }
         } catch (JsonRpcException $e) {
-            if ($e->getCode() === -32601 || str_contains($e->getRpcMessage(), 'Unhandled method connect')) {
-                // Legacy server without `connect`; fall back to `ping`.
-                $serverVersion = $this->ping()->protocolVersion;
-            } else {
+            if ($e->getCode() !== -32601 && !str_contains($e->getRpcMessage(), 'Unhandled method connect')) {
                 throw $e;
             }
+            // Legacy server without `connect`; fall through to `ping` below.
+        }
+
+        // If `connect` is unsupported or reported no protocol version, use the
+        // legacy `ping` handshake (the wire request other SDKs use successfully).
+        if ($serverVersion === null) {
+            $serverVersion = $this->ping()->protocolVersion;
         }
 
         if ($serverVersion === null) {

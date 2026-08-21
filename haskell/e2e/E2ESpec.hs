@@ -119,6 +119,8 @@ spec = do
               , moResponseFormat = Nothing
               , moImageOptions   = Nothing
               , moRequestHeaders = Nothing
+              , moAgentMode      = Nothing
+              , moDisplayPrompt  = Nothing
               }
 
         mEvt <- sendAndWait session msgOpts Nothing  -- default 60s timeout
@@ -180,6 +182,8 @@ spec = do
               , moResponseFormat = Nothing
               , moImageOptions   = Nothing
               , moRequestHeaders = Nothing
+              , moAgentMode      = Nothing
+              , moDisplayPrompt  = Nothing
               }
 
         resp1 <- sendAndWait session msg1 Nothing
@@ -194,6 +198,8 @@ spec = do
               , moResponseFormat = Nothing
               , moImageOptions   = Nothing
               , moRequestHeaders = Nothing
+              , moAgentMode      = Nothing
+              , moDisplayPrompt  = Nothing
               }
 
         resp2 <- sendAndWait session msg2 Nothing
@@ -407,6 +413,8 @@ spec = do
               , moResponseFormat = Nothing
               , moImageOptions   = Nothing
               , moRequestHeaders = Nothing
+              , moAgentMode      = Nothing
+              , moDisplayPrompt  = Nothing
               }
 
         -- sendAndWait may timeout with replay proxy; use short timeout
@@ -438,6 +446,8 @@ spec = do
               , moResponseFormat = Nothing
               , moImageOptions   = Nothing
               , moRequestHeaders = Nothing
+              , moAgentMode      = Nothing
+              , moDisplayPrompt  = Nothing
               }
 
         _ <- sendAndWait session msgOpts Nothing
@@ -481,6 +491,8 @@ spec = do
               , moResponseFormat = Nothing
               , moImageOptions   = Nothing
               , moRequestHeaders = Nothing
+              , moAgentMode      = Nothing
+              , moDisplayPrompt  = Nothing
               }
 
         mEvt <- sendAndWait session msgOpts Nothing
@@ -527,6 +539,8 @@ spec = do
               , moResponseFormat = Nothing
               , moImageOptions   = Nothing
               , moRequestHeaders = Nothing
+              , moAgentMode      = Nothing
+              , moDisplayPrompt  = Nothing
               }
 
         mEvt <- sendAndWait session msgOpts Nothing
@@ -624,6 +638,8 @@ spec = do
                     , moResponseFormat = Nothing
                     , moImageOptions   = Nothing
                     , moRequestHeaders = Nothing
+                    , moAgentMode      = Nothing
+                    , moDisplayPrompt  = Nothing
                     }
               void $ sendAndWait session msgOpts Nothing
 

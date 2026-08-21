@@ -458,6 +458,7 @@ module CopilotSDK
     property tcp_connection_token : String?
     property bearer_token_provider : BearerTokenProvider?
     property on_mcp_auth_request : McpAuthHandler?
+    property on_get_trace_context : TraceContextProvider?
     property builtin_plugin_directories : Array(String)? # wire: builtinPluginDirectories
     property in_process : Bool?                           # wire: inProcess
 
@@ -466,6 +467,7 @@ module CopilotSDK
                    @session_idle_timeout_seconds = nil, @session_fs = nil,
                    @copilot_home = nil, @tcp_connection_token = nil,
                    @bearer_token_provider = nil, @on_mcp_auth_request = nil,
+                   @on_get_trace_context = nil,
                    @builtin_plugin_directories = nil, @in_process = nil)
     end
   end
@@ -636,6 +638,20 @@ module CopilotSDK
 
   # Alias for exit-plan-mode handler callbacks.
   alias ExitPlanModeHandler = Proc(ExitPlanModeRequest, String, ExitPlanModeResult)
+
+  # W3C Trace Context headers returned by a TraceContextProvider and injected
+  # into session.create/resume/send RPCs for distributed tracing of agent turns.
+  struct TraceContext
+    getter traceparent : String?
+    getter tracestate : String?
+
+    def initialize(@traceparent : String? = nil, @tracestate : String? = nil)
+    end
+  end
+
+  # Alias for trace-context provider callbacks. Returns the current W3C trace
+  # context to inject into agent-turn RPCs.
+  alias TraceContextProvider = Proc(TraceContext)
 
   # Default permission handler that denies all requests.
   def self.deny_all_permissions(request : PermissionRequest, session_id : String) : PermissionRequestResult
