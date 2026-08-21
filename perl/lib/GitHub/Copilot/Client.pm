@@ -867,6 +867,13 @@ sub _session_fs_error {
     return { code => $code, message => (defined $message ? "$message" : "$!") };
 }
 
+sub _session_fs_ok {
+    # Void sessionFs operations must reply with JSON `null` (no error object),
+    # which the CLI decodes as success; replying with `{}` is rejected as a
+    # malformed SessionFsError ("missing field `code`").
+    return $GitHub::Copilot::JsonRpcClient::NULL_RESULT;
+}
+
 sub _session_fs_iso8601 {
     my ($epoch) = @_;
     $epoch = time() unless defined $epoch;
@@ -902,7 +909,7 @@ sub _handle_session_fs_write_file {
     if (open my $fh, '>:raw', $path) {
         print $fh $content;
         close $fh;
-        return {};
+        return _session_fs_ok();
     }
     return _session_fs_error("$!");
 }
@@ -915,7 +922,7 @@ sub _handle_session_fs_append_file {
     if (open my $fh, '>>:raw', $path) {
         print $fh $content;
         close $fh;
-        return {};
+        return _session_fs_ok();
     }
     return _session_fs_error("$!");
 }
@@ -963,7 +970,7 @@ sub _handle_session_fs_mkdir {
         }
         1;
     };
-    return $ok ? {} : _session_fs_error("$@");
+    return $ok ? _session_fs_ok() : _session_fs_error("$@");
 }
 
 sub _handle_session_fs_readdir {
@@ -1008,9 +1015,9 @@ sub _handle_session_fs_rm {
             }
             1;
         };
-        return $ok ? {} : ($force ? {} : _session_fs_error("$@"));
+        return $ok ? _session_fs_ok() : ($force ? _session_fs_ok() : _session_fs_error("$@"));
     }
-    return $force ? {} : { code => 'ENOENT', message => "no such file or directory: $path" };
+    return $force ? _session_fs_ok() : { code => 'ENOENT', message => "no such file or directory: $path" };
 }
 
 sub _handle_session_fs_rename {
@@ -1019,7 +1026,7 @@ sub _handle_session_fs_rename {
     my $dest = defined $params->{dest} ? $params->{dest} : '';
     _session_fs_make_parent_dirs($dest);
     if (rename($src, $dest)) {
-        return {};
+        return _session_fs_ok();
     }
     return _session_fs_error("$!");
 }

@@ -20,6 +20,13 @@ use Time::HiRes qw(time sleep);
 use Scalar::Util qw(blessed);
 use Errno qw(EAGAIN EWOULDBLOCK);
 
+# A request handler may return $NULL_RESULT to send an explicit JSON `null`
+# result (as opposed to an empty object `{}`). Some server-side decoders
+# require `null` for void operations — e.g. the CLI decodes the
+# sessionFs.mkdir / writeFile / appendFile / rm / rename responses as an
+# optional error object and rejects `{}` ("missing field `code`").
+our $NULL_RESULT = bless {}, 'GitHub::Copilot::JsonRpcClient::NullResult';
+
 =head1 NAME
 
 GitHub::Copilot::JsonRpcClient - JSON-RPC 2.0 client over stdio with Content-Length framing
@@ -361,8 +368,14 @@ sub _dispatch_incoming {
 
         eval {
             my $result = $handler->($params);
-            $result = {} unless defined $result;
-            $self->_send_response($id, $result);
+            if (blessed($result)
+                && $result->isa('GitHub::Copilot::JsonRpcClient::NullResult')) {
+                # Explicit JSON `null` result requested by the handler.
+                $self->_send_response($id, undef);
+            } else {
+                $result = {} unless defined $result;
+                $self->_send_response($id, $result);
+            }
         };
         if ($@) {
             $self->_send_error_response($id, -32603, "$@", undef);
