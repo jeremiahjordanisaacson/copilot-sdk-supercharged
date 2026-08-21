@@ -92,11 +92,16 @@ env:
   GH_TOKEN: "fake-token-for-e2e-tests"
   GITHUB_TOKEN: "fake-token-for-e2e-tests"
 
+concurrency:
+  group: additional-sdk-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ---- Tier 1: SDKs with standard package managers ----
   java:
     name: "Test: Java SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: java
@@ -119,6 +124,7 @@ jobs:
   rust:
     name: "Test: Rust SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: rust
@@ -138,6 +144,7 @@ jobs:
   ruby:
     name: "Test: Ruby SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: ruby
@@ -161,6 +168,7 @@ jobs:
   php:
     name: "Test: PHP SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: php
@@ -185,6 +193,7 @@ jobs:
   kotlin:
     name: "Test: Kotlin SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: kotlin
@@ -208,6 +217,7 @@ jobs:
   dart:
     name: "Test: Dart SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: dart
@@ -228,7 +238,7 @@ jobs:
   scala:
     name: "Test: Scala SDK"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: scala
@@ -252,6 +262,7 @@ jobs:
   elixir:
     name: "Test: Elixir SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: elixir
@@ -275,6 +286,7 @@ jobs:
   crystal:
     name: "Test: Crystal SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: crystal
@@ -295,6 +307,7 @@ jobs:
   julia:
     name: "Test: Julia SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: julia
@@ -316,6 +329,7 @@ jobs:
   nim:
     name: "Test: Nim SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: nim
@@ -335,6 +349,7 @@ jobs:
   lua:
     name: "Test: Lua SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -357,6 +372,7 @@ jobs:
   cpp:
     name: "Test: C++ SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -376,6 +392,7 @@ jobs:
   c-sdk:
     name: "Test: C SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -395,6 +412,7 @@ jobs:
   swift:
     name: "Test: Swift SDK"
     runs-on: macos-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: swift
@@ -413,6 +431,7 @@ jobs:
   haskell:
     name: "Test: Haskell SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: haskell
@@ -436,6 +455,7 @@ jobs:
   fsharp:
     name: "Test: F# SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: fsharp
@@ -457,6 +477,7 @@ jobs:
   visualbasic:
     name: "Test: Visual Basic SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: visualbasic
@@ -478,6 +499,7 @@ jobs:
   fortran:
     name: "Test: Fortran SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: fortran
@@ -500,6 +522,7 @@ jobs:
   zig:
     name: "Test: Zig SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: zig
@@ -521,6 +544,7 @@ jobs:
   objc:
     name: "Test: Objective-C SDK"
     runs-on: macos-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: objc
@@ -544,6 +568,7 @@ jobs:
   perl:
     name: "Test: Perl SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: perl
@@ -571,6 +596,7 @@ jobs:
   r-sdk:
     name: "Test: R SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: r
@@ -594,6 +620,7 @@ jobs:
   groovy:
     name: "Test: Groovy SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: groovy
@@ -617,6 +644,7 @@ jobs:
   clojure:
     name: "Test: Clojure SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: clojure
@@ -638,6 +666,7 @@ jobs:
   erlang:
     name: "Test: Erlang SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: erlang
@@ -660,6 +689,7 @@ jobs:
   dlang:
     name: "Test: D SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: dlang
@@ -679,6 +709,7 @@ jobs:
   ocaml:
     name: "Test: OCaml SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: ocaml
@@ -701,6 +732,7 @@ jobs:
   tcl:
     name: "Test: Tcl SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: tcl
@@ -721,6 +753,7 @@ jobs:
   shell:
     name: "Test: Shell SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: shell
@@ -742,6 +775,7 @@ jobs:
   solidity:
     name: "Test: Solidity SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: solidity
@@ -759,6 +793,7 @@ jobs:
   vlang:
     name: "Test: V SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -777,6 +812,7 @@ jobs:
   ada:
     name: "Test: Ada SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -794,6 +830,7 @@ jobs:
   cobol:
     name: "Test: COBOL SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -811,6 +848,7 @@ jobs:
   delphi:
     name: "Test: Delphi SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -829,6 +867,7 @@ jobs:
   matlab:
     name: "Test: MATLAB SDK"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
