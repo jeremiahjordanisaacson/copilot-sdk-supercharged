@@ -31,9 +31,20 @@ object TestHarness:
    val envPath = Option(System.getenv("COPILOT_CLI_PATH")).filter(_.nonEmpty)
    envPath.filter(p => java.io.File(p).exists()).getOrElse {
      val repoRoot = resolveRepoRoot()
-     val nodeCliPath = repoRoot.resolve("nodejs/node_modules/@github/copilot/index.js")
-     if nodeCliPath.toFile.exists() then nodeCliPath.toString
-     else "copilot"
+     val githubModules = repoRoot.resolve("nodejs/node_modules/@github").toFile
+     // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+     // package (e.g. @github/copilot-linux-x64); prefer it when present.
+     val platformCli = Option(githubModules.listFiles())
+       .getOrElse(Array.empty[java.io.File])
+       .filter(f => f.isDirectory && f.getName.startsWith("copilot-") && !f.getName.contains("language-server"))
+       .map(f => java.io.File(f, "index.js"))
+       .find(_.exists())
+     platformCli match
+       case Some(f) => f.getAbsolutePath
+       case None =>
+         val nodeCliPath = repoRoot.resolve("nodejs/node_modules/@github/copilot/index.js")
+         if nodeCliPath.toFile.exists() then nodeCliPath.toString
+         else "copilot"
    }
 
   /** Environment variables that route the CLI through the proxy. */

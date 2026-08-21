@@ -59,6 +59,17 @@ class SessionE2ETest {
             return File(envPath).absolutePath
         }
 
+        // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+        // package (e.g. @github/copilot-linux-x64); prefer it when present.
+        val githubModules = repoRoot.resolve("nodejs/node_modules/@github")
+        val platformCli = githubModules.listFiles()
+            ?.filter { it.isDirectory && it.name.startsWith("copilot-") && !it.name.contains("language-server") }
+            ?.map { File(it, "index.js") }
+            ?.firstOrNull { it.exists() }
+        if (platformCli != null) {
+            return platformCli.absolutePath
+        }
+
         val nodeCliPath = repoRoot
             .resolve("nodejs/node_modules/@github/copilot/index.js")
 

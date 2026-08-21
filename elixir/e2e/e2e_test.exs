@@ -803,17 +803,30 @@ defmodule CopilotE2E.E2ETest do
         if File.exists?(path), do: Path.expand(path), else: raise("COPILOT_CLI_PATH not found: #{path}")
 
       _ ->
-        # Look in the sibling nodejs directory
-        base = Path.expand("../../nodejs/node_modules/@github/copilot/index.js", __DIR__)
+        # As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+        # package (e.g. @github/copilot-linux-x64); prefer it when present.
+        github_modules = Path.expand("../../nodejs/node_modules/@github", __DIR__)
 
-        if File.exists?(base) do
-          base
-        else
-          raise """
-          CLI not found for E2E tests.
-          Set COPILOT_CLI_PATH or run `npm install` in the nodejs/ directory.
-          Looked at: #{base}
-          """
+        platform_cli =
+          Path.wildcard(Path.join(github_modules, "copilot-*/index.js"))
+          |> Enum.reject(&String.contains?(&1, "language-server"))
+          |> Enum.find(&File.exists?/1)
+
+        base = Path.join(github_modules, "copilot/index.js")
+
+        cond do
+          platform_cli != nil ->
+            platform_cli
+
+          File.exists?(base) ->
+            base
+
+          true ->
+            raise """
+            CLI not found for E2E tests.
+            Set COPILOT_CLI_PATH or run `npm install` in the nodejs/ directory.
+            Looked at: #{base}
+            """
         end
     end
   end

@@ -25,8 +25,23 @@ local function resolve_cli_path()
     local script_dir = debug.getinfo(1, "S").source:match("^@(.+)[/\\]") or "."
     local sep = package.config:sub(1, 1)
     local repo_root = script_dir .. sep .. ".."
-    local cli_js = repo_root .. sep .. "nodejs" .. sep .. "node_modules"
-        .. sep .. "@github" .. sep .. "copilot" .. sep .. "index.js"
+    local github_modules = repo_root .. sep .. "nodejs" .. sep .. "node_modules"
+        .. sep .. "@github"
+
+    -- As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+    -- package (e.g. @github/copilot-linux-x64); prefer it when present.
+    local ls = io.popen('ls -1 "' .. github_modules .. '"/copilot-*/index.js 2>/dev/null')
+    if ls then
+        for line in ls:lines() do
+            if not line:find("language%-server") then
+                ls:close()
+                return "node " .. line
+            end
+        end
+        ls:close()
+    end
+
+    local cli_js = github_modules .. sep .. "copilot" .. sep .. "index.js"
 
     local f = io.open(cli_js, "r")
     if f then

@@ -76,10 +76,30 @@ final class SessionE2ETests: XCTestCase {
             return envPath
         }
 
-        let nodeCliPath = Self.repoRoot
+        let githubModules = Self.repoRoot
             .appendingPathComponent("nodejs")
             .appendingPathComponent("node_modules")
             .appendingPathComponent("@github")
+
+        // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+        // package (e.g. @github/copilot-linux-x64 or copilot-darwin-arm64);
+        // prefer it when present.
+        if let entries = try? FileManager.default.contentsOfDirectory(
+            at: githubModules, includingPropertiesForKeys: nil
+        ) {
+            let sorted = entries.sorted { $0.lastPathComponent < $1.lastPathComponent }
+            for entry in sorted {
+                let name = entry.lastPathComponent
+                if name.hasPrefix("copilot-") && !name.contains("language-server") {
+                    let candidate = entry.appendingPathComponent("index.js").path
+                    if FileManager.default.fileExists(atPath: candidate) {
+                        return candidate
+                    }
+                }
+            }
+        }
+
+        let nodeCliPath = githubModules
             .appendingPathComponent("copilot")
             .appendingPathComponent("index.js")
             .path

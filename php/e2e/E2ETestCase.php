@@ -94,9 +94,19 @@ abstract class E2ETestCase extends TestCase
             return realpath($envPath) ?: $envPath;
         }
 
-        $nodeCliPath = static::$repoRoot . DIRECTORY_SEPARATOR . 'nodejs'
-            . DIRECTORY_SEPARATOR . 'node_modules' . DIRECTORY_SEPARATOR . '@github'
-            . DIRECTORY_SEPARATOR . 'copilot' . DIRECTORY_SEPARATOR . 'index.js';
+        $githubModules = static::$repoRoot . DIRECTORY_SEPARATOR . 'nodejs'
+            . DIRECTORY_SEPARATOR . 'node_modules' . DIRECTORY_SEPARATOR . '@github';
+
+        // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+        // package (e.g. @github/copilot-linux-x64); prefer it when present.
+        foreach (glob($githubModules . DIRECTORY_SEPARATOR . 'copilot-*' . DIRECTORY_SEPARATOR . 'index.js') ?: [] as $match) {
+            if (strpos($match, 'language-server') === false && file_exists($match)) {
+                return realpath($match) ?: $match;
+            }
+        }
+
+        $nodeCliPath = $githubModules . DIRECTORY_SEPARATOR . 'copilot'
+            . DIRECTORY_SEPARATOR . 'index.js';
 
         if (file_exists($nodeCliPath)) {
             return realpath($nodeCliPath) ?: $nodeCliPath;

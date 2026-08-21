@@ -91,8 +91,12 @@ sub new {
             if (!defined $cli_path || !-e $cli_path) {
                 # Try repo-relative paths
                 my $script_dir = dirname(abs_path(__FILE__));
+                my $nodejs_github = File::Spec->catdir($script_dir, '..', '..', '..', '..', 'nodejs', 'node_modules', '@github');
+                # As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+                # package (e.g. @github/copilot-linux-x64); prefer it when present.
                 my @candidates = (
-                    File::Spec->catfile($script_dir, '..', '..', '..', '..', 'nodejs', 'node_modules', '@github', 'copilot', 'index.js'),
+                    (grep { $_ !~ /language-server/ } glob(File::Spec->catfile($nodejs_github, 'copilot-*', 'index.js'))),
+                    File::Spec->catfile($nodejs_github, 'copilot', 'index.js'),
                     File::Spec->catfile($script_dir, '..', '..', '..', '..', 'test', 'harness', 'node_modules', '@github', 'copilot', 'npm-loader.js'),
                 );
                 $cli_path = undef;

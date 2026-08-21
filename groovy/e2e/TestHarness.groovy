@@ -106,6 +106,16 @@ class TestHarness {
         }
 
         File repoRoot = findRepoRoot()
+        File githubModules = new File(repoRoot, 'nodejs/node_modules/@github')
+        // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+        // package (e.g. @github/copilot-linux-x64); prefer it when present.
+        File platformCli = githubModules.listFiles()?.findAll {
+            it.directory && it.name.startsWith('copilot-') && !it.name.contains('language-server')
+        }?.collect { new File(it, 'index.js') }?.find { it.exists() }
+        if (platformCli != null) {
+            return platformCli.absolutePath
+        }
+
         File nodeCliPath = new File(repoRoot, 'nodejs/node_modules/@github/copilot/index.js')
         if (nodeCliPath.exists()) {
             return nodeCliPath.absolutePath

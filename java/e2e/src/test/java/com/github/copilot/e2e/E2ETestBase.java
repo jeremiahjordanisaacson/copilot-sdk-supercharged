@@ -91,9 +91,32 @@ public abstract class E2ETestBase {
         }
 
         Path repoRoot = TestHarness.getRepoRoot();
-        Path cliPath = repoRoot.resolve("nodejs")
+        Path githubModules = repoRoot.resolve("nodejs")
                 .resolve("node_modules")
-                .resolve("@github")
+                .resolve("@github");
+
+        // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+        // package (e.g. @github/copilot-linux-x64); prefer it when present.
+        if (Files.isDirectory(githubModules)) {
+            try (java.util.stream.Stream<Path> entries = Files.list(githubModules)) {
+                java.util.Optional<Path> platformCli = entries
+                        .filter(Files::isDirectory)
+                        .filter(dir -> {
+                            String n = dir.getFileName().toString();
+                            return n.startsWith("copilot-") && !n.contains("language-server");
+                        })
+                        .map(dir -> dir.resolve("index.js"))
+                        .filter(Files::exists)
+                        .findFirst();
+                if (platformCli.isPresent()) {
+                    return platformCli.get().toAbsolutePath().toString();
+                }
+            } catch (java.io.IOException ignored) {
+                // fall through to legacy path
+            }
+        }
+
+        Path cliPath = githubModules
                 .resolve("copilot")
                 .resolve("index.js");
         if (Files.exists(cliPath)) {

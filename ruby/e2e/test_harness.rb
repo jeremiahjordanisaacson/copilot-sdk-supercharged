@@ -146,7 +146,16 @@ module E2E
       env_path = ENV["COPILOT_CLI_PATH"]
       return File.expand_path(env_path) if env_path && File.exist?(env_path)
 
-      cli = File.join(REPO_ROOT, "nodejs", "node_modules", "@github", "copilot", "index.js")
+      github_modules = File.join(REPO_ROOT, "nodejs", "node_modules", "@github")
+
+      # As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+      # package (e.g. @github/copilot-linux-x64); prefer it when present.
+      platform_cli = Dir.glob(File.join(github_modules, "copilot-*", "index.js"))
+                        .reject { |p| p.include?("language-server") }
+                        .find { |p| File.exist?(p) }
+      return File.expand_path(platform_cli) if platform_cli
+
+      cli = File.join(github_modules, "copilot", "index.js")
       return File.expand_path(cli) if File.exist?(cli)
 
       raise "CLI not found. Set COPILOT_CLI_PATH or run 'npm install' in the nodejs directory."
