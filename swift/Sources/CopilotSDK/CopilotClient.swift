@@ -986,7 +986,7 @@ public actor CopilotClient {
             }
             try content.write(toFile: path, atomically: true, encoding: .utf8)
             applySessionFsMode(params["mode"], to: path)
-            return [:]
+            return nil
         } catch {
             return sessionFsError(error)
         }
@@ -1014,7 +1014,7 @@ public actor CopilotClient {
                 try content.write(toFile: path, atomically: true, encoding: .utf8)
             }
             applySessionFsMode(params["mode"], to: path)
-            return [:]
+            return nil
         } catch {
             return sessionFsError(error)
         }
@@ -1065,7 +1065,7 @@ public actor CopilotClient {
         do {
             try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: recursive)
             applySessionFsMode(params["mode"], to: path)
-            return [:]
+            return nil
         } catch {
             return sessionFsError(error)
         }
@@ -1108,7 +1108,7 @@ public actor CopilotClient {
         }
         let force = params["force"] as? Bool ?? false
         if !FileManager.default.fileExists(atPath: path) {
-            if force { return [:] }
+            if force { return nil }
             return sessionFsError(
                 NSError(
                     domain: NSPOSIXErrorDomain, code: Int(ENOENT),
@@ -1116,7 +1116,7 @@ public actor CopilotClient {
         }
         do {
             try FileManager.default.removeItem(atPath: path)
-            return [:]
+            return nil
         } catch {
             return sessionFsError(error)
         }
@@ -1131,7 +1131,7 @@ public actor CopilotClient {
                 try FileManager.default.removeItem(atPath: dest)
             }
             try FileManager.default.moveItem(atPath: src, toPath: dest)
-            return [:]
+            return nil
         } catch {
             return sessionFsError(error)
         }

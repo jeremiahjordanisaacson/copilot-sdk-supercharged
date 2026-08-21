@@ -168,7 +168,7 @@ public actor JsonRpcClient {
         if let result = result {
             message["result"] = result
         } else {
-            message["result"] = [String: Any]()
+            message["result"] = NSNull()
         }
         try? sendMessage(message)
     }
