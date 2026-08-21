@@ -161,7 +161,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -194,7 +195,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -244,6 +246,7 @@ final class SessionE2ETests: XCTestCase {
             cliPath: getCliPath(),
             cwd: Self.workDir,
             env: getTestEnv(),
+            githubToken: "fake-test-token",
             sessionFs: fsConfig
         ))
 
@@ -274,7 +277,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -310,7 +314,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -349,7 +354,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -382,7 +388,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -412,7 +419,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -444,7 +452,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -467,7 +476,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -490,7 +500,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -513,7 +524,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -530,7 +542,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -566,7 +579,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -609,7 +623,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -645,7 +660,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -685,6 +701,7 @@ final class SessionE2ETests: XCTestCase {
             cliPath: getCliPath(),
             cwd: Self.workDir,
             env: getTestEnv(),
+            githubToken: "fake-test-token",
             sessionFs: fsConfig
         ))
 
@@ -713,7 +730,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -747,7 +765,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
@@ -776,7 +795,8 @@ final class SessionE2ETests: XCTestCase {
         let client = CopilotClient(options: CopilotClientOptions(
             cliPath: getCliPath(),
             cwd: Self.workDir,
-            env: getTestEnv()
+            env: getTestEnv(),
+            githubToken: "fake-test-token"
         ))
 
         try await client.start()
