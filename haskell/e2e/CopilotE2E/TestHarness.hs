@@ -18,8 +18,9 @@ module CopilotE2E.TestHarness
   ) where
 
 import Control.Exception    (SomeException, bracket, catch)
+import Control.Monad        (filterM)
 import Data.List            (isInfixOf, isPrefixOf)
-import System.Directory     (doesFileExist, getCurrentDirectory)
+import System.Directory     (doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory)
 import System.Environment   (lookupEnv)
 import System.FilePath      ((</>))
 import System.IO            (Handle, hGetLine, hClose, hIsEOF)
@@ -38,7 +39,10 @@ data ProxyHandle = ProxyHandle
 -- | Locate the Copilot CLI binary for E2E tests.
 --
 -- Checks @COPILOT_CLI_PATH@ first, then falls back to the Node.js
--- @node_modules@ CLI in the sibling @nodejs@ directory.
+-- @node_modules@ CLI in the sibling @nodejs@ directory. As of CLI 1.0.64-1 the
+-- runnable @index.js@ ships in a platform-specific package
+-- (e.g. @\@github\/copilot-linux-x64@), so that is preferred over the legacy
+-- @\@github\/copilot\/index.js@ location.
 getCliPath :: IO FilePath
 getCliPath = do
   envPath <- lookupEnv "COPILOT_CLI_PATH"
@@ -52,14 +56,35 @@ getCliPath = do
     fallbackCliPath = do
       cwd <- getCurrentDirectory
       -- cabal test runs from haskell/, so go up one level to repo root
-      let repoRoot = cwd </> ".."
-          cliPath  = repoRoot </> "nodejs" </> "node_modules"
-                     </> "@github" </> "copilot" </> "index.js"
-      exists <- doesFileExist cliPath
-      if exists
-        then pure cliPath
-        else error $ "CLI not found for tests. Run 'npm install' in the nodejs directory.\n"
-                  ++ "Tried: " ++ cliPath
+      let githubModules = cwd </> ".." </> "nodejs" </> "node_modules" </> "@github"
+          legacyCli     = githubModules </> "copilot" </> "index.js"
+      platformCli <- findPlatformCli githubModules
+      let candidates = maybe [] pure platformCli ++ [legacyCli]
+      found <- firstExistingFile candidates
+      case found of
+        Just p  -> pure p
+        Nothing -> error $ "CLI not found for tests. Run 'npm install' in the nodejs directory.\n"
+                        ++ "Tried: " ++ show candidates
+
+    -- Locate node_modules/@github/copilot-<platform>/index.js, excluding the
+    -- language-server package which also matches the copilot-* prefix.
+    findPlatformCli githubModules = do
+      dirExists <- doesDirectoryExist githubModules
+      if not dirExists
+        then pure Nothing
+        else do
+          entries <- listDirectory githubModules
+          let platformDirs = filter (\d -> "copilot-" `isPrefixOf` d
+                                            && not ("language-server" `isInfixOf` d)) entries
+          existing <- filterM (\d -> doesFileExist (githubModules </> d </> "index.js")) platformDirs
+          pure $ case existing of
+            (d : _) -> Just (githubModules </> d </> "index.js")
+            []      -> Nothing
+
+    firstExistingFile []       = pure Nothing
+    firstExistingFile (p : ps) = do
+      e <- doesFileExist p
+      if e then pure (Just p) else firstExistingFile ps
 
 -- | Start the replaying CAPI proxy.
 --
