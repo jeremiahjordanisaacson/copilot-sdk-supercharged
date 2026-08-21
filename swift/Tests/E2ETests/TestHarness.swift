@@ -18,6 +18,15 @@ final class TestHarness {
     /// The URL the proxy is listening on after `start()`.
     private(set) var proxyUrl: String?
 
+    /// The CONNECT proxy URL for HTTPS interception, parsed from harness
+    /// startup metadata. Required so the CLI routes its HTTPS CAPI calls
+    /// through the replay proxy.
+    private(set) var connectProxyUrl: String?
+
+    /// Path to the CA certificate file the CLI must trust, parsed from harness
+    /// startup metadata. Required so the CLI accepts the replay proxy's TLS cert.
+    private(set) var caFilePath: String?
+
     /// Start the replay proxy server.
     ///
     /// - Returns: The proxy URL (e.g. `http://127.0.0.1:PORT`).
@@ -90,6 +99,21 @@ final class TestHarness {
 
         let url = String(line[urlRange])
         self.proxyUrl = url
+
+        // Parse the trailing JSON metadata the harness prints after the URL:
+        //   Listening: http://127.0.0.1:PORT {"connectProxyUrl":"...","caFilePath":"..."}
+        // These drive HTTPS interception; without them the CLI's CAPI call never
+        // completes and the session never becomes idle.
+        if let braceIndex = line.firstIndex(of: "{") {
+            let jsonString = String(line[braceIndex...])
+            if let data = jsonString.data(using: .utf8),
+               let meta = try? JSONSerialization.jsonObject(with: data)
+                   as? [String: Any] {
+                self.connectProxyUrl = meta["connectProxyUrl"] as? String
+                self.caFilePath = meta["caFilePath"] as? String
+            }
+        }
+
         return url
     }
 

@@ -112,12 +112,38 @@ final class SessionE2ETests: XCTestCase {
     }
 
     private func getTestEnv() -> [String: String] {
-        return [
-            "COPILOT_API_URL": Self.proxyUrl,
-            "COPILOT_HOME": Self.workDir,
-            "XDG_CONFIG_HOME": Self.workDir,
-            "XDG_STATE_HOME": Self.workDir,
-        ]
+        // Start from the full parent environment: the CLI subprocess env is set
+        // via `process.environment = options.env` (a full replace, not a merge),
+        // so PATH/HOME and friends must be preserved or the CLI cannot launch.
+        var env = ProcessInfo.processInfo.environment
+        env["COPILOT_API_URL"] = Self.proxyUrl
+        env["COPILOT_HOME"] = Self.workDir
+        env["GH_CONFIG_DIR"] = Self.workDir
+        env["XDG_CONFIG_HOME"] = Self.workDir
+        env["XDG_STATE_HOME"] = Self.workDir
+        // Fake tokens so the CLI authenticates against the replay proxy.
+        if env["GH_TOKEN"] == nil { env["GH_TOKEN"] = "fake-test-token" }
+        if env["GITHUB_TOKEN"] == nil { env["GITHUB_TOKEN"] = "fake-test-token" }
+
+        // Route the CLI's HTTPS CAPI calls through the harness CONNECT proxy so
+        // the replay proxy can intercept them; without this the chat turn's CAPI
+        // call escapes to the real internet, never completes, and the session
+        // never becomes idle (the test then hangs until the job timeout).
+        if let connectProxyUrl = Self.harness.connectProxyUrl {
+            env["HTTPS_PROXY"] = connectProxyUrl
+            env["https_proxy"] = connectProxyUrl
+            // Exempt loopback so requests to the replay proxy (127.0.0.1) go
+            // direct instead of through the CONNECT proxy (which only handles
+            // github hosts and would 502 for 127.0.0.1).
+            env["NO_PROXY"] = "127.0.0.1,localhost,::1"
+            env["no_proxy"] = "127.0.0.1,localhost,::1"
+        }
+        if let caFilePath = Self.harness.caFilePath {
+            env["NODE_EXTRA_CA_CERTS"] = caFilePath
+            env["SSL_CERT_FILE"] = caFilePath
+        }
+
+        return env
     }
 
     // MARK: - Tests
