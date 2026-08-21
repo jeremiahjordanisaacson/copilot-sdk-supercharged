@@ -558,6 +558,7 @@ has excluded_tools         => (is => 'ro', default => sub { undef });
 has provider               => (is => 'ro', default => sub { undef });
 has on_permission_request  => (is => 'ro', default => sub { undef });
 has on_user_input_request  => (is => 'ro', default => sub { undef });
+has on_exit_plan_mode      => (is => 'ro', default => sub { undef });
 has hooks                  => (is => 'ro', default => sub { undef });
 has working_directory      => (is => 'ro', default => sub { undef });
 has streaming              => (is => 'ro', default => sub { undef });
