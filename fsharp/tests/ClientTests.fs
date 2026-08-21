@@ -279,7 +279,7 @@ let ``CopilotClient NegotiatedProtocolVersion is None before start`` () =
 
 [<Fact>]
 let ``MessageOptions record creates correctly`` () =
-    let opts = { Prompt = "hello"; Attachments = None; Mode = None }
+    let opts = { Prompt = "hello"; Attachments = None; Mode = None; AgentMode = None; DisplayPrompt = None; RequestHeaders = None }
     opts.Prompt |> should equal "hello"
     opts.Attachments |> should equal None
     opts.Mode |> should equal None
@@ -287,7 +287,7 @@ let ``MessageOptions record creates correctly`` () =
 [<Fact>]
 let ``MessageOptions with attachments`` () =
     let attachment = { Type = "file"; Path = Some "./test.fs"; Url = None; Content = None }
-    let opts = { Prompt = "review"; Attachments = Some [attachment]; Mode = None }
+    let opts = { Prompt = "review"; Attachments = Some [attachment]; Mode = None; AgentMode = None; DisplayPrompt = None; RequestHeaders = None }
     opts.Attachments |> Option.get |> List.length |> should equal 1
 
 // ---------------------------------------------------------------------------

@@ -218,6 +218,7 @@ typedef struct {
     const char **choices;       /**< NULL-terminated array, or NULL if no choices */
     int choices_count;
     bool allow_freeform;
+    bool has_allow_freeform;    /**< Whether allow_freeform was explicitly provided */
 } copilot_user_input_request_t;
 
 typedef struct {
@@ -571,6 +572,55 @@ typedef copilot_elicitation_result_t (*copilot_elicitation_handler_fn)(
 );
 
 /* ============================================================================
+ * Exit plan mode
+ * ============================================================================ */
+
+/** Request passed to the exit-plan-mode handler. */
+typedef struct {
+    const char *session_id;         /**< Session identifier */
+    const char *summary;            /**< Summary of the proposed plan (may be NULL) */
+    const char *plan_content;       /**< Full plan content (may be NULL) */
+    const char **actions;           /**< NULL-terminated array of action labels, or NULL */
+    size_t actions_count;           /**< Number of entries in actions */
+    const char *recommended_action; /**< Recommended action label (may be NULL) */
+} copilot_exit_plan_mode_request_t;
+
+/** Response returned from the exit-plan-mode handler. */
+typedef struct {
+    bool approved;                  /**< Whether the plan is approved */
+    const char *selected_action;    /**< Selected action label (may be NULL) */
+    const char *feedback;           /**< Optional feedback for the assistant (may be NULL) */
+} copilot_exit_plan_mode_response_t;
+
+/**
+ * Handler invoked when the assistant requests to exit plan mode.
+ *
+ * Populate *response and return COPILOT_OK. Returning any other value
+ * causes the plan to be approved by default.
+ */
+typedef copilot_error_t (*copilot_exit_plan_mode_handler_fn)(
+    const copilot_exit_plan_mode_request_t *request,
+    void *user_data,
+    copilot_exit_plan_mode_response_t *response
+);
+
+/* ============================================================================
+ * Trace context
+ * ============================================================================ */
+
+/** W3C trace context propagated on outbound requests. */
+typedef struct {
+    const char *traceparent;  /**< W3C traceparent header value, or NULL */
+    const char *tracestate;   /**< W3C tracestate header value, or NULL */
+} copilot_trace_context_t;
+
+/**
+ * Provider invoked to obtain the current trace context for outbound requests.
+ * Return a copilot_trace_context_t; NULL fields are omitted.
+ */
+typedef copilot_trace_context_t (*copilot_trace_context_provider_fn)(void *user_data);
+
+/* ============================================================================
  * Client options
  * ============================================================================ */
 
@@ -594,6 +644,8 @@ typedef struct {
     void *bearer_token_user_data;               /**< User data passed to bearer_token_provider */
     const char **builtin_plugin_directories;    /**< Built-in plugin directories (builtinPluginDirectories), NULL-terminated, or NULL */
     bool in_process;                            /**< Use the in-process FFI transport (inProcess) instead of spawning a CLI */
+    copilot_trace_context_provider_fn on_get_trace_context; /**< Trace-context provider for outbound requests, or NULL */
+    void *trace_context_user_data;              /**< User data passed to on_get_trace_context */
 } copilot_client_options_t;
 
 /**
@@ -698,6 +750,8 @@ typedef struct {
     bool content_exclusion;                 /**< Enable content-exclusion enforcement (contentExclusion) */
     bool has_content_exclusion;             /**< Whether content_exclusion was explicitly set */
     const char *args_schema_json;           /**< Agent-factory authoring args schema (argsSchema) as JSON, or NULL */
+    copilot_exit_plan_mode_handler_fn on_exit_plan_mode; /**< Handler for exit-plan-mode requests, or NULL */
+    void *exit_plan_mode_user_data;         /**< User data passed to on_exit_plan_mode */
 } copilot_session_config_t;
 
 /**

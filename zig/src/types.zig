@@ -220,6 +220,24 @@ pub const UserInputResponse = struct {
 };
 
 // ---------------------------------------------------------------------------
+// Exit plan mode
+// ---------------------------------------------------------------------------
+
+pub const ExitPlanModeRequest = struct {
+    session_id: []const u8 = "",
+    summary: []const u8 = "",
+    plan_content: ?[]const u8 = null,
+    actions: ?[]const []const u8 = null,
+    recommended_action: []const u8 = "",
+};
+
+pub const ExitPlanModeResponse = struct {
+    approved: bool = false,
+    selected_action: ?[]const u8 = null,
+    feedback: ?[]const u8 = null,
+};
+
+// ---------------------------------------------------------------------------
 // Elicitation
 // ---------------------------------------------------------------------------
 
@@ -367,6 +385,16 @@ pub const McpAuthHandler = *const fn (args: ProviderTokenArgs) anyerror![]const 
 
 /// Interceptor for outbound LLM inference HTTP/WebSocket requests.
 pub const CopilotRequestHandler = *const fn (request_json: []const u8) anyerror![]const u8;
+
+/// W3C Trace Context headers used for distributed trace propagation.
+pub const TraceContext = struct {
+    traceparent: ?[]const u8 = null,
+    tracestate: ?[]const u8 = null,
+};
+
+/// Callback that returns the current W3C Trace Context. Wire this up to your
+/// OpenTelemetry (or other tracing) SDK to propagate traces to the Copilot CLI.
+pub const TraceContextProvider = *const fn () TraceContext;
 
 /// Tool "defer" loading policy: eager pre-load (.never) or lazy via search (.auto).
 pub const ToolDefer = enum {

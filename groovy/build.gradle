@@ -4,11 +4,16 @@ plugins {
 }
 
 group = 'io.github.jeremiahjordanisaacson'
-archivesBaseName = 'copilot-sdk-groovy'
 version = '2.5.0'
 
-sourceCompatibility = '17'
-targetCompatibility = '17'
+base {
+    archivesName = 'copilot-sdk-groovy'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
 
 repositories {
     mavenCentral()

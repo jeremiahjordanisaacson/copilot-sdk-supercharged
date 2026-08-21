@@ -1,7 +1,7 @@
 #![cfg(feature = "test-support")]
 #![allow(clippy::unwrap_used)]
 
-use github_copilot_sdk::Client;
+use copilot_sdk::Client;
 use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, duplex};
 
 async fn write_framed(writer: &mut (impl AsyncWrite + Unpin), body: &[u8]) {
@@ -38,7 +38,7 @@ async fn read_framed(reader: &mut (impl tokio::io::AsyncRead + Unpin)) -> serde_
 /// backward-compatibility path documented on `verify_protocol_version`.
 async fn verify_with_result(
     result: serde_json::Value,
-) -> (Result<(), github_copilot_sdk::Error>, Option<u32>) {
+) -> (Result<(), copilot_sdk::Error>, Option<u32>) {
     let (client_write, server_read) = duplex(8192);
     let (server_write, client_read) = duplex(8192);
     let client = Client::from_streams(client_read, client_write, std::env::temp_dir()).unwrap();
@@ -93,7 +93,7 @@ async fn rejected_when_version_out_of_range() {
     let err = res.unwrap_err();
     assert!(matches!(
         err,
-        github_copilot_sdk::Error::Protocol(github_copilot_sdk::ProtocolError::VersionMismatch {
+        copilot_sdk::Error::Protocol(copilot_sdk::ProtocolError::VersionMismatch {
             server: 1,
             ..
         })

@@ -935,7 +935,7 @@ pub enum ContentBlock {
 }
 
 /// Options for sending a message to a session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageOptions {
     pub prompt: String,

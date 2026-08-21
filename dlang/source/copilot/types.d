@@ -842,3 +842,74 @@ struct PermissionResponse
         return obj;
     }
 }
+
+// ---------------------------------------------------------------------------
+// Exit plan mode
+// ---------------------------------------------------------------------------
+
+/// Request to exit plan mode and continue with a selected action.
+struct ExitPlanModeRequest
+{
+    /// The session that produced this request.
+    string sessionId;
+
+    /// Summary of the plan or proposed next step.
+    string summary;
+
+    /// Full plan content, when available.
+    Nullable!string planContent;
+
+    /// Available actions the user can select.
+    string[] actions;
+
+    /// The action recommended by the runtime.
+    string recommendedAction;
+
+    static ExitPlanModeRequest fromJson(JSONValue v) @safe
+    {
+        ExitPlanModeRequest req;
+        if (v.type != JSONType.object) return req;
+        auto pSession = "sessionId" in v;
+        if (pSession !is null && (*pSession).type == JSONType.string)
+            req.sessionId = (*pSession).str;
+        auto pSummary = "summary" in v;
+        if (pSummary !is null && (*pSummary).type == JSONType.string)
+            req.summary = (*pSummary).str;
+        auto pPlan = "planContent" in v;
+        if (pPlan !is null && (*pPlan).type == JSONType.string)
+            req.planContent = (*pPlan).str;
+        auto pActions = "actions" in v;
+        if (pActions !is null && (*pActions).type == JSONType.array)
+            foreach (a; (*pActions).array)
+                if (a.type == JSONType.string)
+                    req.actions ~= a.str;
+        auto pRec = "recommendedAction" in v;
+        if (pRec !is null && (*pRec).type == JSONType.string)
+            req.recommendedAction = (*pRec).str;
+        return req;
+    }
+}
+
+/// Response to an exit-plan-mode request.
+struct ExitPlanModeResponse
+{
+    /// Whether the user approved exiting plan mode.
+    bool approved = false;
+
+    /// Selected action, if the user chose one.
+    Nullable!string selectedAction;
+
+    /// Optional feedback provided by the user.
+    Nullable!string feedback;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["approved"] = approved;
+        if (!selectedAction.isNull)
+            obj["selectedAction"] = selectedAction.get;
+        if (!feedback.isNull)
+            obj["feedback"] = feedback.get;
+        return obj;
+    }
+}

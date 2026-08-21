@@ -634,12 +634,44 @@ static cJSON *on_exit_plan_mode_request(const char *method, cJSON *params, void 
 
     if (session && session->exit_plan_mode_handler) {
         copilot_exit_plan_mode_request_t req;
+        memset(&req, 0, sizeof(req));
         req.session_id = sid;
+
+        cJSON *summary_item = cJSON_GetObjectItem(params, "summary");
+        req.summary = (summary_item && cJSON_IsString(summary_item)) ? summary_item->valuestring : NULL;
+
+        cJSON *plan_item = cJSON_GetObjectItem(params, "planContent");
+        req.plan_content = (plan_item && cJSON_IsString(plan_item)) ? plan_item->valuestring : NULL;
+
+        cJSON *rec_item = cJSON_GetObjectItem(params, "recommendedAction");
+        req.recommended_action = (rec_item && cJSON_IsString(rec_item)) ? rec_item->valuestring : NULL;
+
+        const char *actions_arr[64];
+        cJSON *actions_item = cJSON_GetObjectItem(params, "actions");
+        if (actions_item && cJSON_IsArray(actions_item)) {
+            int count = cJSON_GetArraySize(actions_item);
+            if (count > 63) count = 63;
+            for (int i = 0; i < count; i++) {
+                cJSON *a = cJSON_GetArrayItem(actions_item, i);
+                actions_arr[i] = cJSON_IsString(a) ? a->valuestring : "";
+            }
+            actions_arr[count] = NULL;
+            req.actions = actions_arr;
+            req.actions_count = (size_t)count;
+        }
+
         copilot_exit_plan_mode_response_t resp;
+        memset(&resp, 0, sizeof(resp));
         resp.approved = true;
 
         copilot_error_t err = session->exit_plan_mode_handler(&req, session->exit_plan_mode_user_data, &resp);
         cJSON_AddBoolToObject(response, "approved", (err == COPILOT_OK) ? resp.approved : true);
+        if (err == COPILOT_OK && resp.selected_action) {
+            cJSON_AddStringToObject(response, "selectedAction", resp.selected_action);
+        }
+        if (err == COPILOT_OK && resp.feedback) {
+            cJSON_AddStringToObject(response, "feedback", resp.feedback);
+        }
     } else {
         /* Default: approve */
         cJSON_AddBoolToObject(response, "approved", true);
