@@ -23,7 +23,7 @@ class JsonRpcException(
 /**
  * Handler for incoming JSON-RPC requests from the server.
  */
-typealias RequestHandler = suspend (params: JsonObject) -> JsonObject
+typealias RequestHandler = suspend (params: JsonObject) -> JsonElement
 
 /**
  * Minimal JSON-RPC 2.0 client for stdio/TCP transport.
@@ -274,7 +274,7 @@ class JsonRpcClient(
         }
     }
 
-    private suspend fun sendResponse(requestId: String, result: JsonObject) {
+    private suspend fun sendResponse(requestId: String, result: JsonElement) {
         val response = buildJsonObject {
             put("jsonrpc", "2.0")
             put("id", requestId)

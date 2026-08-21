@@ -983,25 +983,25 @@ class CopilotClient(
         }
     }
 
-    private fun handleSessionFsWriteFile(params: JsonObject): JsonObject {
+    private fun handleSessionFsWriteFile(params: JsonObject): JsonElement {
         val path = params["path"]?.jsonPrimitive?.content ?: ""
         return try {
             val f = File(path)
             f.parentFile?.mkdirs()
             f.writeText(params["content"]?.jsonPrimitive?.content ?: "", Charsets.UTF_8)
-            JsonObject(emptyMap())
+            JsonNull
         } catch (e: Exception) {
             sessionFsError(e)
         }
     }
 
-    private fun handleSessionFsAppendFile(params: JsonObject): JsonObject {
+    private fun handleSessionFsAppendFile(params: JsonObject): JsonElement {
         val path = params["path"]?.jsonPrimitive?.content ?: ""
         return try {
             val f = File(path)
             f.parentFile?.mkdirs()
             f.appendText(params["content"]?.jsonPrimitive?.content ?: "", Charsets.UTF_8)
-            JsonObject(emptyMap())
+            JsonNull
         } catch (e: Exception) {
             sessionFsError(e)
         }
@@ -1040,14 +1040,14 @@ class CopilotClient(
         }
     }
 
-    private fun handleSessionFsMkdir(params: JsonObject): JsonObject {
+    private fun handleSessionFsMkdir(params: JsonObject): JsonElement {
         val path = params["path"]?.jsonPrimitive?.content ?: ""
         val recursive = params["recursive"]?.jsonPrimitive?.booleanOrNull ?: false
         return try {
             val f = File(path)
             val ok = if (recursive) f.mkdirs() else f.mkdir()
             if (!ok && !f.isDirectory) throw java.io.IOException("Failed to create directory: $path")
-            JsonObject(emptyMap())
+            JsonNull
         } catch (e: Exception) {
             sessionFsError(e)
         }
@@ -1090,25 +1090,25 @@ class CopilotClient(
         }
     }
 
-    private fun handleSessionFsRm(params: JsonObject): JsonObject {
+    private fun handleSessionFsRm(params: JsonObject): JsonElement {
         val path = params["path"]?.jsonPrimitive?.content ?: ""
         val recursive = params["recursive"]?.jsonPrimitive?.booleanOrNull ?: false
         val force = params["force"]?.jsonPrimitive?.booleanOrNull ?: false
         return try {
             val f = File(path)
             if (!f.exists()) {
-                if (force) return JsonObject(emptyMap())
+                if (force) return JsonNull
                 throw java.io.FileNotFoundException(path)
             }
             val ok = if (recursive) f.deleteRecursively() else f.delete()
             if (!ok && !force) throw java.io.IOException("Failed to remove: $path")
-            JsonObject(emptyMap())
+            JsonNull
         } catch (e: Exception) {
-            if (force) JsonObject(emptyMap()) else sessionFsError(e)
+            if (force) JsonNull else sessionFsError(e)
         }
     }
 
-    private fun handleSessionFsRename(params: JsonObject): JsonObject {
+    private fun handleSessionFsRename(params: JsonObject): JsonElement {
         val src = params["src"]?.jsonPrimitive?.content ?: ""
         val dest = params["dest"]?.jsonPrimitive?.content ?: ""
         return try {
@@ -1118,7 +1118,7 @@ class CopilotClient(
                 File(src).toPath(), d.toPath(),
                 java.nio.file.StandardCopyOption.REPLACE_EXISTING
             )
-            JsonObject(emptyMap())
+            JsonNull
         } catch (e: Exception) {
             sessionFsError(e)
         }
