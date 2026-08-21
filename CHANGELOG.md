@@ -15,6 +15,10 @@ Synced the latest upstream changes and pinned the bundled Copilot CLI to `@githu
 - **Optional login on `AccountLoginRequest`** — `login` is now optional; when omitted, the authenticated user is resolved from the token.
 - **Interrupted shell replay** — the test harness now normalizes interrupted shell replay results for deterministic end-to-end snapshots. ([cc0438d6](https://github.com/github/copilot-sdk/commit/cc0438d6))
 
+### Security
+
+- **Java** — bumped Jackson (`jackson-databind` + `jackson-annotations`) 2.17.0 → 2.18.10 in `java/pom.xml` and `java/e2e/pom.xml`, resolving 10 Dependabot advisories (CVE-2026-54512, CVE-2026-54513, CVE-2026-54514, CVE-2026-54515, CVE-2026-59888).
+
 ## [v2.5.1](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged/releases/tag/v2.5.1) (2026-08-21)
 
 ### Fixes
