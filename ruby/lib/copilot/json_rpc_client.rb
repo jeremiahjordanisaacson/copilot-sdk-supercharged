@@ -296,7 +296,11 @@ module Copilot
       # Execute handler (may be synchronous or may raise)
       begin
         result = handler.call(params)
-        result = {} if result.nil?
+        # sessionFs.* write-ops (writeFile/appendFile/mkdir/rm/rename) signal success
+        # as JSON null (the CLI decodes the result as `SessionFsError | undefined`).
+        # Coercing nil to {} would be decoded as a malformed SessionFsError
+        # ("missing field `code`"), so preserve nil for those methods only.
+        result = {} if result.nil? && !method.to_s.start_with?("sessionFs.")
         send_response(request_id, result)
       rescue JsonRpcError => e
         send_error_response(request_id, e.code, e.message, e.data)
