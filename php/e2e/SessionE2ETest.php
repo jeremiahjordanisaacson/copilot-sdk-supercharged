@@ -605,8 +605,8 @@ class SessionE2ETest extends E2ETestCase
             env: $this->getTestEnv(),
             cwd: static::$workDir,
             sessionFs: new SessionFsConfig(
-                initialCwd: '/',
-                sessionStatePath: '/session-state',
+                initialCwd: static::$workDir,
+                sessionStatePath: static::$workDir . DIRECTORY_SEPARATOR . 'state',
                 conventions: 'posix',
             ),
         ));

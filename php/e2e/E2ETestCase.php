@@ -96,6 +96,24 @@ abstract class E2ETestCase extends TestCase
         $env['GH_TOKEN'] = $env['GH_TOKEN'] ?? 'fake-test-token';
         $env['GITHUB_TOKEN'] = $env['GITHUB_TOKEN'] ?? 'fake-test-token';
 
+        // Route the CLI's HTTPS calls to GitHub hosts through the harness CONNECT
+        // proxy so the auth/user-login fetch is served by the replay proxy instead
+        // of hitting the real api.github.com (which returns "401 Bad credentials").
+        // Loopback is exempted so CAPI calls to the replay proxy (127.0.0.1) go
+        // direct rather than through the CONNECT proxy.
+        $connectProxyUrl = static::$harness->getConnectProxyUrl();
+        if ($connectProxyUrl !== null) {
+            $env['HTTPS_PROXY'] = $connectProxyUrl;
+            $env['https_proxy'] = $connectProxyUrl;
+            $env['NO_PROXY'] = '127.0.0.1,localhost,::1';
+            $env['no_proxy'] = '127.0.0.1,localhost,::1';
+        }
+        $caFilePath = static::$harness->getCaFilePath();
+        if ($caFilePath !== null) {
+            $env['NODE_EXTRA_CA_CERTS'] = $caFilePath;
+            $env['SSL_CERT_FILE'] = $caFilePath;
+        }
+
         return $env;
     }
 

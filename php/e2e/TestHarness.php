@@ -24,6 +24,10 @@ class TestHarness
 
     private ?string $proxyUrl = null;
 
+    private ?string $connectProxyUrl = null;
+
+    private ?string $caFilePath = null;
+
     /**
      * Start the replay proxy server.
      *
@@ -72,8 +76,23 @@ class TestHarness
             throw new \RuntimeException('Failed to read proxy URL from stdout');
         }
 
-        if (preg_match('/Listening:\s*(http:\/\/\S+)/', trim($line), $matches)) {
+        if (preg_match('/Listening:\s*(http:\/\/\S+)\s*(.*)/', trim($line), $matches)) {
             $this->proxyUrl = $matches[1];
+
+            // The harness may append JSON metadata after the URL describing the
+            // CONNECT proxy used to intercept HTTPS calls to GitHub hosts. Wiring
+            // it up (below, in E2ETestCase) is required so the CLI's auth/user
+            // login fetch is served by the replay proxy instead of hitting the
+            // real api.github.com and failing with "401 Bad credentials".
+            $metadataStr = isset($matches[2]) ? trim($matches[2]) : '';
+            if ($metadataStr !== '' && str_starts_with($metadataStr, '{')) {
+                $meta = json_decode($metadataStr, true);
+                if (is_array($meta)) {
+                    $this->connectProxyUrl = $meta['connectProxyUrl'] ?? null;
+                    $this->caFilePath = $meta['caFilePath'] ?? null;
+                }
+            }
+
             return $this->proxyUrl;
         }
 
@@ -112,6 +131,23 @@ class TestHarness
         if ($result === false) {
             throw new \RuntimeException('Failed to configure replay proxy');
         }
+    }
+
+    /**
+     * The CONNECT proxy URL for intercepting HTTPS calls to GitHub hosts, if the
+     * harness advertised one in its startup metadata.
+     */
+    public function getConnectProxyUrl(): ?string
+    {
+        return $this->connectProxyUrl;
+    }
+
+    /**
+     * Path to the CA certificate file for the CONNECT proxy, if advertised.
+     */
+    public function getCaFilePath(): ?string
+    {
+        return $this->caFilePath;
     }
 
     /**

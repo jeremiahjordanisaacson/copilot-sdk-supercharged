@@ -498,7 +498,12 @@ class JsonRpcClient
 
         try {
             $result = $handler($params);
-            if ($result === null) {
+            // A `null` handler result serializes to JSON `null`. For sessionFs.*
+            // write operations that is the REQUIRED success value — the CLI decodes
+            // any non-null object as a SessionFsError and fails with
+            // "missing field `code`". Only substitute an empty object for
+            // non-sessionFs handlers, which expect an object result.
+            if ($result === null && !str_starts_with($method, 'sessionFs.')) {
                 $result = [];
             }
             $this->sendResponse($id, $result);

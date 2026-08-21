@@ -517,15 +517,27 @@ class CopilotClient
     {
         $this->ensureConnected();
 
-        $params = [];
-        if (isset($config['initialCwd'])) {
-            $params['initialCwd'] = $config['initialCwd'];
+        // Fall back to the sessionFs configuration supplied to the constructor
+        // (CopilotClientOptions.sessionFs) when the caller does not pass explicit
+        // values. This mirrors the Node SDK, which reads initialCwd/sessionStatePath
+        // from the client's sessionFs config. The CLI requires `initialCwd`.
+        $fs = $this->options->sessionFs;
+
+        $initialCwd = $config['initialCwd'] ?? ($fs?->initialCwd ?? '');
+        if ($initialCwd === '') {
+            $initialCwd = getcwd() ?: '.';
         }
-        if (isset($config['sessionStatePath'])) {
-            $params['sessionStatePath'] = $config['sessionStatePath'];
+
+        $params = ['initialCwd' => $initialCwd];
+
+        $sessionStatePath = $config['sessionStatePath'] ?? ($fs?->sessionStatePath ?? '');
+        if ($sessionStatePath !== '') {
+            $params['sessionStatePath'] = $sessionStatePath;
         }
-        if (isset($config['conventions'])) {
-            $params['conventions'] = $config['conventions'];
+
+        $conventions = $config['conventions'] ?? ($fs?->conventions ?? '');
+        if ($conventions !== '') {
+            $params['conventions'] = $conventions;
         }
 
         $this->connection->request('sessionFs.setProvider', $params);
@@ -870,6 +882,209 @@ class CopilotClient
         $this->connection->setRequestHandler('exitPlanMode.request', function (array $params): array {
             return $this->handleExitPlanModeRequest($params);
         });
+
+        // Session filesystem provider callbacks. When a provider is registered via
+        // setSessionFsProvider(), the CLI drives filesystem access by sending these
+        // requests back to the SDK. Write ops return null on success (the CLI decodes
+        // any non-null object as a SessionFsError); read ops return their result
+        // shape, with errors reported in-band as { code, message }.
+        $this->connection->setRequestHandler('sessionFs.readFile', fn (array $p): array => $this->handleSessionFsReadFile($p));
+        $this->connection->setRequestHandler('sessionFs.writeFile', fn (array $p): ?array => $this->handleSessionFsWriteFile($p));
+        $this->connection->setRequestHandler('sessionFs.appendFile', fn (array $p): ?array => $this->handleSessionFsAppendFile($p));
+        $this->connection->setRequestHandler('sessionFs.exists', fn (array $p): array => $this->handleSessionFsExists($p));
+        $this->connection->setRequestHandler('sessionFs.stat', fn (array $p): array => $this->handleSessionFsStat($p));
+        $this->connection->setRequestHandler('sessionFs.mkdir', fn (array $p): ?array => $this->handleSessionFsMkdir($p));
+        $this->connection->setRequestHandler('sessionFs.readdir', fn (array $p): array => $this->handleSessionFsReaddir($p));
+        $this->connection->setRequestHandler('sessionFs.readdirWithTypes', fn (array $p): array => $this->handleSessionFsReaddirWithTypes($p));
+        $this->connection->setRequestHandler('sessionFs.rm', fn (array $p): ?array => $this->handleSessionFsRm($p));
+        $this->connection->setRequestHandler('sessionFs.rename', fn (array $p): ?array => $this->handleSessionFsRename($p));
+    }
+
+    // ---- SessionFs provider request handlers ----
+    //
+    // These service the CLI's sessionFs.* callbacks against the real filesystem.
+    // Success returns mirror the generated result shapes; write ops return null
+    // (serialized as JSON null) and errors are reported in-band as a
+    // SessionFsError ({ code, message }) so the CLI can distinguish ENOENT from
+    // other failures without failing at the JSON-RPC layer.
+
+    private function handleSessionFsReadFile(array $params): array
+    {
+        $path = (string) ($params['path'] ?? '');
+        if (!is_file($path)) {
+            return ['content' => '', 'error' => $this->sessionFsError('ENOENT', "No such file: {$path}")];
+        }
+        $content = @file_get_contents($path);
+        if ($content === false) {
+            return ['content' => '', 'error' => $this->sessionFsError('UNKNOWN', "Failed to read: {$path}")];
+        }
+        return ['content' => $content];
+    }
+
+    private function handleSessionFsWriteFile(array $params): ?array
+    {
+        $path = (string) ($params['path'] ?? '');
+        $dir = \dirname($path);
+        if (!is_dir($dir) && !@mkdir($dir, 0777, true) && !is_dir($dir)) {
+            return $this->sessionFsError('UNKNOWN', "Failed to create directory: {$dir}");
+        }
+        if (@file_put_contents($path, (string) ($params['content'] ?? '')) === false) {
+            return $this->sessionFsError('UNKNOWN', "Failed to write: {$path}");
+        }
+        if (isset($params['mode'])) {
+            @chmod($path, (int) $params['mode']);
+        }
+        return null;
+    }
+
+    private function handleSessionFsAppendFile(array $params): ?array
+    {
+        $path = (string) ($params['path'] ?? '');
+        $dir = \dirname($path);
+        if (!is_dir($dir) && !@mkdir($dir, 0777, true) && !is_dir($dir)) {
+            return $this->sessionFsError('UNKNOWN', "Failed to create directory: {$dir}");
+        }
+        if (@file_put_contents($path, (string) ($params['content'] ?? ''), FILE_APPEND) === false) {
+            return $this->sessionFsError('UNKNOWN', "Failed to append: {$path}");
+        }
+        if (isset($params['mode'])) {
+            @chmod($path, (int) $params['mode']);
+        }
+        return null;
+    }
+
+    private function handleSessionFsExists(array $params): array
+    {
+        return ['exists' => file_exists((string) ($params['path'] ?? ''))];
+    }
+
+    private function handleSessionFsStat(array $params): array
+    {
+        $path = (string) ($params['path'] ?? '');
+        $st = @stat($path);
+        if ($st === false) {
+            $now = gmdate('Y-m-d\TH:i:s\Z');
+            return [
+                'isFile' => false,
+                'isDirectory' => false,
+                'size' => 0,
+                'mtime' => $now,
+                'birthtime' => $now,
+                'error' => $this->sessionFsError('ENOENT', "No such file or directory: {$path}"),
+            ];
+        }
+        return [
+            'isFile' => is_file($path),
+            'isDirectory' => is_dir($path),
+            'size' => $st['size'],
+            'mtime' => gmdate('Y-m-d\TH:i:s\Z', $st['mtime']),
+            'birthtime' => gmdate('Y-m-d\TH:i:s\Z', $st['ctime'] ?: $st['mtime']),
+        ];
+    }
+
+    private function handleSessionFsMkdir(array $params): ?array
+    {
+        $path = (string) ($params['path'] ?? '');
+        $recursive = (bool) ($params['recursive'] ?? false);
+        $mode = isset($params['mode']) ? (int) $params['mode'] : 0777;
+        if ($recursive) {
+            if (is_dir($path)) {
+                return null;
+            }
+            if (!@mkdir($path, $mode, true) && !is_dir($path)) {
+                return $this->sessionFsError('UNKNOWN', "Failed to create directory: {$path}");
+            }
+        } elseif (!@mkdir($path, $mode, false)) {
+            $code = is_dir(\dirname($path)) ? 'UNKNOWN' : 'ENOENT';
+            return $this->sessionFsError($code, "Failed to create directory: {$path}");
+        }
+        return null;
+    }
+
+    private function handleSessionFsReaddir(array $params): array
+    {
+        $path = (string) ($params['path'] ?? '');
+        if (!is_dir($path)) {
+            return ['entries' => [], 'error' => $this->sessionFsError('ENOENT', "No such directory: {$path}")];
+        }
+        $entries = @scandir($path);
+        if ($entries === false) {
+            return ['entries' => [], 'error' => $this->sessionFsError('UNKNOWN', "Failed to read directory: {$path}")];
+        }
+        return ['entries' => array_values(array_filter($entries, fn ($e) => $e !== '.' && $e !== '..'))];
+    }
+
+    private function handleSessionFsReaddirWithTypes(array $params): array
+    {
+        $path = (string) ($params['path'] ?? '');
+        if (!is_dir($path)) {
+            return ['entries' => [], 'error' => $this->sessionFsError('ENOENT', "No such directory: {$path}")];
+        }
+        $names = @scandir($path);
+        if ($names === false) {
+            return ['entries' => [], 'error' => $this->sessionFsError('UNKNOWN', "Failed to read directory: {$path}")];
+        }
+        $entries = [];
+        foreach ($names as $name) {
+            if ($name === '.' || $name === '..') {
+                continue;
+            }
+            $entries[] = [
+                'name' => $name,
+                'type' => is_dir($path . DIRECTORY_SEPARATOR . $name) ? 'directory' : 'file',
+            ];
+        }
+        return ['entries' => $entries];
+    }
+
+    private function handleSessionFsRm(array $params): ?array
+    {
+        $path = (string) ($params['path'] ?? '');
+        $recursive = (bool) ($params['recursive'] ?? false);
+        $force = (bool) ($params['force'] ?? false);
+        if (!file_exists($path) && !is_link($path)) {
+            return $force ? null : $this->sessionFsError('ENOENT', "No such file or directory: {$path}");
+        }
+        if (is_dir($path) && !is_link($path)) {
+            $ok = $recursive ? $this->removeRecursive($path) : @rmdir($path);
+        } else {
+            $ok = @unlink($path);
+        }
+        if (!$ok) {
+            return $force ? null : $this->sessionFsError('UNKNOWN', "Failed to remove: {$path}");
+        }
+        return null;
+    }
+
+    private function removeRecursive(string $path): bool
+    {
+        if (is_dir($path) && !is_link($path)) {
+            foreach (array_diff(@scandir($path) ?: [], ['.', '..']) as $child) {
+                $this->removeRecursive($path . DIRECTORY_SEPARATOR . $child);
+            }
+            return @rmdir($path);
+        }
+        return @unlink($path);
+    }
+
+    private function handleSessionFsRename(array $params): ?array
+    {
+        $src = (string) ($params['src'] ?? '');
+        $dest = (string) ($params['dest'] ?? '');
+        if (!@rename($src, $dest)) {
+            $code = file_exists($src) ? 'UNKNOWN' : 'ENOENT';
+            return $this->sessionFsError($code, "Failed to rename {$src} to {$dest}");
+        }
+        return null;
+    }
+
+    /**
+     * Build a SessionFsError payload. Missing paths map to "ENOENT"; everything
+     * else maps to "UNKNOWN", matching the reference SDK contract.
+     */
+    private function sessionFsError(string $code, string $message): array
+    {
+        return ['code' => $code, 'message' => $message];
     }
 
     private function handleSessionEventNotification(array $notification): void
