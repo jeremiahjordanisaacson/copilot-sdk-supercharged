@@ -1,9 +1,0 @@
-src/
-test/
-examples/
-*.ts
-!*.d.ts
-tsconfig.json
-vitest.config.ts
-.gitignore
-*.log
