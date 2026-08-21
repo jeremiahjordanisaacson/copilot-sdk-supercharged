@@ -12,6 +12,8 @@ use lib dirname(__FILE__);
 
 use TestHarness;
 use GitHub::Copilot::Client;
+use GitHub::Copilot::Types;
+use GitHub::Copilot::DefineTool qw(define_tool);
 
 my $repo_root = abs_path(File::Spec->catdir(dirname(__FILE__), '..', '..'));
 
@@ -270,15 +272,15 @@ subtest 'tools' => sub {
     configure_snapshot();
 
     my $client = make_client();
-    my $session = $client->create_session({
-        tools => [
-            {
-                name        => 'test_tool',
-                description => 'A test tool for E2E testing',
-                handler     => sub { return { result => 'tool executed' }; },
-            },
-        ],
-    });
+    my $test_tool = define_tool(
+        name        => 'test_tool',
+        description => 'A test tool for E2E testing',
+        parameters  => { type => 'object', properties => {} },
+        handler     => sub { return { result => 'tool executed' }; },
+    );
+    my $session = $client->create_session(
+        GitHub::Copilot::Types::SessionConfig->new( tools => [$test_tool] )
+    );
     ok(defined $session, 'Session with tools created');
 
     # Simple prompt that does not invoke the tool — verifies tools attach correctly
@@ -296,7 +298,9 @@ subtest 'streaming' => sub {
     configure_snapshot();
 
     my $client = make_client();
-    my $session = $client->create_session({ streaming => 1 });
+    my $session = $client->create_session(
+        GitHub::Copilot::Types::SessionConfig->new( streaming => 1 )
+    );
     my $response = $session->send_and_wait({ prompt => 'What is 2+2?' });
     ok(defined $response, 'Received response in streaming mode');
 
@@ -311,12 +315,14 @@ subtest 'system message customization' => sub {
     configure_snapshot();
 
     my $client = make_client();
-    my $session = $client->create_session({
-        system_message => {
-            mode    => 'append',
-            content => 'You are a helpful test assistant.',
-        },
-    });
+    my $session = $client->create_session(
+        GitHub::Copilot::Types::SessionConfig->new(
+            system_message => {
+                mode    => 'append',
+                content => 'You are a helpful test assistant.',
+            },
+        )
+    );
     ok(defined $session, 'Session with system message created without error');
 
     $client->stop();
@@ -353,11 +359,13 @@ subtest 'mcp servers config' => sub {
 
     my $client = make_client();
     eval {
-        my $session = $client->create_session({
-            mcp_servers => [
-                { url => 'http://localhost:9999/mcp' },
-            ],
-        });
+        my $session = $client->create_session(
+            GitHub::Copilot::Types::SessionConfig->new(
+                mcp_servers => [
+                    { url => 'http://localhost:9999/mcp' },
+                ],
+            )
+        );
         ok(defined $session, 'Session with MCP servers config created');
     };
     if ($@) {
@@ -376,11 +384,11 @@ subtest 'skills config' => sub {
 
     my $client = make_client();
     eval {
-        my $session = $client->create_session({
-            skills => {
-                directories => [ $repo_root ],
-            },
-        });
+        my $session = $client->create_session(
+            GitHub::Copilot::Types::SessionConfig->new(
+                skill_directories => [ $repo_root ],
+            )
+        );
         ok(defined $session, 'Session with skills config created');
     };
     if ($@) {
