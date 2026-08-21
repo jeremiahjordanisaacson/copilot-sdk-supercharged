@@ -5,6 +5,8 @@
 require "open3"
 require "socket"
 require "thread"
+require "fileutils"
+require "time"
 
 module Copilot
   # Main client for interacting with the Copilot CLI.
@@ -650,6 +652,29 @@ module Copilot
       @rpc_client.on_request("exitPlanMode.request") do |params|
         handle_exit_plan_mode_request(params)
       end
+
+      register_session_fs_handlers
+    end
+
+    # Registers the client-side session filesystem request handlers.
+    #
+    # When a session filesystem provider is set via {#set_session_fs_provider},
+    # the CLI drives filesystem access by sending +sessionFs.*+ requests back to
+    # the client. These handlers service those requests against the real
+    # filesystem using the absolute paths supplied by the CLI. Errors are
+    # returned in-band as +{ code:, message: }+ (SessionFsError) rather than
+    # raised, matching the reference SDK contract.
+    def register_session_fs_handlers
+      @rpc_client.on_request("sessionFs.readFile") { |params| handle_session_fs_read_file(params) }
+      @rpc_client.on_request("sessionFs.writeFile") { |params| handle_session_fs_write_file(params) }
+      @rpc_client.on_request("sessionFs.appendFile") { |params| handle_session_fs_append_file(params) }
+      @rpc_client.on_request("sessionFs.exists") { |params| handle_session_fs_exists(params) }
+      @rpc_client.on_request("sessionFs.stat") { |params| handle_session_fs_stat(params) }
+      @rpc_client.on_request("sessionFs.mkdir") { |params| handle_session_fs_mkdir(params) }
+      @rpc_client.on_request("sessionFs.readdir") { |params| handle_session_fs_readdir(params) }
+      @rpc_client.on_request("sessionFs.readdirWithTypes") { |params| handle_session_fs_readdir_with_types(params) }
+      @rpc_client.on_request("sessionFs.rm") { |params| handle_session_fs_rm(params) }
+      @rpc_client.on_request("sessionFs.rename") { |params| handle_session_fs_rename(params) }
     end
 
     def verify_protocol_version
@@ -799,6 +824,135 @@ module Copilot
       rescue StandardError
         { approved: true }
       end
+    end
+
+    # ---- SessionFs provider request handlers ----
+    #
+    # These service the CLI's +sessionFs.*+ callbacks against the real
+    # filesystem. Success returns mirror the generated result shapes and errors
+    # are returned in-band as a SessionFsError (+{ code:, message: }+) so the CLI
+    # can distinguish a missing file (ENOENT) from other failures without the
+    # request failing at the JSON-RPC layer.
+
+    def handle_session_fs_read_file(params)
+      content = File.read(params["path"], encoding: "UTF-8")
+      { content: content }
+    rescue StandardError => e
+      { content: "", error: session_fs_error(e) }
+    end
+
+    def handle_session_fs_write_file(params)
+      path = params["path"]
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, params["content"].to_s)
+      File.chmod(params["mode"], path) if params["mode"]
+      nil
+    rescue StandardError => e
+      session_fs_error(e)
+    end
+
+    def handle_session_fs_append_file(params)
+      path = params["path"]
+      FileUtils.mkdir_p(File.dirname(path))
+      File.open(path, "a") { |f| f.write(params["content"].to_s) }
+      File.chmod(params["mode"], path) if params["mode"]
+      nil
+    rescue StandardError => e
+      session_fs_error(e)
+    end
+
+    def handle_session_fs_exists(params)
+      { exists: File.exist?(params["path"]) }
+    rescue StandardError
+      { exists: false }
+    end
+
+    def handle_session_fs_stat(params)
+      st = File.stat(params["path"])
+      {
+        isFile: st.file?,
+        isDirectory: st.directory?,
+        size: st.size,
+        mtime: st.mtime.utc.iso8601,
+        birthtime: session_fs_birthtime(st).utc.iso8601,
+      }
+    rescue StandardError => e
+      now = Time.now.utc.iso8601
+      {
+        isFile: false,
+        isDirectory: false,
+        size: 0,
+        mtime: now,
+        birthtime: now,
+        error: session_fs_error(e),
+      }
+    end
+
+    def handle_session_fs_mkdir(params)
+      path = params["path"]
+      if params["recursive"]
+        FileUtils.mkdir_p(path)
+      else
+        Dir.mkdir(path)
+      end
+      File.chmod(params["mode"], path) if params["mode"]
+      nil
+    rescue StandardError => e
+      session_fs_error(e)
+    end
+
+    def handle_session_fs_readdir(params)
+      { entries: Dir.children(params["path"]) }
+    rescue StandardError => e
+      { entries: [], error: session_fs_error(e) }
+    end
+
+    def handle_session_fs_readdir_with_types(params)
+      path = params["path"]
+      entries = Dir.children(path).map do |name|
+        { name: name, type: File.directory?(File.join(path, name)) ? "directory" : "file" }
+      end
+      { entries: entries }
+    rescue StandardError => e
+      { entries: [], error: session_fs_error(e) }
+    end
+
+    def handle_session_fs_rm(params)
+      path = params["path"]
+      force = params["force"]
+      if params["recursive"]
+        force ? FileUtils.rm_rf(path) : FileUtils.rm_r(path)
+      elsif force
+        FileUtils.rm_f(path)
+      else
+        File.delete(path)
+      end
+      nil
+    rescue Errno::ENOENT => e
+      params["force"] ? nil : session_fs_error(e)
+    rescue StandardError => e
+      session_fs_error(e)
+    end
+
+    def handle_session_fs_rename(params)
+      File.rename(params["src"], params["dest"])
+      nil
+    rescue StandardError => e
+      session_fs_error(e)
+    end
+
+    # Returns the creation time when the platform supports it, else falls back to mtime.
+    def session_fs_birthtime(stat)
+      stat.birthtime
+    rescue NotImplementedError
+      stat.mtime
+    end
+
+    # Maps a Ruby exception to a SessionFsError hash. Missing paths map to
+    # "ENOENT"; everything else maps to "UNKNOWN", matching the reference SDK.
+    def session_fs_error(err)
+      code = err.is_a?(Errno::ENOENT) ? "ENOENT" : "UNKNOWN"
+      { code: code, message: err.message }
     end
 
     # ---- Payload builders ----
