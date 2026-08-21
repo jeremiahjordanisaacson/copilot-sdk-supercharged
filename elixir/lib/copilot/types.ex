@@ -494,7 +494,7 @@ defmodule Copilot.Types do
   end
 
   defmodule ToolDefer do
-    @moduledoc ~S(Tool "defer" loading policy: `auto/0` (lazy via search) or `never/0` (eager pre-load).)
+    @moduledoc ~S|Tool "defer" loading policy: `auto/0` (lazy via search) or `never/0` (eager pre-load).|
     @spec auto() :: String.t()
     def auto, do: "auto"
     @spec never() :: String.t()

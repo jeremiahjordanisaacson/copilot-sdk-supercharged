@@ -221,6 +221,12 @@ public class CopilotSession {
         }
         ExitPlanModeRequest req = new ExitPlanModeRequest();
         req.sessionId = (String) params.get("sessionId");
+        req.summary = (String) params.get("summary");
+        req.planContent = (String) params.get("planContent");
+        @SuppressWarnings("unchecked")
+        List<String> actions = (List<String>) params.get("actions");
+        req.actions = actions;
+        req.recommendedAction = (String) params.get("recommendedAction");
         return exitPlanModeHandler.handle(req);
     }
 

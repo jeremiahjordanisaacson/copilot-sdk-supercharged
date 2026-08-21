@@ -153,6 +153,40 @@ public final class Types {
         UserInputResponse handle(UserInputRequest request, String sessionId) throws Exception;
     }
 
+    /** Request to exit plan mode and continue with a selected action. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ExitPlanModeRequest {
+        /** The session that produced this request. */
+        public String sessionId;
+        /** Summary of the plan or proposed next step. */
+        public String summary;
+        /** Full plan content, when available. */
+        public String planContent;
+        /** Available actions the user can select. */
+        public List<String> actions;
+        /** The action recommended by the runtime. */
+        public String recommendedAction;
+    }
+
+    /** Response to an exit-plan-mode request. */
+    public static class ExitPlanModeResponse {
+        /** Whether the user approved exiting plan mode. */
+        public boolean approved;
+        /** Selected action, if the user chose one. */
+        public String selectedAction;
+        /** Optional feedback provided by the user. */
+        public String feedback;
+
+        public ExitPlanModeResponse() {}
+        public ExitPlanModeResponse(boolean approved) { this.approved = approved; }
+    }
+
+    /** Functional interface for exit-plan-mode request handlers. */
+    @FunctionalInterface
+    public interface ExitPlanModeHandler {
+        ExitPlanModeResponse handle(ExitPlanModeRequest request) throws Exception;
+    }
+
     /** Context for a slash-command invocation. */
     public static class CommandContext {
         public String sessionId;

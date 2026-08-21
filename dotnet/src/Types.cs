@@ -2613,6 +2613,81 @@ public enum EmbeddingCacheStorageMode
     InMemory
 }
 
+/// <summary>Response format for a message (Supercharged extension).</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<ResponseFormat>))]
+public enum ResponseFormat
+{
+    /// <summary>Plain text response.</summary>
+    [JsonStringEnumMemberName("text")]
+    Text,
+    /// <summary>Image generation response.</summary>
+    [JsonStringEnumMemberName("image")]
+    Image,
+    /// <summary>Structured JSON response.</summary>
+    [JsonStringEnumMemberName("json_object")]
+    JsonObject
+}
+
+/// <summary>Options for image generation (Supercharged extension).</summary>
+public class ImageOptions
+{
+    /// <summary>Image size (e.g. "1024x1024")</summary>
+    [JsonPropertyName("size")]
+    public string? Size { get; set; }
+
+    /// <summary>Image quality ("hd" or "standard")</summary>
+    [JsonPropertyName("quality")]
+    public string? Quality { get; set; }
+
+    /// <summary>Image style ("natural" or "vivid")</summary>
+    [JsonPropertyName("style")]
+    public string? Style { get; set; }
+}
+
+/// <summary>Image data from an assistant image response.</summary>
+public class AssistantImageData
+{
+    /// <summary>Image format ("png", "jpeg", "webp")</summary>
+    [JsonPropertyName("format")]
+    public string Format { get; set; } = "";
+
+    /// <summary>Base64-encoded image bytes</summary>
+    [JsonPropertyName("base64")]
+    public string Base64 { get; set; } = "";
+
+    /// <summary>Optional temporary URL for the image.</summary>
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    /// <summary>The prompt the model actually used.</summary>
+    [JsonPropertyName("revisedPrompt")]
+    public string? RevisedPrompt { get; set; }
+
+    /// <summary>Image width in pixels.</summary>
+    [JsonPropertyName("width")]
+    public int Width { get; set; }
+
+    /// <summary>Image height in pixels.</summary>
+    [JsonPropertyName("height")]
+    public int Height { get; set; }
+}
+
+/// <summary>A content block in a mixed text+image response.</summary>
+public class ContentBlock
+{
+    /// <summary>Block type ("text" or "image").</summary>
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "";
+
+    /// <summary>Text content (when type is "text").</summary>
+    [JsonPropertyName("text")]
+    public string? Text { get; set; }
+
+    /// <summary>Image data (when type is "image").</summary>
+    [JsonPropertyName("image")]
+    public AssistantImageData? Image { get; set; }
+}
+
 /// <summary>
 /// Abstract base class for MCP server configurations.
 /// </summary>
@@ -4435,5 +4510,8 @@ public sealed class SystemMessageTransformRpcResponse
 [JsonSerializable(typeof(CanvasHostContext))]
 [JsonSerializable(typeof(ExtensionInfo))]
 [JsonSerializable(typeof(CanvasProviderIdentity))]
+[JsonSerializable(typeof(ImageOptions))]
+[JsonSerializable(typeof(AssistantImageData))]
+[JsonSerializable(typeof(ContentBlock))]
 #pragma warning restore GHCP001
 internal partial class TypesJsonContext : JsonSerializerContext;
