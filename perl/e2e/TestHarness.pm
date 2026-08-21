@@ -117,6 +117,12 @@ sub get_proxy_env {
     if ($self->{connect_proxy_url}) {
         $env{HTTPS_PROXY} = $self->{connect_proxy_url};
         $env{https_proxy} = $self->{connect_proxy_url};
+        # Exempt loopback so CAPI requests to the replay proxy (127.0.0.1) go
+        # direct instead of through the CONNECT proxy (which only handles github
+        # hosts and returns 502 for 127.0.0.1), otherwise turns never go idle.
+        my $no_proxy = '127.0.0.1,localhost,::1';
+        $env{NO_PROXY} = $no_proxy;
+        $env{no_proxy} = $no_proxy;
     }
     if ($self->{ca_file_path}) {
         $env{NODE_EXTRA_CA_CERTS} = $self->{ca_file_path};

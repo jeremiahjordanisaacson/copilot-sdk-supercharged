@@ -177,6 +177,13 @@ module E2E
       if @connect_proxy_url
         env["HTTPS_PROXY"] = @connect_proxy_url
         env["https_proxy"] = @connect_proxy_url
+        # Exempt loopback so CAPI requests to the replay proxy (127.0.0.1) go
+        # direct instead of being routed through the CONNECT proxy (which only
+        # handles github hosts and would return 502 for 127.0.0.1). Without this
+        # the chat turn's CAPI call fails and the session never becomes idle.
+        no_proxy = "127.0.0.1,localhost,::1"
+        env["NO_PROXY"] = no_proxy
+        env["no_proxy"] = no_proxy
       end
       if @ca_file_path
         env["NODE_EXTRA_CA_CERTS"] = @ca_file_path

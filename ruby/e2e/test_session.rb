@@ -149,9 +149,16 @@ class TestSession < E2E::TestCase
     )
     client.start
 
+    # Create sessions and send messages so they are persisted to disk;
+    # session.list only returns sessions that have been written out (this
+    # mirrors the canonical Python/Go/.NET list-sessions tests and the
+    # should_list_sessions snapshot).
     s1 = client.create_session(model: "claude-sonnet-4.5")
-    sleep 0.5
+    s1.send_and_wait(prompt: "Say hello")
     s2 = client.create_session(model: "claude-sonnet-4.5")
+    s2.send_and_wait(prompt: "Say goodbye")
+
+    # Small delay to ensure session files are written to disk
     sleep 0.5
 
     sessions = client.list_sessions
