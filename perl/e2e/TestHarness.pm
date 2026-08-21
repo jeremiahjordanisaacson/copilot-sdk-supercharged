@@ -83,6 +83,9 @@ sub stop {
         };
     }
     if ($self->{process_pid}) {
+        # Force the proxy to exit (in addition to the graceful /stop above) so
+        # waitpid cannot block indefinitely if the server ignores /stop.
+        kill('TERM', $self->{process_pid});
         waitpid($self->{process_pid}, 0);
         $self->{process_pid} = undef;
     }

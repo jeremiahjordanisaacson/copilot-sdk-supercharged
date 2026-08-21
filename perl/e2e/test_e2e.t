@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-use Test::More tests => 20;
+use Test::More;
 use File::Spec;
 use File::Basename;
 use Cwd qw(abs_path);
@@ -68,7 +68,7 @@ subtest 'send message' => sub {
 
     my $client = make_client();
     my $session = $client->create_session();
-    my $response = $session->send_and_wait({ content => 'What is 2+2?' });
+    my $response = $session->send_and_wait({ prompt => 'What is 2+2?' });
     ok(defined $response, 'Received a response');
 
     $client->stop();
@@ -102,10 +102,10 @@ subtest 'multi-turn conversation' => sub {
     my $client = make_client();
     my $session = $client->create_session();
 
-    my $response1 = $session->send_and_wait({ content => 'What is 1+1?' });
+    my $response1 = $session->send_and_wait({ prompt => 'What is 1+1?' });
     ok(defined $response1, 'Received first response');
 
-    my $response2 = $session->send_and_wait({ content => 'Now if you double that, what do you get?' });
+    my $response2 = $session->send_and_wait({ prompt => 'Now if you double that, what do you get?' });
     ok(defined $response2, 'Received second response');
 
     $client->stop();
@@ -281,7 +281,7 @@ subtest 'tools' => sub {
     });
     ok(defined $session, 'Session with tools created');
 
-    my $response = $session->send_and_wait({ content => 'What is the secret number for key ALPHA?' });
+    my $response = $session->send_and_wait({ prompt => 'What is the secret number for key ALPHA?' });
     ok(defined $response, 'Received response with tools defined');
 
     $client->stop();
@@ -296,7 +296,7 @@ subtest 'streaming' => sub {
 
     my $client = make_client();
     my $session = $client->create_session({ streaming => 1 });
-    my $response = $session->send_and_wait({ content => 'What is 2+2?' });
+    my $response = $session->send_and_wait({ prompt => 'What is 2+2?' });
     ok(defined $response, 'Received response in streaming mode');
 
     $client->stop();
@@ -400,8 +400,8 @@ subtest 'compaction' => sub {
     my $session = $client->create_session();
 
     # Send two messages using multi-turn snapshot prompts
-    $session->send_and_wait({ content => 'What is 1+1?' });
-    $session->send_and_wait({ content => 'Now if you double that, what do you get?' });
+    $session->send_and_wait({ prompt => 'What is 1+1?' });
+    $session->send_and_wait({ prompt => 'Now if you double that, what do you get?' });
 
     pass('Completed multi-turn messages without error (compaction may have occurred)');
 

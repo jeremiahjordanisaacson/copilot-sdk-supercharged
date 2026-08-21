@@ -216,6 +216,18 @@ sub stop {
     return \@errors;
 }
 
+sub DESTROY {
+    my ($self) = @_;
+    # Safety net: terminate the CLI subprocess even if stop() was never called
+    # (e.g. a test died before reaching cleanup). Otherwise the detached
+    # JSON-RPC reader thread stays blocked reading the CLI's stdout, which can
+    # keep the interpreter alive at exit and hang the test runner.
+    if ($self->{_process_pid}) {
+        eval { kill('TERM', $self->{_process_pid}) };
+        $self->{_process_pid} = undef;
+    }
+}
+
 sub get_state {
     my ($self) = @_;
     return $self->{_state};
