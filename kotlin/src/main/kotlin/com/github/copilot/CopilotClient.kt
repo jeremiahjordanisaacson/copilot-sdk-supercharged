@@ -761,6 +761,20 @@ class CopilotClient(
         client.setRequestHandler("userInput.request") { params -> handleUserInputRequest(params) }
         client.setRequestHandler("hooks.invoke") { params -> handleHooksInvoke(params) }
         client.setRequestHandler("elicitation.request") { params -> handleElicitationRequest(params) }
+
+        // Session filesystem provider callbacks. When a provider is registered via
+        // sessionFs.setProvider, the CLI drives filesystem access by sending these
+        // requests back to the client. Service them against the real filesystem.
+        client.setRequestHandler("sessionFs.readFile") { params -> handleSessionFsReadFile(params) }
+        client.setRequestHandler("sessionFs.writeFile") { params -> handleSessionFsWriteFile(params) }
+        client.setRequestHandler("sessionFs.appendFile") { params -> handleSessionFsAppendFile(params) }
+        client.setRequestHandler("sessionFs.exists") { params -> handleSessionFsExists(params) }
+        client.setRequestHandler("sessionFs.stat") { params -> handleSessionFsStat(params) }
+        client.setRequestHandler("sessionFs.mkdir") { params -> handleSessionFsMkdir(params) }
+        client.setRequestHandler("sessionFs.readdir") { params -> handleSessionFsReaddir(params) }
+        client.setRequestHandler("sessionFs.readdirWithTypes") { params -> handleSessionFsReaddirWithTypes(params) }
+        client.setRequestHandler("sessionFs.rm") { params -> handleSessionFsRm(params) }
+        client.setRequestHandler("sessionFs.rename") { params -> handleSessionFsRename(params) }
     }
 
     private fun handleSessionEventNotification(params: JsonObject) {
@@ -940,6 +954,173 @@ class CopilotClient(
         return buildJsonObject {
             put("action", result.action)
             result.content?.let { put("content", json.encodeToJsonElement(it)) }
+        }
+    }
+
+    // ---- SessionFs provider request handlers ----
+    //
+    // These service the CLI's sessionFs.* callbacks against the real filesystem
+    // using the absolute paths supplied by the CLI. Success returns mirror the
+    // generated result shapes; errors are returned in-band as a SessionFsError
+    // ({ code, message }) so the CLI can distinguish a missing file (ENOENT)
+    // from other failures without the request failing at the JSON-RPC layer.
+
+    private fun sessionFsError(e: Throwable): JsonObject = buildJsonObject {
+        val code = if (e is java.nio.file.NoSuchFileException || e is java.io.FileNotFoundException) "ENOENT" else "UNKNOWN"
+        put("code", code)
+        put("message", e.message ?: e.toString())
+    }
+
+    private fun handleSessionFsReadFile(params: JsonObject): JsonObject {
+        val path = params["path"]?.jsonPrimitive?.content ?: ""
+        return try {
+            buildJsonObject { put("content", File(path).readText(Charsets.UTF_8)) }
+        } catch (e: Exception) {
+            buildJsonObject {
+                put("content", "")
+                put("error", sessionFsError(e))
+            }
+        }
+    }
+
+    private fun handleSessionFsWriteFile(params: JsonObject): JsonObject {
+        val path = params["path"]?.jsonPrimitive?.content ?: ""
+        return try {
+            val f = File(path)
+            f.parentFile?.mkdirs()
+            f.writeText(params["content"]?.jsonPrimitive?.content ?: "", Charsets.UTF_8)
+            JsonObject(emptyMap())
+        } catch (e: Exception) {
+            sessionFsError(e)
+        }
+    }
+
+    private fun handleSessionFsAppendFile(params: JsonObject): JsonObject {
+        val path = params["path"]?.jsonPrimitive?.content ?: ""
+        return try {
+            val f = File(path)
+            f.parentFile?.mkdirs()
+            f.appendText(params["content"]?.jsonPrimitive?.content ?: "", Charsets.UTF_8)
+            JsonObject(emptyMap())
+        } catch (e: Exception) {
+            sessionFsError(e)
+        }
+    }
+
+    private fun handleSessionFsExists(params: JsonObject): JsonObject {
+        val path = params["path"]?.jsonPrimitive?.content ?: ""
+        return buildJsonObject { put("exists", File(path).exists()) }
+    }
+
+    private fun handleSessionFsStat(params: JsonObject): JsonObject {
+        val path = params["path"]?.jsonPrimitive?.content ?: ""
+        return try {
+            val f = File(path)
+            if (!f.exists()) throw java.io.FileNotFoundException(path)
+            val attrs = java.nio.file.Files.readAttributes(
+                f.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java
+            )
+            buildJsonObject {
+                put("isFile", f.isFile)
+                put("isDirectory", f.isDirectory)
+                put("size", f.length())
+                put("mtime", java.time.Instant.ofEpochMilli(attrs.lastModifiedTime().toMillis()).toString())
+                put("birthtime", java.time.Instant.ofEpochMilli(attrs.creationTime().toMillis()).toString())
+            }
+        } catch (e: Exception) {
+            val now = java.time.Instant.now().toString()
+            buildJsonObject {
+                put("isFile", false)
+                put("isDirectory", false)
+                put("size", 0)
+                put("mtime", now)
+                put("birthtime", now)
+                put("error", sessionFsError(e))
+            }
+        }
+    }
+
+    private fun handleSessionFsMkdir(params: JsonObject): JsonObject {
+        val path = params["path"]?.jsonPrimitive?.content ?: ""
+        val recursive = params["recursive"]?.jsonPrimitive?.booleanOrNull ?: false
+        return try {
+            val f = File(path)
+            val ok = if (recursive) f.mkdirs() else f.mkdir()
+            if (!ok && !f.isDirectory) throw java.io.IOException("Failed to create directory: $path")
+            JsonObject(emptyMap())
+        } catch (e: Exception) {
+            sessionFsError(e)
+        }
+    }
+
+    private fun handleSessionFsReaddir(params: JsonObject): JsonObject {
+        val path = params["path"]?.jsonPrimitive?.content ?: ""
+        return try {
+            val children = File(path).listFiles() ?: throw java.io.FileNotFoundException(path)
+            buildJsonObject {
+                put("entries", buildJsonArray { children.forEach { add(it.name) } })
+            }
+        } catch (e: Exception) {
+            buildJsonObject {
+                put("entries", JsonArray(emptyList()))
+                put("error", sessionFsError(e))
+            }
+        }
+    }
+
+    private fun handleSessionFsReaddirWithTypes(params: JsonObject): JsonObject {
+        val path = params["path"]?.jsonPrimitive?.content ?: ""
+        return try {
+            val children = File(path).listFiles() ?: throw java.io.FileNotFoundException(path)
+            buildJsonObject {
+                put("entries", buildJsonArray {
+                    children.forEach { child ->
+                        add(buildJsonObject {
+                            put("name", child.name)
+                            put("type", if (child.isDirectory) "directory" else "file")
+                        })
+                    }
+                })
+            }
+        } catch (e: Exception) {
+            buildJsonObject {
+                put("entries", JsonArray(emptyList()))
+                put("error", sessionFsError(e))
+            }
+        }
+    }
+
+    private fun handleSessionFsRm(params: JsonObject): JsonObject {
+        val path = params["path"]?.jsonPrimitive?.content ?: ""
+        val recursive = params["recursive"]?.jsonPrimitive?.booleanOrNull ?: false
+        val force = params["force"]?.jsonPrimitive?.booleanOrNull ?: false
+        return try {
+            val f = File(path)
+            if (!f.exists()) {
+                if (force) return JsonObject(emptyMap())
+                throw java.io.FileNotFoundException(path)
+            }
+            val ok = if (recursive) f.deleteRecursively() else f.delete()
+            if (!ok && !force) throw java.io.IOException("Failed to remove: $path")
+            JsonObject(emptyMap())
+        } catch (e: Exception) {
+            if (force) JsonObject(emptyMap()) else sessionFsError(e)
+        }
+    }
+
+    private fun handleSessionFsRename(params: JsonObject): JsonObject {
+        val src = params["src"]?.jsonPrimitive?.content ?: ""
+        val dest = params["dest"]?.jsonPrimitive?.content ?: ""
+        return try {
+            val d = File(dest)
+            d.parentFile?.mkdirs()
+            java.nio.file.Files.move(
+                File(src).toPath(), d.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING
+            )
+            JsonObject(emptyMap())
+        } catch (e: Exception) {
+            sessionFsError(e)
         }
     }
 
