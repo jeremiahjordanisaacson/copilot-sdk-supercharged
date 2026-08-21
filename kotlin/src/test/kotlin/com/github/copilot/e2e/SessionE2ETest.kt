@@ -190,8 +190,8 @@ class SessionE2ETest {
         )
 
         val fsConfig = SessionFsConfig(
-            initialCwd = "/",
-            sessionStatePath = "/session-state",
+            initialCwd = workDir,
+            sessionStatePath = File(workDir, "session-state").absolutePath,
             conventions = "posix",
         )
 
