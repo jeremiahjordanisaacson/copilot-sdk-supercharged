@@ -671,6 +671,38 @@ function CopilotClient:_setup_handlers()
     self._rpc_client:set_request_handler("exitPlanMode.request", function(params)
         return self:_handle_exit_plan_mode_request(params)
     end)
+
+    -- sessionFs.* provider requests (serviced against the real filesystem)
+    self._rpc_client:set_request_handler("sessionFs.readFile", function(params)
+        return self:_handle_session_fs_read_file(params)
+    end)
+    self._rpc_client:set_request_handler("sessionFs.writeFile", function(params)
+        return self:_handle_session_fs_write_file(params)
+    end)
+    self._rpc_client:set_request_handler("sessionFs.appendFile", function(params)
+        return self:_handle_session_fs_append_file(params)
+    end)
+    self._rpc_client:set_request_handler("sessionFs.exists", function(params)
+        return self:_handle_session_fs_exists(params)
+    end)
+    self._rpc_client:set_request_handler("sessionFs.stat", function(params)
+        return self:_handle_session_fs_stat(params)
+    end)
+    self._rpc_client:set_request_handler("sessionFs.mkdir", function(params)
+        return self:_handle_session_fs_mkdir(params)
+    end)
+    self._rpc_client:set_request_handler("sessionFs.readdir", function(params)
+        return self:_handle_session_fs_readdir(params)
+    end)
+    self._rpc_client:set_request_handler("sessionFs.readdirWithTypes", function(params)
+        return self:_handle_session_fs_readdir_with_types(params)
+    end)
+    self._rpc_client:set_request_handler("sessionFs.rm", function(params)
+        return self:_handle_session_fs_rm(params)
+    end)
+    self._rpc_client:set_request_handler("sessionFs.rename", function(params)
+        return self:_handle_session_fs_rename(params)
+    end)
 end
 
 --- Dispatch a session event to the appropriate session.
@@ -868,6 +900,260 @@ function CopilotClient:_handle_exit_plan_mode_request(params)
     end
 
     return result, nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Internal: sessionFs provider request handlers
+-- ---------------------------------------------------------------------------
+--
+-- When a session filesystem provider is registered via
+-- set_session_fs_provider, the CLI drives filesystem access by sending
+-- "sessionFs.*" requests back to the client. These handlers service those
+-- requests against the real filesystem using the absolute paths supplied by
+-- the CLI. Errors are returned in-band as { code =, message = } (never raised)
+-- so the CLI can distinguish a missing file (ENOENT) from other failures
+-- without the JSON-RPC call itself failing, matching the reference SDK.
+--
+-- Lua's standard library lacks directory listing, recursive mkdir/remove and a
+-- stat() that exposes type/size/mtime, so those primitives are serviced via
+-- POSIX shell utilities (the SDK's supported test targets are POSIX).
+
+-- Quote a path for safe single-quoted POSIX shell interpolation.
+local function _sfs_quote(s)
+    return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+end
+
+-- Map an error message to a SessionFsError, classifying missing paths as ENOENT.
+local function _sfs_error(message)
+    local msg = tostring(message or "unknown error")
+    local code = msg:lower():find("no such file or directory", 1, true) and "ENOENT" or "UNKNOWN"
+    return { code = code, message = msg }
+end
+
+-- Return the parent directory portion of a path, or nil when there is none.
+local function _sfs_dirname(path)
+    return tostring(path):match("^(.*)[/\\][^/\\]+[/\\]?$")
+end
+
+-- Best-effort recursive parent directory creation (POSIX mkdir -p).
+local function _sfs_mkparent(path)
+    local dir = _sfs_dirname(path)
+    if dir and dir ~= "" then
+        os.execute("mkdir -p " .. _sfs_quote(dir))
+    end
+end
+
+-- Existence check that works for both files and directories.
+local function _sfs_path_exists(path)
+    if not path then return false end
+    if os.rename(path, path) then return true end
+    local f = io.open(path, "r")
+    if f then f:close(); return true end
+    return false
+end
+
+-- Return "file", "directory", or nil for the given path (POSIX test).
+local function _sfs_kind(path)
+    local h = io.popen(
+        "if [ -d " .. _sfs_quote(path) .. " ]; then echo directory; " ..
+        "elif [ -e " .. _sfs_quote(path) .. " ]; then echo file; " ..
+        "else echo none; fi 2>/dev/null"
+    )
+    if not h then return nil end
+    local out = (h:read("*a") or ""):gsub("%s+$", "")
+    h:close()
+    if out == "directory" or out == "file" then return out end
+    return nil
+end
+
+-- List a directory's entries (excluding . and ..) via POSIX ls.
+local function _sfs_list(path)
+    if _sfs_kind(path) ~= "directory" then
+        return nil, "no such file or directory"
+    end
+    local h = io.popen("ls -1A " .. _sfs_quote(path) .. " 2>/dev/null")
+    if not h then return nil, "cannot list directory" end
+    local names = {}
+    for line in h:lines() do
+        if line ~= "" then names[#names + 1] = line end
+    end
+    h:close()
+    return names
+end
+
+-- Return an ISO 8601 UTC timestamp string for the given epoch seconds.
+local function _sfs_iso(epoch)
+    return os.date("!%Y-%m-%dT%H:%M:%SZ", epoch or os.time())
+end
+
+-- Best-effort file modification time (epoch seconds) via POSIX stat.
+local function _sfs_mtime(path)
+    local h = io.popen(
+        "stat -c %Y " .. _sfs_quote(path) .. " 2>/dev/null || " ..
+        "stat -f %m " .. _sfs_quote(path) .. " 2>/dev/null"
+    )
+    if not h then return nil end
+    local out = (h:read("*a") or ""):gsub("%s+$", "")
+    h:close()
+    return tonumber(out)
+end
+
+-- Tag a Lua table so cjson encodes it as a JSON array even when empty.
+local function _sfs_as_array(t)
+    if cjson.array_mt then
+        setmetatable(t, cjson.array_mt)
+    end
+    return t
+end
+
+-- Format a numeric mode as an octal string for chmod, else pass through.
+local function _sfs_mode_str(mode)
+    if type(mode) == "number" then
+        return string.format("%o", mode)
+    end
+    return tostring(mode)
+end
+
+function CopilotClient:_handle_session_fs_read_file(params)
+    local path = params and params.path
+    local f, oerr = io.open(path, "r")
+    if not f then
+        return { content = "", error = _sfs_error(oerr) }, nil
+    end
+    local content = f:read("*a") or ""
+    f:close()
+    return { content = content }, nil
+end
+
+function CopilotClient:_handle_session_fs_write_file(params)
+    local path = params and params.path
+    _sfs_mkparent(path)
+    local f, oerr = io.open(path, "w")
+    if not f then
+        return _sfs_error(oerr), nil
+    end
+    f:write(tostring((params and params.content) or ""))
+    f:close()
+    if params and params.mode then
+        os.execute("chmod " .. _sfs_mode_str(params.mode) .. " " .. _sfs_quote(path))
+    end
+    return {}, nil
+end
+
+function CopilotClient:_handle_session_fs_append_file(params)
+    local path = params and params.path
+    _sfs_mkparent(path)
+    local f, oerr = io.open(path, "a")
+    if not f then
+        return _sfs_error(oerr), nil
+    end
+    f:write(tostring((params and params.content) or ""))
+    f:close()
+    if params and params.mode then
+        os.execute("chmod " .. _sfs_mode_str(params.mode) .. " " .. _sfs_quote(path))
+    end
+    return {}, nil
+end
+
+function CopilotClient:_handle_session_fs_exists(params)
+    return { exists = _sfs_path_exists(params and params.path) }, nil
+end
+
+function CopilotClient:_handle_session_fs_stat(params)
+    local path = params and params.path
+    local kind = _sfs_kind(path)
+    if not kind then
+        local now = _sfs_iso()
+        return {
+            isFile = false,
+            isDirectory = false,
+            size = 0,
+            mtime = now,
+            birthtime = now,
+            error = _sfs_error("no such file or directory"),
+        }, nil
+    end
+    local size = 0
+    if kind == "file" then
+        local f = io.open(path, "r")
+        if f then
+            size = f:seek("end") or 0
+            f:close()
+        end
+    end
+    local iso = _sfs_iso(_sfs_mtime(path) or os.time())
+    return {
+        isFile = (kind == "file"),
+        isDirectory = (kind == "directory"),
+        size = size,
+        mtime = iso,
+        birthtime = iso,
+    }, nil
+end
+
+function CopilotClient:_handle_session_fs_mkdir(params)
+    local path = params and params.path
+    local cmd = (params and params.recursive) and ("mkdir -p " .. _sfs_quote(path))
+        or ("mkdir " .. _sfs_quote(path))
+    local ok = os.execute(cmd)
+    if ok ~= true and ok ~= 0 and not _sfs_path_exists(path) then
+        return _sfs_error("failed to create directory: " .. tostring(path)), nil
+    end
+    if params and params.mode then
+        os.execute("chmod " .. _sfs_mode_str(params.mode) .. " " .. _sfs_quote(path))
+    end
+    return {}, nil
+end
+
+function CopilotClient:_handle_session_fs_readdir(params)
+    local names, err = _sfs_list(params and params.path)
+    if not names then
+        return { entries = _sfs_as_array({}), error = _sfs_error(err) }, nil
+    end
+    return { entries = _sfs_as_array(names) }, nil
+end
+
+function CopilotClient:_handle_session_fs_readdir_with_types(params)
+    local path = params and params.path
+    local names, err = _sfs_list(path)
+    if not names then
+        return { entries = _sfs_as_array({}), error = _sfs_error(err) }, nil
+    end
+    local base = tostring(path):gsub("[/\\]$", "")
+    local entries = {}
+    for _, name in ipairs(names) do
+        local kind = _sfs_kind(base .. "/" .. name)
+        entries[#entries + 1] = { name = name, type = (kind == "directory") and "directory" or "file" }
+    end
+    return { entries = _sfs_as_array(entries) }, nil
+end
+
+function CopilotClient:_handle_session_fs_rm(params)
+    local path = params and params.path
+    local force = params and params.force
+    if params and params.recursive then
+        os.execute((force and "rm -rf " or "rm -r ") .. _sfs_quote(path))
+        if not force and _sfs_path_exists(path) then
+            return _sfs_error("failed to remove: " .. tostring(path)), nil
+        end
+        return {}, nil
+    end
+    local ok, rerr = os.remove(path)
+    if not ok then
+        if force then
+            return {}, nil
+        end
+        return _sfs_error(rerr), nil
+    end
+    return {}, nil
+end
+
+function CopilotClient:_handle_session_fs_rename(params)
+    local ok, rerr = os.rename(params and params.src, params and params.dest)
+    if not ok then
+        return _sfs_error(rerr), nil
+    end
+    return {}, nil
 end
 
 -- ---------------------------------------------------------------------------
