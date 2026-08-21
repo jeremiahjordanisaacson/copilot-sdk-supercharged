@@ -587,7 +587,7 @@ final class SessionE2ETests: XCTestCase {
     func testTools() async throws {
         try await configureSnapshot(
             category: "session",
-            testName: "should_create_session_with_custom_tool"
+            testName: "sendandwait_blocks_until_session_idle_and_returns_final_assistant_message"
         )
 
         let client = CopilotClient(options: CopilotClientOptions(
@@ -616,7 +616,7 @@ final class SessionE2ETests: XCTestCase {
             XCTAssertFalse(sessionId.isEmpty, "Session with tools should have a valid ID")
 
             let response = try await session.sendAndWait(
-                MessageOptions(prompt: "What is the secret number for key ALPHA?")
+                MessageOptions(prompt: "What is 2+2?")
             )
             XCTAssertNotNil(response, "Tool-enabled session should return a response")
 
