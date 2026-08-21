@@ -141,8 +141,8 @@ subtest 'session list' => sub {
     my $session1 = $client->create_session();
     my $session2 = $client->create_session();
 
-    my @sessions = $client->list_sessions();
-    cmp_ok(scalar @sessions, '>=', 2, 'At least 2 sessions listed');
+    my $sessions = $client->list_sessions();
+    cmp_ok(scalar @$sessions, '>=', 2, 'At least 2 sessions listed');
 
     $client->stop();
 };
@@ -175,8 +175,8 @@ subtest 'session delete' => sub {
 
     $client->delete_session($session_id);
 
-    my @sessions = $client->list_sessions();
-    my @ids = map { $_->id() } @sessions;
+    my $sessions = $client->list_sessions();
+    my @ids = map { $_->id() } @$sessions;
     ok(!grep({ $_ eq $session_id } @ids), 'Deleted session not in list');
 
     $client->stop();
@@ -190,8 +190,8 @@ subtest 'model list' => sub {
     configure_snapshot();
 
     my $client = make_client();
-    my @models = $client->list_models();
-    cmp_ok(scalar @models, '>', 0, 'At least one model returned');
+    my $models = $client->list_models();
+    cmp_ok(scalar @$models, '>', 0, 'At least one model returned');
 
     $client->stop();
 };

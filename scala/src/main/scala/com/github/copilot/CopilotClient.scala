@@ -113,9 +113,16 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
       // Set up connection handlers
       attachConnectionHandlers()
 
-      // Verify protocol version compatibility
-      val pingFuture = ping()
-      val pingResult = concurrent.Await.result(pingFuture, scala.concurrent.duration.Duration(10, "s"))
+      // Verify protocol version compatibility. Call rpcClient directly rather than the public
+      // ping(), which routes through ensureConnected() and would re-enter start() (state is still
+      // Connecting here, not Connected), deadlocking until the Await times out.
+      val pingRaw = concurrent.Await.result(
+        rpcClient.get.sendRequest("ping", Json.obj("message" -> Option.empty[String].asJson).dropNullValues),
+        scala.concurrent.duration.Duration(10, "s")
+      )
+      val pingResult = pingRaw.as[PingResponse] match
+        case Right(r) => r
+        case Left(err) => throw new RuntimeException(s"Failed to decode ping response: $err")
       verifyProtocolVersion(pingResult)
 
       // Register session filesystem provider if configured

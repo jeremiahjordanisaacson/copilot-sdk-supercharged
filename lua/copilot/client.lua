@@ -97,6 +97,20 @@ function CopilotClient:start()
     -- Build command string
     local cmd = table.concat(args, " ")
 
+    -- Cap the CLI process lifetime with coreutils `timeout` (POSIX, when
+    -- available). Applied BEFORE prepending environment variables so the
+    -- executable itself -- not a `VAR=value` env assignment -- is timeout's
+    -- direct child, ensuring the process (and thus the stdout pipe) is actually
+    -- killed if it stalls. Without this, a mismatched replay can block the
+    -- blocking reader for the entire CI timeout. `-k` force-kills if the process
+    -- ignores the initial signal.
+    if package.config:sub(1, 1) == "/" then
+        local has_timeout = os.execute("command -v timeout >/dev/null 2>&1")
+        if has_timeout == true or has_timeout == 0 then
+            cmd = "timeout -k 10 90 " .. cmd
+        end
+    end
+
     -- Prepend custom environment variables (from options.env)
     if self._env and type(self._env) == "table" then
         local is_windows = (package.config:sub(1, 1) == "\\")
@@ -569,20 +583,8 @@ function CopilotClient:_spawn_process_posix(cmd)
         os.execute("mkfifo " .. fifo_path)
     end
 
-    -- Launch the process: stdin reads from fifo, stdout is captured by popen.
-    -- Cap the CLI process lifetime with coreutils `timeout` when available so a
-    -- stalled blocking read (e.g. the replay proxy has no matching snapshot and
-    -- the CLI emits nothing further) surfaces as EOF rather than hanging the
-    -- caller forever. Guarded by availability to preserve behavior where
-    -- `timeout` is absent (e.g. stock macOS).
-    local timeout_prefix = ""
-    do
-        local ok = os.execute("command -v timeout >/dev/null 2>&1")
-        if ok == true or ok == 0 then
-            timeout_prefix = "timeout 90 "
-        end
-    end
-    local full_cmd = string.format("%s%s < %s", timeout_prefix, cmd, fifo_path)
+    -- Launch the process: stdin reads from fifo, stdout is captured by popen
+    local full_cmd = string.format("%s < %s", cmd, fifo_path)
     local stdout_handle = io.popen(full_cmd, "r")
     if not stdout_handle then
         os.remove(fifo_path)
