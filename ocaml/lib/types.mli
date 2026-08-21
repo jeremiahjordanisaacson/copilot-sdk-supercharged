@@ -313,6 +313,8 @@ type client_options = {
   builtin_plugin_directories : string list option;
   (* JSON key: "inProcess" *)
   in_process : bool option;
+  (* Provider that supplies W3C trace context for outbound requests. *)
+  on_get_trace_context : (unit -> trace_context) option;
 }
 
 val default_client_options : unit -> client_options
