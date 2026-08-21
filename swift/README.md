@@ -344,7 +344,7 @@ List available models:
 let models = try await client.listModels()
 for model in models {
     print("\(model.id): \(model.name)")
-    if model.capabilities.supports.reasoningEffort {
+    if model.capabilities.supports?.reasoningEffort == true {
         print("  Supports reasoning effort: \(model.supportedReasoningEfforts ?? [])")
     }
 }

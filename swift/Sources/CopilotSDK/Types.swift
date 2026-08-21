@@ -1411,8 +1411,8 @@ public struct GetAuthStatusResponse: Codable, Sendable {
 
 /// Model support flags.
 public struct ModelSupports: Codable, Sendable {
-    public let vision: Bool
-    public let reasoningEffort: Bool
+    public let vision: Bool?
+    public let reasoningEffort: Bool?
 }
 
 /// Vision-specific limits.
@@ -1425,14 +1425,14 @@ public struct ModelVisionLimits: Codable, Sendable {
 /// Model limits.
 public struct ModelLimits: Codable, Sendable {
     public let max_prompt_tokens: Int?
-    public let max_context_window_tokens: Int
+    public let max_context_window_tokens: Int?
     public let vision: ModelVisionLimits?
 }
 
 /// Model capabilities.
 public struct ModelCapabilities: Codable, Sendable {
-    public let supports: ModelSupports
-    public let limits: ModelLimits
+    public let supports: ModelSupports?
+    public let limits: ModelLimits?
 }
 
 /// Model policy state.
