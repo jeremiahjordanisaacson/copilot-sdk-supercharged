@@ -85,6 +85,10 @@ describe("Lua SDK E2E", function()
             cliPath = cli_path,
             logLevel = "info",
             env = env,
+            -- Pass a token so the CLI uses proxy token-auth and skips the
+            -- auto-login GitHub-user fetch (which never completes through the
+            -- replay proxy and hangs the chat turn until the job times out).
+            githubToken = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN") or "fake-test-token",
         }
         if extra_opts then
             for k, v in pairs(extra_opts) do
