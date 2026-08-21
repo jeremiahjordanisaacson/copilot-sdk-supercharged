@@ -442,15 +442,18 @@ module Copilot
     #
     # @param initial_cwd [String, nil] Initial working directory
     # @param session_state_path [String, nil] Path for session state persistence
-    # @param conventions [Array<String>, nil] Convention strings
+    # @param conventions [String, nil] Filesystem conventions ("posix" or "windows").
+    #   Required by the CLI; defaults to the host platform's conventions when omitted.
     # @return [void]
     def set_session_fs_provider(initial_cwd: nil, session_state_path: nil, conventions: nil)
       raise_not_connected! unless @rpc_client
 
+      conventions ||= (RUBY_PLATFORM =~ /mswin|mingw|cygwin/ ? "windows" : "posix")
+
       params = {}
       params[:initialCwd] = initial_cwd if initial_cwd
       params[:sessionStatePath] = session_state_path if session_state_path
-      params[:conventions] = conventions if conventions
+      params[:conventions] = conventions
 
       @rpc_client.request("sessionFs.setProvider", params)
     end

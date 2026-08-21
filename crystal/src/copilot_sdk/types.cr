@@ -167,6 +167,41 @@ module CopilotSDK
     end
   end
 
+  # Request from the agent to exit plan mode and begin executing.
+  class ExitPlanModeRequest
+    include JSON::Serializable
+
+    # Summary of the plan or proposed next step.
+    property summary : String
+    # Full plan content, when available.
+    @[JSON::Field(key: "planContent")]
+    property plan_content : String?
+    # Available actions the user can select.
+    property actions : Array(String)
+    # The action recommended by the runtime.
+    @[JSON::Field(key: "recommendedAction")]
+    property recommended_action : String
+
+    def initialize(@summary, @actions, @recommended_action, @plan_content = nil)
+    end
+  end
+
+  # Result of an exit-plan-mode request.
+  class ExitPlanModeResult
+    include JSON::Serializable
+
+    # Whether the user approved exiting plan mode.
+    property approved : Bool
+    # Selected action, if the user chose one.
+    @[JSON::Field(key: "selectedAction")]
+    property selected_action : String?
+    # Optional feedback provided by the user.
+    property feedback : String?
+
+    def initialize(@approved, @selected_action = nil, @feedback = nil)
+    end
+  end
+
   # Context for an elicitation request from the server.
   class ElicitationRequest
     include JSON::Serializable
@@ -598,6 +633,9 @@ module CopilotSDK
 
   # Alias for session event handler callbacks.
   alias SessionEventHandler = Proc(SessionEvent, Nil)
+
+  # Alias for exit-plan-mode handler callbacks.
+  alias ExitPlanModeHandler = Proc(ExitPlanModeRequest, String, ExitPlanModeResult)
 
   # Default permission handler that denies all requests.
   def self.deny_all_permissions(request : PermissionRequest, session_id : String) : PermissionRequestResult

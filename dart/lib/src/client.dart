@@ -272,7 +272,9 @@ class CopilotClient {
       if (config.tools != null)
         'tools': config.tools!.map((t) => t.toJson()).toList(),
       if (config.systemMessage != null)
-        'systemMessage': (config.systemMessage as dynamic).toJson(),
+        'systemMessage': config.systemMessage is String
+            ? config.systemMessage
+            : (config.systemMessage as dynamic).toJson(),
       if (config.availableTools != null) 'availableTools': config.availableTools,
       if (config.excludedTools != null) 'excludedTools': config.excludedTools,
       if (config.provider != null) 'provider': config.provider!.toJson(),
@@ -377,7 +379,9 @@ class CopilotClient {
       if (config.tools != null)
         'tools': config.tools!.map((t) => t.toJson()).toList(),
       if (config.systemMessage != null)
-        'systemMessage': (config.systemMessage as dynamic).toJson(),
+        'systemMessage': config.systemMessage is String
+            ? config.systemMessage
+            : (config.systemMessage as dynamic).toJson(),
       if (config.availableTools != null) 'availableTools': config.availableTools,
       if (config.excludedTools != null) 'excludedTools': config.excludedTools,
       if (config.provider != null) 'provider': config.provider!.toJson(),

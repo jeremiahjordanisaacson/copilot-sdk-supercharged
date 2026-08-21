@@ -633,8 +633,27 @@ class CopilotClient
     private function verifyProtocolVersion(): void
     {
         $expectedVersion = SdkProtocolVersion::get();
-        $pingResult = $this->ping();
-        $serverVersion = $pingResult->protocolVersion;
+        $serverVersion = null;
+
+        try {
+            // Modern servers implement the `connect` handshake (carrying the optional
+            // connection token). Legacy servers without it fall back to `ping` below.
+            $connectParams = [];
+            if ($this->options->tcpConnectionToken !== null) {
+                $connectParams['token'] = $this->options->tcpConnectionToken;
+            }
+            $result = $this->connection->request('connect', $connectParams);
+            if (is_array($result) && array_key_exists('protocolVersion', $result)) {
+                $serverVersion = $result['protocolVersion'];
+            }
+        } catch (JsonRpcException $e) {
+            if ($e->getCode() === -32601 || str_contains($e->getRpcMessage(), 'Unhandled method connect')) {
+                // Legacy server without `connect`; fall back to `ping`.
+                $serverVersion = $this->ping()->protocolVersion;
+            } else {
+                throw $e;
+            }
+        }
 
         if ($serverVersion === null) {
             throw new \RuntimeException(

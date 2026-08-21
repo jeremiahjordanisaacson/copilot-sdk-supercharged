@@ -1848,6 +1848,7 @@ data CopilotClientOptions = CopilotClientOptions
   , ccoBearerTokenProvider       :: !(Maybe BearerTokenProvider)  -- ^ BYOK bearer-token provider (per-session)
   , ccoBuiltinPluginDirectories  :: !(Maybe [Text])  -- ^ Built-in plugin directories (builtinPluginDirectories)
   , ccoInProcess                 :: !(Maybe Bool)  -- ^ Use in-process FFI transport (inProcess)
+  , ccoOnGetTraceContext         :: !(Maybe TraceContextProvider)  -- ^ Provider invoked to supply trace context (onGetTraceContext)
   }
 
 -- | Default client options.
@@ -1870,4 +1871,5 @@ defaultClientOptions = CopilotClientOptions
   , ccoBearerTokenProvider       = Nothing
   , ccoBuiltinPluginDirectories  = Nothing
   , ccoInProcess                 = Nothing
+  , ccoOnGetTraceContext         = Nothing
   }

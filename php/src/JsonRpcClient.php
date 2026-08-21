@@ -103,7 +103,9 @@ class JsonRpcClient
             'jsonrpc' => '2.0',
             'id' => $id,
             'method' => $method,
-            'params' => $params,
+            // Encode empty params as a JSON object ({}) rather than an array ([]),
+            // matching the object-params convention the server expects.
+            'params' => $params === [] ? new \stdClass() : $params,
         ];
 
         $this->sendMessage($message);
