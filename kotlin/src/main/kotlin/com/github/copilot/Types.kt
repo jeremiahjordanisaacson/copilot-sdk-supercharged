@@ -690,7 +690,7 @@ data class MessageOptions(
 @Serializable
 data class PingResponse(
     val message: String? = null,
-    val timestamp: Long = 0,
+    val timestamp: String = "",
     val protocolVersion: Int? = null
 )
 

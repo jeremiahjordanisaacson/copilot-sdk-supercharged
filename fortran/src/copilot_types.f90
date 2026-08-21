@@ -85,6 +85,8 @@ module copilot_types
     type(session_fs_config), allocatable :: session_fs
     character(len=:), allocatable :: copilot_home
     character(len=:), allocatable :: tcp_connection_token
+    !> Enable remote session support (Mission Control); adds the --remote CLI flag.
+    logical :: remote = .false.
     !> HTTP request handler to intercept/mutate outbound LLM inference requests
     !! (CopilotRequestHandler).
     procedure(copilot_request_handler_interface), pointer, nopass :: request_handler => null()

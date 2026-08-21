@@ -117,7 +117,7 @@ impl Drop for Subscription {
 /// # Examples
 ///
 /// ```rust,no_run
-/// # use copilot_sdk_supercharged::*;
+/// # use copilot_sdk::*;
 /// # async fn example() -> Result<(), CopilotError> {
 /// let client = CopilotClient::new(CopilotClientOptions::default());
 /// let session = client.create_session(SessionConfig::default()).await?;
@@ -133,7 +133,7 @@ impl Drop for Subscription {
 ///
 /// // Send a message and wait for completion
 /// let response = session.send_and_wait(
-///     MessageOptions { prompt: "Hello!".into(), attachments: None, mode: None, response_format: None, image_options: None },
+///     MessageOptions { prompt: "Hello!".into(), ..Default::default() },
 ///     None,
 /// ).await?;
 ///

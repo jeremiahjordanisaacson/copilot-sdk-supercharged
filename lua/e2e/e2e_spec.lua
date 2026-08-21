@@ -24,7 +24,7 @@ local function resolve_cli_path()
     -- Try to find it relative to the repo root (lua/ -> nodejs/)
     local script_dir = debug.getinfo(1, "S").source:match("^@(.+)[/\\]") or "."
     local sep = package.config:sub(1, 1)
-    local repo_root = script_dir .. sep .. ".."
+    local repo_root = script_dir .. sep .. ".." .. sep .. ".."
     local github_modules = repo_root .. sep .. "nodejs" .. sep .. "node_modules"
         .. sep .. "@github"
 

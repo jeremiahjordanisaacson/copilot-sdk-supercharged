@@ -74,6 +74,9 @@ struct CopilotClientOptions
 
     /// Use the in-process FFI transport instead of a child CLI process.
     bool inProcess = false;
+
+    /// Enable remote session support (Mission Control); adds the --remote CLI flag.
+    bool remote = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -865,7 +868,7 @@ struct ExitPlanModeRequest
     /// The action recommended by the runtime.
     string recommendedAction;
 
-    static ExitPlanModeRequest fromJson(JSONValue v) @safe
+    static ExitPlanModeRequest fromJson(JSONValue v) @trusted
     {
         ExitPlanModeRequest req;
         if (v.type != JSONType.object) return req;

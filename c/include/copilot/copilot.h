@@ -438,7 +438,7 @@ typedef enum {
 /**
  * MCP server configuration.
  *
- * For stdio servers: set command, args, args_count, and optionally env_*/cwd.
+ * For stdio servers: set command, args, args_count, and optionally env_* and cwd.
  * For HTTP/SSE servers: set url and optionally headers_*.
  * Both variants use tools, tools_count, and optionally timeout.
  */

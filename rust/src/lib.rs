@@ -10,7 +10,7 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use copilot_sdk_supercharged::*;
+//! use copilot_sdk::*;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), CopilotError> {
@@ -28,8 +28,7 @@
 //!     let response = session.send_and_wait(
 //!         MessageOptions {
 //!             prompt: "What is 2 + 2?".to_string(),
-//!             attachments: None,
-//!             mode: None,
+//!             ..Default::default()
 //!         },
 //!         None,
 //!     ).await?;

@@ -32,7 +32,7 @@ use crate::CopilotError;
 /// # Examples
 ///
 /// ```rust,no_run
-/// # use copilot_sdk_supercharged::*;
+/// # use copilot_sdk::*;
 /// # async fn example() -> Result<(), CopilotError> {
 /// // Create a client with default options (spawns CLI server via stdio)
 /// let client = CopilotClient::new(CopilotClientOptions::default());
@@ -52,8 +52,7 @@ use crate::CopilotError;
 ///
 /// session.send(MessageOptions {
 ///     prompt: "Hello!".to_string(),
-///     attachments: None,
-///     mode: None,
+///     ..Default::default()
 /// }).await?;
 ///
 /// // Clean up

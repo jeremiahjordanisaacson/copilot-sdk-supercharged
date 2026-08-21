@@ -59,6 +59,8 @@ pub const ClientOptions = struct {
     builtin_plugin_directories: ?[]const []const u8 = null,
     /// Use the in-process FFI transport instead of spawning a CLI (`inProcess` wire key).
     in_process: bool = false,
+    /// Provider that supplies W3C trace context for outbound requests (`onGetTraceContext`).
+    on_get_trace_context: ?TraceContextProvider = null,
 };
 
 pub const SessionFsConfig = struct {

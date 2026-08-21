@@ -671,9 +671,14 @@ class CopilotClient {
       );
     }
 
+    // If cliPath is a .js file, run it with node.
+    final executable = _cliPath.endsWith('.js') ? 'node' : _cliPath;
+    final execArgs =
+        _cliPath.endsWith('.js') ? <String>[_cliPath, ...args] : args;
+
     _cliProcess = await Process.start(
-      _cliPath,
-      args,
+      executable,
+      execArgs,
       workingDirectory: _cwd,
       environment: env,
     );

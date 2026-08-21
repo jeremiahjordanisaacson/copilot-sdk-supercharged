@@ -723,7 +723,7 @@ class CopilotClient {
             args << cliPath
         }
 
-        args.addAll(cliArgs as List)
+        args.addAll(cliArgs as List<String>)
         args.addAll(['--headless', '--no-auto-update', '--log-level', logLevel])
 
         if (useStdio) {

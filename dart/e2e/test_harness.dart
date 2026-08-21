@@ -172,10 +172,30 @@ class TestHarness {
       return File(envPath).absolute.path;
     }
 
-    final nodeCli = File('$_repoRoot${Platform.pathSeparator}nodejs'
-        '${Platform.pathSeparator}node_modules${Platform.pathSeparator}'
-        '@github${Platform.pathSeparator}copilot'
-        '${Platform.pathSeparator}index.js');
+    final sep = Platform.pathSeparator;
+    final githubModules =
+        Directory('$_repoRoot${sep}nodejs${sep}node_modules${sep}@github');
+    // As of CLI 1.0.64-1 the runnable index.js ships in a platform-specific
+    // package (e.g. @github/copilot-linux-x64); prefer it when present.
+    if (githubModules.existsSync()) {
+      for (final entry in githubModules.listSync()) {
+        if (entry is Directory) {
+          final name = entry.path.split(sep).last;
+          if (name.startsWith('copilot-') &&
+              !name.contains('language-server')) {
+            final idx = File('${entry.path}${sep}index.js');
+            if (idx.existsSync()) {
+              return idx.absolute.path;
+            }
+          }
+        }
+      }
+    }
+
+    final nodeCli = File('$_repoRoot${sep}nodejs'
+        '${sep}node_modules${sep}'
+        '@github${sep}copilot'
+        '${sep}index.js');
     if (nodeCli.existsSync()) {
       return nodeCli.absolute.path;
     }

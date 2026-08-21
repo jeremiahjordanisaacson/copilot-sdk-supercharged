@@ -786,6 +786,8 @@ type client_options = {
   builtin_plugin_directories : string list option;
   (* JSON key: "inProcess" *)
   in_process : bool option;
+  (* Enable remote session support (Mission Control); adds the --remote CLI flag. *)
+  remote : bool option;
   (* Provider that supplies W3C trace context for outbound requests. *)
   on_get_trace_context : (unit -> trace_context) option;
 }
@@ -804,6 +806,7 @@ let default_client_options () =
   ; bearer_token_provider = None
   ; builtin_plugin_directories = None
   ; in_process = None
+  ; remote = None
   ; on_get_trace_context = None
   }
 

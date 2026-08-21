@@ -599,6 +599,7 @@ module Copilot
     :session_fs,
     :copilot_home, :tcp_connection_token,
     :request_handler,
+    :on_get_trace_context,
     keyword_init: true
   )
 
