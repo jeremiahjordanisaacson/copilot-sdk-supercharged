@@ -78,6 +78,9 @@ class CopilotE2ESpec
       cliPath = Some(TestHarness.cliPath),
       cwd = Some(workDir),
       env = Some(TestHarness.testEnv(workDir)),
+      githubToken = Some(
+        sys.env.getOrElse("GH_TOKEN", sys.env.getOrElse("GITHUB_TOKEN", "fake-test-token"))
+      ),
       sessionFs = sessionFs,
     )
     val c = CopilotClient(opts)
