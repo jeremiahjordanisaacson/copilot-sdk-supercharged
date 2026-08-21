@@ -1494,7 +1494,7 @@ type SessionEventHandler = SessionEvent -> IO ()
 -- | Response from a ping request.
 data PingResponse = PingResponse
   { pingMessage         :: !Text
-  , pingTimestamp       :: !Integer
+  , pingTimestamp       :: !Text
   , pingProtocolVersion :: !(Maybe Int)
   } deriving (Show, Eq, Generic)
 

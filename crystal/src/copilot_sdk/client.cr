@@ -291,9 +291,6 @@ module CopilotSDK
       cli_path = @options.cli_path || find_cli_path
 
       args = ["--stdio"]
-      if @options.remote
-        args << "--remote"
-      end
 
       process = Process.new(
         cli_path,
