@@ -24,6 +24,16 @@ module copilot_session_module
     end subroutine session_event_handler
   end interface
 
+  !> Procedure pointer interface for exit-plan-mode handlers.
+  abstract interface
+    subroutine exit_plan_mode_callback_interface(request, response, user_data)
+      import :: exit_plan_mode_request_t, exit_plan_mode_response_t
+      type(exit_plan_mode_request_t), intent(in) :: request
+      type(exit_plan_mode_response_t), intent(out) :: response
+      class(*), intent(inout), optional :: user_data
+    end subroutine exit_plan_mode_callback_interface
+  end interface
+
   !> Internal event handler entry.
   type :: handler_entry
     integer :: id = 0

@@ -250,6 +250,35 @@ val permission_result_to_yojson : permission_result -> Yojson.Safe.t
 val permission_result_to_yojson_with_context :
   permission_result -> Yojson.Safe.t option -> Yojson.Safe.t
 
+(** {1 Exit Plan Mode} *)
+
+type exit_plan_mode_request = {
+  session_id : string;
+  summary : string;
+  plan_content : string option;
+  actions : string list;
+  recommended_action : string;
+}
+
+val exit_plan_mode_request_of_yojson :
+  Yojson.Safe.t -> (exit_plan_mode_request, string) result
+
+type exit_plan_mode_response = {
+  approved : bool;
+  selected_action : string option;
+  feedback : string option;
+}
+
+val exit_plan_mode_response_to_yojson : exit_plan_mode_response -> Yojson.Safe.t
+
+val default_exit_plan_mode_response : unit -> exit_plan_mode_response
+
+(** W3C trace context propagated on outbound requests. *)
+type trace_context = {
+  traceparent : string option;
+  tracestate : string option;
+}
+
 (** {1 Status Types} *)
 
 type get_status_response = {

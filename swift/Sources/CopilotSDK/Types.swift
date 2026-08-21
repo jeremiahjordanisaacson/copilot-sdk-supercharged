@@ -309,6 +309,74 @@ public struct UserInputResponse: Codable, Sendable {
 public typealias UserInputHandler = @Sendable (UserInputRequest, String) async throws
     -> UserInputResponse
 
+// MARK: - Exit Plan Mode Types
+
+/// A request from the agent to exit plan mode and begin executing a plan.
+public struct ExitPlanModeRequest: Codable, Sendable {
+    /// The session that produced the plan.
+    public let sessionId: String
+    /// A short summary of the plan.
+    public let summary: String
+    /// The full plan content, if available.
+    public let planContent: String?
+    /// The actions the user can choose from.
+    public let actions: [String]
+    /// The action the agent recommends.
+    public let recommendedAction: String
+
+    public init(
+        sessionId: String,
+        summary: String = "",
+        planContent: String? = nil,
+        actions: [String] = [],
+        recommendedAction: String = ""
+    ) {
+        self.sessionId = sessionId
+        self.summary = summary
+        self.planContent = planContent
+        self.actions = actions
+        self.recommendedAction = recommendedAction
+    }
+}
+
+/// The user's response to an exit-plan-mode request.
+public struct ExitPlanModeResponse: Codable, Sendable {
+    /// Whether the plan was approved.
+    public let approved: Bool
+    /// The action the user selected, if any.
+    public let selectedAction: String?
+    /// Optional feedback from the user.
+    public let feedback: String?
+
+    public init(approved: Bool, selectedAction: String? = nil, feedback: String? = nil) {
+        self.approved = approved
+        self.selectedAction = selectedAction
+        self.feedback = feedback
+    }
+}
+
+/// Handler for exit-plan-mode requests.
+public typealias ExitPlanModeHandler = @Sendable (ExitPlanModeRequest) async throws
+    -> ExitPlanModeResponse
+
+// MARK: - Trace Context Types
+
+/// W3C trace-context values injected into outbound requests for distributed tracing.
+public struct TraceContext: Codable, Sendable {
+    /// The `traceparent` header value.
+    public let traceparent: String?
+    /// The `tracestate` header value.
+    public let tracestate: String?
+
+    public init(traceparent: String? = nil, tracestate: String? = nil) {
+        self.traceparent = traceparent
+        self.tracestate = tracestate
+    }
+}
+
+/// Supplies the current trace context for outbound requests.
+public typealias TraceContextProvider = @Sendable () async -> TraceContext
+
 // MARK: - Hook Types
 
 /// Base hook input with timestamp and cwd.
@@ -871,6 +939,9 @@ public struct SessionConfig: Sendable {
     /// Handler for elicitation requests from the server.
     public var onElicitationRequest: ElicitationHandler?
 
+    /// Handler invoked when the agent requests to exit plan mode.
+    public var onExitPlanMode: ExitPlanModeHandler?
+
     /// Directories to search for instruction files.
     public var instructionDirectories: [String]?
 
@@ -937,6 +1008,7 @@ public struct SessionConfig: Sendable {
         gitHubToken: String? = nil,
         commands: [CommandDefinition]? = nil,
         onElicitationRequest: ElicitationHandler? = nil,
+        onExitPlanMode: ExitPlanModeHandler? = nil,
         instructionDirectories: [String]? = nil,
         enableCitations: Bool? = nil,
         excludedBuiltinAgents: [String]? = nil,
@@ -981,6 +1053,7 @@ public struct SessionConfig: Sendable {
         self.gitHubToken = gitHubToken
         self.commands = commands
         self.onElicitationRequest = onElicitationRequest
+        self.onExitPlanMode = onExitPlanMode
         self.instructionDirectories = instructionDirectories
         self.enableCitations = enableCitations
         self.excludedBuiltinAgents = excludedBuiltinAgents
@@ -1036,6 +1109,9 @@ public struct ResumeSessionConfig: Sendable {
     /// Handler for elicitation requests from the server.
     public var onElicitationRequest: ElicitationHandler?
 
+    /// Handler invoked when the agent requests to exit plan mode.
+    public var onExitPlanMode: ExitPlanModeHandler?
+
     /// Directories to search for instruction files.
     public var instructionDirectories: [String]?
 
@@ -1065,6 +1141,7 @@ public struct ResumeSessionConfig: Sendable {
         disableResume: Bool? = nil,
         commands: [CommandDefinition]? = nil,
         onElicitationRequest: ElicitationHandler? = nil,
+        onExitPlanMode: ExitPlanModeHandler? = nil,
         instructionDirectories: [String]? = nil
     ) {
         self.model = model
@@ -1092,6 +1169,7 @@ public struct ResumeSessionConfig: Sendable {
         self.disableResume = disableResume
         self.commands = commands
         self.onElicitationRequest = onElicitationRequest
+        self.onExitPlanMode = onExitPlanMode
         self.instructionDirectories = instructionDirectories
     }
 }
@@ -1538,6 +1616,9 @@ public struct CopilotClientOptions: Sendable {
     /// Use the in-process FFI transport instead of spawning a CLI.
     public var inProcess: Bool?
 
+    /// Supplies the current W3C trace context for outbound requests.
+    public var onGetTraceContext: TraceContextProvider?
+
     public init(
         cliPath: String? = nil,
         cliArgs: [String]? = nil,
@@ -1558,7 +1639,8 @@ public struct CopilotClientOptions: Sendable {
         requestHandler: CopilotRequestHandler? = nil,
         bearerTokenProvider: BearerTokenProvider? = nil,
         builtinPluginDirectories: [String]? = nil,
-        inProcess: Bool? = nil
+        inProcess: Bool? = nil,
+        onGetTraceContext: TraceContextProvider? = nil
     ) {
         self.cliPath = cliPath
         self.cliArgs = cliArgs
@@ -1580,6 +1662,7 @@ public struct CopilotClientOptions: Sendable {
         self.bearerTokenProvider = bearerTokenProvider
         self.builtinPluginDirectories = builtinPluginDirectories
         self.inProcess = inProcess
+        self.onGetTraceContext = onGetTraceContext
     }
 }
 

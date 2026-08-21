@@ -508,6 +508,33 @@ data class UserInputResponse(
  */
 typealias UserInputHandler = suspend (request: UserInputRequest, sessionId: String) -> UserInputResponse
 
+/**
+ * Request from the agent to exit plan mode and begin executing a plan.
+ */
+@Serializable
+data class ExitPlanModeRequest(
+    val sessionId: String,
+    val summary: String,
+    val planContent: String? = null,
+    val actions: List<String>,
+    val recommendedAction: String
+)
+
+/**
+ * Response to an exit plan mode request.
+ */
+@Serializable
+data class ExitPlanModeResponse(
+    val approved: Boolean,
+    val selectedAction: String? = null,
+    val feedback: String? = null
+)
+
+/**
+ * Handler for exit plan mode requests.
+ */
+typealias ExitPlanModeHandler = suspend (request: ExitPlanModeRequest) -> ExitPlanModeResponse
+
 // ============================================================================
 // Hook Types
 // ============================================================================

@@ -14,6 +14,7 @@ module copilot_types
   public :: copilot_tool, tool_result, tool_invocation
   public :: permission_request, permission_result
   public :: elicitation_request, elicitation_result
+  public :: exit_plan_mode_request_t, exit_plan_mode_response_t
   public :: session_fs_config, session_fs_entry
   public :: copilot_connection_state
   public :: mcp_server_config, command_definition, image_options
@@ -341,6 +342,22 @@ module copilot_types
     character(len=:), allocatable :: action
     character(len=:), allocatable :: content_json
   end type elicitation_result
+
+  ! --------------------------------------------------------------------------
+  ! Exit plan mode request / response
+  ! --------------------------------------------------------------------------
+  type :: exit_plan_mode_request_t
+    character(len=:), allocatable :: session_id
+    character(len=:), allocatable :: summary
+    character(len=:), allocatable :: plan_content
+    character(len=:), allocatable :: recommended_action
+  end type exit_plan_mode_request_t
+
+  type :: exit_plan_mode_response_t
+    logical :: approved = .false.
+    character(len=:), allocatable :: selected_action
+    character(len=:), allocatable :: feedback
+  end type exit_plan_mode_response_t
 
   ! --------------------------------------------------------------------------
   ! Abstract interfaces for callbacks

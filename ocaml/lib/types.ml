@@ -674,6 +674,64 @@ let permission_result_to_yojson_with_context (r : permission_result)
   | _, json -> json
 
 (* ========================================================================== *)
+(* Exit Plan Mode                                                             *)
+(* ========================================================================== *)
+
+type exit_plan_mode_request = {
+  session_id : string;
+  summary : string;
+  plan_content : string option;
+  actions : string list;
+  recommended_action : string;
+}
+
+let exit_plan_mode_request_of_yojson (json : Yojson.Safe.t)
+    : (exit_plan_mode_request, string) result =
+  try
+    Ok
+      { session_id = (try json |> member "sessionId" |> to_string with _ -> "")
+      ; summary = (try json |> member "summary" |> to_string with _ -> "")
+      ; plan_content =
+          (try Some (json |> member "planContent" |> to_string) with _ -> None)
+      ; actions =
+          (try json |> member "actions" |> to_list |> List.map to_string
+           with _ -> [])
+      ; recommended_action =
+          (try json |> member "recommendedAction" |> to_string with _ -> "")
+      }
+  with exn -> Error (Printexc.to_string exn)
+
+type exit_plan_mode_response = {
+  approved : bool;
+  selected_action : string option;
+  feedback : string option;
+}
+
+let exit_plan_mode_response_to_yojson (r : exit_plan_mode_response)
+    : Yojson.Safe.t =
+  let fields = [ ("approved", `Bool r.approved) ] in
+  let fields =
+    match r.selected_action with
+    | Some v -> ("selectedAction", `String v) :: fields
+    | None -> fields
+  in
+  let fields =
+    match r.feedback with
+    | Some v -> ("feedback", `String v) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+let default_exit_plan_mode_response () : exit_plan_mode_response =
+  { approved = true; selected_action = None; feedback = None }
+
+(** W3C trace context propagated on outbound requests. *)
+type trace_context = {
+  traceparent : string option;
+  tracestate : string option;
+}
+
+(* ========================================================================== *)
 (* Status Types                                                               *)
 (* ========================================================================== *)
 

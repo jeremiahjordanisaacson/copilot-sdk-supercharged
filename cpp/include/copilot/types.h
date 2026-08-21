@@ -365,6 +365,40 @@ inline void to_json(nlohmann::json& j, const UserInputResponse& r) {
 using UserInputHandler = std::function<UserInputResponse(
     const UserInputRequest& request, const std::string& sessionId)>;
 
+/// Request passed to the exit-plan-mode handler.
+struct ExitPlanModeRequest {
+    std::string sessionId;
+    std::string summary;
+    std::optional<std::string> planContent;
+    std::vector<std::string> actions;
+    std::string recommendedAction;
+};
+
+inline void from_json(const nlohmann::json& j, ExitPlanModeRequest& r) {
+    if (j.contains("sessionId")) j.at("sessionId").get_to(r.sessionId);
+    if (j.contains("summary")) j.at("summary").get_to(r.summary);
+    if (j.contains("planContent")) r.planContent = j["planContent"].get<std::string>();
+    if (j.contains("actions")) r.actions = j["actions"].get<std::vector<std::string>>();
+    if (j.contains("recommendedAction")) j.at("recommendedAction").get_to(r.recommendedAction);
+}
+
+/// Response returned from the exit-plan-mode handler.
+struct ExitPlanModeResponse {
+    bool approved = false;
+    std::optional<std::string> selectedAction;
+    std::optional<std::string> feedback;
+};
+
+inline void to_json(nlohmann::json& j, const ExitPlanModeResponse& r) {
+    j = {{"approved", r.approved}};
+    if (r.selectedAction) j["selectedAction"] = *r.selectedAction;
+    if (r.feedback) j["feedback"] = *r.feedback;
+}
+
+/// Handler for exit-plan-mode requests.
+using ExitPlanModeHandler = std::function<ExitPlanModeResponse(
+    const ExitPlanModeRequest& request)>;
+
 // ============================================================================
 // Hook Types
 // ============================================================================
@@ -794,6 +828,7 @@ struct SessionConfig {
     std::optional<ProviderConfig> provider;
     PermissionHandler onPermissionRequest;
     UserInputHandler onUserInputRequest;
+    ExitPlanModeHandler onExitPlanMode;
     std::optional<SessionHooks> hooks;
     std::optional<std::string> workingDirectory;
     bool streaming = false;
@@ -875,6 +910,7 @@ struct ResumeSessionConfig {
     bool streaming = false;
     PermissionHandler onPermissionRequest;
     UserInputHandler onUserInputRequest;
+    ExitPlanModeHandler onExitPlanMode;
     std::optional<SessionHooks> hooks;
     std::optional<std::string> workingDirectory;
     std::optional<std::string> configDir;
