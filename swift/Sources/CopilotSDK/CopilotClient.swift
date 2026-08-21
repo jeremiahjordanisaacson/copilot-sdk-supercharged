@@ -686,6 +686,48 @@ public actor CopilotClient {
             }
             return try await self.handleExitPlanModeRequest(params)
         }
+
+        // sessionFs.* provider requests (serviced against the real filesystem)
+        await rpc.setRequestHandler(method: "sessionFs.readFile") { [weak self] params in
+            guard let self = self else { throw JsonRpcError(code: -32000, message: "Client deallocated") }
+            return try await self.handleSessionFsReadFile(params)
+        }
+        await rpc.setRequestHandler(method: "sessionFs.writeFile") { [weak self] params in
+            guard let self = self else { throw JsonRpcError(code: -32000, message: "Client deallocated") }
+            return try await self.handleSessionFsWriteFile(params)
+        }
+        await rpc.setRequestHandler(method: "sessionFs.appendFile") { [weak self] params in
+            guard let self = self else { throw JsonRpcError(code: -32000, message: "Client deallocated") }
+            return try await self.handleSessionFsAppendFile(params)
+        }
+        await rpc.setRequestHandler(method: "sessionFs.exists") { [weak self] params in
+            guard let self = self else { throw JsonRpcError(code: -32000, message: "Client deallocated") }
+            return try await self.handleSessionFsExists(params)
+        }
+        await rpc.setRequestHandler(method: "sessionFs.stat") { [weak self] params in
+            guard let self = self else { throw JsonRpcError(code: -32000, message: "Client deallocated") }
+            return try await self.handleSessionFsStat(params)
+        }
+        await rpc.setRequestHandler(method: "sessionFs.mkdir") { [weak self] params in
+            guard let self = self else { throw JsonRpcError(code: -32000, message: "Client deallocated") }
+            return try await self.handleSessionFsMkdir(params)
+        }
+        await rpc.setRequestHandler(method: "sessionFs.readdir") { [weak self] params in
+            guard let self = self else { throw JsonRpcError(code: -32000, message: "Client deallocated") }
+            return try await self.handleSessionFsReaddir(params)
+        }
+        await rpc.setRequestHandler(method: "sessionFs.readdirWithTypes") { [weak self] params in
+            guard let self = self else { throw JsonRpcError(code: -32000, message: "Client deallocated") }
+            return try await self.handleSessionFsReaddirWithTypes(params)
+        }
+        await rpc.setRequestHandler(method: "sessionFs.rm") { [weak self] params in
+            guard let self = self else { throw JsonRpcError(code: -32000, message: "Client deallocated") }
+            return try await self.handleSessionFsRm(params)
+        }
+        await rpc.setRequestHandler(method: "sessionFs.rename") { [weak self] params in
+            guard let self = self else { throw JsonRpcError(code: -32000, message: "Client deallocated") }
+            return try await self.handleSessionFsRename(params)
+        }
     }
 
     private func verifyProtocolVersion() async throws {
@@ -887,6 +929,211 @@ public actor CopilotClient {
             return ["approved": result.approved]
         } catch {
             return ["approved": true]
+        }
+    }
+
+    // MARK: - Private: SessionFs Provider Handlers
+    //
+    // When a session filesystem provider is registered, the CLI drives
+    // filesystem access by sending sessionFs.* requests back to the client.
+    // These handlers service those requests against the real filesystem using
+    // the absolute paths supplied by the CLI. Errors are returned in-band as
+    // { code, message } (never thrown) so the CLI can distinguish a missing
+    // file (ENOENT) from other failures without the JSON-RPC call itself
+    // failing, matching the reference SDK contract.
+
+    private func sessionFsError(_ error: Error) -> [String: Any] {
+        let ns = error as NSError
+        let isNotFound =
+            (ns.domain == NSCocoaErrorDomain
+                && (ns.code == NSFileReadNoSuchFileError || ns.code == NSFileNoSuchFileError))
+            || (ns.domain == NSPOSIXErrorDomain && ns.code == Int(ENOENT))
+        return ["code": isNotFound ? "ENOENT" : "UNKNOWN", "message": ns.localizedDescription]
+    }
+
+    private func sessionFsISODate(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: date)
+    }
+
+    private func applySessionFsMode(_ mode: Any?, to path: String) {
+        guard let modeNum = mode as? NSNumber else { return }
+        try? FileManager.default.setAttributes([.posixPermissions: modeNum], ofItemAtPath: path)
+    }
+
+    private func handleSessionFsReadFile(_ params: [String: Any]) async throws -> [String: Any]? {
+        guard let path = params["path"] as? String else {
+            return ["content": "", "error": ["code": "UNKNOWN", "message": "missing path"]]
+        }
+        do {
+            let content = try String(contentsOfFile: path, encoding: .utf8)
+            return ["content": content]
+        } catch {
+            return ["content": "", "error": sessionFsError(error)]
+        }
+    }
+
+    private func handleSessionFsWriteFile(_ params: [String: Any]) async throws -> [String: Any]? {
+        guard let path = params["path"] as? String else {
+            return ["code": "UNKNOWN", "message": "missing path"]
+        }
+        let content = params["content"] as? String ?? ""
+        do {
+            let dir = (path as NSString).deletingLastPathComponent
+            if !dir.isEmpty {
+                try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            }
+            try content.write(toFile: path, atomically: true, encoding: .utf8)
+            applySessionFsMode(params["mode"], to: path)
+            return [:]
+        } catch {
+            return sessionFsError(error)
+        }
+    }
+
+    private func handleSessionFsAppendFile(_ params: [String: Any]) async throws -> [String: Any]? {
+        guard let path = params["path"] as? String else {
+            return ["code": "UNKNOWN", "message": "missing path"]
+        }
+        let content = params["content"] as? String ?? ""
+        do {
+            let dir = (path as NSString).deletingLastPathComponent
+            if !dir.isEmpty {
+                try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            }
+            if FileManager.default.fileExists(atPath: path),
+                let handle = FileHandle(forWritingAtPath: path)
+            {
+                defer { try? handle.close() }
+                try handle.seekToEnd()
+                if let data = content.data(using: .utf8) {
+                    try handle.write(contentsOf: data)
+                }
+            } else {
+                try content.write(toFile: path, atomically: true, encoding: .utf8)
+            }
+            applySessionFsMode(params["mode"], to: path)
+            return [:]
+        } catch {
+            return sessionFsError(error)
+        }
+    }
+
+    private func handleSessionFsExists(_ params: [String: Any]) async throws -> [String: Any]? {
+        guard let path = params["path"] as? String else { return ["exists": false] }
+        return ["exists": FileManager.default.fileExists(atPath: path)]
+    }
+
+    private func handleSessionFsStat(_ params: [String: Any]) async throws -> [String: Any]? {
+        let now = sessionFsISODate(Date())
+        guard let path = params["path"] as? String else {
+            return [
+                "isFile": false, "isDirectory": false, "size": 0,
+                "mtime": now, "birthtime": now,
+                "error": ["code": "UNKNOWN", "message": "missing path"],
+            ]
+        }
+        do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: path)
+            var isDir: ObjCBool = false
+            _ = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+            let size = (attrs[.size] as? NSNumber)?.intValue ?? 0
+            let mtime = (attrs[.modificationDate] as? Date) ?? Date()
+            let btime = (attrs[.creationDate] as? Date) ?? mtime
+            return [
+                "isFile": !isDir.boolValue,
+                "isDirectory": isDir.boolValue,
+                "size": size,
+                "mtime": sessionFsISODate(mtime),
+                "birthtime": sessionFsISODate(btime),
+            ]
+        } catch {
+            return [
+                "isFile": false, "isDirectory": false, "size": 0,
+                "mtime": now, "birthtime": now,
+                "error": sessionFsError(error),
+            ]
+        }
+    }
+
+    private func handleSessionFsMkdir(_ params: [String: Any]) async throws -> [String: Any]? {
+        guard let path = params["path"] as? String else {
+            return ["code": "UNKNOWN", "message": "missing path"]
+        }
+        let recursive = params["recursive"] as? Bool ?? false
+        do {
+            try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: recursive)
+            applySessionFsMode(params["mode"], to: path)
+            return [:]
+        } catch {
+            return sessionFsError(error)
+        }
+    }
+
+    private func handleSessionFsReaddir(_ params: [String: Any]) async throws -> [String: Any]? {
+        guard let path = params["path"] as? String else {
+            return ["entries": [String](), "error": ["code": "UNKNOWN", "message": "missing path"]]
+        }
+        do {
+            let entries = try FileManager.default.contentsOfDirectory(atPath: path)
+            return ["entries": entries]
+        } catch {
+            return ["entries": [String](), "error": sessionFsError(error)]
+        }
+    }
+
+    private func handleSessionFsReaddirWithTypes(_ params: [String: Any]) async throws -> [String: Any]? {
+        guard let path = params["path"] as? String else {
+            return ["entries": [[String: Any]](), "error": ["code": "UNKNOWN", "message": "missing path"]]
+        }
+        do {
+            let names = try FileManager.default.contentsOfDirectory(atPath: path)
+            let base = path as NSString
+            let entries: [[String: Any]] = names.map { name in
+                var isDir: ObjCBool = false
+                _ = FileManager.default.fileExists(
+                    atPath: base.appendingPathComponent(name), isDirectory: &isDir)
+                return ["name": name, "type": isDir.boolValue ? "directory" : "file"]
+            }
+            return ["entries": entries]
+        } catch {
+            return ["entries": [[String: Any]](), "error": sessionFsError(error)]
+        }
+    }
+
+    private func handleSessionFsRm(_ params: [String: Any]) async throws -> [String: Any]? {
+        guard let path = params["path"] as? String else {
+            return ["code": "UNKNOWN", "message": "missing path"]
+        }
+        let force = params["force"] as? Bool ?? false
+        if !FileManager.default.fileExists(atPath: path) {
+            if force { return [:] }
+            return sessionFsError(
+                NSError(
+                    domain: NSPOSIXErrorDomain, code: Int(ENOENT),
+                    userInfo: [NSLocalizedDescriptionKey: "no such file or directory: \(path)"]))
+        }
+        do {
+            try FileManager.default.removeItem(atPath: path)
+            return [:]
+        } catch {
+            return sessionFsError(error)
+        }
+    }
+
+    private func handleSessionFsRename(_ params: [String: Any]) async throws -> [String: Any]? {
+        guard let src = params["src"] as? String, let dest = params["dest"] as? String else {
+            return ["code": "UNKNOWN", "message": "missing src or dest"]
+        }
+        do {
+            if FileManager.default.fileExists(atPath: dest) {
+                try FileManager.default.removeItem(atPath: dest)
+            }
+            try FileManager.default.moveItem(atPath: src, toPath: dest)
+            return [:]
+        } catch {
+            return sessionFsError(error)
         }
     }
 
