@@ -652,6 +652,18 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     // exitPlanMode.request (server asks client to approve exiting plan mode)
     client.onRequest("exitPlanMode.request", handleExitPlanModeRequest)
 
+    // sessionFs.* (server drives filesystem access through the client)
+    client.onRequest("sessionFs.readFile", handleSessionFsReadFile)
+    client.onRequest("sessionFs.writeFile", handleSessionFsWriteFile)
+    client.onRequest("sessionFs.appendFile", handleSessionFsAppendFile)
+    client.onRequest("sessionFs.exists", handleSessionFsExists)
+    client.onRequest("sessionFs.stat", handleSessionFsStat)
+    client.onRequest("sessionFs.mkdir", handleSessionFsMkdir)
+    client.onRequest("sessionFs.readdir", handleSessionFsReaddir)
+    client.onRequest("sessionFs.readdirWithTypes", handleSessionFsReaddirWithTypes)
+    client.onRequest("sessionFs.rm", handleSessionFsRm)
+    client.onRequest("sessionFs.rename", handleSessionFsRename)
+
   private def handleSessionEvent(params: Json): Unit =
     val cursor = params.hcursor
     for
@@ -787,6 +799,189 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     session.handleExitPlanModeRequest(request).map { result =>
       Json.obj("approved" -> result.approved.asJson)
     }
+
+  // -------------------------------------------------------------------------
+  // SessionFs provider handlers
+  //
+  // Service the CLI's sessionFs.* callbacks against the real filesystem. Success
+  // returns mirror the generated result shapes; failures are returned in-band as
+  // a SessionFsError ({ code, message }) so the CLI can distinguish a missing
+  // file (ENOENT) from other errors without failing the JSON-RPC request.
+  // -------------------------------------------------------------------------
+
+  private def handleSessionFsReadFile(params: Json): Future[Json] =
+    val path = params.hcursor.get[String]("path").getOrElse("")
+    val result =
+      try
+        val content = java.nio.file.Files.readString(java.nio.file.Paths.get(path))
+        Json.obj("content" -> content.asJson)
+      catch
+        case e: Exception =>
+          Json.obj("content" -> "".asJson, "error" -> sessionFsError(e))
+    Future.successful(result)
+
+  private def handleSessionFsWriteFile(params: Json): Future[Json] =
+    val cursor = params.hcursor
+    val path = cursor.get[String]("path").getOrElse("")
+    val content = cursor.get[String]("content").getOrElse("")
+    val result =
+      try
+        val p = java.nio.file.Paths.get(path)
+        Option(p.getParent()).foreach(parent => java.nio.file.Files.createDirectories(parent))
+        java.nio.file.Files.writeString(p, content)
+        Json.obj()
+      catch
+        case e: Exception => sessionFsError(e)
+    Future.successful(result)
+
+  private def handleSessionFsAppendFile(params: Json): Future[Json] =
+    val cursor = params.hcursor
+    val path = cursor.get[String]("path").getOrElse("")
+    val content = cursor.get[String]("content").getOrElse("")
+    val result =
+      try
+        val p = java.nio.file.Paths.get(path)
+        Option(p.getParent()).foreach(parent => java.nio.file.Files.createDirectories(parent))
+        java.nio.file.Files.writeString(p, content,
+          java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
+        Json.obj()
+      catch
+        case e: Exception => sessionFsError(e)
+    Future.successful(result)
+
+  private def handleSessionFsExists(params: Json): Future[Json] =
+    val path = params.hcursor.get[String]("path").getOrElse("")
+    val exists =
+      try java.nio.file.Files.exists(java.nio.file.Paths.get(path))
+      catch case _: Exception => false
+    Future.successful(Json.obj("exists" -> exists.asJson))
+
+  private def handleSessionFsStat(params: Json): Future[Json] =
+    val path = params.hcursor.get[String]("path").getOrElse("")
+    val result =
+      try
+        val attrs = java.nio.file.Files.readAttributes(
+          java.nio.file.Paths.get(path),
+          classOf[java.nio.file.attribute.BasicFileAttributes]
+        )
+        Json.obj(
+          "isFile" -> attrs.isRegularFile().asJson,
+          "isDirectory" -> attrs.isDirectory().asJson,
+          "size" -> attrs.size().asJson,
+          "mtime" -> java.time.Instant.ofEpochMilli(attrs.lastModifiedTime().toMillis()).toString.asJson,
+          "birthtime" -> java.time.Instant.ofEpochMilli(attrs.creationTime().toMillis()).toString.asJson,
+        )
+      catch
+        case e: Exception =>
+          val now = java.time.Instant.now().toString
+          Json.obj(
+            "isFile" -> false.asJson,
+            "isDirectory" -> false.asJson,
+            "size" -> 0.asJson,
+            "mtime" -> now.asJson,
+            "birthtime" -> now.asJson,
+            "error" -> sessionFsError(e),
+          )
+    Future.successful(result)
+
+  private def handleSessionFsMkdir(params: Json): Future[Json] =
+    val cursor = params.hcursor
+    val path = cursor.get[String]("path").getOrElse("")
+    val recursive = cursor.get[Boolean]("recursive").getOrElse(false)
+    val result =
+      try
+        val p = java.nio.file.Paths.get(path)
+        if recursive then java.nio.file.Files.createDirectories(p)
+        else java.nio.file.Files.createDirectory(p)
+        Json.obj()
+      catch
+        case e: Exception => sessionFsError(e)
+    Future.successful(result)
+
+  private def handleSessionFsReaddir(params: Json): Future[Json] =
+    val path = params.hcursor.get[String]("path").getOrElse("")
+    val result =
+      try
+        val dir = new File(path)
+        if !dir.isDirectory() then throw new java.io.FileNotFoundException(path)
+        val names = Option(dir.listFiles()).getOrElse(Array.empty[File]).map(_.getName()).toList
+        Json.obj("entries" -> names.asJson)
+      catch
+        case e: Exception =>
+          Json.obj("entries" -> List.empty[String].asJson, "error" -> sessionFsError(e))
+    Future.successful(result)
+
+  private def handleSessionFsReaddirWithTypes(params: Json): Future[Json] =
+    val path = params.hcursor.get[String]("path").getOrElse("")
+    val result =
+      try
+        val dir = new File(path)
+        if !dir.isDirectory() then throw new java.io.FileNotFoundException(path)
+        val entries = Option(dir.listFiles()).getOrElse(Array.empty[File]).map { f =>
+          Json.obj(
+            "name" -> f.getName().asJson,
+            "type" -> (if f.isDirectory() then "directory" else "file").asJson,
+          )
+        }.toList
+        Json.obj("entries" -> entries.asJson)
+      catch
+        case e: Exception =>
+          Json.obj("entries" -> List.empty[Json].asJson, "error" -> sessionFsError(e))
+    Future.successful(result)
+
+  private def handleSessionFsRm(params: Json): Future[Json] =
+    val cursor = params.hcursor
+    val path = cursor.get[String]("path").getOrElse("")
+    val recursive = cursor.get[Boolean]("recursive").getOrElse(false)
+    val force = cursor.get[Boolean]("force").getOrElse(false)
+    val result =
+      try
+        val p = java.nio.file.Paths.get(path)
+        if java.nio.file.Files.exists(p) then
+          if recursive then deleteRecursively(p) else java.nio.file.Files.delete(p)
+          Json.obj()
+        else if force then
+          Json.obj()
+        else
+          sessionFsError(new java.io.FileNotFoundException(path))
+      catch
+        case e: Exception => if force then Json.obj() else sessionFsError(e)
+    Future.successful(result)
+
+  private def handleSessionFsRename(params: Json): Future[Json] =
+    val cursor = params.hcursor
+    val src = cursor.get[String]("src").getOrElse("")
+    val dest = cursor.get[String]("dest").getOrElse("")
+    val result =
+      try
+        val destPath = java.nio.file.Paths.get(dest)
+        Option(destPath.getParent()).foreach(parent => java.nio.file.Files.createDirectories(parent))
+        java.nio.file.Files.move(
+          java.nio.file.Paths.get(src), destPath,
+          java.nio.file.StandardCopyOption.REPLACE_EXISTING
+        )
+        Json.obj()
+      catch
+        case e: Exception => sessionFsError(e)
+    Future.successful(result)
+
+  private def deleteRecursively(path: java.nio.file.Path): Unit =
+    val file = path.toFile()
+    if file.isDirectory() then
+      Option(file.listFiles())
+        .getOrElse(Array.empty[File])
+        .foreach(child => deleteRecursively(child.toPath()))
+    java.nio.file.Files.deleteIfExists(path)
+
+  private def sessionFsError(err: Throwable): Json =
+    val code = err match
+      case _: java.nio.file.NoSuchFileException => "ENOENT"
+      case _: java.io.FileNotFoundException     => "ENOENT"
+      case _                                    => "UNKNOWN"
+    Json.obj(
+      "code" -> code.asJson,
+      "message" -> Option(err.getMessage()).getOrElse("").asJson,
+    )
 
   private def injectTraceContext(params: Json): Json =
     options.onGetTraceContext match
