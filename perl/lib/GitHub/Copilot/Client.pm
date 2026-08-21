@@ -13,6 +13,8 @@ use Cwd qw(abs_path);
 use JSON::PP;
 use Scalar::Util qw(blessed);
 use POSIX ();
+use File::Path qw(make_path remove_tree);
+use Errno ();
 
 use GitHub::Copilot::JsonRpcClient;
 use GitHub::Copilot::Session;
@@ -596,6 +598,31 @@ sub _setup_handlers {
         my ($params) = @_;
         return $self->_handle_exit_plan_mode_request($params);
     });
+
+    # Handle sessionFs.* provider callbacks from the server. When a sessionFs
+    # provider is configured the CLI drives all of the session's filesystem
+    # access back through these callbacks; we service them against the real
+    # local filesystem (mirrors the Kotlin/Scala SDKs).
+    $self->{_client}->set_request_handler('sessionFs.readFile',
+        sub { return $self->_handle_session_fs_read_file($_[0]); });
+    $self->{_client}->set_request_handler('sessionFs.writeFile',
+        sub { return $self->_handle_session_fs_write_file($_[0]); });
+    $self->{_client}->set_request_handler('sessionFs.appendFile',
+        sub { return $self->_handle_session_fs_append_file($_[0]); });
+    $self->{_client}->set_request_handler('sessionFs.exists',
+        sub { return $self->_handle_session_fs_exists($_[0]); });
+    $self->{_client}->set_request_handler('sessionFs.stat',
+        sub { return $self->_handle_session_fs_stat($_[0]); });
+    $self->{_client}->set_request_handler('sessionFs.mkdir',
+        sub { return $self->_handle_session_fs_mkdir($_[0]); });
+    $self->{_client}->set_request_handler('sessionFs.readdir',
+        sub { return $self->_handle_session_fs_readdir($_[0]); });
+    $self->{_client}->set_request_handler('sessionFs.readdirWithTypes',
+        sub { return $self->_handle_session_fs_readdir_with_types($_[0]); });
+    $self->{_client}->set_request_handler('sessionFs.rm',
+        sub { return $self->_handle_session_fs_rm($_[0]); });
+    $self->{_client}->set_request_handler('sessionFs.rename',
+        sub { return $self->_handle_session_fs_rename($_[0]); });
 }
 
 # --------------------------------------------------------------------------
@@ -822,6 +849,179 @@ sub _set_session_fs_provider {
     delete $payload{$_} for grep { !defined $payload{$_} } keys %payload;
 
     $self->{_client}->request('sessionFs.setProvider', \%payload);
+}
+
+# --------------------------------------------------------------------------
+# Internal: sessionFs.* provider callback handlers
+#
+# The CLI routes the session's filesystem access back through these callbacks
+# when a sessionFs provider is configured. We service them against the real
+# local filesystem. Failures are returned in-band as a SessionFsError
+# ({ code, message }) — mirroring the Kotlin/Scala SDKs — so the CLI can tell a
+# missing file (ENOENT) apart from other errors without failing the RPC.
+# --------------------------------------------------------------------------
+
+sub _session_fs_error {
+    my ($message) = @_;
+    my $code = $!{ENOENT} ? 'ENOENT' : 'UNKNOWN';
+    return { code => $code, message => (defined $message ? "$message" : "$!") };
+}
+
+sub _session_fs_iso8601 {
+    my ($epoch) = @_;
+    $epoch = time() unless defined $epoch;
+    return POSIX::strftime('%Y-%m-%dT%H:%M:%SZ', gmtime($epoch));
+}
+
+sub _session_fs_make_parent_dirs {
+    my ($path) = @_;
+    my $parent = dirname($path);
+    if (defined $parent && length $parent && !-d $parent) {
+        eval { make_path($parent); 1 };
+    }
+    return;
+}
+
+sub _handle_session_fs_read_file {
+    my ($self, $params) = @_;
+    my $path = defined $params->{path} ? $params->{path} : '';
+    if (open my $fh, '<:raw', $path) {
+        local $/;
+        my $content = <$fh>;
+        close $fh;
+        return { content => (defined $content ? $content : '') };
+    }
+    return { content => '', error => _session_fs_error("$!") };
+}
+
+sub _handle_session_fs_write_file {
+    my ($self, $params) = @_;
+    my $path = defined $params->{path} ? $params->{path} : '';
+    my $content = defined $params->{content} ? $params->{content} : '';
+    _session_fs_make_parent_dirs($path);
+    if (open my $fh, '>:raw', $path) {
+        print $fh $content;
+        close $fh;
+        return {};
+    }
+    return _session_fs_error("$!");
+}
+
+sub _handle_session_fs_append_file {
+    my ($self, $params) = @_;
+    my $path = defined $params->{path} ? $params->{path} : '';
+    my $content = defined $params->{content} ? $params->{content} : '';
+    _session_fs_make_parent_dirs($path);
+    if (open my $fh, '>>:raw', $path) {
+        print $fh $content;
+        close $fh;
+        return {};
+    }
+    return _session_fs_error("$!");
+}
+
+sub _handle_session_fs_exists {
+    my ($self, $params) = @_;
+    my $path = defined $params->{path} ? $params->{path} : '';
+    return { exists => ((-e $path) ? \1 : \0) };
+}
+
+sub _handle_session_fs_stat {
+    my ($self, $params) = @_;
+    my $path = defined $params->{path} ? $params->{path} : '';
+    my @st = stat($path);
+    if (@st) {
+        return {
+            isFile      => ((-f _) ? \1 : \0),
+            isDirectory => ((-d _) ? \1 : \0),
+            size        => $st[7] + 0,
+            mtime       => _session_fs_iso8601($st[9]),
+            birthtime   => _session_fs_iso8601($st[10]),
+        };
+    }
+    my $err = _session_fs_error("$!");
+    my $now = _session_fs_iso8601(time());
+    return {
+        isFile      => \0,
+        isDirectory => \0,
+        size        => 0,
+        mtime       => $now,
+        birthtime   => $now,
+        error       => $err,
+    };
+}
+
+sub _handle_session_fs_mkdir {
+    my ($self, $params) = @_;
+    my $path = defined $params->{path} ? $params->{path} : '';
+    my $recursive = $params->{recursive} ? 1 : 0;
+    my $ok = eval {
+        if ($recursive) {
+            make_path($path);
+        } elsif (!-d $path) {
+            mkdir($path) or die "$!";
+        }
+        1;
+    };
+    return $ok ? {} : _session_fs_error("$@");
+}
+
+sub _handle_session_fs_readdir {
+    my ($self, $params) = @_;
+    my $path = defined $params->{path} ? $params->{path} : '';
+    if (opendir my $dh, $path) {
+        my @entries = grep { $_ ne '.' && $_ ne '..' } readdir($dh);
+        closedir $dh;
+        return { entries => \@entries };
+    }
+    return { entries => [], error => _session_fs_error("$!") };
+}
+
+sub _handle_session_fs_readdir_with_types {
+    my ($self, $params) = @_;
+    my $path = defined $params->{path} ? $params->{path} : '';
+    if (opendir my $dh, $path) {
+        my @names = grep { $_ ne '.' && $_ ne '..' } readdir($dh);
+        closedir $dh;
+        my @entries = map {
+            my $full = File::Spec->catfile($path, $_);
+            { name => $_, type => ((-d $full) ? 'directory' : 'file') };
+        } @names;
+        return { entries => \@entries };
+    }
+    return { entries => [], error => _session_fs_error("$!") };
+}
+
+sub _handle_session_fs_rm {
+    my ($self, $params) = @_;
+    my $path = defined $params->{path} ? $params->{path} : '';
+    my $recursive = $params->{recursive} ? 1 : 0;
+    my $force = $params->{force} ? 1 : 0;
+    if (-e $path || -l $path) {
+        my $ok = eval {
+            if ($recursive) {
+                remove_tree($path);
+            } elsif (-d $path) {
+                rmdir($path) or die "$!";
+            } else {
+                unlink($path) or die "$!";
+            }
+            1;
+        };
+        return $ok ? {} : ($force ? {} : _session_fs_error("$@"));
+    }
+    return $force ? {} : { code => 'ENOENT', message => "no such file or directory: $path" };
+}
+
+sub _handle_session_fs_rename {
+    my ($self, $params) = @_;
+    my $src = defined $params->{src} ? $params->{src} : '';
+    my $dest = defined $params->{dest} ? $params->{dest} : '';
+    _session_fs_make_parent_dirs($dest);
+    if (rename($src, $dest)) {
+        return {};
+    }
+    return _session_fs_error("$!");
 }
 
 # --------------------------------------------------------------------------
