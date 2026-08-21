@@ -1037,7 +1037,7 @@ function CopilotClient:_handle_session_fs_write_file(params)
     if params and params.mode then
         os.execute("chmod " .. _sfs_mode_str(params.mode) .. " " .. _sfs_quote(path))
     end
-    return {}, nil
+    return nil, nil
 end
 
 function CopilotClient:_handle_session_fs_append_file(params)
@@ -1052,7 +1052,7 @@ function CopilotClient:_handle_session_fs_append_file(params)
     if params and params.mode then
         os.execute("chmod " .. _sfs_mode_str(params.mode) .. " " .. _sfs_quote(path))
     end
-    return {}, nil
+    return nil, nil
 end
 
 function CopilotClient:_handle_session_fs_exists(params)
@@ -1102,7 +1102,7 @@ function CopilotClient:_handle_session_fs_mkdir(params)
     if params and params.mode then
         os.execute("chmod " .. _sfs_mode_str(params.mode) .. " " .. _sfs_quote(path))
     end
-    return {}, nil
+    return nil, nil
 end
 
 function CopilotClient:_handle_session_fs_readdir(params)
@@ -1136,16 +1136,16 @@ function CopilotClient:_handle_session_fs_rm(params)
         if not force and _sfs_path_exists(path) then
             return _sfs_error("failed to remove: " .. tostring(path)), nil
         end
-        return {}, nil
+        return nil, nil
     end
     local ok, rerr = os.remove(path)
     if not ok then
         if force then
-            return {}, nil
+            return nil, nil
         end
         return _sfs_error(rerr), nil
     end
-    return {}, nil
+    return nil, nil
 end
 
 function CopilotClient:_handle_session_fs_rename(params)
@@ -1153,7 +1153,7 @@ function CopilotClient:_handle_session_fs_rename(params)
     if not ok then
         return _sfs_error(rerr), nil
     end
-    return {}, nil
+    return nil, nil
 end
 
 -- ---------------------------------------------------------------------------
