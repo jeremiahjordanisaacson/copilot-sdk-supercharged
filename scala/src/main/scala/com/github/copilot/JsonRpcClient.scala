@@ -6,7 +6,7 @@ import io.circe.*
 import io.circe.parser.*
 import io.circe.syntax.*
 
-import java.io.{BufferedReader, InputStream, InputStreamReader, OutputStream}
+import java.io.{BufferedInputStream, InputStream, OutputStream}
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -246,28 +246,34 @@ class JsonRpcClient(
       output.flush()
 
   private def readLoop(): Unit =
-    val reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))
+    // Read from the raw byte stream. Content-Length is a BYTE count, so the body
+    // must be read as exactly that many bytes and only then decoded as UTF-8.
+    // Reading via a char-based Reader (counting chars) desynchronises framing on
+    // any multi-byte UTF-8 payload, bleeding the next message's header into the
+    // current body. BufferedInputStream is created once so its buffer persists
+    // across messages.
+    val in = new BufferedInputStream(input)
     try
       while running do
         // 1. Read headers until blank line
-        val contentLength = readHeaders(reader)
-        if contentLength <= 0 then
+        val contentLength = readHeaders(in)
+        if contentLength < 0 then
           // EOF or error
           running = false
-        else
+        else if contentLength > 0 then
           // 2. Read exactly contentLength bytes
-          val bodyChars = new Array[Char](contentLength)
+          val body = new Array[Byte](contentLength)
           var totalRead = 0
-          while totalRead < contentLength do
-            val n = reader.read(bodyChars, totalRead, contentLength - totalRead)
-            if n < 0 then
-              running = false
-              totalRead = contentLength // break
-            else
-              totalRead += n
+          var eof = false
+          while totalRead < contentLength && !eof do
+            val n = in.read(body, totalRead, contentLength - totalRead)
+            if n < 0 then eof = true
+            else totalRead += n
 
-          if running then
-            val bodyStr = new String(bodyChars, 0, totalRead)
+          if eof then
+            running = false
+          else
+            val bodyStr = new String(body, 0, totalRead, StandardCharsets.UTF_8)
             handleIncomingMessage(bodyStr)
     catch
       case _: InterruptedException => // expected on stop
@@ -278,22 +284,34 @@ class JsonRpcClient(
       running = false
 
   /**
-   * Read HTTP-style headers and return the Content-Length value.
-   * Returns -1 on EOF.
+   * Read HTTP-style headers (byte-wise) and return the Content-Length value.
+   * Returns -1 on EOF before the terminating blank line.
    */
-  private def readHeaders(reader: BufferedReader): Int =
+  private def readHeaders(in: InputStream): Int =
     var contentLength = -1
-    var line = reader.readLine()
-    if line == null then return -1 // EOF
-
-    while line != null && line.nonEmpty do
-      if line.startsWith("Content-Length:") then
+    var done = false
+    while !done do
+      val line = readHeaderLine(in)
+      if line == null then return -1 // EOF
+      if line.isEmpty then
+        done = true // blank line terminates the header block
+      else if line.startsWith("Content-Length:") then
         val value = line.substring("Content-Length:".length).trim
         Try(value.toInt).foreach(cl => contentLength = cl)
-      line = reader.readLine()
-      if line == null then return -1 // EOF before blank line
-
     contentLength
+
+  /**
+   * Read a single CRLF-terminated header line as ASCII, returning it without the
+   * trailing CR/LF. Returns null on immediate EOF.
+   */
+  private def readHeaderLine(in: InputStream): String =
+    val sb = new StringBuilder()
+    var b = in.read()
+    if b < 0 then return null // EOF
+    while b >= 0 && b != '\n' do
+      if b != '\r' then sb.append(b.toChar)
+      b = in.read()
+    sb.toString
 
   // -------------------------------------------------------------------------
   // Message dispatch

@@ -176,7 +176,7 @@ subtest 'session delete' => sub {
     $client->delete_session($session_id);
 
     my $sessions = $client->list_sessions();
-    my @ids = map { $_->id() } @$sessions;
+    my @ids = map { $_->sessionId() } @$sessions;
     ok(!grep({ $_ eq $session_id } @ids), 'Deleted session not in list');
 
     $client->stop();
@@ -232,10 +232,10 @@ subtest 'client lifecycle' => sub {
     configure_snapshot();
 
     my $client = make_client();
-    is($client->state(), 'connected', 'Client is connected after start');
+    is($client->get_state(), 'connected', 'Client is connected after start');
 
     $client->stop();
-    is($client->state(), 'disconnected', 'Client is disconnected after stop');
+    is($client->get_state(), 'disconnected', 'Client is disconnected after stop');
 };
 
 # ----------------------------------------------------------------

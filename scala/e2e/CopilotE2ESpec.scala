@@ -157,7 +157,7 @@ class CopilotE2ESpec
     val fsConfig = SessionFsConfig(
       initialCwd = System.getProperty("user.dir"),
       sessionStatePath = System.getProperty("java.io.tmpdir"),
-      conventions = "Use Scala 3 idioms"
+      conventions = "posix"
     )
 
     val c = makeClient(sessionFs = Some(fsConfig))
@@ -469,7 +469,7 @@ class CopilotE2ESpec
     val fsConfig = SessionFsConfig(
       initialCwd = System.getProperty("user.dir"),
       sessionStatePath = System.getProperty("java.io.tmpdir"),
-      conventions = "Prefer immutable data structures"
+      conventions = "posix"
     )
 
     val c = makeClient(sessionFs = Some(fsConfig))

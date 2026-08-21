@@ -211,7 +211,6 @@ describe("Lua SDK E2E", function()
             local session, sess_err = client:create_session({
                 model = "claude-sonnet-4.5",
                 instructions = "You are a helpful coding assistant.",
-                agent = "copilot-chat",
             })
             assert.is_not_nil(session, "Failed to create session with config: " .. tostring(sess_err))
             assert.is_nil(sess_err)

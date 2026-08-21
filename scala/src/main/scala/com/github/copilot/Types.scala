@@ -977,8 +977,8 @@ object ModelLimits:
 
 /** Model capabilities and limits. */
 case class ModelCapabilities(
-  supports: ModelSupports,
-  limits: ModelLimits
+  supports: Option[ModelSupports] = None,
+  limits: Option[ModelLimits] = None
 )
 
 object ModelCapabilities:
