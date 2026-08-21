@@ -76,12 +76,27 @@ abstract class E2ETestCase extends TestCase
      */
     protected function getTestEnv(): array
     {
-        return [
-            'COPILOT_API_URL' => static::$proxyUrl,
-            'COPILOT_HOME' => static::$workDir,
-            'XDG_CONFIG_HOME' => static::$workDir,
-            'XDG_STATE_HOME' => static::$workDir,
-        ];
+        // Start from the full parent environment so the spawned CLI inherits
+        // PATH (needed by the `#!/usr/bin/env node` shebang to locate node),
+        // HOME, and other essentials. proc_open() with an explicit env array
+        // does NOT inherit the parent environment, so omitting PATH here makes
+        // the CLI fail to exec and the first stdin write breaks the pipe.
+        $env = getenv();
+        if (!is_array($env)) {
+            $env = [];
+        }
+
+        $env['COPILOT_API_URL'] = static::$proxyUrl;
+        $env['COPILOT_HOME'] = static::$workDir;
+        $env['GH_CONFIG_DIR'] = static::$workDir;
+        $env['XDG_CONFIG_HOME'] = static::$workDir;
+        $env['XDG_STATE_HOME'] = static::$workDir;
+
+        // Provide a fake token so the CLI authenticates against the replay proxy.
+        $env['GH_TOKEN'] = $env['GH_TOKEN'] ?? 'fake-test-token';
+        $env['GITHUB_TOKEN'] = $env['GITHUB_TOKEN'] ?? 'fake-test-token';
+
+        return $env;
     }
 
     /**
