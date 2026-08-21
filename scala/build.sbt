@@ -24,4 +24,13 @@ lazy val root = project
       "-feature",
       "-unchecked",
     ),
+
+    // Fork a dedicated JVM for tests. The E2E suite spawns CLI subprocesses and
+    // uses blocking `Await.result` calls inside Futures on ExecutionContext.global;
+    // running unforked in the sbt JVM let ForkJoinPool compensation threads and
+    // leaked processes accumulate until the CI runner was reclaimed mid-run. A
+    // forked, memory-bounded JVM isolates that work so the runner stays healthy.
+    fork := true,
+    Test / fork := true,
+    Test / javaOptions ++= Seq("-Xmx3g"),
   )

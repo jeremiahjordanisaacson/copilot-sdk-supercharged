@@ -814,8 +814,11 @@ sub _set_session_fs_provider {
         croak "session_fs must be a SessionFsConfig object or hashref";
     }
 
-    # Omit undefined values so we never send JSON null for optional fields;
-    # the CLI rejects null for string/map params such as conventions.
+    # conventions is required by the CLI and must be "windows" or "posix";
+    # default it based on the current platform when the caller omits it.
+    $payload{conventions} //= ( $^O =~ /MSWin|cygwin|msys/i ? 'windows' : 'posix' );
+
+    # Omit any remaining undefined optional values so we never send JSON null.
     delete $payload{$_} for grep { !defined $payload{$_} } keys %payload;
 
     $self->{_client}->request('sessionFs.setProvider', \%payload);

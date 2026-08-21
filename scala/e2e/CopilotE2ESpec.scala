@@ -30,7 +30,23 @@ class CopilotE2ESpec
     with BeforeAndAfterAll
     with BeforeAndAfterEach:
 
-  given ExecutionContext = ExecutionContext.global
+  // Dedicated cached thread pool with daemon threads rather than the global
+  // ForkJoinPool. The SDK performs nested blocking `Await.result` calls inside
+  // its own Futures; on the ForkJoinPool every such blocking call spawns an
+  // unbounded managed-blocking compensation thread, which exhausts the CI
+  // runner and gets the test process terminated. A cached pool sized to the
+  // sequential test workload (with daemon threads so the JVM can still exit)
+  // avoids the thread explosion.
+  private val e2eThreadFactory: java.util.concurrent.ThreadFactory =
+    (r: Runnable) => {
+      val t = new Thread(r, "copilot-e2e")
+      t.setDaemon(true)
+      t
+    }
+  given ExecutionContext =
+    ExecutionContext.fromExecutor(
+      java.util.concurrent.Executors.newCachedThreadPool(e2eThreadFactory)
+    )
 
   private val timeout: FiniteDuration = 30.seconds
 

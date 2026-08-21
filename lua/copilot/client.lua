@@ -569,8 +569,20 @@ function CopilotClient:_spawn_process_posix(cmd)
         os.execute("mkfifo " .. fifo_path)
     end
 
-    -- Launch the process: stdin reads from fifo, stdout is captured by popen
-    local full_cmd = string.format("%s < %s", cmd, fifo_path)
+    -- Launch the process: stdin reads from fifo, stdout is captured by popen.
+    -- Cap the CLI process lifetime with coreutils `timeout` when available so a
+    -- stalled blocking read (e.g. the replay proxy has no matching snapshot and
+    -- the CLI emits nothing further) surfaces as EOF rather than hanging the
+    -- caller forever. Guarded by availability to preserve behavior where
+    -- `timeout` is absent (e.g. stock macOS).
+    local timeout_prefix = ""
+    do
+        local ok = os.execute("command -v timeout >/dev/null 2>&1")
+        if ok == true or ok == 0 then
+            timeout_prefix = "timeout 90 "
+        end
+    end
+    local full_cmd = string.format("%s%s < %s", timeout_prefix, cmd, fifo_path)
     local stdout_handle = io.popen(full_cmd, "r")
     if not stdout_handle then
         os.remove(fifo_path)

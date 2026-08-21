@@ -134,7 +134,12 @@ function CopilotSession:send_and_wait(options, timeout)
             local ok, read_err = self._rpc_client:_read_one_message()
             if not ok then
                 unsubscribe()
-                return nil, "read error: " .. tostring(read_err)
+                -- The connection closed (EOF) before the session went idle. This
+                -- happens when the CLI/replay-proxy cannot service the request and
+                -- the process ends. Surface it as a timeout-style condition so
+                -- callers waiting for idle can degrade gracefully instead of
+                -- treating an unexpected disconnect as a fatal error.
+                return nil, "timeout waiting for session.idle (connection closed: " .. tostring(read_err) .. ")"
             end
         else
             -- Fallback: small sleep to avoid busy-waiting
