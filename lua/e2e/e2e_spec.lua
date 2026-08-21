@@ -115,7 +115,8 @@ describe("Lua SDK E2E", function()
     local function configure_snapshot(category, name)
         local script_dir = debug.getinfo(1, "S").source:match("^@(.+)[/\\]") or "."
         local sep = package.config:sub(1, 1)
-        local repo_root = script_dir .. sep .. ".."
+        -- script_dir is <repo>/lua/e2e, so the repo root is two levels up.
+        local repo_root = script_dir .. sep .. ".." .. sep .. ".."
         local snapshot_path = repo_root .. sep .. "test" .. sep .. "snapshots"
             .. sep .. category .. sep .. name .. ".yaml"
         local work_dir = os.tmpname() .. "_lua_e2e"
