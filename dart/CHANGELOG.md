@@ -1,9 +1,10 @@
 ## 2.5.2
-- Upstream sync: pinned @github/copilot to 1.0.81-6. Added the `user_setting`
-  variant to the PermissionModeSource and PermissionsSetApproveAllSource enums
-  (core generated SDKs), made AccountLoginRequest.login optional, and
-  normalized interrupted shell replay results in the test harness. No public
-  Dart API changes.
+- Upstream sync: bundled CLI runtime pinned to the latest published
+  @github/copilot (^1.0.80); upstream's 1.0.81-6 is not yet on public npm.
+  Added the `user_setting` variant to the PermissionModeSource and
+  PermissionsSetApproveAllSource enums (core generated SDKs), made
+  AccountLoginRequest.login optional, and normalized interrupted shell replay
+  results in the test harness. No public Dart API changes.
 
 ## 2.5.1
 - Maintenance release: hardened the Lua, Perl, and Scala SDK end-to-end test

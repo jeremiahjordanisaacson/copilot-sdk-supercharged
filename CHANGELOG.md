@@ -9,7 +9,7 @@ See [GitHub Releases](https://github.com/github/copilot-sdk/releases) for the fu
 
 ### Upstream sync: 2 commits from `github/copilot-sdk`
 
-Synced the latest upstream changes and pinned the bundled Copilot CLI to `@github/copilot` 1.0.81-6. No breaking changes to the public SDK surface.
+Synced the latest upstream changes. Upstream bumped `@github/copilot` to 1.0.81-6, which is not yet published on the public npm registry (latest published is 1.0.80), so the bundled CLI runtime is pinned to the latest available release (`^1.0.80`); all of upstream's SDK type refinements below are included regardless. No breaking changes to the public SDK surface.
 
 - **`user_setting` permission source** — added the `user_setting` variant to the `PermissionModeSource` and `PermissionsSetApproveAllSource` enums in the core generated SDKs (Node, Python, Go, .NET), so permission decisions originating from a user's saved setting are now distinguishable. ([21d738ea](https://github.com/github/copilot-sdk/commit/21d738ea))
 - **Optional login on `AccountLoginRequest`** — `login` is now optional; when omitted, the authenticated user is resolved from the token.
