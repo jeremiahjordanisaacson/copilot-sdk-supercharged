@@ -3,7 +3,7 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 
 namespace eval ::copilot::version {
-    variable sdk_version "2.5.0"
+    variable sdk_version "2.5.1"
     variable sdk_name    "copilot-sdk-tcl"
     variable min_protocol_version 3
 }

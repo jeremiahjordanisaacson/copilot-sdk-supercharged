@@ -1,3 +1,9 @@
+## 2.5.1
+- Maintenance release: hardened the Lua, Perl, and Scala SDK end-to-end test
+  suites. Perl now implements the sessionFs provider callbacks; Scala uses a
+  byte-framed JSON-RPC transport and fixes a ping deadlock; Lua fixes
+  process-timeout handling. No public API changes.
+
 ## 2.5.0
 - Upstream sync: 210 commits from @github/copilot-sdk
 - New features ported to all 40 SDKs: session rewind, additional session

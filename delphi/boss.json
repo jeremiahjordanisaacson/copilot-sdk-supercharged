@@ -1,7 +1,7 @@
 {
   "name": "copilot-sdk-supercharged",
   "description": "Delphi SDK for the GitHub Copilot CLI",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "homepage": "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged",
   "license": "MIT"
 }
