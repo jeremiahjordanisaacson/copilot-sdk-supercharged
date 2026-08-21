@@ -15,8 +15,10 @@ BEGIN {
     }
 }
 use Thread::Queue;
+use IO::Select;
 use Time::HiRes qw(time sleep);
 use Scalar::Util qw(blessed);
+use Errno qw(EAGAIN EWOULDBLOCK);
 
 =head1 NAME
 
@@ -28,8 +30,9 @@ A minimal JSON-RPC 2.0 client that communicates over stdin/stdout of a child
 process using Content-Length header framing (the same wire format used by
 LSP / vscode-jsonrpc).
 
-A background reader thread continuously reads messages from stdout and routes
-them to the appropriate handler:
+Messages are read on demand (single-threaded): C<request()> and
+C<process_incoming()> pull bytes from stdout, frame them by Content-Length, and
+route each message to the appropriate handler:
 
 =over
 
@@ -64,21 +67,17 @@ sub new {
     binmode($stdin_fh,  ':raw');
     binmode($stdout_fh, ':raw');
 
-    my %pending;
-    if ($HAS_THREADS) {
-        eval 'my %p :shared; %pending = %p;';
-    }
     my %self = (
-        stdin_fh             => $stdin_fh,
-        stdout_fh            => $stdout_fh,
-        _pending             => \%pending,
-        _response_queues     => {},   # id => Thread::Queue (not shared; managed carefully)
+        stdin_fh              => $stdin_fh,
+        stdout_fh             => $stdout_fh,
+        _pending              => {},   # id => 1 for in-flight requests
+        _responses            => {},   # id => decoded response message
         _notification_handler => undef,
-        _request_handlers    => {},
-        _running             => 0,
-        _reader_thread       => undef,
-        _write_lock          => undef,
-        _incoming_queue      => Thread::Queue->new(),
+        _request_handlers     => {},
+        _running              => 0,
+        _incoming             => [],   # queued notifications/requests (decoded)
+        _read_buf             => '',   # raw bytes not yet framed into a message
+        _selector             => undef,# IO::Select over stdout_fh (created lazily)
     );
 
     return bless \%self, $class;
@@ -92,27 +91,19 @@ sub start {
     my ($self) = @_;
     return if $self->{_running};
     $self->{_running} = 1;
-
-    if ($HAS_THREADS) {
-        # Start the background reader thread
-        $self->{_reader_thread} = threads->create(sub {
-            $self->_read_loop();
-        });
-        $self->{_reader_thread}->detach();
-    }
-    # Without threads, the caller must call process_incoming() periodically
-
+    # Single-threaded design: messages are read on demand by request() and
+    # process_incoming(). No background reader thread is used because Perl
+    # ithreads cannot safely share the dynamically-created response map, and a
+    # detached reader blocked on read() would keep the interpreter alive at exit.
     return $self;
 }
 
 sub stop {
     my ($self) = @_;
     $self->{_running} = 0;
-    # Signal all pending requests to unblock
-    for my $id (keys %{ $self->{_pending} }) {
-        my $q = $self->{_response_queues}{$id};
-        $q->enqueue(undef) if $q;
-    }
+    %{ $self->{_pending} }   = ();
+    %{ $self->{_responses} } = ();
+    @{ $self->{_incoming} }  = ();
 }
 
 sub set_notification_handler {
@@ -137,16 +128,7 @@ sub request {
     croak "Client not started" unless $self->{_running};
 
     my $id = _generate_request_id();
-
-    # Create a response queue for this request
-    my $queue = Thread::Queue->new();
-    if ($HAS_THREADS) {
-        lock(%{ $self->{_pending} });
-        $self->{_pending}{$id} = 1;
-    } else {
-        $self->{_pending}{$id} = 1;
-    }
-    $self->{_response_queues}{$id} = $queue;
+    $self->{_pending}{$id} = 1;
 
     my $message = {
         jsonrpc => '2.0',
@@ -157,46 +139,27 @@ sub request {
 
     $self->_send_message($message);
 
-    # Wait for response with timeout
+    # Wait for the matching response, reading and dispatching any interleaved
+    # notifications/requests as they arrive. Reads are bounded by select() so a
+    # silent server cannot block us past the deadline.
     my $deadline = time() + $timeout;
-    my $response;
+    my $resp;
     while (1) {
-        # In non-threaded mode, read messages directly
-        unless ($HAS_THREADS) {
-            while (my $msg = $self->_read_message()) {
-                $self->_handle_message($msg);
-            }
+        $self->_pump(0.05);          # read + route available messages
+        $self->_process_incoming();  # dispatch notifications/requests
+
+        if (exists $self->{_responses}{$id}) {
+            $resp = delete $self->{_responses}{$id};
+            last;
         }
 
-        # Process any incoming requests/notifications on the main thread
-        $self->_process_incoming();
-
-        my $remaining = $deadline - time();
-        if ($remaining <= 0) {
-            if ($HAS_THREADS) {
-                lock(%{ $self->{_pending} });
-            }
+        if (time() >= $deadline) {
             delete $self->{_pending}{$id};
-            delete $self->{_response_queues}{$id};
             croak "JSON-RPC request '$method' timed out after ${timeout}s";
         }
-
-        # Poll with a short timeout so we can process incoming messages
-        $response = $queue->dequeue_timed(0.05);
-        last if defined $response;
     }
 
-    # Cleanup
-    if ($HAS_THREADS) {
-        lock(%{ $self->{_pending} });
-        delete $self->{_pending}{$id};
-    } else {
-        delete $self->{_pending}{$id};
-    }
-    delete $self->{_response_queues}{$id};
-
-    # Decode response (it comes as a JSON string from the shared queue)
-    my $resp = ref($response) ? $response : $json->decode($response);
+    delete $self->{_pending}{$id};
 
     if (exists $resp->{error}) {
         my $err = $resp->{error};
@@ -230,15 +193,77 @@ sub notify {
 sub _process_incoming {
     my ($self) = @_;
 
-    while (my $item = $self->{_incoming_queue}->dequeue_nb()) {
-        my $msg = ref($item) ? $item : $json->decode($item);
-        $self->_dispatch_incoming($msg);
+    # Pull any messages that are already available (non-blocking) so callers
+    # polling for session events actually observe them without a reader thread.
+    $self->_pump(0) if $self->{_running};
+
+    while (my $item = shift @{ $self->{_incoming} }) {
+        $self->_dispatch_incoming($item);
     }
 }
 
 sub process_incoming {
     my ($self) = @_;
     $self->_process_incoming();
+}
+
+# --------------------------------------------------------------------------
+# Read available bytes and frame them into JSON-RPC messages, dispatching each
+# via _handle_message. Waits up to $timeout seconds for the first bytes, then
+# drains whatever else is immediately available and returns promptly.
+# --------------------------------------------------------------------------
+
+sub _pump {
+    my ($self, $timeout) = @_;
+    $timeout //= 0;
+
+    $self->{_selector} //= IO::Select->new($self->{stdout_fh});
+
+    my $deadline = time() + $timeout;
+    while (1) {
+        # Frame and dispatch every complete message already in the buffer.
+        while (defined(my $msg = $self->_try_parse_message())) {
+            $self->_handle_message($msg);
+        }
+
+        my $remaining = $deadline - time();
+        $remaining = 0 if $remaining < 0;
+        last unless $self->{_selector}->can_read($remaining);
+
+        my $chunk = '';
+        my $n = sysread($self->{stdout_fh}, $chunk, 65536);
+        if (!defined $n) {
+            last if $! == EAGAIN || $! == EWOULDBLOCK;
+            die "JSON-RPC read error: $!";
+        }
+        last if $n == 0;  # EOF: server closed stdout
+        $self->{_read_buf} .= $chunk;
+
+        # After the first successful read only keep draining what is already
+        # buffered/available (deadline now) so we never block for more data.
+        $deadline = time();
+    }
+}
+
+# Frame one complete Content-Length message out of the read buffer. Returns the
+# decoded hashref, or undef if a full message is not yet buffered.
+sub _try_parse_message {
+    my ($self) = @_;
+
+    my $sep = index($self->{_read_buf}, "\r\n\r\n");
+    return undef if $sep < 0;
+
+    my $header = substr($self->{_read_buf}, 0, $sep);
+    return undef unless $header =~ /Content-Length:\s*(\d+)/i;
+    my $len = $1;
+
+    my $body_start = $sep + 4;
+    return undef if length($self->{_read_buf}) < $body_start + $len;
+
+    my $body = substr($self->{_read_buf}, $body_start, $len);
+    substr($self->{_read_buf}, 0, $body_start + $len) = '';
+
+    return $json->decode($body);
 }
 
 # --------------------------------------------------------------------------
@@ -284,93 +309,21 @@ sub _send_error_response {
     $self->_send_message($response);
 }
 
-# --------------------------------------------------------------------------
-# Background reader thread
-# --------------------------------------------------------------------------
-
-sub _read_loop {
-    my ($self) = @_;
-
-    eval {
-        while ($self->{_running}) {
-            my $message = $self->_read_message();
-            last unless defined $message;
-            $self->_handle_message($message);
-        }
-    };
-    if ($@ && $self->{_running}) {
-        warn "JSON-RPC read loop error: $@";
-    }
-}
-
-sub _read_exact {
-    my ($self, $num_bytes) = @_;
-    my $fh = $self->{stdout_fh};
-    my $buf = '';
-    my $remaining = $num_bytes;
-
-    while ($remaining > 0) {
-        my $bytes_read = read($fh, my $chunk, $remaining);
-        if (!defined $bytes_read || $bytes_read == 0) {
-            die "Unexpected end of stream while reading JSON-RPC message";
-        }
-        $buf .= $chunk;
-        $remaining -= $bytes_read;
-    }
-
-    return $buf;
-}
-
-sub _read_message {
-    my ($self) = @_;
-    my $fh = $self->{stdout_fh};
-
-    # Read header line
-    my $header_line = <$fh>;
-    return undef unless defined $header_line;
-
-    chomp $header_line;
-    $header_line =~ s/\r$//;
-
-    return undef unless $header_line =~ /^Content-Length:\s*(\d+)/i;
-    my $content_length = $1;
-
-    # Read blank line separator
-    my $blank = <$fh>;
-
-    # Read exact content
-    my $content = $self->_read_exact($content_length);
-
-    return $json->decode($content);
-}
-
 sub _handle_message {
     my ($self, $message) = @_;
 
     # Response to a pending request
     if (exists $message->{id} && (exists $message->{result} || exists $message->{error})) {
         my $id = $message->{id};
-        my $queue;
-        if ($HAS_THREADS) {
-            lock(%{ $self->{_pending} });
-            if (exists $self->{_pending}{$id}) {
-                $queue = $self->{_response_queues}{$id};
-            }
-        } else {
-            if (exists $self->{_pending}{$id}) {
-                $queue = $self->{_response_queues}{$id};
-            }
-        }
-        if ($queue) {
-            # Encode to string for thread-safe transfer
-            $queue->enqueue($json->encode($message));
+        if (exists $self->{_pending}{$id}) {
+            $self->{_responses}{$id} = $message;
         }
         return;
     }
 
-    # Notification (no id) or incoming request (method + id)
-    # Queue for main thread processing
-    $self->{_incoming_queue}->enqueue($json->encode($message));
+    # Notification (no id) or incoming request (method + id): queue for dispatch
+    # on the polling thread via _process_incoming().
+    push @{ $self->{_incoming} }, $message;
 }
 
 sub _dispatch_incoming {
