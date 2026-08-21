@@ -829,7 +829,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         val p = java.nio.file.Paths.get(path)
         Option(p.getParent()).foreach(parent => java.nio.file.Files.createDirectories(parent))
         java.nio.file.Files.writeString(p, content)
-        Json.obj()
+        Json.Null
       catch
         case e: Exception => sessionFsError(e)
     Future.successful(result)
@@ -844,7 +844,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         Option(p.getParent()).foreach(parent => java.nio.file.Files.createDirectories(parent))
         java.nio.file.Files.writeString(p, content,
           java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
-        Json.obj()
+        Json.Null
       catch
         case e: Exception => sessionFsError(e)
     Future.successful(result)
@@ -893,7 +893,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         val p = java.nio.file.Paths.get(path)
         if recursive then java.nio.file.Files.createDirectories(p)
         else java.nio.file.Files.createDirectory(p)
-        Json.obj()
+        Json.Null
       catch
         case e: Exception => sessionFsError(e)
     Future.successful(result)
@@ -939,13 +939,13 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         val p = java.nio.file.Paths.get(path)
         if java.nio.file.Files.exists(p) then
           if recursive then deleteRecursively(p) else java.nio.file.Files.delete(p)
-          Json.obj()
+          Json.Null
         else if force then
-          Json.obj()
+          Json.Null
         else
           sessionFsError(new java.io.FileNotFoundException(path))
       catch
-        case e: Exception => if force then Json.obj() else sessionFsError(e)
+        case e: Exception => if force then Json.Null else sessionFsError(e)
     Future.successful(result)
 
   private def handleSessionFsRename(params: Json): Future[Json] =
@@ -960,7 +960,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
           java.nio.file.Paths.get(src), destPath,
           java.nio.file.StandardCopyOption.REPLACE_EXISTING
         )
-        Json.obj()
+        Json.Null
       catch
         case e: Exception => sessionFsError(e)
     Future.successful(result)
