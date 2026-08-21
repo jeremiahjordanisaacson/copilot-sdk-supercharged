@@ -5,7 +5,7 @@
         <RootNamespace>GitHub.Copilot</RootNamespace>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <PackageId>CopilotSDK.Supercharged</PackageId>
-        <Version>2.5.1</Version>
+        <Version>2.5.2</Version>
         <Description>GitHub Copilot SDK Supercharged - .NET SDK for programmatic control of GitHub Copilot CLI. Supports 40 languages.</Description>
         <Authors>jeremiahjordanisaacson</Authors>
         <Company>copilot-sdk-supercharged</Company>
