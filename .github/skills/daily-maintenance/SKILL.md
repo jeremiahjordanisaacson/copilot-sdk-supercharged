@@ -192,6 +192,20 @@ If upstream added new fields to existing types (e.g., `ModelBilling` got `tokenP
 
 **Gate**: `node scripts/verify-sdk-coverage.mjs` reports `36/36 SDKs fully covered` for BOTH RPC methods and features. AND every SDK's types file has the new type names.
 
+### Step 3f: Update EVERY SDK README with the new features (MANDATORY)
+
+**Never let per-language SDK docs drift behind the code.** Every feature ported in this sync MUST be documented in **all 40 individual SDK READMEs** (`nodejs/`, `python/`, `go/`, `dotnet/`, and every one of the 36 additional SDKs) — not just the root `README.md`/`CHANGELOG.md`.
+
+For each new user-facing feature:
+- Add/refresh the relevant section in each `<lang>/README.md` using that language's **real, idiomatic API** (option name, method, type) — match the casing conventions from Step 3c.
+- **Verify against the actual implementation before writing** — read the SDK's source so the documented signature is real. Do NOT hallucinate API that isn't there (the inverse of the feature-parity rule is just as damaging).
+- Keep examples runnable and consistent with each SDK README's existing structure.
+- Refresh the root `README.md` "What's New in vX.Y.Z" section too.
+
+Parallelize with **general-purpose background agents** using the same language-family batches as Step 3c. Give each agent the authoritative feature list plus the instruction to read each SDK's source first, and verify their edits with grep afterward (agents lie).
+
+**Gate**: every new feature appears in every SDK README. Spot-check with a keyword grep across `**/README.md` (the new option name in its various casings) — every SDK should match.
+
 ---
 
 ## Phase 4: Testing
@@ -257,20 +271,30 @@ If ANY workflow fails validation: **FIX IT BEFORE COMMITTING**. Common issues:
 - Missing required keys under mappings
 
 ### Step 5b: Dependabot / Security Alerts
-Fix ALL open security alerts before shipping:
+Fix ALL open security alerts before shipping — **both Dependabot AND CodeQL code scanning**:
 ```bash
-# Check for open alerts
+# 1. Dependabot (dependency vulnerabilities)
 gh api repos/jeremiahjordanisaacson/copilot-sdk-supercharged/dependabot/alerts \
   --jq '.[] | select(.state == "open") | "\(.number) \(.severity) \(.dependency.package.name)"'
 
-# If any exist:
+# 2. CodeQL code scanning (source-level bugs: ReDoS, injection, etc.)
+gh api repos/jeremiahjordanisaacson/copilot-sdk-supercharged/code-scanning/alerts \
+  --jq '.[] | select(.state == "open") | "\(.number) \(.rule.security_severity_level) \(.rule.id) \(.most_recent_instance.location.path):\(.most_recent_instance.location.start_line)"'
+
+# If any dependabot alerts exist:
 cd test/harness && npm audit fix && npm ci --ignore-scripts  # Verify lock file valid
 cd nodejs && npm audit fix && npm ci --ignore-scripts  # Same for nodejs
 
 # Verify zero vulnerabilities
 cd test/harness && npm audit 2>&1 | tail -3  # Must show "found 0 vulnerabilities"
 ```
-**Gate**: `npm audit` returns 0 vulnerabilities in ALL package directories. Zero open dependabot alerts.
+
+**Fixing CodeQL alerts** (real source bugs, not dependency bumps):
+- Read the exact finding: `gh api .../code-scanning/alerts/<N> --jq '.most_recent_instance.message.text'`
+- Fix the source, then **prove behavior is preserved** — e.g. for `js/redos`, diff old-vs-new regex matches on representative input AND confirm the evil input no longer hangs.
+- Canonical `js/redos` fix: `[^\n]*` inside a `(...)*` group → `[^\r\n]*` so each line matches deterministically (kills 2^k backtracking). Never leave a High alert open.
+
+**Gate**: `npm audit` returns 0 vulnerabilities in ALL package directories. Zero open Dependabot alerts. Zero open CodeQL code-scanning alerts (or each remaining one triaged as a documented false positive).
 
 ### Step 5c: Commit
 ```bash
@@ -396,14 +420,14 @@ git push origin "v$VERSION"
 
 # The tag push triggers these workflows automatically:
 # - release.yml         → Creates GitHub Release with SDK zip archives + checksums
-# - pypi-publish.yml    → Publishes to PyPI (needs PYPI_TOKEN secret)
-# - npm-publish.yml     → Publishes to npm (needs NPM_TOKEN secret)
+# - pypi-publish.yml    → Publishes to PyPI (OIDC trusted publishing — no token)
+# - npm-publish.yml     → Publishes to npm (OIDC trusted publishing — no token, auto-provenance)
 # - cargo-publish.yml   → Publishes to crates.io (needs CARGO_REGISTRY_TOKEN)
 # - rubygems-publish.yml → Publishes to RubyGems (needs RUBYGEMS_API_KEY)
 # - nuget-publish.yml   → Publishes to NuGet (needs NUGET_API_KEY)
 # - hex-publish.yml     → Publishes to Hex.pm (needs HEX_API_KEY)
 # - maven-publish.yml   → Publishes to Maven Central (needs MAVEN_* secrets)
-# - pub-publish.yml     → Publishes to pub.dev (needs PUB_DEV_CREDENTIALS)
+# - pub-publish.yml     → Publishes to pub.dev (OIDC — after manual first publish + automated publishing enabled)
 # - luarocks-publish.yml → Publishes to LuaRocks (needs LUAROCKS_API_KEY)
 # - cpan-publish.yml    → Publishes to CPAN (needs PAUSE_* secrets)
 # - clojars-publish.yml → Publishes to Clojars (needs CLOJARS_* secrets)
@@ -434,9 +458,12 @@ done
 # gh run view <ID> --log-failed | tail -50
 # Common fixes:
 # - Attestation runs before build → move attestation AFTER build step
-# - Expired token → user must regenerate (npm, PyPI, etc.)
+# - npm/PyPI/pub.dev use OIDC trusted publishing (no token). A 404/403 there usually means the
+#   trusted publisher isn't configured on the registry, OR setup-node's registry-url injected a
+#   placeholder authToken (XXXXX-XXXXX-XXXXX-XXXXX) that suppressed OIDC → drop registry-url.
+# - Token registries (crates.io, NuGet, RubyGems, Hex, Maven, CPAN, …): expired token → user regenerates
 # - Missing secret → user must add to repo Settings > Secrets
-# - 403/401 → token permissions issue
+# - 403/401 → token permissions or trusted-publisher misconfiguration
 ```
 
 ### Step 6e: Verify Packages on Registries
@@ -526,7 +553,7 @@ gh issue list --state open --json number,title \
 # Collect from all registries
 npm_dl=$(curl -sf "https://api.npmjs.org/downloads/point/last-month/copilot-sdk-supercharged" | python3 -c "import sys,json; print(json.load(sys.stdin).get('downloads','?'))" || echo "?")
 pypi_dl=$(curl -sf "https://pypistats.org/api/packages/copilot-sdk-supercharged/recent" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('last_month','?'))" || echo "?")
-crate_dl=$(curl -sf "https://crates.io/api/v1/crates/github-copilot-sdk" | python3 -c "import sys,json; print(json.load(sys.stdin)['crate']['downloads'])" || echo "?")
+crate_dl=$(curl -sf "https://crates.io/api/v1/crates/copilot-sdk-supercharged" | python3 -c "import sys,json; print(json.load(sys.stdin)['crate']['downloads'])" || echo "?")
 gem_dl=$(curl -sf "https://rubygems.org/api/v1/gems/copilot-sdk-supercharged.json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('downloads','?'))" || echo "?")
 hex_dl=$(curl -sf "https://hex.pm/api/packages/copilot_sdk_supercharged" | python3 -c "import sys,json; print(json.load(sys.stdin).get('downloads',{}).get('all','?'))" || echo "?")
 ```
@@ -538,6 +565,33 @@ Present as a table to the user.
 npm whoami 2>&1 || echo "⚠️ npm token expired — https://www.npmjs.com/settings/jeremiahisaacson/tokens"
 gh auth status 2>&1 | head -3
 ```
+
+---
+
+## Phase 8: Post-Release Regression & Security Sweep (ALWAYS loop back)
+
+**After shipping, loop back — the run is NOT done until this passes.** Async scanners (CodeQL, Dependabot) and post-merge CI surface issues that didn't exist at commit time.
+
+```bash
+# 1. Re-check CI on main is still green after the release commits/tags
+gh run list --branch main --limit 6 --json workflowName,status,conclusion
+
+# 2. Re-scan for NEW security notices (these run asynchronously post-merge)
+gh api repos/jeremiahjordanisaacson/copilot-sdk-supercharged/code-scanning/alerts \
+  --jq '.[] | select(.state=="open") | "\(.number) \(.rule.security_severity_level) \(.rule.id) \(.most_recent_instance.location.path):\(.most_recent_instance.location.start_line)"'
+gh api repos/jeremiahjordanisaacson/copilot-sdk-supercharged/dependabot/alerts \
+  --jq '.[] | select(.state=="open") | "\(.number) \(.severity) \(.dependency.package.name)"'
+
+# 3. Confirm every registry actually shows the new version (re-run Step 6e)
+```
+
+**If anything is found:**
+1. Fix the regression / security finding (see Step 5b for CodeQL fix guidance).
+2. Re-run the affected gates: `verify-sdk-coverage.mjs` (36/36), affected tests, workflow YAML validation.
+3. **Reship**: bump a patch version and cut a new tag (or force-push the tag) so ALL publishers re-run and every registry converges on the fixed release.
+4. Repeat this sweep until CI is green AND zero open CodeQL/Dependabot alerts AND every registry is on the latest version.
+
+**Gate**: main CI green, zero open security alerts, all registries converged. Only then is the maintenance run complete.
 
 ---
 
@@ -624,7 +678,11 @@ These are hard-won lessons from past maintenance cycles. **Consult this before d
 - PHP CI needs `COMPOSER_TOKEN` secret for private package auth
 
 ### Publish Workflow Gotchas
-- npm: Token needs "bypass 2fa" enabled — user must regenerate at npmjs.com
+- npm/PyPI/pub.dev publish via **OIDC trusted publishing** (no tokens). Requirements:
+  - Workflow needs `permissions: id-token: write`; npm CLI ≥ 11.5.1 / Node ≥ 22.14 (setup-node@v6 ships 11.17.0).
+  - **Do NOT set `registry-url` in `actions/setup-node`** — it writes `.npmrc` with a placeholder `_authToken=${NODE_AUTH_TOKEN}` (`XXXXX-XXXXX-XXXXX-XXXXX`) that suppresses OIDC → 404. npm defaults to registry.npmjs.org.
+  - Registry-side trusted publisher must exist (npmjs.com / pypi.org / pub.dev): org=`jeremiahjordanisaacson`, repo=`copilot-sdk-supercharged`, workflow filename = the publish `.yml`, environment empty.
+- **PyPI package name MUST be `copilot-sdk-supercharged`** — in `python/pyproject.toml` `name` AND `python/copilot/__init__.py` `_pkg_version(...)`. `github-copilot-sdk` is a DIFFERENT, unowned PyPI project → 403. (Leave `_cli_download.py` `_CACHE_DIR_NAME`; that's a filesystem cache path, not the package name.)
 - Attestation steps (`actions/attest-build-provenance@v2`) must run AFTER build/package steps — add `continue-on-error: true`
 - Rust: `cargo publish` with bundled-cli feature requires `--no-default-features` — build.rs panics looking for missing bundled_cli_version.txt
 - npm lockfile: After upstream merges, use `npm install --ignore-scripts` instead of `npm ci` (lockfile may be out of sync)
@@ -658,7 +716,7 @@ These are hard-won lessons from past maintenance cycles. **Consult this before d
 | Merge conflicts in generated files | `git checkout --theirs <file>` then re-run codegen if needed |
 | Agent claims it updated files but didn't | Always verify with grep. Fix manually. |
 | CI fails on Windows only | Usually path separators or shell=True issues. Check the workflow. |
-| npm token expired | User must regenerate at npmjs.com/settings/jeremiahisaacson/tokens |
+| npm publish 404/403 | OIDC trusted publisher not configured on npmjs.com, OR setup-node `registry-url` injected a placeholder token. Configure the trusted publisher and remove `registry-url`. |
 | `git fetch upstream` fails | Check network. Verify remote: `git remote -v`. Re-add if needed. |
 | `npm ci` fails with "lock file out of sync" | `cd <dir> && npm install` to regenerate lock, then `npm ci` to verify. |
 | Workflow YAML parse error | Use `run: \|` block scalar for complex commands. |
