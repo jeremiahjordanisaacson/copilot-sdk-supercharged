@@ -26,7 +26,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install build tools
-        run: pip install build twine
+        run: pip install build
 
       - name: Set version from tag
         run: |
@@ -36,13 +36,7 @@ jobs:
       - name: Build package
         run: python -m build
 
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+      - name: Publish to PyPI (OIDC trusted publishing — no token, PEP 740 attestations)
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          subject-path: python/dist/*
-
-      - name: Publish to PyPI
-        run: twine upload dist/*
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+          packages-dir: python/dist

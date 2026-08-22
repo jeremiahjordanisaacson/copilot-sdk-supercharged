@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
+      - name: Upgrade npm for OIDC trusted publishing (needs >= 11.5.1)
+        run: npm install -g npm@latest
+
       - name: Set version from tag
         run: |
           VERSION=${GITHUB_REF_NAME#v}
@@ -37,13 +40,5 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Publish to npm
+      - name: Publish to npm (OIDC trusted publishing — no token, auto-provenance)
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
-        continue-on-error: true
-        with:
-          subject-path: nodejs/dist/**

@@ -31,11 +31,8 @@ jobs:
       - name: Install dependencies
         run: dart pub get
 
-      - name: Publish to pub.dev
-        run: |
-          mkdir -p ~/.config/dart
-          echo '${{ secrets.PUB_DEV_CREDENTIALS }}' > ~/.config/dart/pub-credentials.json
-          dart pub publish --force
+      - name: Publish to pub.dev (OIDC trusted publishing — no credentials secret)
+        run: dart pub publish --force
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
