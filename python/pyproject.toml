@@ -3,7 +3,7 @@ requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "github-copilot-sdk"
+name = "copilot-sdk-supercharged"
 # Canonical version for the whole monorepo — verify-version-sync.sh reads this
 # value and requires every SDK's manifest to match it. The publish workflow
 # re-injects the release tag version at publish time (which equals this value).

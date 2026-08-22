@@ -131,7 +131,7 @@ All guides assume you have:
 
 - **One of the SDKs** installed (Node.js, Python, and .NET SDKs include the CLI automatically):
   - Node.js: `npm install copilot-sdk-supercharged`
-  - Python: `pip install github-copilot-sdk`
+  - Python: `pip install copilot-sdk-supercharged`
   - Go: `go get github.com/github/copilot-sdk/go` (requires separate CLI installation)
   - .NET: `dotnet add package GitHub.Copilot.SDK`
   - See the [Getting Started tutorial](../../getting-started.md) for all 40 supported languages, including community SDKs for Java, Rust, Ruby, PHP, Swift, Kotlin, C++, and more.

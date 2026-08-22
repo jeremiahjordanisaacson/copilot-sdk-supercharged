@@ -204,7 +204,7 @@ from .tools import (
 )
 
 try:
-    __version__ = _pkg_version("github-copilot-sdk")
+    __version__ = _pkg_version("copilot-sdk-supercharged")
 except PackageNotFoundError:
     # No installed package metadata (e.g. running from a source checkout that
     # was never installed). Use a sentinel that can never masquerade as a real

@@ -79,26 +79,34 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
-## What's New in v2.3.0
+## What's New in v2.5.2
 
-Synced with upstream `github/copilot-sdk` v0.4.0 (73 upstream commits) and ported all features to all 40 SDKs:
+Tracks upstream `github/copilot-sdk` and ports every feature to all 40 SDKs. Highlights since v2.3.0 (see the [CHANGELOG](./CHANGELOG.md) for the full history):
 
-- **@github/copilot 1.0.47** – Latest session types with experimental schema support
-- **Codegen identifier sanitization** – Fixed identifier generation for edge-case property names
-- **z-prefixed Go generated files** – Go codegen outputs `z_`-prefixed files for clarity
-- **Experimental schema types** – Support for experimental/beta schema types in codegen
-- **Normalized skill context snapshots** – Consistent test snapshot formatting across SDKs
-- **Derive Default on Rust types** – All generated Rust types now implement `Default`
-- **PingResponse.timestamp** – Consistent `String` type across all 40 SDKs
-- **SessionFs improvements** – Session-scoped filesystem with 10 I/O operations
-- **Per-session GitHub auth** – Scope auth tokens per session for multi-tenant apps
-- **Commands & UI Elicitation** – Register slash commands and interactive prompts/dialogs
-- **System prompt customization** – Fine-grained control with append/replace/customize modes
-- **Per-agent skills** – Preload skill content into agent context at startup
-- **Per-agent tool visibility** – `excludedTools` to control tool access per agent
-- **Runtime request headers** – Custom HTTP headers per message turn
-- **Image generation** – Response format and image options across all SDKs
-- **40 SDK CI** – Full E2E test coverage for Node.js, Python, Go, .NET, Rust, Java, and 34 additional SDKs
+**Latest release (v2.5.2)**
+
+- **`user_setting` permission source** – Permission decisions originating from a user's saved setting are now distinguishable across the core SDKs (Node, Python, Go, .NET)
+- **Optional login on `AccountLoginRequest`** – Omit `login` to resolve the authenticated user from the token
+- **Security (Java)** – Jackson bumped 2.17.0 → 2.18.10, resolving 10 Dependabot advisories (CVE-2026-54512/54513/54514/54515/59888)
+- **Runtime pin** – `@github/copilot` pinned to `^1.0.80` (latest on public npm); newer upstream type refinements are still included
+
+**Sessions & transport (v2.5.0)**
+
+- **Session rewind** – Restore a session to an earlier point from its file-change captures
+- **In-process (FFI) transport** – Run the runtime in-process across Node, Python, Go, and Rust
+- **Additional session directories** – Expose extra working directories to a session
+- **Disabled MCP servers & GitHub MCP tool config** – Fine-grained per-session MCP control
+- **Canvas provider** – Register a session-level canvas provider
+- **`reasoningEffort: max` & tool search** – Highest reasoning tier, with tool-search scaling for large tool sets
+- **Agent Factories `argsSchema`** – Declare a factory's arguments; repository content-exclusion rules respected
+
+**Auth, BYOK & telemetry (v2.4.0)**
+
+- **MCP OAuth host token handlers** – Answer `401 WWW-Authenticate` challenges from MCP servers
+- **BYOK bearer-token provider** – Per-session token resolution for Managed-Identity-style auth
+- **Session memory, WebSocket transport & citations** – Plus per-session AI-credit budgets (`sessionLimits`)
+
+All additional-SDK features are enforced by `scripts/verify-sdk-coverage.mjs` (36/36 coverage).
 
 ## Getting Started
 

@@ -11,13 +11,13 @@ To use the SDK, you'll need:
 ## Installation
 
 ```bash
-pip install github-copilot-sdk
+pip install copilot-sdk-supercharged
 ```
 
 To include OpenTelemetry support:
 
 ```bash
-pip install "github-copilot-sdk[telemetry]"
+pip install "copilot-sdk-supercharged[telemetry]"
 ```
 
 ## Runtime
@@ -775,7 +775,7 @@ client = CopilotClient(
 
 Trace context (`traceparent`/`tracestate`) is automatically propagated between the SDK and CLI on `create_session`, `resume_session`, and `send` calls, and inbound when the CLI invokes tool handlers.
 
-Install with telemetry extras: `pip install "github-copilot-sdk[telemetry]"` (provides `opentelemetry-api`)
+Install with telemetry extras: `pip install "copilot-sdk-supercharged[telemetry]"` (provides `opentelemetry-api`)
 
 ## Permission Handling
 

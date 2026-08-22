@@ -86,7 +86,7 @@ go get github.com/Azure/azure-sdk-for-go/sdk/azidentity
 <!-- docs-validate: skip -->
 
 ```bash
-pip install github-copilot-sdk azure-identity
+pip install copilot-sdk-supercharged azure-identity
 ```
 
 </details>

@@ -52,7 +52,7 @@ npm install @github/copilot-sdk tsx
 <summary><strong>Python</strong></summary>
 
 ```bash
-pip install github-copilot-sdk
+pip install copilot-sdk-supercharged
 ```
 
 </details>

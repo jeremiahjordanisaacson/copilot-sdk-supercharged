@@ -950,7 +950,7 @@ function removeUnusedSyntheticPythonDataclasses(code: string, knownDefinitionNam
     }
 
     const classBlockRe =
-        /((?:^# (?:Experimental|Deprecated|Internal):[^\n]*\r?\n)*@dataclass(?:\([^\r\n]*\))?\r?\nclass\s+(\w+):[\s\S]*?)(?=^(?:# (?:Experimental|Deprecated|Internal):[^\n]*\r?\n)*@dataclass(?:\([^\r\n]*\))?\r?\nclass\s+\w|^class\s+\w|^def\s+\w|^[A-Z]\w+\s*=|\Z)/gm;
+        /((?:^# (?:Experimental|Deprecated|Internal):[^\r\n]*\r?\n)*@dataclass(?:\([^\r\n]*\))?\r?\nclass\s+(\w+):[\s\S]*?)(?=^(?:# (?:Experimental|Deprecated|Internal):[^\r\n]*\r?\n)*@dataclass(?:\([^\r\n]*\))?\r?\nclass\s+\w|^class\s+\w|^def\s+\w|^[A-Z]\w+\s*=|\Z)/gm;
     const blocks: DataclassBlock[] = [...code.matchAll(classBlockRe)].map((match) => ({
         name: match[2],
         text: match[1],
