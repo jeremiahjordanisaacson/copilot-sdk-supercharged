@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -23,9 +24,14 @@ jobs:
       - name: Setup Dart
         uses: dart-lang/setup-dart@v1
 
-      - name: Set version from tag
+      - name: Set version
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION=${GITHUB_REF_NAME#v}
+          else
+            VERSION=$(grep -E '^version:' pubspec.yaml | head -1 | sed -E 's/version:[[:space:]]*(.*)/\1/')
+          fi
+          echo "Publishing version: $VERSION"
           sed -i "s/^version: .*/version: $VERSION/" pubspec.yaml
 
       - name: Install dependencies
