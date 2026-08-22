@@ -1,5 +1,5 @@
 # Package
-version       = "2.5.2"
+version       = "2.5.3"
 author        = "GitHub"
 description   = "GitHub Copilot SDK for Nim - build AI-powered applications using the Copilot CLI"
 license       = "MIT"

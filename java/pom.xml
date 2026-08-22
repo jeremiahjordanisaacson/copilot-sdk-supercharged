@@ -6,7 +6,7 @@
 
     <groupId>io.github.jeremiahjordanisaacson</groupId>
     <artifactId>copilot-sdk-supercharged</artifactId>
-    <version>2.5.2</version>
+    <version>2.5.3</version>
     <packaging>jar</packaging>
 
     <name>GitHub Copilot Supercharged SDK</name>

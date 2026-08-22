@@ -1,9 +1,9 @@
 package = "copilot-sdk-supercharged"
-version = "2.5.2-1"
+version = "2.5.3-1"
 
 source = {
     url = "git+https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git",
-    tag = "v2.5.2",
+    tag = "v2.5.3",
     dir = "copilot-sdk-supercharged/lua",
 }
 

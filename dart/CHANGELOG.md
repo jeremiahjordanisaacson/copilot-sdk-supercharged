@@ -1,3 +1,11 @@
+## 2.5.3
+- Maintenance, security, and documentation release. Fixed the Python SDK's
+  PyPI package name (now `copilot-sdk-supercharged`), resolved a High-severity
+  ReDoS in the Python code generator, hardened the npm/PyPI/pub.dev publish
+  workflows (OIDC trusted publishing + workflow_dispatch), and backfilled
+  "Recent Features (v2.4–v2.5)" documentation across all 40 SDK READMEs.
+  No public Dart API changes.
+
 ## 2.5.2
 - Upstream sync: bundled CLI runtime pinned to the latest published
   @github/copilot (^1.0.80); upstream's 1.0.81-6 is not yet on public npm.

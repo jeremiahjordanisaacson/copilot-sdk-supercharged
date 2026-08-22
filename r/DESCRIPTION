@@ -1,6 +1,6 @@
 Package: copilot.sdk.supercharged
 Title: R SDK for GitHub Copilot CLI
-Version: 2.5.2
+Version: 2.5.3
 Authors@R: c(
     person("Jeremiah", "Isaacson", email = "jeremiah@example.com", role = c("aut", "cre")),
     person("Microsoft Corporation", role = c("cph"))

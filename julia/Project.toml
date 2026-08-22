@@ -1,6 +1,6 @@
 name = "CopilotSDK"
 uuid = "c7e3a1d0-5f2b-4e8a-9c1d-3b6f7a8e9d0c"
-version = "2.5.2"
+version = "2.5.3"
 authors = ["Jeremiah Isaacson"]
 description = "Julia SDK for the GitHub Copilot CLI"
 

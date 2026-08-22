@@ -7,7 +7,7 @@
 
 set dir [file dirname [info script]]
 
-package ifneeded copilot::version 2.5.2 [list source [file join $dir version.tcl]]
+package ifneeded copilot::version 2.5.3 [list source [file join $dir version.tcl]]
 package ifneeded copilot::types   2.0.0 [list source [file join $dir types.tcl]]
 package ifneeded copilot::jsonrpc 2.0.0 [list source [file join $dir jsonrpc.tcl]]
 package ifneeded copilot::tools   2.0.0 [list source [file join $dir tools.tcl]]

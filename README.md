@@ -79,11 +79,18 @@ The GitHub Copilot SDK exposes the same engine behind Copilot CLI: a production-
 
 See the individual SDK READMEs for usage examples and API reference. For architecture details, see [`MULTI_LANGUAGE_SDKS.md`](./MULTI_LANGUAGE_SDKS.md).
 
-## What's New in v2.5.2
+## What's New in v2.5.3
 
 Tracks upstream `github/copilot-sdk` and ports every feature to all 40 SDKs. Highlights since v2.3.0 (see the [CHANGELOG](./CHANGELOG.md) for the full history):
 
-**Latest release (v2.5.2)**
+**Latest release (v2.5.3)**
+
+- **PyPI package name fixed** – The Python SDK now publishes under `copilot-sdk-supercharged` (matching every other registry) instead of an unowned project name
+- **Security** – Resolved a High-severity ReDoS (super-linear backtracking) in the Python code generator's class-block regex
+- **Publishing hardened** – npm/PyPI/pub.dev workflows use OIDC trusted publishing with `workflow_dispatch` + a manifest-version fallback so releases can be safely re-run
+- **Docs** – Backfilled a source-grounded "Recent Features (v2.4–v2.5)" section into all 40 SDK READMEs
+
+**v2.5.2**
 
 - **`user_setting` permission source** – Permission decisions originating from a user's saved setting are now distinguishable across the core SDKs (Node, Python, Go, .NET)
 - **Optional login on `AccountLoginRequest`** – Omit `login` to resolve the authenticated user from the token
