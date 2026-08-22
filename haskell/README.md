@@ -274,6 +274,93 @@ let opts = defaultClientOptions
 client <- newCopilotClient opts
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Options added in the v2.4 and v2.5 upstream syncs. These are optional
+`SessionConfig` fields (accessors prefixed `sc`), `CopilotClientOptions` fields
+(prefixed `cco`), or `MessageOptions` fields (prefixed `mo`).
+
+**v2.5.0**
+
+- Reasoning effort — `scReasoningEffort :: Maybe Text`
+- Tool search (discover tools on demand) — `scToolSearch :: Maybe Value`
+- Session rewind — `scRewindEnabled :: Maybe Bool`
+- Additional directories — `scAdditionalDirectories :: Maybe [Text]`
+- Disabled MCP servers — `scDisabledMcpServers :: Maybe [Text]`
+- GitHub MCP tool config — `scGithubMcpToolConfig`
+- Canvas provider — `scCanvasProvider`
+- Custom agents local-only — `scCustomAgentsLocalOnly :: Maybe Bool`
+- Experimental mode — `scExperimentalMode :: Maybe Bool`
+- Content exclusion — `scContentExclusion :: Maybe Bool`
+- User-prompt-transformed hook — `shOnUserPromptTransformed`
+- Permission decision context — `ptuoDecisionContext`
+- Agent-factory args schema — `cacArgsSchema`
+- Built-in plugin directories — `ccoBuiltinPluginDirectories :: Maybe [Text]`
+- In-process FFI transport — `ccoInProcess :: Maybe Bool`
+
+**v2.4.0**
+
+- BYOK bearer-token provider — `ccoBearerTokenProvider :: Maybe BearerTokenProvider`
+- MCP OAuth token handler — `scOnMcpAuthRequest :: Maybe McpAuthHandler`
+- HTTP request handler — `ccoRequestHandler :: Maybe CopilotRequestHandler`
+- Session citations — `scEnableCitations :: Maybe Bool`
+- Excluded built-in agents — `scExcludedBuiltinAgents :: Maybe [Text]`
+- Session spending limits — `scSessionLimits :: Maybe SessionLimitsConfig` (`slcMaxAiCredits`)
+- Session memory — `scMemory :: Maybe MemoryConfiguration`
+- OTLP protocol — `scOtlpProtocol :: Maybe Text`
+- WebSocket responses — `scEnableWebSocketResponses :: Maybe Bool`
+- Experiment assignments — `scExpAssignments`
+- Tool defer loading — `toolDeferAuto`, `toolDeferNever`
+- System-message sections — `systemMessageSectionPreamble`, `systemMessageSectionPreserve`
+- Post-tool-use / pre-MCP hooks — `shOnPostToolUse`, `shOnPreMcpToolCall`
+- Message agent mode / display prompt — `moAgentMode`, `moDisplayPrompt`
+- GitHub attachment variants — `attachmentGitHubCommit`, `attachmentGitHubRepository`
+
+Reasoning effort, content exclusion, extra directories, and rewind:
+
+```haskell
+session <- createSession client defaultSessionConfig
+  { scReasoningEffort       = Just "high"        -- e.g. "low" | "medium" | "high"
+  , scContentExclusion      = Just True          -- honor content-exclusion rules
+  , scAdditionalDirectories = Just ["../shared", "../docs"]
+  , scRewindEnabled         = Just True          -- allow rewinding to an earlier checkpoint
+  , scDisabledMcpServers    = Just ["playwright"]
+  }
+```
+
+Tool search and experimental mode:
+
+```haskell
+import Data.Aeson (object, (.=))
+
+session <- createSession client defaultSessionConfig
+  { scToolSearch       = Just (object ["enabled" .= True])
+  , scExperimentalMode = Just True
+  }
+```
+
+Session spending limits and citations:
+
+```haskell
+session <- createSession client defaultSessionConfig
+  { scSessionLimits   = Just SessionLimitsConfig { slcMaxAiCredits = Just 5.0 }
+  , scEnableCitations = Just True
+  , scOtlpProtocol    = Just "http/protobuf"
+  }
+```
+
+BYOK bearer-token provider and in-process transport (client options):
+
+```haskell
+let opts = defaultClientOptions
+      { ccoBearerTokenProvider      = Just $ \args ->
+          pure "ghs_ephemeral_token"        -- scoped to (ptaSessionId args)
+      , ccoBuiltinPluginDirectories = Just ["./plugins"]
+      , ccoInProcess                = Just False
+      }
+client <- newCopilotClient opts
+```
+
 ## JSON-RPC Protocol
 
 The SDK communicates using JSON-RPC 2.0 with Content-Length header framing

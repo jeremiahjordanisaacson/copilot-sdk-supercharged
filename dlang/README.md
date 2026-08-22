@@ -197,6 +197,88 @@ The test suite uses D's built-in `unittest` blocks and covers:
 - **Delegates** for event listeners and tool handlers
 - **Module system** with `package.d` for clean imports
 
+## Recent Features (v2.4–v2.5)
+
+The SDK tracks upstream `@github/copilot-sdk` v2.4–v2.5. Unless noted, the items below are fields on `SessionConfig` and default to unset, so existing code is unaffected.
+
+### v2.5.0
+
+- **Reasoning effort** — `config.reasoningEffort` (`"low"`/`"medium"`/`"high"`/`"xhigh"`).
+- **Session rewind** — `config.rewindEnabled`.
+- **Additional directories** — `config.additionalDirectories`.
+- **Content exclusion** — `config.contentExclusion`.
+- **Tool search** — `config.toolSearch`.
+- **Disabled MCP servers** — `config.disabledMcpServers`.
+- **GitHub MCP tool config** — `config.githubMcpToolConfig`.
+- **Canvas provider** — `config.canvasProvider`.
+- **Custom agents local-only** — `config.customAgentsLocalOnly`.
+- **Experimental mode** — `config.experimentalMode`.
+- **Agent factory args schema** — `AgentFactoryOptions.argsSchema`.
+- **Permission decision context** — `decisionContext` on permission results.
+- **Built-in plugin directories** — `CopilotClientOptions.builtinPluginDirectories`.
+- **In-process FFI transport** — `CopilotClientOptions.inProcess`.
+
+### v2.4.0
+
+- **BYOK bearer token provider** — `CopilotClientOptions.bearerTokenProvider` (`BearerTokenProvider`).
+- **MCP OAuth token handler** — `config.onMcpAuthRequest` (`McpAuthHandler`).
+- **HTTP request handler** — `CopilotClientOptions.requestHandler` (`CopilotRequestHandler`).
+- **Session citations** — `config.enableCitations`.
+- **Excluded built-in agents** — `config.excludedBuiltinAgents`.
+- **Session spending limits** — `config.sessionLimits` (`SessionLimitsConfig.maxAiCredits`).
+- **Session memory** — `config.memory` (`MemoryConfiguration`).
+- **OTLP telemetry protocol** — `config.otlpProtocol`.
+- **WebSocket transport** — `config.enableWebSocketResponses`.
+- **Experiment assignments** — `config.expAssignments`.
+- **Per-message agent mode** — `MessageOptions.agentMode` and `displayPrompt`.
+- **Tool defer loading** — `ToolDefer` (`auto_`/`never`).
+- **Hook identifiers** — `HookType.postToolUse`, `preMcpToolCall`, `userPromptTransformed`.
+- **GitHub attachments** — `GitHubAttachmentType.commit` / `repository`.
+
+Configure reasoning effort, rewind, extra directories, content exclusion, and tool search:
+
+```d
+import std.json : parseJSON;
+
+SessionConfig config;
+config.reasoningEffort = "high";
+config.rewindEnabled = true;
+config.additionalDirectories = ["../shared", "/data/corpus"];
+config.contentExclusion = true;
+config.toolSearch = parseJSON(`{ "enabled": true }`);
+auto session = client.createSession(config);
+```
+
+Supply bring-your-own-key bearer tokens, minted per session:
+
+```d
+CopilotClientOptions opts;
+opts.bearerTokenProvider = (ProviderTokenArgs args) {
+    return mintTokenFor(args.sessionId);
+};
+auto client = new CopilotClient(opts);
+```
+
+Cap spend and turn on citations and persistent memory:
+
+```d
+SessionConfig config;
+SessionLimitsConfig limits;
+limits.maxAiCredits = 5.0;
+config.sessionLimits = limits;
+config.enableCitations = true;
+config.memory = MemoryConfiguration(true);
+```
+
+Choose an agent mode and display prompt for a single turn:
+
+```d
+MessageOptions opts;
+opts.agentMode = "plan";
+opts.displayPrompt = "Refactor auth (planning)";
+session.send("Refactor the auth module", opts);
+```
+
 ## Cookbook
 
 See the [`cookbook/`](cookbook/) directory for focused recipes:

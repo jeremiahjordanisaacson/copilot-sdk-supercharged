@@ -304,6 +304,84 @@ local session = client:create_session({
 - `disabled_skills` - skills to exclude from the session
 - `include_sub_agent_streaming_events` - receive streaming events from sub-agents
 
+## Recent Features (v2.4–v2.5)
+
+Recent upstream syncs added a range of session options, passed in the table given to `client:create_session{...}`. Constant and config helpers live in `copilot.types`.
+
+### New in v2.5
+
+- **Reasoning effort** — `reasoningEffort` — set the model's reasoning budget (e.g. `"high"`).
+- **Tool search** — `toolSearch` — discover tools on demand.
+- **Content exclusion** — `contentExclusion` — honor content-exclusion rules.
+- **Session rewind** — `rewindEnabled` — allow rolling back to an earlier snapshot; observe `types.SessionEventType.SESSION_SNAPSHOT_REWIND` events.
+- **Additional directories** — `additionalDirectories` — extra workspace directories.
+- **Disabled MCP servers** — `disabledMcpServers`.
+- **GitHub MCP tool config** — `githubMcpToolConfig`.
+- **Canvas provider** — `canvasProvider`.
+- **Custom agents local-only** — `customAgentsLocalOnly`.
+- **Built-in plugin directories** — `builtinPluginDirectories`.
+- **Agent-factory authoring** — `argsSchema`.
+- **Permission decision context** — `decisionContext`.
+- **In-process transport** — `inProcess`.
+- **Experimental mode** — `experimentalMode`.
+- **MCP OAuth handler** — `onMcpAuthRequest`.
+
+### New in v2.4
+
+- **Session citations** — `enableCitations`.
+- **Excluded built-in agents** — `excludedBuiltinAgents`.
+- **Spending limits** — `sessionLimits` via `types.SessionLimitsConfig({ maxAiCredits = ... })`.
+- **Session memory** — `memory` via `types.MemoryConfiguration({ enabled = ... })`.
+- **OTLP protocol** — `otlpProtocol`.
+- **WebSocket responses** — `enableWebSocketResponses`.
+- **Experiment assignments** — `expAssignments`.
+- **Hooks** — `onPostToolUse`, `onUserPromptTransformed`, `onPreMcpToolCall`.
+- **BYOK fields** — `requestHandler` / `bearerTokenProvider` on `types.ClientOptions`.
+- **Tool defer loading** — `types.ToolDefer`.
+- **System-message sections** — `types.SystemMessageSection` (`PREAMBLE` / `PRESERVE`).
+- **GitHub attachments** — `types.GitHubAttachment` (`GITHUB_COMMIT`, `GITHUB_REPOSITORY`).
+- **Per-message overrides** — `agentMode`, `displayPrompt`.
+
+### Examples
+
+```lua
+-- Reasoning effort + on-demand tool search + content exclusion
+local session = client:create_session({
+    reasoningEffort  = "high",
+    toolSearch       = true,
+    contentExclusion = true,
+})
+```
+
+```lua
+local types = require("copilot.types")
+
+-- Enable session rewind and observe rewind snapshots
+local session = client:create_session({ rewindEnabled = true })
+session:on(function(event)
+    if event.type == types.SessionEventType.SESSION_SNAPSHOT_REWIND then
+        print("Rewound to snapshot")
+    end
+end)
+```
+
+```lua
+-- Grant the agent access to extra workspace directories
+local session = client:create_session({
+    additionalDirectories = { "../shared-lib", "../docs" },
+})
+```
+
+```lua
+local types = require("copilot.types")
+
+-- Cap AI-credit spend and enable persistent memory
+local session = client:create_session({
+    sessionLimits = types.SessionLimitsConfig({ maxAiCredits = 500 }),
+    memory        = types.MemoryConfiguration({ enabled = true }),
+})
+```
+
 ## Session Event Types
 
 All event type constants are available in `types.SessionEventType`:

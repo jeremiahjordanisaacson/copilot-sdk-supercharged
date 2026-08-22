@@ -432,6 +432,83 @@ val response = session.sendAndWait(MessageOptions(
 ))
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Parity options tracking the upstream `@github/copilot` SDK, exposed as constructor
+parameters on the `SessionConfig`, `CopilotClientOptions`, `MessageOptions`, and
+`SessionHooks` data classes.
+
+### v2.5.0
+
+- **Reasoning effort** — `SessionConfig(reasoningEffort = ReasoningEffort.HIGH)` (`LOW`/`MEDIUM`/`HIGH`/`XHIGH`).
+- **Session rewind** — `SessionConfig(rewindEnabled = true)`; roll back to an earlier snapshot (`session.snapshot_rewind` event).
+- **Additional directories** — `SessionConfig(additionalDirectories = ...)`; extra workspace roots the agent may read.
+- **Content exclusion** — `SessionConfig(contentExclusion = true)`; honor repository content-exclusion rules.
+- **Tool search** — `SessionConfig(toolSearch = ...)`; on-demand tool discovery for large tool sets.
+- **Disabled MCP servers** — `SessionConfig(disabledMcpServers = ...)`.
+- **GitHub MCP tool config** — `SessionConfig(githubMcpToolConfig = ...)`.
+- **Canvas provider** — `SessionConfig(canvasProvider = ...)`.
+- **Custom agents local-only** — `SessionConfig(customAgentsLocalOnly = true)`.
+- **Experimental mode** — `SessionConfig(experimentalMode = true)`.
+- **User-prompt-transformed hook** — `SessionHooks(onUserPromptTransformed = ...)`.
+- **Built-in plugin directories** — `CopilotClientOptions(builtinPluginDirectories = ...)`.
+- **In-process (FFI) transport** — `CopilotClientOptions(inProcess = true)`.
+- **Agent factory args schema** — custom agents accept a typed `argsSchema`.
+- **Permission decision context** — permission results carry `decisionContext`.
+
+### v2.4.0
+
+- **BYOK bearer token provider** — `CopilotClientOptions(bearerTokenProvider = ...)`; a `suspend (ProviderTokenArgs) -> String`.
+- **HTTP request handler** — `CopilotClientOptions(requestHandler = ...)`.
+- **MCP OAuth token handler** — `SessionConfig(onMcpAuthRequest = ...)`.
+- **Session citations** — `SessionConfig(enableCitations = true)`.
+- **Excluded built-in agents** — `SessionConfig(excludedBuiltinAgents = ...)`.
+- **Session spending limits** — `SessionConfig(sessionLimits = SessionLimitsConfig(maxAiCredits = ...))`.
+- **Session memory** — `SessionConfig(memory = MemoryConfiguration(enabled = true))`.
+- **OTLP protocol** — `SessionConfig(otlpProtocol = "grpc")`.
+- **WebSocket responses** — `SessionConfig(enableWebSocketResponses = true)`.
+- **Experiment assignments** — `SessionConfig(expAssignments = ...)`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `SessionHooks(onPostToolUse = ..., onPreMcpToolCall = ...)`.
+- **Per-message agent mode & display prompt** — `MessageOptions(agentMode = ..., displayPrompt = ...)`.
+- **System-message sections** — `SystemMessageSection.PREAMBLE` / `.PRESERVE`.
+- **Tool defer policy** — `ToolDefer.AUTO` / `.NEVER`.
+- **GitHub attachment variants** — `GitHubAttachment.GITHUB_COMMIT` / `.GITHUB_REPOSITORY`.
+
+### Examples
+
+```kotlin
+// Reasoning effort — trade latency for depth on models that support it
+val session = client.createSession(SessionConfig(
+    model = "gpt-5",
+    reasoningEffort = ReasoningEffort.HIGH   // LOW | MEDIUM | HIGH | XHIGH
+))
+```
+
+```kotlin
+// Roll back to an earlier snapshot, expose extra roots, and honor content exclusion
+val session = client.createSession(SessionConfig(
+    rewindEnabled = true,                    // emits session.snapshot_rewind events
+    additionalDirectories = listOf("/repo/shared", "/repo/docs"),
+    contentExclusion = true
+))
+```
+
+```kotlin
+// On-demand tool discovery for large tool sets
+val session = client.createSession(SessionConfig(
+    toolSearch = mapOf("enabled" to true)
+))
+```
+
+```kotlin
+// BYOK bearer tokens + in-process FFI transport (client-level)
+val client = CopilotClient(CopilotClientOptions(
+    bearerTokenProvider = { args -> fetchToken(args.sessionId) },
+    builtinPluginDirectories = listOf("/opt/copilot/plugins"),
+    inProcess = true
+))
+```
+
 ## License
 
 MIT License. See [LICENSE](../LICENSE) for details.

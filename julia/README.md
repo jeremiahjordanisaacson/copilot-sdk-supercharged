@@ -200,6 +200,101 @@ Events are dispatched to handlers registered with `on()`:
 | `ModelInfo` | Model metadata |
 | `SessionMetadata` | Session listing metadata |
 
+## Recent Features (v2.4–v2.5)
+
+Recent upstream syncs added session and client options for parity with `@github/copilot-sdk`. Pass session options as keyword arguments to `create_session` (they map onto `SessionConfig`); client options map onto `CopilotClientOptions`.
+
+**v2.5 wave (`create_session` / `SessionConfig` unless noted):**
+
+- **Reasoning effort** — `reasoning_effort` (e.g. `"minimal"`, `"low"`, `"medium"`, `"high"`, `"max"`).
+- **Tool search** — `tool_search`; discover tools on demand.
+- **Session rewind** — `rewind_enabled`; roll the conversation back to an earlier turn.
+- **Content exclusion** — `content_exclusion`; honor rules that hide files from the agent.
+- **Additional directories** — `additional_directories`.
+- **Disabled MCP servers** — `disabled_mcp_servers`.
+- **GitHub MCP tool config** — `github_mcp_tool_config`.
+- **Canvas provider** — `canvas_provider`.
+- **Custom agents local-only** — `custom_agents_local_only`.
+- **Experimental mode** — `experimental_mode`.
+- **User-prompt-transformed hook** — `on_user_prompt_transformed`.
+- **Permission decision context** — `PermissionResponse.decision_context`.
+- **Agent factory args** — `AgentFactoryOptions.args_schema`.
+- **Built-in plugin directories** — `CopilotClientOptions.builtin_plugin_directories`.
+- **In-process FFI transport** — `CopilotClientOptions.in_process`.
+
+**v2.4 wave:**
+
+- **BYOK bearer token provider** — `bearer_token_provider` (a `Function`).
+- **MCP OAuth token handler** — `on_mcp_auth_request`.
+- **HTTP request handler** — `request_handler` (`CopilotRequestHandler`).
+- **Session citations** — `enable_citations`.
+- **Excluded built-in agents** — `excluded_builtin_agents`.
+- **Session spending limits** — `session_limits` (`SessionLimitsConfig(max_ai_credits=...)`).
+- **OTLP telemetry protocol** — `otlp_protocol` (`OTLP_PROTOCOL_GRPC` / `OTLP_PROTOCOL_HTTP`).
+- **WebSocket transport** — `enable_web_socket_responses`.
+- **Session memory** — `memory` (`MemoryConfiguration`).
+- **Experiment assignments** — `exp_assignments`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `on_post_tool_use`, `on_pre_mcp_tool_call`.
+- **Message agent mode / display prompt** — `MessageOptions.agent_mode`, `MessageOptions.display_prompt`.
+- **Tool defer loading** — `TOOL_DEFER_EAGER` / `TOOL_DEFER_LAZY`.
+- **System-message sections** — `SYSTEM_MESSAGE_PREAMBLE` / `SYSTEM_MESSAGE_PRESERVE`.
+- **GitHub attachments** — `GITHUB_COMMIT_ATTACHMENT` / `GITHUB_REPOSITORY_ATTACHMENT`.
+
+### Reasoning effort & tool search
+
+```julia
+session = create_session(client;
+    model="gpt-4o",
+    reasoning_effort="high",
+    tool_search=Dict("enabled" => true),
+    on_permission_request=approve_all,
+)
+```
+
+### Session rewind & additional directories
+
+```julia
+session = create_session(client;
+    rewind_enabled=true,
+    additional_directories=["/repo/docs", "/repo/vendor"],
+    on_permission_request=approve_all,
+)
+```
+
+### Content exclusion
+
+```julia
+session = create_session(client;
+    content_exclusion=true,
+    on_permission_request=approve_all,
+)
+```
+
+### BYOK bearer token provider
+
+```julia
+session = create_session(client;
+    bearer_token_provider=args -> fetch_token(args),
+    on_permission_request=approve_all,
+)
+```
+
+### Spending limits & citations
+
+```julia
+session = create_session(client;
+    session_limits=SessionLimitsConfig(max_ai_credits=5.0),
+    enable_citations=true,
+    on_permission_request=approve_all,
+)
+```
+
+### In-process transport
+
+```julia
+client = CopilotClient(in_process=true, builtin_plugin_directories=["./plugins"])
+```
+
 ## Cookbook
 
 See [`cookbook/`](./cookbook/) for complete recipes:

@@ -648,6 +648,88 @@ session, err := client.CreateSession(context.Background(), &copilot.SessionConfi
 > - For Azure OpenAI endpoints (`*.openai.azure.com`), you **must** use `Type: "azure"`, not `Type: "openai"`.
 > - The `BaseURL` should be just the host (e.g., `https://my-resource.openai.azure.com`). Do **not** include `/openai/v1` in the URL - the SDK handles path construction automatically.
 
+## Recent Features (v2.4–v2.5)
+
+The recent CLI syncs added a wave of session controls. A few already have their own sections above — [reasoning effort](#session), [in-process transport](#in-process-transport-experimental), [memory](#memory), [session hooks](#session-hooks), and [OTLP protocol](#telemetry) — so this section is a compact roundup of the rest. Fields are set on `copilot.SessionConfig` (and `copilot.ResumeSessionConfig`) unless noted. Optional scalars use the `copilot.Bool`/`copilot.String`/`copilot.Int` helpers.
+
+**v2.5**
+
+- **Tool search** — `ToolSearch *copilot.ToolSearchConfig` (`Enabled`, `DeferThreshold`). Let the model discover tools on demand via the built-in tool-search tool instead of preloading every definition.
+- **Session rewind** — `session.RPC.History.ListRewindPoints(ctx)`, `PreviewRewind(...)`, and `Rewind(...)`. Opt in to file capture with `EnableFileChangeTracking: copilot.Bool(true)`.
+- **Content exclusion** — `session.RPC.ContentExclusion.CheckPaths(ctx, ...)`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
+- **Additional directories** — `AdditionalDirectories []string`. Extra workspace roots the agent may access beyond `WorkingDirectory`.
+- **Disabled MCP servers** — `DisabledMCPServers []string`.
+- **GitHub MCP tool config** — `GitHubMCPToolConfig *copilot.GitHubMCPToolConfig`.
+- **Canvas provider** — `CanvasProvider *copilot.CanvasProviderIdentity`.
+- **Custom agents local-only** — `CustomAgentsLocalOnly *bool`.
+- **User-prompt-transformed hook** — `OnUserPromptTransformed` in `copilot.SessionHooks`.
+- **Permission decision context** — `DecisionContext` via `copilot.NewAttributedPermissionResult(...)`.
+- **Built-in plugin directories** — `BuiltinPluginDirectories` (client option) and `PluginDirectories` (session option).
+- **Experimental mode** — `EnableExperimentalMode *bool`.
+
+**v2.4**
+
+- **BYOK bearer-token provider** — `Provider.BearerTokenProvider` (`func(copilot.ProviderTokenArgs) (string, error)`); see [Custom Providers](#custom-providers).
+- **MCP OAuth handler** — `OnMCPAuthRequest copilot.MCPAuthHandler`.
+- **Session citations** — `EnableCitations *bool`.
+- **Excluded built-in agents** — `ExcludedBuiltInAgents []string`.
+- **Session spending limits** — `SessionLimits *rpc.SessionLimitsConfig` (caps such as `MaxAiCredits`).
+- **Pre-MCP-tool-call hook** — `OnPreMCPToolCall` in `copilot.SessionHooks`.
+- **HTTP request handler** — `RequestHandler *copilot.CopilotRequestHandler` (client option).
+- **GitHub attachments** — `copilot.AttachmentGitHubCommit`, `copilot.AttachmentGitHubRepository`.
+
+**Reasoning effort and tool search:**
+
+```go
+session, err := client.CreateSession(context.Background(), &copilot.SessionConfig{
+    Model:                 "claude-sonnet-4.6",
+    ReasoningEffort:       "high",
+    ToolSearch:            &copilot.ToolSearchConfig{Enabled: copilot.Bool(true), DeferThreshold: copilot.Int(30)},
+    AdditionalDirectories: []string{"/repo/shared", "/repo/docs"},
+})
+```
+
+**Session rewind** — roll a session back to an earlier user turn, optionally restoring files:
+
+```go
+session, err := client.CreateSession(context.Background(), &copilot.SessionConfig{
+    EnableFileChangeTracking: copilot.Bool(true),
+})
+// ... send a turn, then rewind it ...
+
+points, err := session.RPC.History.ListRewindPoints(context.Background())
+if err == nil && len(points.Points) > 0 {
+    last := points.Points[len(points.Points)-1]
+    _, err = session.RPC.History.Rewind(context.Background(), &rpc.HistoryRewindRequest{
+        EventID: last.EventID,
+        Mode:    rpc.HistoryRewindModeConversationAndFiles, // or rpc.HistoryRewindModeConversation
+    })
+}
+```
+
+**Content exclusion** — check paths against the session's policy:
+
+```go
+result, err := session.RPC.ContentExclusion.CheckPaths(context.Background(), &rpc.ContentExclusionCheckPathsRequest{
+    Paths: []string{"/repo/src/secret.go", "/repo/README.md"},
+})
+```
+
+**BYOK bearer-token provider** — supply tokens dynamically (never serialized; the runtime calls back per request):
+
+```go
+session, err := client.CreateSession(context.Background(), &copilot.SessionConfig{
+    Model: "gpt-4",
+    Provider: &copilot.ProviderConfig{
+        Type:    "openai",
+        BaseURL: "https://my-api.example.com/v1",
+        BearerTokenProvider: func(args copilot.ProviderTokenArgs) (string, error) {
+            return acquireAccessToken()
+        },
+    },
+})
+```
+
 ## Telemetry
 
 The SDK supports OpenTelemetry for distributed tracing. Provide a `Telemetry` config to enable trace export and automatic W3C Trace Context propagation.

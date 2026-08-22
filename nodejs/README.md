@@ -811,6 +811,89 @@ const session = await client.createSession({
 > - For Azure OpenAI endpoints (`*.openai.azure.com`), you **must** use `type: "azure"`, not `type: "openai"`.
 > - The `baseUrl` should be just the host (e.g., `https://my-resource.openai.azure.com`). Do **not** include `/openai/v1` in the URL - the SDK handles path construction automatically.
 
+## Recent Features (v2.4–v2.5)
+
+The recent CLI syncs added a wave of session controls. A few already have their own sections above — [reasoning effort](#copilotclient), [in-process transport](#copilotclient), [memory](#memory), [session hooks](#session-hooks), and [OTLP protocol](#telemetry) — so this section is a compact roundup of the rest. Options are passed to `createSession(...)` / `resumeSession(...)` unless noted; experimental surfaces are marked `@experimental` in the type definitions.
+
+**v2.5**
+
+- **Tool search** — `toolSearch?: ToolSearchConfig` (`{ enabled, deferThreshold }`). Let the model discover tools on demand through the built-in `tool_search_tool` instead of preloading every definition.
+- **Session rewind** — `session.rpc.history.listRewindPoints()`, `previewRewind(...)`, and `rewind({ eventId, mode })`. Opt in to file capture at create time with `enableFileChangeTracking: true`.
+- **Content exclusion** — `session.rpc.contentExclusion.checkPaths({ paths })`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
+- **Additional directories** — `additionalDirectories?: string[]`. Extra workspace roots the agent may access beyond the working directory.
+- **Disabled MCP servers** — `disabledMcpServers?: string[]`.
+- **GitHub MCP tool config** — `githubMcpToolConfig?: GitHubMcpToolConfig`.
+- **Canvas provider** — `canvasProvider?: CanvasProviderIdentity`.
+- **Custom agents local-only** — `customAgentsLocalOnly?: boolean`.
+- **User-prompt-transformed hook** — `onUserPromptTransformed` in [`SessionHooks`](#session-hooks).
+- **Permission decision context** — `decisionContext` on an attributed permission result.
+- **Built-in plugin directories** — `builtinPluginDirectories?` (client option) and `pluginDirectories?` (session option).
+- **Agent factory authoring** — `defineFactory(...)` with a typed `argsSchema`.
+- **Experimental mode** — `enableExperimentalMode?: boolean`.
+
+**v2.4**
+
+- **BYOK bearer-token provider** — `provider.bearerTokenProvider: (args) => Promise<string>` for managed-identity / on-demand auth (see [Custom Providers](#custom-providers)).
+- **MCP OAuth handler** — `onMcpAuthRequest?: McpAuthHandler`.
+- **Session citations** — `enableCitations?: boolean`.
+- **Excluded built-in agents** — `excludedBuiltinAgents?: string[]`.
+- **Session spending limits** — `sessionLimits?: SessionLimitsConfig` (caps such as `maxAiCredits`).
+- **WebSocket responses** — `capi.enableWebSocketResponses?: boolean`.
+- **Tool defer loading** — `defer?: "auto" | "never"` on a tool definition.
+- **Pre-MCP-tool-call hook** — `onPreMcpToolCall` in [`SessionHooks`](#session-hooks).
+- **Message agent mode / display prompt** — `agentMode` and `displayPrompt` on send options.
+- **HTTP request handler** — `requestHandler?: CopilotRequestHandler` (client option).
+- **GitHub attachments** — `AttachmentGitHubCommit`, `AttachmentGitHubRepository`.
+- **Experiment assignments** — `expAssignments?`.
+
+**Reasoning effort and tool search:**
+
+```typescript
+const session = await client.createSession({
+    model: "claude-sonnet-4.6",
+    reasoningEffort: "high",
+    toolSearch: { enabled: true, deferThreshold: 30 },
+    additionalDirectories: ["/repo/shared", "/repo/docs"],
+});
+```
+
+**Session rewind** — roll a session back to an earlier user turn, optionally restoring files:
+
+```typescript
+const session = await client.createSession({ enableFileChangeTracking: true });
+await session.sendAndWait({ prompt: "Refactor src/utils.ts" });
+
+const { points } = await session.rpc.history.listRewindPoints();
+const target = points.at(-1);
+if (target) {
+    await session.rpc.history.rewind({
+        eventId: target.eventId,
+        mode: "conversation-and-files", // or "conversation"
+    });
+}
+```
+
+**Content exclusion** — check paths against the session's policy:
+
+```typescript
+const result = await session.rpc.contentExclusion.checkPaths({
+    paths: ["/repo/src/secret.ts", "/repo/README.md"],
+});
+```
+
+**BYOK bearer-token provider** — supply tokens dynamically (never serialized; the runtime calls back per request):
+
+```typescript
+const session = await client.createSession({
+    model: "gpt-4",
+    provider: {
+        type: "openai",
+        baseUrl: "https://my-api.example.com/v1",
+        bearerTokenProvider: async () => await getAccessToken(),
+    },
+});
+```
+
 ## Telemetry
 
 The SDK supports OpenTelemetry for distributed tracing. Provide a `telemetry` config to enable trace export from the CLI process — this is all most users need:

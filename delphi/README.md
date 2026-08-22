@@ -473,6 +473,93 @@ MsgOpts.ImageOptions.Style := 'natural';
 MsgOpts.Prompt := 'Generate a sunset over mountains';
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Fields added in the v2.4 and v2.5 upstream syncs. Unless noted, they are fields of
+`TSessionConfig` (passed to `CreateSession`); a few live on `TCopilotClientOptions`
+or `TMessageOptions`. JSON-valued fields (e.g. `ToolSearch`) take a JSON string.
+
+### v2.5 session options
+
+- **Reasoning effort** — `Config.ReasoningEffort` (`'low'`/`'medium'`/`'high'`).
+- **Tool search** — `Config.ToolSearch` (JSON string).
+- **Session rewind** — `Config.RewindEnabled`.
+- **Content exclusion** — `Config.ContentExclusion`.
+- **Additional directories** — `Config.AdditionalDirectories` (`TArray<string>`).
+- **Disabled MCP servers** — `Config.DisabledMcpServers` (`TArray<string>`).
+- **GitHub MCP tool config** — `Config.GithubMcpToolConfig` (JSON string).
+- **Canvas provider** — `Config.CanvasProvider` (JSON string).
+- **Custom agents local-only** — `Config.CustomAgentsLocalOnly`.
+- **Permission decision context** — `Config.DecisionContext` (JSON string).
+- **User-prompt-transformed hook** — `Config.Hooks.OnUserPromptTransformed`.
+- **Built-in plugin directories** — `Config.BuiltinPluginDirectories` (`TArray<string>`).
+- **Agent-factory args schema** — `Config.ArgsSchema` (JSON string).
+- **In-process FFI transport** — `Config.InProcess`.
+- **Experimental mode** — `Config.ExperimentalMode`.
+
+### v2.4 session options
+
+- **BYOK bearer token provider** — `Options.BearerTokenProvider` (`TBearerTokenProvider`).
+- **HTTP request handler** — `Options.RequestHandler` (`TCopilotRequestHandler`).
+- **MCP OAuth token handler** — `Config.OnMcpAuthRequest` (`TMcpAuthHandler`).
+- **Session citations** — `Config.EnableCitations`.
+- **Excluded built-in agents** — `Config.ExcludedBuiltinAgents` (`TArray<string>`).
+- **Session spending limits** — `Config.SessionLimits.MaxAiCredits`.
+- **Session memory** — `Config.Memory.Enabled`.
+- **OTLP protocol** — `Config.OtlpProtocol`.
+- **WebSocket transport** — `Config.EnableWebSocketResponses`.
+- **Experiment assignments** — `Config.ExpAssignments`.
+- **Post/pre-tool hooks** — `Config.Hooks.OnPostToolUse`, `Config.Hooks.OnPreMcpToolCall`.
+- **Per-message overrides** — `MsgOpts.AgentMode`, `MsgOpts.DisplayPrompt`.
+- **Constants** — `ToolDeferAuto`/`ToolDeferNever`, `SectionPreamble`/`SectionPreserve`, `GitHubCommit`/`GitHubRepository`.
+
+### Reasoning effort and tool search
+
+```pascal
+Config := Default(TSessionConfig);
+Config.ReasoningEffort := 'high';
+Config.ToolSearch := '{"enabled":true}';
+Session := Client.CreateSession(Config);
+```
+
+### Session rewind
+
+```pascal
+Config := Default(TSessionConfig);
+Config.RewindEnabled := True;
+Session := Client.CreateSession(Config);
+```
+
+### Content exclusion and additional directories
+
+```pascal
+Config := Default(TSessionConfig);
+Config.ContentExclusion := True;
+Config.AdditionalDirectories := ['C:\shared', 'C:\reference'];
+Session := Client.CreateSession(Config);
+```
+
+### BYOK bearer token provider
+
+```pascal
+Opts := Default(TCopilotClientOptions);
+Opts.BearerTokenProvider :=
+  function(const Args: TProviderTokenArgs): string
+  begin
+    // Return a fresh bearer token for Args.SessionId
+    Result := 'Bearer-token-value';
+  end;
+Client := TCopilotClient.Create(Opts);
+```
+
+### Session spending limits
+
+```pascal
+Config := Default(TSessionConfig);
+Config.SessionLimits.MaxAiCredits := 500;
+Session := Client.CreateSession(Config);
+```
+
 ## Thread Safety
 
 - All public methods on `TCopilotClient` and `TCopilotSession` use `TCriticalSection` for thread safety.

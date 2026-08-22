@@ -443,6 +443,87 @@ let response = try await session.sendAndWait(MessageOptions(
 ))
 ```
 
+## Recent Features (v2.4–v2.5)
+
+The SDK tracks upstream `@github/copilot-sdk`. These options live on `SessionConfig`
+(session-scoped), `CopilotClientOptions` (client-scoped), `MessageOptions` (per turn),
+or `SessionHooks`.
+
+### v2.5
+
+- **Reasoning effort** — `SessionConfig(reasoningEffort:)` using `ReasoningEffort` (`.low`, `.medium`, `.high`, `.xhigh`).
+- **Session rewind** — `SessionConfig(rewindEnabled:)` rolls the conversation back to an earlier turn.
+- **Additional directories** — `SessionConfig(additionalDirectories:)` exposes extra workspace roots.
+- **Content exclusion** — `SessionConfig(contentExclusion:)` honors rules that hide files from the agent.
+- **Tool search** — `SessionConfig(toolSearch:)` discovers tools on demand instead of preloading them.
+- **Disabled MCP servers** — `SessionConfig(disabledMcpServers:)`.
+- **GitHub MCP tool config** — `SessionConfig(githubMcpToolConfig:)`.
+- **Canvas provider** — `SessionConfig(canvasProvider:)`.
+- **Custom agents local-only** — `SessionConfig(customAgentsLocalOnly:)`.
+- **Experimental mode** — `SessionConfig(experimentalMode:)`.
+- **User-prompt-transformed hook** — `SessionHooks(onUserPromptTransformed:)`.
+- **Permission decision context** — `PreToolUseHookOutput(decisionContext:)`.
+- **Agent-factory args schema** — `argsSchema` on the factory definition.
+- **Built-in plugin dirs / in-process FFI** — `CopilotClientOptions(builtinPluginDirectories:)`, `CopilotClientOptions(inProcess:)`.
+
+### v2.4
+
+- **BYOK bearer token provider** — `CopilotClientOptions(bearerTokenProvider:)` (`BearerTokenProvider`).
+- **MCP OAuth token handler** — `SessionConfig(onMcpAuthRequest:)` (`McpAuthHandler`).
+- **HTTP request handler** — `CopilotClientOptions(requestHandler:)` (`CopilotRequestHandler`).
+- **Session citations** — `SessionConfig(enableCitations:)`.
+- **Excluded built-in agents** — `SessionConfig(excludedBuiltinAgents:)`.
+- **Spending limits** — `SessionConfig(sessionLimits:)` with `SessionLimitsConfig(maxAiCredits:)`.
+- **Session memory** — `SessionConfig(memory:)` with `MemoryConfiguration`.
+- **OTLP protocol / WebSocket transport** — `SessionConfig(otlpProtocol:)`, `SessionConfig(enableWebSocketResponses:)`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `SessionHooks(onPostToolUse:)`, `SessionHooks(onPreMcpToolCall:)`.
+- **Message agent mode / display prompt** — `MessageOptions(agentMode:)`, `MessageOptions(displayPrompt:)`.
+- **Tool defer loading** — `ToolDefer.auto` / `ToolDefer.never`.
+- **System message sections** — `SystemMessageSection.preamble`, `SystemMessageSection.preserve`.
+- **GitHub attachments** — `GitHubAttachment.gitHubCommit`, `GitHubAttachment.gitHubRepository`.
+- **Experiment assignments** — `SessionConfig(expAssignments:)`.
+
+```swift
+// Reasoning effort + session rewind + extra workspace roots
+let session = try await client.createSession(SessionConfig(
+    reasoningEffort: .high,
+    rewindEnabled: true,
+    additionalDirectories: ["/repo/packages/core", "/repo/packages/api"]
+))
+```
+
+```swift
+// Honor content exclusion and discover tools on demand
+let session = try await client.createSession(SessionConfig(
+    contentExclusion: true,
+    toolSearch: ["mode": AnyCodable("auto")]
+))
+```
+
+```swift
+// Bring-your-own-key: supply bearer tokens dynamically
+let client = CopilotClient(options: CopilotClientOptions(
+    bearerTokenProvider: { _ in await fetchToken() }
+))
+```
+
+```swift
+// Cap AI-credit spend and emit citations
+let session = try await client.createSession(SessionConfig(
+    enableCitations: true,
+    sessionLimits: SessionLimitsConfig(maxAiCredits: 5.0)
+))
+```
+
+```swift
+// Per-message agent mode and display prompt
+try await session.send(MessageOptions(
+    prompt: "Refactor this module",
+    agentMode: "plan",
+    displayPrompt: "Refactor (planning)"
+))
+```
+
 ## License
 
 See the [LICENSE](../LICENSE) file in the repository root.

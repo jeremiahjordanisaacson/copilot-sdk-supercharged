@@ -486,6 +486,90 @@ Register skill directories and control sub-agent behavior:
                (println "Session ended:" (:reason input)))}))
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Options added in the v2.4 and v2.5 upstream syncs. Session keys are passed to
+`create-session!`; transport/BYOK options to `create-client` (see
+`copilot.types/client-options`). Several are built with `copilot.types` helpers.
+
+**v2.5.0**
+
+- Reasoning effort — `:reasoning-effort` (`:low` `:medium` `:high` `:xhigh`)
+- Tool search — `:tool-search`
+- Session rewind — `:rewind-enabled`
+- Additional directories — `:additional-directories`
+- Disabled MCP servers — `:disabled-mcp-servers`
+- GitHub MCP tool config — `:github-mcp-tool-config`
+- Canvas provider — `:canvas-provider`
+- Custom agents local-only — `:custom-agents-local-only`
+- Experimental mode — `:experimental-mode`
+- Content exclusion — `:content-exclusion`
+- User-prompt-transformed hook — `:on-user-prompt-transformed`
+- Permission decision context — `types/permission-result` (`:decision-context`)
+- Agent-factory args schema — `types/custom-agent-config` (`:args-schema`)
+- Built-in plugin directories — `:builtin-plugin-directories`
+- In-process FFI transport — `:in-process`
+
+**v2.4.0**
+
+- BYOK bearer-token provider — `types/bearer-token-provider`
+- MCP OAuth handler flag — `:on-mcp-auth-request`
+- HTTP request handler — `types/copilot-request-handler`
+- Session citations — `:enable-citations`
+- Excluded built-in agents — `:excluded-builtin-agents`
+- Session spending limits — `types/session-limits` (`:max-ai-credits`)
+- Session memory — `types/memory-configuration` (`:enabled`)
+- OTLP protocol — `:otlp-protocol`
+- WebSocket responses — `:enable-web-socket-responses`
+- Experiment assignments — `:exp-assignments`
+- Tool defer loading — `types/tool-defer-modes` (`:auto` `:never`)
+- System-message preamble / preserve — `types/system-prompt-sections` (`:preamble`), `types/section-override-actions` (`:preserve`)
+- Post-tool-use / pre-MCP hooks — `:on-post-tool-use`, `:on-pre-mcp-tool-call`
+- Message agent mode / display prompt — `:agent-mode`, `:display-prompt`
+- GitHub attachment variants — `types/github-attachment-types` (`:commit` `:repository`)
+
+Reasoning effort, content exclusion, extra directories, and rewind:
+
+```clojure
+(def sess
+  (client/create-session! my-client
+    :reasoning-effort       :high          ; :low :medium :high :xhigh
+    :content-exclusion      true
+    :additional-directories ["../shared" "../docs"]
+    :rewind-enabled         true
+    :disabled-mcp-servers   ["playwright"]))
+```
+
+Tool search, spending limits, memory, and citations:
+
+```clojure
+(require '[copilot.types :as types])
+
+(client/create-session! my-client
+  :tool-search       {:enabled true}
+  :experimental-mode true
+  :session-limits    (types/session-limits :max-ai-credits 5.0)
+  :memory-config     (types/memory-configuration :enabled true)
+  :enable-citations  true)
+```
+
+BYOK bearer-token provider and transport (client options):
+
+```clojure
+(def my-client
+  (client/create-client
+    :bearer-token-provider      (types/bearer-token-provider
+                                  (fn [_args] "ghs_ephemeral_token"))
+    :builtin-plugin-directories ["./plugins"]
+    :in-process                 false))
+```
+
+Permission decision context:
+
+```clojure
+(types/permission-result :approved :decision-context {:source "policy"})
+```
+
 ## Error Handling
 
 ```clojure

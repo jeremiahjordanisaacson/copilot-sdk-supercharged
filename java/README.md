@@ -213,6 +213,85 @@ SessionEvent response = session.sendAndWait(
 );
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Parity options tracking the upstream `@github/copilot` SDK. All are exposed as fluent
+builders on `SessionConfig`, `CopilotClientOptions`, `MessageOptions`, and `SessionHooks`.
+
+### v2.5.0
+
+- **Reasoning effort** — `SessionConfig.reasoningEffort(String)` (`"low"`/`"medium"`/`"high"`/`"xhigh"`; see `Types.ReasoningEffort`).
+- **Session rewind** — `SessionConfig.rewindEnabled(boolean)`; roll back to an earlier snapshot (`session.snapshot_rewind` event).
+- **Additional directories** — `SessionConfig.additionalDirectories(List<String>)`; extra workspace roots the agent may read.
+- **Content exclusion** — `SessionConfig.contentExclusion(boolean)`; honor repository content-exclusion rules.
+- **Tool search** — `SessionConfig.toolSearch(Map<String, Object>)`; on-demand tool discovery for large tool sets.
+- **Disabled MCP servers** — `SessionConfig.disabledMcpServers(List<String>)`.
+- **GitHub MCP tool config** — `SessionConfig.githubMcpToolConfig(Map<String, Object>)`.
+- **Canvas provider** — `SessionConfig.canvasProvider(Map<String, Object>)`.
+- **Custom agents local-only** — `SessionConfig.customAgentsLocalOnly(boolean)`.
+- **Experimental mode** — `SessionConfig.experimentalMode(boolean)`.
+- **User-prompt-transformed hook** — `SessionHooks.onUserPromptTransformed(HookHandler)`.
+- **Built-in plugin directories** — `CopilotClientOptions.builtinPluginDirectories(List<String>)`.
+- **In-process (FFI) transport** — `CopilotClientOptions.inProcess(boolean)`.
+- **Agent factory args schema** — `Types.CustomAgentConfig.argsSchema`.
+- **Permission decision context** — `Types.PermissionRequestResult.decisionContext`.
+
+### v2.4.0
+
+- **BYOK bearer token provider** — `CopilotClientOptions.bearerTokenProvider(BearerTokenProvider)` (`getBearerToken(ProviderTokenArgs)`).
+- **HTTP request handler** — `CopilotClientOptions.requestHandler(CopilotRequestHandler)`.
+- **MCP OAuth token handler** — `SessionConfig.onMcpAuthRequest(McpAuthHandler)`.
+- **Session citations** — `SessionConfig.enableCitations(boolean)`.
+- **Excluded built-in agents** — `SessionConfig.excludedBuiltinAgents(List<String>)`.
+- **Session spending limits** — `SessionConfig.sessionLimits(SessionLimitsConfig)` (`maxAiCredits`).
+- **Session memory** — `SessionConfig.memory(MemoryConfiguration)`.
+- **OTLP protocol** — `SessionConfig.otlpProtocol(String)` (`"grpc"`/`"http/protobuf"`).
+- **WebSocket responses** — `SessionConfig.enableWebSocketResponses(boolean)`.
+- **Experiment assignments** — `SessionConfig.expAssignments(Map<String, Object>)`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `SessionHooks.onPostToolUse(...)`, `SessionHooks.onPreMcpToolCall(...)`.
+- **Per-message agent mode & display prompt** — `MessageOptions.agentMode(String)`, `MessageOptions.displayPrompt(String)`.
+- **System-message sections** — `CopilotClient.SystemMessageSection.PREAMBLE` / `.PRESERVE`.
+- **Tool defer policy** — `CopilotClient.ToolDefer.AUTO` / `.NEVER` (`Tool.defer`).
+- **GitHub attachment variants** — `CopilotClient.GitHubAttachment.GITHUB_COMMIT` / `.GITHUB_REPOSITORY`.
+
+### Examples
+
+```java
+// Reasoning effort — trade latency for depth on models that support it
+CopilotSession session = client.createSession(
+    new SessionConfig()
+        .model("gpt-5")
+        .reasoningEffort("high")          // "low" | "medium" | "high" | "xhigh"
+).get();
+```
+
+```java
+// Roll back to an earlier snapshot, expose extra roots, and honor content exclusion
+CopilotSession session = client.createSession(
+    new SessionConfig()
+        .rewindEnabled(true)              // emits session.snapshot_rewind events
+        .additionalDirectories(List.of("/repo/shared", "/repo/docs"))
+        .contentExclusion(true)
+).get();
+```
+
+```java
+// On-demand tool discovery for large tool sets
+CopilotSession session = client.createSession(
+    new SessionConfig().toolSearch(Map.of("enabled", true))   // forwarded to the CLI tool-search config
+).get();
+```
+
+```java
+// BYOK bearer tokens + in-process FFI transport (client-level)
+CopilotClient client = new CopilotClient(
+    new CopilotClientOptions()
+        .bearerTokenProvider(args -> fetchToken(args.sessionId))
+        .builtinPluginDirectories(List.of("/opt/copilot/plugins"))
+        .inProcess(true)
+);
+```
+
 ## Documentation & Resources
 
 | Resource                      | Link                                                                                                                                   |

@@ -449,6 +449,97 @@ Await client.DeleteSessionAsync(sessions(0).SessionId)
 
 ---
 
+## Recent Features (v2.4–v2.5)
+
+Options added in the v2.4 and v2.5 upstream syncs. Unless noted, these are properties
+of `SessionConfig` (passed to `CreateSessionAsync`); a few live on `CopilotClientOptions`
+or `MessageOptions`.
+
+### v2.5 session options
+
+- **Reasoning effort** — `SessionConfig.ReasoningEffort` (`"low"`/`"medium"`/`"high"`).
+- **Tool search** — `SessionConfig.ToolSearch` (discover tools on demand).
+- **Session rewind** — `SessionConfig.RewindEnabled` (restore an earlier turn).
+- **Content exclusion** — `SessionConfig.ContentExclusion` (honor content-exclusion rules).
+- **Additional directories** — `SessionConfig.AdditionalDirectories` (extra workspace dirs).
+- **Disabled MCP servers** — `SessionConfig.DisabledMcpServers`.
+- **GitHub MCP tool config** — `SessionConfig.GithubMcpToolConfig`.
+- **Canvas provider** — `SessionConfig.CanvasProvider`.
+- **Custom agents local-only** — `SessionConfig.CustomAgentsLocalOnly`.
+- **Permission decision context** — `SessionConfig.DecisionContext`.
+- **User-prompt-transformed hook** — `SessionConfig.OnUserPromptTransformed`.
+- **Built-in plugin directories** — `SessionConfig.BuiltinPluginDirectories`.
+- **Agent-factory args schema** — `SessionConfig.ArgsSchema`.
+- **In-process FFI transport** — `SessionConfig.InProcess`.
+- **Experimental mode** — `SessionConfig.ExperimentalMode`.
+
+### v2.4 session options
+
+- **BYOK bearer token provider** — `CopilotClientOptions.BearerTokenProvider` (receives `ProviderTokenArgs`).
+- **HTTP request handler** — `CopilotClientOptions.RequestHandler` (`CopilotRequestHandler`).
+- **MCP OAuth token handler** — `SessionConfig.OnMcpAuthRequest`.
+- **Session citations** — `SessionConfig.EnableCitations`.
+- **Excluded built-in agents** — `SessionConfig.ExcludedBuiltinAgents`.
+- **Session spending limits** — `SessionConfig.SessionLimits` (`SessionLimitsConfig.MaxAiCredits`).
+- **Session memory** — `SessionConfig.Memory` (`MemoryConfiguration`).
+- **OTLP protocol** — `SessionConfig.OtlpProtocol`.
+- **WebSocket transport** — `SessionConfig.EnableWebSocketResponses`.
+- **Experiment assignments** — `SessionConfig.ExpAssignments`.
+- **Post/pre-tool hooks** — `SessionConfig.OnPostToolUse`, `SessionConfig.OnPreMcpToolCall`.
+- **Per-message overrides** — `MessageOptions.AgentMode`, `MessageOptions.DisplayPrompt`.
+- **Constants** — `ToolDefer.Auto`/`ToolDefer.Never`, `SystemMessageSection.Preamble`/`Preserve`, `GitHubAttachment.GitHubCommit`/`GitHubRepository`.
+
+### Reasoning effort and tool search
+
+```vb
+Dim session = Await client.CreateSessionAsync(New SessionConfig With {
+    .ReasoningEffort = "high",
+    .ToolSearch = New Dictionary(Of String, Object) From {{"enabled", True}},
+    .OnPermissionRequest = PermissionHandlers.ApproveAll()
+})
+```
+
+### Session rewind
+
+```vb
+Dim session = Await client.CreateSessionAsync(New SessionConfig With {
+    .RewindEnabled = True,
+    .OnPermissionRequest = PermissionHandlers.ApproveAll()
+})
+```
+
+### Content exclusion and additional directories
+
+```vb
+Dim session = Await client.CreateSessionAsync(New SessionConfig With {
+    .ContentExclusion = True,
+    .AdditionalDirectories = New List(Of String) From {"C:\shared", "C:\reference"},
+    .OnPermissionRequest = PermissionHandlers.ApproveAll()
+})
+```
+
+### BYOK bearer token provider
+
+```vb
+Dim client As New CopilotClient(New CopilotClientOptions With {
+    .BearerTokenProvider = Function(args As ProviderTokenArgs)
+        ' Return a fresh bearer token for args.SessionId
+        Return Task.FromResult("Bearer-token-value")
+    End Function
+})
+```
+
+### Session spending limits
+
+```vb
+Dim session = Await client.CreateSessionAsync(New SessionConfig With {
+    .SessionLimits = New SessionLimitsConfig With { .MaxAiCredits = 500 },
+    .OnPermissionRequest = PermissionHandlers.ApproveAll()
+})
+```
+
+---
+
 ## Building from Source
 
 ```bash

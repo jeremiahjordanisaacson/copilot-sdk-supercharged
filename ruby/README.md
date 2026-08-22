@@ -291,6 +291,86 @@ session.on(Copilot::SessionEventType::ASSISTANT_MESSAGE_DELTA) do |event|
 end
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Recent upstream syncs added a range of session-configuration options. Except where noted, each is a keyword passed to `client.create_session(...)`.
+
+### New in v2.5
+
+- **Reasoning effort** — `reasoning_effort:` — set the model's reasoning budget (e.g. `"low"`, `"medium"`, `"high"`).
+- **Tool search** — `tool_search:` — let the agent discover tools on demand instead of pre-loading them.
+- **Content exclusion** — `content_exclusion:` — honor content-exclusion rules that hide files from the agent.
+- **Session rewind** — `rewind_enabled:` — allow rolling a session back to an earlier snapshot; observe `Copilot::SessionEventType::SESSION_SNAPSHOT_REWIND` events.
+- **Additional directories** — `additional_directories:` — extra workspace directories the agent may access.
+- **Disabled MCP servers** — `disabled_mcp_servers:` — turn off specific MCP servers for the session.
+- **GitHub MCP tool config** — `github_mcp_tool_config:` — configure the built-in GitHub MCP toolset.
+- **Canvas provider** — `canvas_provider:` — supply a canvas rendering provider.
+- **Custom agents local-only** — `custom_agents_local_only:` — restrict custom agents to local definitions.
+- **Built-in plugin directories** — `builtin_plugin_directories:` — directories scanned for built-in plugins.
+- **Agent-factory authoring** — `args_schema:` — author agent factories with a typed args schema.
+- **Permission decision context** — `decision_context:` — extra context passed to permission decisions.
+- **In-process transport** — `in_process:` — run the CLI in-process instead of as a subprocess.
+- **Experimental mode** — `experimental_mode:` — opt into experimental CLI behavior.
+- **MCP OAuth handler** — `on_mcp_auth_request:` — handle OAuth token requests from MCP servers.
+
+### New in v2.4
+
+- **Session citations** — `enable_citations:` — emit citation metadata.
+- **Excluded built-in agents** — `excluded_builtin_agents:` — hide specific built-in agents.
+- **Spending limits** — `session_limits:` — cap AI-credit spend with `Copilot::SessionLimitsConfig.new(max_ai_credits:)`.
+- **Session memory** — `memory:` — configure persistent memory with `Copilot::MemoryConfiguration.new(enabled:)`.
+- **OTLP protocol** — `otlp_protocol:` — choose the OTLP telemetry wire protocol.
+- **WebSocket responses** — `enable_web_socket_responses:` — stream responses over WebSocket.
+- **Experiment assignments** — `exp_assignments:` — pass experiment assignments to the runtime.
+- **Tool defer loading** — `Copilot::ToolDefer` (`AUTO` / `NEVER`) — defer tool loading until first use.
+- **System-message sections** — `Copilot::SystemMessageSection` (`PREAMBLE` / `PRESERVE`).
+- **GitHub attachments** — `Copilot::GitHubAttachment` (`GITHUB_COMMIT`, `GITHUB_REPOSITORY`, …).
+- **Post-tool-use / prompt-transformed hooks** — `on_post_tool_use`, `on_user_prompt_transformed` on `Copilot::SessionHooks`.
+- **Per-message agent mode / display prompt** — `agent_mode:` and `display_prompt:` on `session.send` / `session.send_and_wait`.
+
+### Examples
+
+```ruby
+# Reasoning effort + on-demand tool search + content exclusion
+session = client.create_session(
+  reasoning_effort: "high",
+  tool_search: true,
+  content_exclusion: true
+)
+```
+
+```ruby
+# Enable session rewind and observe rewind snapshots
+session = client.create_session(rewind_enabled: true)
+session.on(Copilot::SessionEventType::SESSION_SNAPSHOT_REWIND) do |event|
+  puts "Rewound to snapshot: #{event.data}"
+end
+```
+
+```ruby
+# Grant the agent access to extra workspace directories
+session = client.create_session(
+  additional_directories: ["../shared-lib", "../docs"]
+)
+```
+
+```ruby
+# Cap AI-credit spend and enable persistent memory
+session = client.create_session(
+  session_limits: Copilot::SessionLimitsConfig.new(max_ai_credits: 500),
+  memory: Copilot::MemoryConfiguration.new(enabled: true)
+)
+```
+
+```ruby
+# Per-message agent mode and a display-only prompt
+session.send_and_wait(
+  prompt: "Summarize the diff",
+  agent_mode: "plan",
+  display_prompt: "Summarize the staged changes"
+)
+```
+
 ## API Reference
 
 ### `Copilot::CopilotClient`

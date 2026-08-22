@@ -432,6 +432,96 @@ response <- session$send_and_wait(
 )
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Recent upstream syncs added session options for parity with `@github/copilot-sdk`. All of the following are named parameters of `client$create_session()` (lifecycle hooks are passed inside the `hooks = list(...)` argument).
+
+**v2.5 wave (`create_session()` parameters unless noted):**
+
+- **Reasoning effort** — `reasoning_effort` (e.g. `"minimal"`, `"low"`, `"medium"`, `"high"`, `"max"`).
+- **Tool search** — `tool_search`; discover tools on demand.
+- **Session rewind** — `rewind_enabled`; roll the conversation back to an earlier turn.
+- **Content exclusion** — `content_exclusion`; honor rules that hide files from the agent.
+- **Additional directories** — `additional_directories`.
+- **Disabled MCP servers** — `disabled_mcp_servers`.
+- **GitHub MCP tool config** — `github_mcp_tool_config`.
+- **Canvas provider** — `canvas_provider`.
+- **Custom agents local-only** — `custom_agents_local_only`.
+- **Experimental mode** — `experimental_mode`.
+- **User-prompt-transformed hook** — `hooks$on_user_prompt_transformed`.
+- **Permission decision context** — `decision_context`.
+- **Agent factory args** — `args_schema`.
+- **Built-in plugin directories** — `builtin_plugin_directories`.
+- **In-process FFI transport** — `in_process`.
+
+**v2.4 wave:**
+
+- **BYOK bearer token provider** — `bearer_token_provider` (a function receiving `ProviderTokenArgs`, e.g. `args$session_id`).
+- **MCP OAuth token handler** — `on_mcp_auth_request`.
+- **Session citations** — `enable_citations`.
+- **Excluded built-in agents** — `excluded_builtin_agents`.
+- **Session spending limits** — `session_limits` (e.g. `list(maxAiCredits = ...)`).
+- **OTLP telemetry protocol** — `otlp_protocol` (`"grpc"` or `"http/protobuf"`).
+- **WebSocket transport** — `enable_web_socket_responses`.
+- **Session memory** — `memory`.
+- **Experiment assignments** — `exp_assignments`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `hooks$on_post_tool_use`, `hooks$on_pre_mcp_tool_call`.
+- **Message agent mode / display prompt** — `agent_mode`, `display_prompt` (defaults here; also per-message on `session$send()`).
+- **Tool defer loading** — `"auto"` / `"never"`.
+- **System-message sections** — `"preamble"` / `"preserve"`.
+- **GitHub attachments** — `"GitHubCommit"` / `"GitHubRepository"`.
+
+### Reasoning effort & tool search
+
+```r
+session <- client$create_session(
+  model = "gpt-5",
+  reasoning_effort = "high",
+  tool_search = list(enabled = TRUE)
+)
+```
+
+### Session rewind & additional directories
+
+```r
+session <- client$create_session(
+  rewind_enabled = TRUE,
+  additional_directories = c("/repo/docs", "/repo/vendor")
+)
+```
+
+### Content exclusion
+
+```r
+session <- client$create_session(content_exclusion = TRUE)
+```
+
+### BYOK bearer token provider
+
+```r
+session <- client$create_session(
+  bearer_token_provider = function(args) fetch_token(args$session_id)
+)
+```
+
+### Spending limits & citations
+
+```r
+session <- client$create_session(
+  session_limits = list(maxAiCredits = 5),
+  enable_citations = TRUE
+)
+```
+
+### In-process transport
+
+```r
+session <- client$create_session(
+  in_process = TRUE,
+  builtin_plugin_directories = c("./plugins")
+)
+```
+
 ## Requirements
 
 - R 4.1+

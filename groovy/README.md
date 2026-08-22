@@ -162,6 +162,80 @@ def result = session.sendAndWait(
 )
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Parity options tracking the upstream `@github/copilot` SDK. Session options are passed
+as named-argument maps to `createSession`; client options to the `CopilotClient` constructor.
+
+### v2.5.0
+
+- **Reasoning effort** — `createSession(reasoningEffort: 'high')` (`'low'`/`'medium'`/`'high'`/`'xhigh'`; see `ReasoningEffort`).
+- **Session rewind** — `createSession(rewindEnabled: true)`; roll back to an earlier snapshot (`session.snapshot_rewind` event).
+- **Additional directories** — `createSession(additionalDirectories: [...])`; extra workspace roots the agent may read.
+- **Content exclusion** — `createSession(contentExclusion: true)`; honor repository content-exclusion rules.
+- **Tool search** — `createSession(toolSearch: [...])`; on-demand tool discovery for large tool sets.
+- **Disabled MCP servers** — `createSession(disabledMcpServers: [...])`.
+- **GitHub MCP tool config** — `createSession(githubMcpToolConfig: [...])`.
+- **Canvas provider** — `createSession(canvasProvider: [...])`.
+- **Custom agents local-only** — `createSession(customAgentsLocalOnly: true)`.
+- **Experimental mode** — `createSession(experimentalMode: true)`.
+- **User-prompt-transformed hook** — `createSession(hooks: [onUserPromptTransformed: { input, sessionId -> ... }])`.
+- **Built-in plugin directories** — `new CopilotClient(builtinPluginDirectories: [...])`.
+- **In-process (FFI) transport** — `new CopilotClient(inProcess: true)`.
+- **Agent factory args schema** — custom agents accept a typed `argsSchema`.
+- **Permission decision context** — `PermissionRequestResult.decisionContext`.
+
+### v2.4.0
+
+- **BYOK bearer token provider** — `new CopilotClient(bearerTokenProvider: { args -> ... })`; a closure receiving `ProviderTokenArgs`.
+- **HTTP request handler** — `new CopilotClient(requestHandler: { ... })`.
+- **MCP OAuth token handler** — `createSession(onMcpAuthRequest: { ... })`.
+- **Session citations** — `createSession(enableCitations: true)`.
+- **Excluded built-in agents** — `createSession(excludedBuiltinAgents: [...])`.
+- **Session spending limits** — `createSession(sessionLimits: new SessionLimitsConfig(maxAiCredits: ...))`.
+- **Session memory** — `createSession(memory: new MemoryConfiguration(enabled: true))`.
+- **OTLP protocol** — `createSession(otlpProtocol: 'grpc')`.
+- **WebSocket responses** — `createSession(enableWebSocketResponses: true)`.
+- **Experiment assignments** — `createSession(expAssignments: [...])`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `hooks: [onPostToolUse: {...}, onPreMcpToolCall: {...}]`.
+- **Per-message agent mode & display prompt** — `send(agentMode: ..., displayPrompt: ...)`.
+- **System-message sections** — `CopilotClient.SystemMessageSection.PREAMBLE` / `.PRESERVE`.
+- **Tool defer policy** — `CopilotClient.ToolDefer.AUTO` / `.NEVER` (`Tool.defer`).
+- **GitHub attachment variants** — `CopilotClient.GitHubAttachment.GITHUB_COMMIT` / `.GITHUB_REPOSITORY`.
+
+### Examples
+
+```groovy
+// Reasoning effort — trade latency for depth on models that support it
+def session = client.createSession(
+    model: 'gpt-5',
+    reasoningEffort: 'high'            // 'low' | 'medium' | 'high' | 'xhigh'
+)
+```
+
+```groovy
+// Roll back to an earlier snapshot, expose extra roots, and honor content exclusion
+def session = client.createSession(
+    rewindEnabled: true,              // emits session.snapshot_rewind events
+    additionalDirectories: ['/repo/shared', '/repo/docs'],
+    contentExclusion: true
+)
+```
+
+```groovy
+// On-demand tool discovery for large tool sets
+def session = client.createSession(toolSearch: [enabled: true])
+```
+
+```groovy
+// BYOK bearer tokens + in-process FFI transport (client-level)
+def client = new CopilotClient(
+    bearerTokenProvider: { args -> fetchToken(args.sessionId) },
+    builtinPluginDirectories: ['/opt/copilot/plugins'],
+    inProcess: true
+)
+```
+
 ## API Reference
 
 ### CopilotClient

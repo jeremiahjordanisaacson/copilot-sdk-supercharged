@@ -177,6 +177,100 @@ in
 let client = Client.create ~options:opts () in
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Fields added in the v2.4 and v2.5 upstream syncs. Session options are record
+fields on `Types.session_config` (build with
+`{ (Types.default_session_config ()) with ... }`); transport options are fields
+on `Types.client_options`.
+
+**v2.5.0**
+
+- Reasoning effort — `reasoning_effort : reasoning_effort option` (`Low | Medium | High | Xhigh`)
+- Tool search — `tool_search : (string * Yojson.Safe.t) list`
+- Session rewind — `rewind_enabled : bool option`
+- Additional directories — `additional_directories : string list option`
+- Disabled MCP servers — `disabled_mcp_servers : string list option`
+- GitHub MCP tool config — `github_mcp_tool_config`
+- Canvas provider — `canvas_provider`
+- Custom agents local-only — `custom_agents_local_only : bool option`
+- Experimental mode — `experimental_mode : bool option`
+- Content exclusion — `content_exclusion : bool option`
+- Permission decision context — `permission_result_to_yojson_with_context`
+- Agent-factory args schema — `args_schema`
+- Built-in plugin directories — `builtin_plugin_directories : string list option`
+- In-process FFI transport — `in_process : bool option`
+
+**v2.4.0**
+
+- BYOK bearer-token provider — `bearer_token_provider : bearer_token_provider option`
+- MCP OAuth handler flag — `on_mcp_auth_request : bool`
+- HTTP request handler — `request_handler : copilot_request_handler option`
+- Session citations — `enable_citations : bool`
+- Excluded built-in agents — `excluded_builtin_agents : string list`
+- Session spending limits — `session_limits : session_limits_config option` (`max_ai_credits`)
+- Session memory — `memory : memory_configuration option`
+- OTLP protocol — `otlp_protocol : string option`
+- WebSocket responses — `enable_web_socket_responses : bool`
+- Experiment assignments — `exp_assignments`
+- Tool defer loading — `tool_defer` (`DeferAuto | DeferNever`)
+- System-message sections — `system_message_section_preamble`, `system_message_section_preserve`
+- Hook name constants — `hook_on_post_tool_use`, `hook_on_pre_mcp_tool_call`, `hook_on_user_prompt_transformed`
+- Message agent mode / display prompt — `Types.make_message ?agent_mode ?display_prompt`
+- GitHub attachment variants — `attachment_github_commit`, `attachment_github_repository`
+
+Reasoning effort, content exclusion, extra directories, and rewind:
+
+```ocaml
+let config =
+  { (Types.default_session_config ()) with
+    reasoning_effort       = Some Types.High   (* Low | Medium | High | Xhigh *)
+  ; content_exclusion      = Some true
+  ; additional_directories = Some [ "../shared"; "../docs" ]
+  ; rewind_enabled         = Some true
+  ; disabled_mcp_servers   = Some [ "playwright" ]
+  }
+in
+let* session = Client.create_session ~config client in
+```
+
+Tool search and experimental mode:
+
+```ocaml
+let config =
+  { (Types.default_session_config ()) with
+    tool_search       = [ ("enabled", `Bool true) ]
+  ; experimental_mode = Some true
+  }
+in
+```
+
+Session spending limits, memory, and citations:
+
+```ocaml
+let config =
+  { (Types.default_session_config ()) with
+    session_limits   = Some { Types.max_ai_credits = Some 5.0 }
+  ; memory           = Some { Types.memory_enabled = true }
+  ; enable_citations = true
+  ; otlp_protocol    = Some "http/protobuf"
+  }
+in
+```
+
+BYOK bearer-token provider and in-process transport (client options):
+
+```ocaml
+let opts =
+  { (Types.default_client_options ()) with
+    bearer_token_provider      = Some (fun _args -> "ghs_ephemeral_token")
+  ; builtin_plugin_directories = Some [ "./plugins" ]
+  ; in_process                 = Some false
+  }
+in
+let client = Client.create ~options:opts () in
+```
+
 ## Architecture
 
 ```

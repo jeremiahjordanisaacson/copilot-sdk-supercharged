@@ -265,6 +265,90 @@ my $session = $client->create_session(
 - `disabled_skills` - arrayref of skill names to explicitly disable
 - `include_sub_agent_streaming_events` - when true (1), surfaces streaming events from sub-agents in the event stream
 
+## Recent Features (v2.4–v2.5)
+
+Recent upstream syncs added a range of session and client options. Session options are attributes on `GitHub::Copilot::Types::SessionConfig`; BYOK transport options are arguments to `GitHub::Copilot::Client->new`.
+
+### New in v2.5
+
+- **Reasoning effort** — `reasoning_effort` — set the model's reasoning budget (e.g. `'high'`).
+- **Tool search** — `tool_search` — discover tools on demand.
+- **Content exclusion** — `content_exclusion` — honor content-exclusion rules.
+- **Session rewind** — `rewind_enabled` — allow rolling back to an earlier snapshot.
+- **Additional directories** — `additional_directories` — extra workspace directories.
+- **Disabled MCP servers** — `disabled_mcp_servers`.
+- **GitHub MCP tool config** — `github_mcp_tool_config`.
+- **Canvas provider** — `canvas_provider`.
+- **Custom agents local-only** — `custom_agents_local_only`.
+- **Built-in plugin directories** — `builtin_plugin_directories`.
+- **Agent-factory authoring** — `args_schema`.
+- **Permission decision context** — `decision_context`.
+- **In-process transport** — `in_process`.
+- **Experimental mode** — `experimental_mode`.
+- **MCP OAuth handler** — `on_mcp_auth_request`.
+
+### New in v2.4
+
+- **Session citations** — `enable_citations`.
+- **Excluded built-in agents** — `excluded_builtin_agents`.
+- **Spending limits** — `session_limits` (a `GitHub::Copilot::Types::SessionLimitsConfig` with `max_ai_credits`, or a hashref).
+- **Session memory** — `memory` (a `GitHub::Copilot::Types::MemoryConfiguration` with `enabled`, or a hashref).
+- **OTLP protocol** — `otlp_protocol`.
+- **WebSocket responses** — `enable_web_socket_responses`.
+- **Experiment assignments** — `exp_assignments`.
+- **Post-tool-use / pre-MCP hooks** — `on_post_tool_use`, `on_pre_mcp_tool_call`.
+- **BYOK request handler / bearer token** — `request_handler`, `bearer_token_provider` on `Client->new`.
+- **Tool defer loading** — `GitHub::Copilot::Types::ToolDefer` (`DEFER`).
+- **System-message sections** — `GitHub::Copilot::Types::SystemMessageSection` (`PREAMBLE` / `PRESERVE`).
+- **GitHub attachments** — `GitHub::Copilot::Types::GitHubAttachment` (`GITHUB_COMMIT`, `GITHUB_REPOSITORY`).
+- **Per-message overrides** — `agent_mode`, `display_prompt` on `MessageOptions`.
+
+### Examples
+
+```perl
+use GitHub::Copilot::Types;
+
+# Reasoning effort + content exclusion + session rewind
+my $session = $client->create_session(
+    GitHub::Copilot::Types::SessionConfig->new(
+        reasoning_effort  => 'high',
+        content_exclusion => 1,
+        rewind_enabled    => 1,
+    ),
+);
+```
+
+```perl
+# Grant extra workspace directories and disable an MCP server
+my $session = $client->create_session(
+    GitHub::Copilot::Types::SessionConfig->new(
+        additional_directories => ['../shared-lib', '../docs'],
+        disabled_mcp_servers   => ['playwright'],
+    ),
+);
+```
+
+```perl
+# Per-message agent mode and a display-only prompt
+my $response = $session->send_and_wait(
+    GitHub::Copilot::Types::MessageOptions->new(
+        prompt         => 'Summarize the diff',
+        agent_mode     => 'plan',
+        display_prompt => 'Summarize the staged changes',
+    ),
+);
+```
+
+```perl
+# BYOK: supply bearer tokens dynamically
+my $client = GitHub::Copilot::Client->new(
+    bearer_token_provider => sub {
+        my ($args) = @_;   # ProviderTokenArgs (session_id)
+        return fetch_token();
+    },
+);
+```
+
 ## Wire Protocol
 
 The SDK communicates with the Copilot CLI using JSON-RPC 2.0 over stdio with

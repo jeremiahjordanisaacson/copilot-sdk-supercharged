@@ -250,6 +250,98 @@ finally:
   client.stop()
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Recent upstream syncs added session and client options for parity with `@github/copilot-sdk`. `newSessionConfig` accepts each session option as a named argument; complex JSON-valued options use a `*Json` string field.
+
+**v2.5 wave (`newSessionConfig` args unless noted):**
+
+- **Reasoning effort** — `reasoningEffort` (e.g. `"minimal"`, `"low"`, `"medium"`, `"high"`, `"max"`).
+- **Tool search** — `toolSearchJson` (JSON string); discover tools on demand.
+- **Session rewind** — `rewindEnabled`; roll the conversation back to an earlier turn.
+- **Content exclusion** — `contentExclusion`; honor rules that hide files from the agent.
+- **Additional directories** — `additionalDirectories`.
+- **Disabled MCP servers** — `disabledMcpServers`.
+- **GitHub MCP tool config** — `githubMcpToolConfigJson`.
+- **Canvas provider** — `canvasProvider`.
+- **Custom agents local-only** — `customAgentsLocalOnly`.
+- **Experimental mode** — `experimentalMode`.
+- **Permission decision context** — `decisionContextJson` (on the permission reply).
+- **Agent factory args** — `argsSchemaJson`.
+- **Built-in plugin directories** — `ClientConfig.builtinPluginDirectories`.
+- **In-process FFI transport** — `ClientConfig.inProcess`.
+
+**v2.4 wave:**
+
+- **BYOK bearer token provider** — `ClientConfig.bearerTokenProvider` (`BearerTokenProvider`, receives `ProviderTokenArgs`).
+- **MCP OAuth token handler** — `onMcpAuthRequest` (`McpAuthHandler`).
+- **HTTP request handler** — `ClientConfig.requestHandler` (`CopilotRequestHandler`).
+- **Session citations** — `enableCitations`.
+- **Excluded built-in agents** — `excludedBuiltinAgents`.
+- **Session spending limits** — `sessionLimits` (`SessionLimitsConfig.maxAiCredits`).
+- **OTLP telemetry protocol** — `otlpProtocol`.
+- **WebSocket transport** — `enableWebSocketResponses`.
+- **Session memory** — `memory` (`MemoryConfiguration`).
+- **Experiment assignments** — `expAssignmentsJson`.
+- **Message agent mode / display prompt** — `MessageOptions.agentMode`, `MessageOptions.displayPrompt`.
+- **Tool defer loading** — `ToolDefer` (`tdAuto` / `tdNever`).
+- **System-message sections** — `SystemMessageSection` (`smsPreamble` / `smsPreserve`).
+- **Hook identifiers** — `HookPostToolUse`, `HookPreMcpToolCall`, `HookUserPromptTransformed`.
+- **GitHub attachments** — `GitHubCommit`, `GitHubRepository`.
+
+### Reasoning effort
+
+```nim
+let session = await client.createSession(newSessionConfig(
+  reasoningEffort = "high",
+))
+```
+
+### Session rewind & additional directories
+
+```nim
+let session = await client.createSession(newSessionConfig(
+  rewindEnabled = true,
+  additionalDirectories = @["/repo/docs", "/repo/vendor"],
+))
+```
+
+### Content exclusion
+
+```nim
+let session = await client.createSession(newSessionConfig(
+  contentExclusion = true,
+))
+```
+
+### Tool search
+
+```nim
+let session = await client.createSession(newSessionConfig(
+  toolSearchJson = """{"enabled": true}""",
+))
+```
+
+### BYOK bearer token provider & in-process transport
+
+```nim
+var config = newClientConfig(cliPath = "/usr/local/bin/copilot")
+config.bearerTokenProvider = proc(args: ProviderTokenArgs): string =
+  fetchToken(args.sessionId)
+config.inProcess = true
+config.builtinPluginDirectories = @["./plugins"]
+let client = newCopilotClient(config)
+```
+
+### Spending limits & citations
+
+```nim
+let session = await client.createSession(newSessionConfig(
+  sessionLimits = SessionLimitsConfig(maxAiCredits: 5.0),
+  enableCitations = true,
+))
+```
+
 ## Running Tests
 
 ```bash

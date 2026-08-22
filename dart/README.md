@@ -388,6 +388,103 @@ final response = await session.sendAndWait(MessageOptions(
 ));
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Recent upstream syncs added a batch of session and client options for parity with `@github/copilot-sdk`. All symbols below are on `SessionConfig`, `MessageOptions`, `CopilotClientOptions`, or `SessionHooks` unless noted.
+
+**v2.5 wave (`SessionConfig` unless noted):**
+
+- **Reasoning effort** — `reasoningEffort` (e.g. `'minimal'`, `'low'`, `'medium'`, `'high'`, `'max'`).
+- **Tool search** — `toolSearch` map; discover tools on demand instead of preloading all of them.
+- **Session rewind** — `rewindEnabled` roll the conversation back to an earlier turn.
+- **Content exclusion** — `contentExclusion` honor content-exclusion rules that hide files from the agent.
+- **Additional directories** — `additionalDirectories` extra workspace dirs the session may access.
+- **Disabled MCP servers** — `disabledMcpServers` turn off specific MCP servers per session.
+- **GitHub MCP tool config** — `githubMcpToolConfig` configure the built-in GitHub MCP toolset.
+- **Canvas provider** — `canvasProvider` supply a canvas rendering provider.
+- **Custom agents local-only** — `customAgentsLocalOnly` restrict custom agents to local definitions.
+- **Experimental mode** — `experimentalMode` opt into experimental CLI behavior.
+- **User-prompt-transformed hook** — `SessionHooks.onUserPromptTransformed` fires after a prompt is transformed.
+- **Permission decision context** — `PreToolUseHookOutput.decisionContext` opaque context returned with a permission reply.
+- **Agent factory args** — `CustomAgentConfig.argsSchema` JSON Schema for a factory's typed arguments.
+- **Built-in plugin directories** — `CopilotClientOptions.builtinPluginDirectories`.
+- **In-process FFI transport** — `CopilotClientOptions.inProcess` run the CLI in-process instead of spawning a subprocess.
+
+**v2.4 wave:**
+
+- **BYOK bearer token provider** — `bearerTokenProvider` (receives `ProviderTokenArgs`).
+- **MCP OAuth token handler** — `onMcpAuthRequest`.
+- **Session citations** — `enableCitations`.
+- **Excluded built-in agents** — `excludedBuiltinAgents`.
+- **Session spending limits** — `sessionLimits` (`SessionLimitsConfig(maxAiCredits: ...)`).
+- **OTLP telemetry protocol** — `otlpProtocol` (`'grpc'` or `'http/protobuf'`).
+- **WebSocket transport** — `enableWebSocketResponses`.
+- **Session memory** — `memory` (`MemoryConfiguration`).
+- **Experiment assignments** — `expAssignments`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `SessionHooks.onPostToolUse`, `SessionHooks.onPreMcpToolCall`.
+- **Message agent mode / display prompt** — `MessageOptions.agentMode`, `MessageOptions.displayPrompt`.
+- **Tool defer loading** — `ToolDefer.auto` / `ToolDefer.never`.
+- **System-message sections** — `SystemMessageSection.preamble`, `SystemMessageSection.preserve`.
+- **HTTP request handler** — `CopilotRequestHandler` (override `sendRequest`).
+- **GitHub attachments** — `GitHubAttachment.gitHubCommit`, `GitHubAttachment.gitHubRepository`, and more.
+
+### Reasoning effort & tool search
+
+```dart
+final session = await client.createSession(SessionConfig(
+  model: 'gpt-4o',
+  reasoningEffort: 'high',
+  toolSearch: {'enabled': true},
+));
+```
+
+### Session rewind & additional directories
+
+```dart
+final session = await client.createSession(SessionConfig(
+  rewindEnabled: true,
+  additionalDirectories: ['/repo/docs', '/repo/vendor'],
+));
+```
+
+### Content exclusion
+
+```dart
+final session = await client.createSession(SessionConfig(
+  contentExclusion: true,
+));
+```
+
+### BYOK bearer token provider
+
+```dart
+final session = await client.createSession(SessionConfig(
+  provider: ProviderConfig(type: 'openai', baseUrl: 'https://api.example.com/v1'),
+  bearerTokenProvider: (ProviderTokenArgs args) async {
+    // Resolve a fresh token, scoped to args.sessionId if needed.
+    return await fetchToken(args.sessionId);
+  },
+));
+```
+
+### Spending limits & citations
+
+```dart
+final session = await client.createSession(SessionConfig(
+  sessionLimits: SessionLimitsConfig(maxAiCredits: 5.0),
+  enableCitations: true,
+));
+```
+
+### In-process FFI transport
+
+```dart
+final client = CopilotClient(CopilotClientOptions(
+  inProcess: true,
+  builtinPluginDirectories: ['./plugins'],
+));
+```
+
 ## License
 
 See [LICENSE](../LICENSE) in the repository root.

@@ -168,6 +168,77 @@ if {[::copilot::types::is_ok $result]} {
 }
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Recent upstream syncs added a range of session options, passed as key/value pairs to `::copilot::client::create_session`. BYOK transport options are passed to `::copilot::client::new`. Constant and config helpers live in `::copilot::types`.
+
+### New in v2.5
+
+- **Reasoning effort** — `reasoning_effort` — set the model's reasoning budget (e.g. `"high"`).
+- **Tool search** — `tool_search` — discover tools on demand.
+- **Content exclusion** — `content_exclusion` — honor content-exclusion rules.
+- **Session rewind** — `rewind_enabled` — allow rolling back to an earlier snapshot.
+- **Additional directories** — `additional_directories` — extra workspace directories.
+- **Disabled MCP servers** — `disabled_mcp_servers`.
+- **GitHub MCP tool config** — `github_mcp_tool_config`.
+- **Canvas provider** — `canvas_provider`.
+- **Custom agents local-only** — `custom_agents_local_only`.
+- **Built-in plugin directories** — `builtin_plugin_directories`.
+- **Agent-factory authoring** — `args_schema`.
+- **Permission decision context** — `decision_context`.
+- **In-process transport** — `in_process`.
+- **Experimental mode** — `experimental_mode`.
+- **MCP OAuth handler** — `on_mcp_auth_request`.
+
+### New in v2.4
+
+- **Session citations** — `enable_citations`.
+- **Excluded built-in agents** — `excluded_builtin_agents`.
+- **Spending limits** — `session_limits` via `::copilot::types::make_session_limits_config max_ai_credits ...`.
+- **Session memory** — `memory` via `::copilot::types::make_memory_configuration enabled ...`.
+- **OTLP protocol** — `otlp_protocol`.
+- **WebSocket responses** — `enable_web_socket_responses`.
+- **Experiment assignments** — `exp_assignments`.
+- **Hooks** — `on_post_tool_use`, `on_user_prompt_transformed`, `on_pre_mcp_tool_call`.
+- **BYOK request handler / bearer token** — `request_handler`, `bearer_token_provider` on `client::new`.
+- **Tool defer loading** — `::copilot::types::tool_defer`.
+- **System-message sections** — `::copilot::types::system_message_section` (`PREAMBLE` / `PRESERVE`).
+- **GitHub attachments** — `::copilot::types::github_attachment` (`GITHUB_COMMIT`, `GITHUB_REPOSITORY`).
+- **Per-message overrides** — `agent_mode`, `display_prompt` on `send` / `send_and_wait`.
+
+### Examples
+
+```tcl
+# Reasoning effort + content exclusion + session rewind
+set session [::copilot::client::create_session $client \
+    reasoning_effort "high" \
+    content_exclusion 1 \
+    rewind_enabled 1]
+```
+
+```tcl
+# Grant the agent access to extra workspace directories
+set session [::copilot::client::create_session $client \
+    additional_directories {../shared-lib ../docs}]
+```
+
+```tcl
+# Cap AI-credit spend and enable persistent memory
+set limits [::copilot::types::make_session_limits_config max_ai_credits 500]
+set mem    [::copilot::types::make_memory_configuration enabled 1]
+set session [::copilot::client::create_session $client \
+    session_limits $limits \
+    memory $mem]
+```
+
+```tcl
+# BYOK: supply bearer tokens dynamically
+proc my_token_provider {args} {
+    return $::env(MY_COPILOT_TOKEN)
+}
+set client [::copilot::client::new bearer_token_provider my_token_provider]
+```
+
 ## Tcl Idioms Used
 
 - **Namespaces** for module organization (`::copilot::client`, `::copilot::session`, etc.)

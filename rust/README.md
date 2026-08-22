@@ -397,6 +397,94 @@ let response = session.send_and_wait(MessageOptions {
 }, 60_000).await?;
 ```
 
+## Recent Features (v2.4–v2.5)
+
+The SDK tracks the upstream `@github/copilot-sdk` v2.4–v2.5 releases. Unless noted, the items below are fields on `SessionConfig` and default to `None`, so existing code is unaffected.
+
+### v2.5.0
+
+- **Reasoning effort** — `reasoning_effort: Option<ReasoningEffort>` (`Low`/`Medium`/`High`/`Xhigh`).
+- **Session rewind** — roll the conversation back to an earlier turn with `rewind_enabled: Option<bool>`.
+- **Additional directories** — expose extra workspace roots via `additional_directories: Option<Vec<String>>`.
+- **Content exclusion** — honor content-exclusion rules with `content_exclusion: Option<bool>`.
+- **Tool search** — discover tools on demand via `tool_search: Option<serde_json::Value>`.
+- **Disabled MCP servers** — `disabled_mcp_servers: Option<Vec<String>>`.
+- **GitHub MCP tool config** — `github_mcp_tool_config: Option<serde_json::Value>`.
+- **Canvas provider** — `canvas_provider: Option<serde_json::Value>`.
+- **Custom agents local-only** — `custom_agents_local_only: Option<bool>`.
+- **Experimental mode** — `experimental_mode: Option<bool>`.
+- **Agent factory args schema** — `CustomAgentConfig::args_schema`.
+- **Permission decision context** — `decision_context` on permission results.
+- **Built-in plugin directories** — `CopilotClientOptions::builtin_plugin_directories`.
+- **In-process FFI transport** — `CopilotClientOptions::in_process`.
+
+### v2.4.0
+
+- **BYOK bearer token provider** — `CopilotClientOptions::bearer_token_provider` (`BearerTokenProviderFn`).
+- **MCP OAuth token handler** — `SessionConfig::on_mcp_auth_request` (`McpAuthHandlerFn`).
+- **HTTP request handler** — `CopilotClientOptions::request_handler` (`CopilotRequestHandler`).
+- **Session citations** — `enable_citations`.
+- **Excluded built-in agents** — `excluded_builtin_agents`.
+- **Session spending limits** — `session_limits` (`SessionLimitsConfig { max_ai_credits }`).
+- **Session memory** — `memory` (`MemoryConfiguration`).
+- **OTLP telemetry protocol** — `otlp_protocol`.
+- **WebSocket transport** — `enable_web_socket_responses`.
+- **Experiment assignments** — `exp_assignments`.
+- **Per-message agent mode** — `MessageOptions::agent_mode` and `display_prompt`.
+- **Tool defer loading** — `ToolDefer` (`Auto`/`Never`).
+- **Pre-MCP-tool-call hook** — `PreMcpToolCallHookInput`.
+- **GitHub attachments** — `github_attachment::GITHUB_COMMIT` / `GITHUB_REPOSITORY`.
+
+Configure reasoning effort, rewind, extra directories, content exclusion, and tool search on one session:
+
+```rust
+let config = SessionConfig {
+    reasoning_effort: Some(ReasoningEffort::High),
+    rewind_enabled: Some(true),
+    additional_directories: Some(vec!["../shared".into(), "/data/corpus".into()]),
+    content_exclusion: Some(true),
+    tool_search: Some(serde_json::json!({ "enabled": true })),
+    ..Default::default()
+};
+let session = client.create_session(config).await?;
+```
+
+Supply bring-your-own-key bearer tokens, minted per session:
+
+```rust
+use std::sync::Arc;
+
+let client = CopilotClient::new(CopilotClientOptions {
+    bearer_token_provider: Some(BearerTokenProviderFn(Arc::new(|args: ProviderTokenArgs| {
+        // Return a freshly minted bearer token for this session.
+        Ok(mint_token(&args.session_id))
+    }))),
+    ..Default::default()
+});
+```
+
+Cap spend and turn on citations and persistent memory:
+
+```rust
+let config = SessionConfig {
+    session_limits: Some(SessionLimitsConfig { max_ai_credits: Some(5.0) }),
+    enable_citations: Some(true),
+    memory: Some(MemoryConfiguration { enabled: Some(true) }),
+    ..Default::default()
+};
+```
+
+Choose an agent mode and display prompt for a single turn:
+
+```rust
+session.send(MessageOptions {
+    prompt: "Refactor the auth module".into(),
+    agent_mode: Some("plan".into()),
+    display_prompt: Some("Refactor auth (planning)".into()),
+    ..Default::default()
+}).await?;
+```
+
 ## License
 
 MIT - See [LICENSE](../LICENSE) for details.

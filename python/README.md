@@ -750,6 +750,96 @@ async with await client.create_session(
     ...
 ```
 
+## Recent Features (v2.4–v2.5)
+
+The recent CLI syncs added a wave of session controls. A few already have their own sections above — [reasoning effort](#api-reference), [in-process (FFI) transport](#in-process-ffi-transport), [memory](#memory), [session hooks](#session-hooks), and [OTLP protocol](#telemetry) — so this section is a compact roundup of the rest. Options are keyword arguments to `create_session(...)` unless noted.
+
+**v2.5**
+
+- **Tool search** — `tool_search: ToolSearchConfig` (`{"enabled": ..., "defer_threshold": ...}`). Let the model discover tools on demand via the built-in `tool_search_tool` instead of preloading every definition.
+- **Session rewind** — `session.rpc.history.list_rewind_points()`, `preview_rewind(...)`, and `rewind(...)`. Opt in to file capture with `enable_file_change_tracking=True`.
+- **Content exclusion** — `session.rpc.content_exclusion.check_paths(...)`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
+- **Additional directories** — `additional_directories: list[str]`. Extra workspace roots the agent may access beyond the working directory.
+- **Disabled MCP servers** — `disabled_mcp_servers: list[str]`.
+- **GitHub MCP tool config** — `github_mcp_tool_config: GitHubMcpToolConfig`.
+- **Canvas provider** — `canvas_provider: CanvasProviderIdentity`.
+- **Custom agents local-only** — `custom_agents_local_only: bool`.
+- **User-prompt-transformed hook** — `on_user_prompt_transformed` in the `hooks` mapping.
+- **Permission decision context** — `decision_context` on an attributed permission result.
+- **Plugin directories** — `plugin_directories: list[str]`.
+- **Experimental mode** — `enable_experimental_mode: bool`.
+
+**v2.4**
+
+- **BYOK bearer-token provider** — `provider["bearer_token_provider"]`, a sync/async callable returning a token (see [Custom Providers](#custom-providers)).
+- **MCP OAuth handler** — `on_mcp_auth_request: McpAuthHandler`.
+- **Session citations** — `enable_citations: bool`.
+- **Excluded built-in agents** — `excluded_builtin_agents: list[str]`.
+- **Session spending limits** — `session_limits: SessionLimitsConfig` (caps such as `max_ai_credits`).
+- **Pre-MCP-tool-call hook** — `on_pre_mcp_tool_call` in the `hooks` mapping.
+- **HTTP request handler** — `request_handler` on `CopilotClient` (a `CopilotRequestHandler`).
+- **GitHub attachments** — `AttachmentGitHubCommit`, `AttachmentGitHubRepository`.
+- **Experiment assignments** — `exp_assignments`.
+
+**Reasoning effort and tool search:**
+
+```python
+async with await client.create_session(
+    model="claude-sonnet-4.6",
+    reasoning_effort="high",
+    tool_search={"enabled": True, "defer_threshold": 30},
+    additional_directories=["/repo/shared", "/repo/docs"],
+) as session:
+    ...
+```
+
+**Session rewind** — roll a session back to an earlier user turn, optionally restoring files:
+
+```python
+from copilot import rpc
+
+async with await client.create_session(enable_file_change_tracking=True) as session:
+    await session.send_and_wait("Refactor utils.py")
+
+    result = await session.rpc.history.list_rewind_points()
+    if result.points:
+        await session.rpc.history.rewind(
+            rpc.HistoryRewindRequest(
+                event_id=result.points[-1].event_id,
+                mode=rpc.HistoryRewindMode.CONVERSATION_AND_FILES,  # or CONVERSATION
+            )
+        )
+```
+
+**Content exclusion** — check paths against the session's policy:
+
+```python
+from copilot import rpc
+
+result = await session.rpc.content_exclusion.check_paths(
+    rpc.ContentExclusionCheckPathsRequest(
+        paths=["/repo/src/secret.py", "/repo/README.md"],
+    )
+)
+```
+
+**BYOK bearer-token provider** — supply tokens dynamically (never serialized; the runtime calls back per request):
+
+```python
+async def get_token(args):
+    return await acquire_access_token()
+
+async with await client.create_session(
+    model="gpt-4",
+    provider={
+        "type": "openai",
+        "base_url": "https://my-api.example.com/v1",
+        "bearer_token_provider": get_token,
+    },
+) as session:
+    ...
+```
+
 ## Telemetry
 
 The SDK supports OpenTelemetry for distributed tracing. Provide a `telemetry` config to enable trace export and automatic W3C Trace Context propagation.

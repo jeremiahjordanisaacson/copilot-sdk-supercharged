@@ -169,6 +169,106 @@ The SDK uses Crystal's built-in concurrency model:
 | `session.compaction_start` | Session compaction began |
 | `session.compaction_complete` | Session compaction finished |
 
+## Recent Features (v2.4–v2.5)
+
+Recent upstream syncs added session and client options for parity with `@github/copilot-sdk`. Properties live on `SessionConfig`, `MessageOptions`, or `CopilotClientOptions` unless noted.
+
+**v2.5 wave (`SessionConfig` unless noted):**
+
+- **Reasoning effort** — `reasoning_effort` (e.g. `"minimal"`, `"low"`, `"medium"`, `"high"`, `"max"`).
+- **Tool search** — `tool_search` (`JSON::Any`); discover tools on demand.
+- **Session rewind** — `rewind_enabled`; roll the conversation back to an earlier turn.
+- **Content exclusion** — `content_exclusion`; honor rules that hide files from the agent.
+- **Additional directories** — `additional_directories`.
+- **Disabled MCP servers** — `disabled_mcp_servers`.
+- **GitHub MCP tool config** — `github_mcp_tool_config`.
+- **Canvas provider** — `canvas_provider`.
+- **Custom agents local-only** — `custom_agents_local_only`.
+- **Experimental mode** — `experimental_mode`.
+- **Permission decision context** — `PermissionRequestResult#decision_context`.
+- **Agent factory args** — `AgentFactoryOptions#args_schema`.
+- **Built-in plugin directories** — `CopilotClientOptions#builtin_plugin_directories`.
+- **In-process FFI transport** — `CopilotClientOptions#in_process`.
+
+**v2.4 wave:**
+
+- **BYOK bearer token provider** — `CopilotClientOptions#bearer_token_provider` (`BearerTokenProvider`).
+- **MCP OAuth token handler** — `CopilotClientOptions#on_mcp_auth_request` (`McpAuthHandler`).
+- **Session citations** — `enable_citations`.
+- **Excluded built-in agents** — `excluded_builtin_agents`.
+- **Session spending limits** — `session_limits` (`SessionLimits#max_ai_credits`).
+- **OTLP telemetry protocol** — `otlp_protocol`.
+- **WebSocket transport** — `enable_web_socket_responses`.
+- **Session memory** — `memory_config` (`MemoryConfiguration`).
+- **Experiment assignments** — `exp_assignments`.
+- **Message agent mode / display prompt** — `MessageOptions#agent_mode`, `MessageOptions#display_prompt`.
+- **Tool defer loading** — `ToolDeferMode::Auto` / `ToolDeferMode::Never`.
+- **System-message sections** — `SystemMessageSection::Preamble`, `SystemMessageSection::Preserve`.
+- **Hook identifiers** — `HookType::PostToolUse`, `HookType::PreMcpToolCall`, `HookType::UserPromptTransformed`.
+- **GitHub attachments** — `GitHubAttachmentType::GitHubCommit`, `GitHubAttachmentType::GitHubRepository`.
+
+### Reasoning effort
+
+```crystal
+session = client.create_session(
+  CopilotSDK::SessionConfig.new(
+    model: "gpt-4o",
+    reasoning_effort: "high",
+  )
+)
+```
+
+### Session rewind & additional directories
+
+```crystal
+session = client.create_session(
+  CopilotSDK::SessionConfig.new(
+    rewind_enabled: true,
+    additional_directories: ["/repo/docs", "/repo/vendor"],
+  )
+)
+```
+
+### Content exclusion
+
+```crystal
+session = client.create_session(
+  CopilotSDK::SessionConfig.new(content_exclusion: true)
+)
+```
+
+### BYOK bearer token provider
+
+```crystal
+client = CopilotSDK::CopilotClient.new(
+  CopilotSDK::CopilotClientOptions.new(
+    bearer_token_provider: ->(args : JSON::Any) { fetch_token(args) },
+  )
+)
+```
+
+### Spending limits & citations
+
+```crystal
+session = client.create_session(
+  CopilotSDK::SessionConfig.new(
+    session_limits: CopilotSDK::SessionLimits.new(max_ai_credits: 5.0),
+    enable_citations: true,
+  )
+)
+```
+
+### In-process transport
+
+```crystal
+client = CopilotSDK::CopilotClient.new(
+  CopilotSDK::CopilotClientOptions.new(
+    in_process: true,
+    builtin_plugin_directories: ["./plugins"],
+  )
+)
+```
+
 ## Development
 
 ```sh

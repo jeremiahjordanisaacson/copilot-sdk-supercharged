@@ -242,6 +242,83 @@ let myHandler : PermissionRequestHandler =
     }
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Parity options tracking the upstream `@github/copilot` SDK, exposed as fields on the
+`SessionConfig`, `CopilotClientOptions`, and `MessageOptions` records. Build them with
+`{ SessionConfig.defaults with ... }` / `{ CopilotClientOptions.defaults with ... }`.
+
+### v2.5.0
+
+- **Reasoning effort** — `ReasoningEffort = Some "high"` (`"low"`/`"medium"`/`"high"`/`"xhigh"`).
+- **Session rewind** — `RewindEnabled = Some true`; roll back to an earlier snapshot (`session.snapshot_rewind` event).
+- **Additional directories** — `AdditionalDirectories = Some [ ... ]`; extra workspace roots the agent may read.
+- **Content exclusion** — `ContentExclusion = Some true`; honor repository content-exclusion rules.
+- **Tool search** — `ToolSearch = Some (...)`; on-demand tool discovery for large tool sets.
+- **Disabled MCP servers** — `DisabledMcpServers = Some [ ... ]`.
+- **GitHub MCP tool config** — `GithubMcpToolConfig = Some (...)`.
+- **Canvas provider** — `CanvasProvider = Some (...)`.
+- **Custom agents local-only** — `CustomAgentsLocalOnly = Some true`.
+- **Experimental mode** — `ExperimentalMode = Some true`.
+- **User-prompt-transformed hook** — `OnUserPromptTransformed = Some (...)`.
+- **Built-in plugin directories** — `CopilotClientOptions.BuiltinPluginDirectories = Some [ ... ]`.
+- **In-process (FFI) transport** — `CopilotClientOptions.InProcess = Some true`.
+- **Agent factory args schema** — custom agents accept a typed `ArgsSchema`.
+- **Permission decision context** — permission results carry `DecisionContext`.
+
+### v2.4.0
+
+- **BYOK bearer token provider** — `CopilotClientOptions.BearerTokenProvider = Some (fun args -> ...)`; receives `ProviderTokenArgs`.
+- **HTTP request handler** — `CopilotClientOptions.RequestHandler = Some (...)` (`CopilotRequestHandler`).
+- **MCP OAuth token handler** — `OnMcpAuthRequest = Some (...)`.
+- **Session citations** — `EnableCitations = Some true`.
+- **Excluded built-in agents** — `ExcludedBuiltinAgents = Some [ ... ]`.
+- **Session spending limits** — `SessionLimits = Some { MaxAiCredits = Some 100 }`.
+- **Session memory** — `Memory = Some (...)` (`MemoryConfiguration`).
+- **OTLP protocol** — `OtlpProtocol = Some "grpc"`.
+- **WebSocket responses** — `EnableWebSocketResponses = Some true`.
+- **Experiment assignments** — `ExpAssignments = Some (...)`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `OnPostToolUse`, `OnPreMcpToolCall`.
+- **Per-message agent mode & display prompt** — `MessageOptions.AgentMode`, `MessageOptions.DisplayPrompt`.
+- **System-message sections** — `SystemMessageSection.Preamble` / `.Preserve`.
+- **Tool defer policy** — `ToolDefer.Auto` / `.Never`.
+- **GitHub attachment variants** — `GitHubAttachment.GitHubCommit` / `.GitHubRepository`.
+
+### Examples
+
+```fsharp
+// Reasoning effort — trade latency for depth on models that support it
+let config =
+    { SessionConfig.defaults with
+        ReasoningEffort = Some "high" }   // "low" | "medium" | "high" | "xhigh"
+```
+
+```fsharp
+// Roll back to an earlier snapshot, expose extra roots, and honor content exclusion
+let config =
+    { SessionConfig.defaults with
+        RewindEnabled = Some true          // emits session.snapshot_rewind events
+        AdditionalDirectories = Some [ "/repo/shared"; "/repo/docs" ]
+        ContentExclusion = Some true }
+```
+
+```fsharp
+// On-demand tool discovery for large tool sets
+let config =
+    { SessionConfig.defaults with
+        ToolSearch = Some (dict [ "enabled", box true ]) }
+```
+
+```fsharp
+// BYOK bearer tokens + in-process FFI transport (client-level)
+use client =
+    CopilotClient.create
+        { CopilotClientOptions.defaults with
+            BearerTokenProvider = Some (fun args -> async { return fetchToken args.SessionId })
+            BuiltinPluginDirectories = Some [ "/opt/copilot/plugins" ]
+            InProcess = Some true }
+```
+
 ## F# Idioms
 
 This SDK is designed around F# best practices:

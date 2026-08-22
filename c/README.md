@@ -336,6 +336,91 @@ copilot_message_options_t opts = {
 copilot_session_send_and_wait(session, &opts, 60000, &content);
 ```
 
+## Recent Features (v2.4–v2.5)
+
+The SDK tracks upstream `@github/copilot-sdk` v2.4–v2.5. Unless noted, fields live on `copilot_session_config_t`; boolean options pair with a `has_*` flag so a zero-initialized config stays unset.
+
+### v2.5.0
+
+- **Reasoning effort** — `config.reasoning_effort` (`"low"`/`"medium"`/`"high"`/`"xhigh"`).
+- **Session rewind** — `config.rewind_enabled` (+ `has_rewind_enabled`).
+- **Additional directories** — `config.additional_directories` (NULL-terminated).
+- **Content exclusion** — `config.content_exclusion` (+ `has_content_exclusion`).
+- **Tool search** — `config.tool_search_json`.
+- **Disabled MCP servers** — `config.disabled_mcp_servers` (NULL-terminated).
+- **GitHub MCP tool config** — `config.github_mcp_tool_config_json`.
+- **Canvas provider** — `config.canvas_provider_json`.
+- **Custom agents local-only** — `config.custom_agents_local_only`.
+- **Experimental mode** — `config.experimental_mode`.
+- **Agent factory args schema** — `config.args_schema_json`.
+- **Permission decision context** — `decision_context_json` on the permission result.
+- **Built-in plugin directories** — `copilot_client_options_t::builtin_plugin_directories`.
+- **In-process FFI transport** — `copilot_client_options_t::in_process`.
+
+### v2.4.0
+
+- **BYOK bearer token provider** — `copilot_client_options_t::bearer_token_provider` (`copilot_bearer_token_provider_fn`).
+- **MCP OAuth token handler** — `config.on_mcp_auth_request` (`copilot_mcp_auth_handler_fn`).
+- **HTTP request handler** — `copilot_client_options_t::request_handler` (`copilot_request_handler_fn`).
+- **Session citations** — `config.enable_citations`.
+- **Excluded built-in agents** — `config.excluded_builtin_agents`.
+- **Session spending limits** — `config.session_limits` (`copilot_session_limits_config_t::max_ai_credits`).
+- **Session memory** — `config.memory` (`copilot_memory_config_t`).
+- **OTLP telemetry protocol** — `config.otlp_protocol`.
+- **WebSocket transport** — `config.enable_web_socket_responses`.
+- **Experiment assignments** — `config.exp_assignments_json`.
+- **Per-message agent mode** — `copilot_message_options_t::agent_mode` and `display_prompt`.
+- **Hook identifiers** — `COPILOT_HOOK_POST_TOOL_USE`, `COPILOT_HOOK_PRE_MCP_TOOL_CALL`, `COPILOT_HOOK_USER_PROMPT_TRANSFORMED`.
+- **Tool defer loading** — `COPILOT_TOOL_DEFER_AUTO` / `COPILOT_TOOL_DEFER_NEVER`.
+- **GitHub attachments** — `COPILOT_GITHUB_COMMIT` / `COPILOT_GITHUB_REPOSITORY`.
+
+Configure reasoning effort, rewind, extra directories, content exclusion, and tool search:
+
+```c
+copilot_session_config_t config = copilot_session_config_default();
+config.reasoning_effort = "high";
+config.rewind_enabled = true;
+config.has_rewind_enabled = true;
+const char *dirs[] = { "../shared", "/data/corpus", NULL };
+config.additional_directories = dirs;
+config.content_exclusion = true;
+config.has_content_exclusion = true;
+config.tool_search_json = "{\"enabled\":true}";
+```
+
+Supply bring-your-own-key bearer tokens, minted per session:
+
+```c
+static char *provide_token(const copilot_provider_token_args_t *args, void *user_data)
+{
+    (void)user_data;
+    return mint_token_for(args->session_id);  /* newly-allocated; the SDK frees it */
+}
+
+copilot_client_options_t opts = copilot_client_options_default();
+opts.bearer_token_provider = provide_token;
+```
+
+Cap spend and turn on citations:
+
+```c
+copilot_session_limits_config_t limits = { .max_ai_credits = 5.0, .has_max_ai_credits = true };
+copilot_session_config_t config = copilot_session_config_default();
+config.session_limits = &limits;
+config.enable_citations = true;
+config.has_enable_citations = true;
+```
+
+Choose an agent mode and display prompt for a single turn:
+
+```c
+copilot_message_options_t opts = {
+    .prompt = "Refactor the auth module",
+    .agent_mode = "plan",
+    .display_prompt = "Refactor auth (planning)",
+};
+```
+
 ## License
 
 See the [LICENSE](../LICENSE) file in the repository root.

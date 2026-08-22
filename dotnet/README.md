@@ -749,6 +749,91 @@ var session = await client.CreateSessionAsync(new SessionConfig
 });
 ```
 
+## Recent Features (v2.4–v2.5)
+
+The recent CLI syncs added a wave of session controls. A few already have their own sections above — [reasoning effort](#copilotclient), [memory](#memory), [BYOK](#bring-your-own-key-byok), [session hooks](#session-hooks), and [OTLP protocol](#telemetry) — so this section is a compact roundup of the rest. Properties are set on `SessionConfig` (and `ResumeSessionConfig`) unless noted.
+
+**v2.5**
+
+- **Tool search** — `ToolSearch = new ToolSearchConfig { Enabled = true, DeferThreshold = 30 }`. Let the model discover tools on demand via the built-in tool-search tool instead of preloading every definition.
+- **Session rewind** — `session.Rpc.History.ListRewindPointsAsync()`, `PreviewRewindAsync(...)`, and `RewindAsync(eventId, mode)`. Opt in to file capture with `EnableFileChangeTracking = true`.
+- **Content exclusion** — `session.Rpc.ContentExclusion.CheckPathsAsync(paths)`. Check absolute paths against the session's content-exclusion policy; fail closed when evaluation is unavailable.
+- **Additional directories** — `AdditionalDirectories`. Extra workspace roots the agent may access beyond the working directory.
+- **Disabled MCP servers** — `DisabledMcpServers`.
+- **GitHub MCP tool config** — `GitHubMcpToolConfig`.
+- **Canvas provider** — `CanvasProvider`.
+- **Custom agents local-only** — `CustomAgentsLocalOnly`.
+- **User-prompt-transformed hook** — `OnUserPromptTransformed` in `SessionHooks`.
+- **Permission decision context** — `DecisionContext` on a `PermissionDecision`.
+- **Built-in plugin directories** — `BuiltinPluginDirectories` (client option) and `PluginDirectories` (session option).
+- **Experimental mode** — `EnableExperimentalMode`.
+
+**v2.4**
+
+- **BYOK bearer-token provider** — `Provider.BearerTokenProvider` (`Func<ProviderTokenArgs, Task<string>>`); see [Bring Your Own Key (BYOK)](#bring-your-own-key-byok).
+- **MCP OAuth handler** — `OnMcpAuthRequest`.
+- **Session citations** — `EnableCitations`.
+- **Excluded built-in agents** — `ExcludedBuiltInAgents`.
+- **Session spending limits** — `SessionLimits` (caps such as `MaxAiCredits`).
+- **Pre-MCP-tool-call hook** — `OnPreMcpToolCall` in `SessionHooks`.
+- **Message agent mode / display prompt** — `AgentMode` and `DisplayPrompt` on `MessageOptions`.
+- **HTTP request handler** — `RequestHandler` on `CopilotClientOptions` (a `CopilotRequestHandler`).
+- **GitHub attachments** — `AttachmentGitHubCommit`, `AttachmentGitHubRepository`.
+- **Experiment assignments** — `ExpAssignments`.
+
+**Reasoning effort and tool search:**
+
+```csharp
+var session = await client.CreateSessionAsync(new SessionConfig
+{
+    Model = "claude-sonnet-4.6",
+    ReasoningEffort = "high",
+    ToolSearch = new ToolSearchConfig { Enabled = true, DeferThreshold = 30 },
+    AdditionalDirectories = ["/repo/shared", "/repo/docs"],
+});
+```
+
+**Session rewind** — roll a session back to an earlier user turn, optionally restoring files:
+
+```csharp
+var session = await client.CreateSessionAsync(new SessionConfig
+{
+    EnableFileChangeTracking = true,
+});
+await session.SendAndWaitAsync("Refactor Utils.cs");
+
+var points = await session.Rpc.History.ListRewindPointsAsync();
+if (points.Points.Count > 0)
+{
+    var target = points.Points[^1];
+    await session.Rpc.History.RewindAsync(
+        target.EventId,
+        HistoryRewindMode.ConversationAndFiles); // or HistoryRewindMode.Conversation
+}
+```
+
+**Content exclusion** — check paths against the session's policy:
+
+```csharp
+var result = await session.Rpc.ContentExclusion.CheckPathsAsync(
+    ["/repo/src/Secret.cs", "/repo/README.md"]);
+```
+
+**BYOK bearer-token provider** — supply tokens dynamically (never serialized; the runtime calls back per request):
+
+```csharp
+var session = await client.CreateSessionAsync(new SessionConfig
+{
+    Model = "gpt-4",
+    Provider = new ProviderConfig
+    {
+        Type = "openai",
+        BaseUrl = "https://my-api.example.com/v1",
+        BearerTokenProvider = async args => await AcquireAccessTokenAsync(),
+    },
+});
+```
+
 ## Telemetry
 
 The SDK supports OpenTelemetry for distributed tracing. Provide a `Telemetry` config to enable trace export and automatic W3C Trace Context propagation.

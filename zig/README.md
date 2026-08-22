@@ -308,6 +308,88 @@ All fallible operations return `SdkError!T`. Error variants:
 
 The SDK verifies protocol compatibility with the server on startup. The current protocol version is **2**.
 
+## Recent Features (v2.4–v2.5)
+
+The SDK tracks upstream `@github/copilot-sdk` v2.4–v2.5. Unless noted, the fields below live on the `createSession` config and default to `null`/`false`, so existing code is unaffected.
+
+### v2.5.0
+
+- **Reasoning effort** — `.reasoning_effort` (`"low"`/`"medium"`/`"high"`/`"xhigh"`).
+- **Session rewind** — `.rewind_enabled`.
+- **Additional directories** — `.additional_directories`.
+- **Content exclusion** — `.content_exclusion`.
+- **Tool search** — `.tool_search_json`.
+- **Disabled MCP servers** — `.disabled_mcp_servers`.
+- **GitHub MCP tool config** — `.github_mcp_tool_config_json`.
+- **Canvas provider** — `.canvas_provider_json`.
+- **Custom agents local-only** — `.custom_agents_local_only`.
+- **Experimental mode** — `.experimental_mode`.
+- **Agent factory args schema** — `.args_schema_json`.
+- **Permission decision context** — `.decision_context` on the permission result.
+- **Built-in plugin directories** — `ClientOptions.builtin_plugin_directories`.
+- **In-process FFI transport** — `ClientOptions.in_process`.
+
+### v2.4.0
+
+- **BYOK bearer token provider** — `ClientOptions.bearer_token_provider` (`BearerTokenProvider`).
+- **MCP OAuth handler flag** — `.mcp_auth_handler` (`McpAuthHandler`).
+- **HTTP request handler** — `ClientOptions.request_handler` (`CopilotRequestHandler`).
+- **Session citations** — `.enable_citations`.
+- **Excluded built-in agents** — `.excluded_builtin_agents`.
+- **Session spending limits** — `.session_limits` (`SessionLimitsConfig.max_ai_credits`).
+- **Session memory** — `.memory` (`MemoryConfiguration`).
+- **OTLP telemetry protocol** — `.otlp_protocol`.
+- **WebSocket transport** — `.enable_web_socket_responses`.
+- **Experiment assignments** — `.exp_assignments_json`.
+- **Per-message agent mode** — `.agent_mode` and `.display_prompt` on `send`/`sendAndWait`.
+- **Tool defer loading** — `ToolDefer` (`.auto`/`.never`).
+- **Hook identifiers** — `HookType.post_tool_use`, `HookType.pre_mcp_tool_call`, `HookType.user_prompt_transformed`.
+- **GitHub attachments** — `GitHubAttachment.github_commit` / `github_repository`.
+
+Configure reasoning effort, rewind, extra directories, content exclusion, and tool search:
+
+```zig
+var session = try client.createSession(.{
+    .reasoning_effort = "high",
+    .rewind_enabled = true,
+    .additional_directories = &.{ "../shared", "/data/corpus" },
+    .content_exclusion = true,
+    .tool_search_json = "{\"enabled\":true}",
+});
+```
+
+Supply bring-your-own-key bearer tokens, minted per session:
+
+```zig
+fn provideToken(args: copilot.ProviderTokenArgs) anyerror![]const u8 {
+    return mintTokenFor(args.session_id);
+}
+
+var client = copilot.CopilotClient.init(allocator, .{
+    .bearer_token_provider = provideToken,
+});
+```
+
+Cap spend and turn on citations and persistent memory:
+
+```zig
+var session = try client.createSession(.{
+    .session_limits = .{ .max_ai_credits = 5.0 },
+    .enable_citations = true,
+    .memory = .{ .enabled = true },
+});
+```
+
+Choose an agent mode and display prompt for a single turn:
+
+```zig
+try session.send(.{
+    .prompt = "Refactor the auth module",
+    .agent_mode = "plan",
+    .display_prompt = "Refactor auth (planning)",
+});
+```
+
 ## Cookbook
 
 See the [cookbook/](cookbook/) directory for recipes:

@@ -333,6 +333,81 @@ config.systemMessage = @{
 };
 ```
 
+## Recent Features (v2.4–v2.5)
+
+The SDK tracks upstream `@github/copilot-sdk`. These properties live on
+`CPSessionConfig` (session-scoped), `CPCopilotClientOptions` (client-scoped),
+`CPMessageOptions` (per turn), or `CPSessionHooks`.
+
+### v2.5
+
+- **Reasoning effort** — `CPSessionConfig.reasoningEffort` (`@"low"`, `@"medium"`, `@"high"`, `@"xhigh"`).
+- **Session rewind** — `CPSessionConfig.rewindEnabled` rolls the conversation back to an earlier turn.
+- **Additional directories** — `CPSessionConfig.additionalDirectories`.
+- **Content exclusion** — `CPSessionConfig.contentExclusion`.
+- **Tool search** — `CPSessionConfig.toolSearch` discovers tools on demand.
+- **Disabled MCP servers** — `CPSessionConfig.disabledMcpServers`.
+- **GitHub MCP tool config** — `CPSessionConfig.githubMcpToolConfig`.
+- **Canvas provider** — `CPSessionConfig.canvasProvider`.
+- **Custom agents local-only** — `CPSessionConfig.customAgentsLocalOnly`.
+- **Experimental mode** — `CPSessionConfig.experimentalMode`.
+- **User-prompt-transformed hook** — `CPSessionHooks.onUserPromptTransformed`.
+- **Permission decision context** — `CPSessionConfig.decisionContext`.
+- **Agent-factory args schema** — `CPSessionConfig.argsSchema`.
+- **Built-in plugin dirs / in-process FFI** — `CPCopilotClientOptions.builtinPluginDirectories`, `CPCopilotClientOptions.inProcess`.
+
+### v2.4
+
+- **BYOK bearer token provider** — `CPCopilotClientOptions.bearerTokenProvider` (`CPBearerTokenProvider`).
+- **MCP OAuth token handler** — `CPSessionConfig.onMcpAuthRequest` (`CPMcpAuthHandler`).
+- **HTTP request handler** — `CPCopilotClientOptions.requestHandler` (`CPCopilotRequestHandler`).
+- **Session citations** — `CPSessionConfig.enableCitations`.
+- **Excluded built-in agents** — `CPSessionConfig.excludedBuiltinAgents`.
+- **Spending limits** — `CPSessionConfig.sessionLimits` with `CPSessionLimitsConfig.maxAiCredits`.
+- **Session memory** — `CPSessionConfig.memory` with `CPMemoryConfiguration`.
+- **OTLP protocol / WebSocket transport** — `CPSessionConfig.otlpProtocol`, `CPSessionConfig.enableWebSocketResponses`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `CPSessionHooks.onPostToolUse`, `CPSessionHooks.onPreMcpToolCall`.
+- **Message agent mode / display prompt** — `CPMessageOptions.agentMode`, `CPMessageOptions.displayPrompt`.
+- **Tool defer loading** — `CPToolDeferAuto` / `CPToolDeferNever`.
+- **System message sections** — `CPSystemMessageSectionPreamble`, `CPSystemMessageSectionPreserve`.
+- **GitHub attachments** — `CPGitHubAttachmentCommit`, `CPGitHubAttachmentRepository`.
+- **Experiment assignments** — `CPSessionConfig.expAssignments`.
+
+```objc
+// Reasoning effort + session rewind + extra workspace roots
+CPSessionConfig *config = [[CPSessionConfig alloc] init];
+config.reasoningEffort = @"high";
+config.rewindEnabled = @YES;
+config.additionalDirectories = @[@"/repo/packages/core", @"/repo/packages/api"];
+config.contentExclusion = @YES;             // honor content-exclusion rules
+config.toolSearch = @{@"mode": @"auto"};    // discover tools on demand
+```
+
+```objc
+// Bring-your-own-key: supply bearer tokens dynamically
+CPCopilotClientOptions *opts = [CPCopilotClientOptions defaultOptions];
+opts.bearerTokenProvider = ^(CPProviderTokenArgs *args, void (^completion)(NSString *token)) {
+    completion(@"ghs_exampletoken");
+};
+```
+
+```objc
+// Cap AI-credit spend and emit citations
+CPSessionConfig *config = [[CPSessionConfig alloc] init];
+config.enableCitations = @YES;
+CPSessionLimitsConfig *limits = [[CPSessionLimitsConfig alloc] init];
+limits.maxAiCredits = @5;
+config.sessionLimits = limits;
+```
+
+```objc
+// Per-message agent mode and display prompt
+CPMessageOptions *msg = [[CPMessageOptions alloc] init];
+msg.prompt = @"Refactor this module";
+msg.agentMode = @"plan";
+msg.displayPrompt = @"Refactor (planning)";
+```
+
 ## File Structure
 
 ```

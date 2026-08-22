@@ -167,6 +167,85 @@ Available tools:
 
 All base `CopilotClientOptions` from the core SDK are also accepted.
 
+## Recent Features (v2.4–v2.5)
+
+The Solidity client forwards the upstream `@github/copilot-sdk` session options
+to the base SDK. Pass them to `client.createSession(...)`
+(typed as `SolidityUpstreamSessionOptions`), or per message via
+`client.sendMessage(session, ...)` (`SolidityMessageOptions`).
+
+### v2.5
+
+- **Reasoning effort** — `reasoningEffort` (`"low"`, `"medium"`, `"high"`).
+- **Session rewind** — `rewindEnabled` rolls the conversation back to an earlier turn.
+- **Additional directories** — `additionalDirectories`.
+- **Content exclusion** — `contentExclusion`.
+- **Tool search** — `toolSearch` (object or `true`) discovers tools on demand.
+- **Disabled MCP servers** — `disabledMcpServers`.
+- **GitHub MCP tool config** — `githubMcpToolConfig`.
+- **Canvas provider** — `canvasProvider`.
+- **Custom agents local-only** — `customAgentsLocalOnly`.
+- **Experimental mode / in-process FFI** — `experimentalMode`, `inProcess`.
+- **User-prompt-transformed hook** — `onUserPromptTransformed`.
+- **Permission decision context** — `decisionContext`.
+- **Agent-factory args schema** — `argsSchema`.
+- **Built-in plugin directories** — `builtinPluginDirectories`.
+
+### v2.4
+
+- **BYOK bearer token provider** — `bearerTokenProvider` (`BearerTokenProvider`).
+- **MCP OAuth token handler** — `onMcpAuthRequest` (`McpAuthHandler`).
+- **Session citations** — `enableCitations`.
+- **Excluded built-in agents** — `excludedBuiltinAgents`.
+- **Spending limits** — `sessionLimits` (`SessionLimitsConfig` with `maxAiCredits`).
+- **Session memory** — `memory` (`MemoryConfiguration`).
+- **OTLP protocol / WebSocket transport** — `otlpProtocol`, `enableWebSocketResponses`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `hooks.onPostToolUse`, `hooks.onPreMcpToolCall`.
+- **Message agent mode / display prompt** — `agentMode`, `displayPrompt`.
+- **Constants** — `ToolDefer`, `SystemMessageSection.preamble` / `.preserve`, `GitHubAttachment.gitHubCommit` / `.gitHubRepository`.
+- **Experiment assignments** — `expAssignments`.
+
+```typescript
+// Reasoning effort + session rewind + extra workspace roots
+const session = await client.createSession({
+    reasoningEffort: "high",
+    rewindEnabled: true,
+    additionalDirectories: ["/repo/contracts", "/repo/test"],
+});
+```
+
+```typescript
+// Honor content exclusion and discover tools on demand
+const session = await client.createSession({
+    contentExclusion: true,
+    toolSearch: true,
+});
+```
+
+```typescript
+// Cap AI-credit spend and emit citations
+const session = await client.createSession({
+    enableCitations: true,
+    sessionLimits: { maxAiCredits: 5 },
+});
+```
+
+```typescript
+// Bring-your-own-key: supply bearer tokens dynamically
+const session = await client.createSession({
+    bearerTokenProvider: async () => process.env.LLM_TOKEN,
+});
+```
+
+```typescript
+// Per-message agent mode and display prompt
+await client.sendMessage(session, {
+    prompt: "Refactor this contract",
+    agentMode: "plan",
+    displayPrompt: "Refactor (planning)",
+});
+```
+
 ## Cookbook
 
 See the `cookbook/` directory for detailed recipes:

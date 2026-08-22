@@ -351,6 +351,85 @@ opts.imageOptions = copilot::ImageOptions{"1024x1024", "hd", "natural"};
 auto response = session->sendAndWait(opts);
 ```
 
+## Recent Features (v2.4–v2.5)
+
+The SDK tracks upstream `@github/copilot-sdk` v2.4–v2.5. Unless noted, the items below are members of `SessionConfig` (via `std::optional`), so existing code is unaffected.
+
+### v2.5.0
+
+- **Reasoning effort** — `config.reasoningEffort` (`"low"`/`"medium"`/`"high"`/`"xhigh"`).
+- **Session rewind** — `config.rewindEnabled`.
+- **Additional directories** — `config.additionalDirectories`.
+- **Content exclusion** — `config.contentExclusion`.
+- **Tool search** — `config.toolSearch`.
+- **Disabled MCP servers** — `config.disabledMcpServers`.
+- **GitHub MCP tool config** — `config.githubMcpToolConfig`.
+- **Canvas provider** — `config.canvasProvider`.
+- **Custom agents local-only** — `config.customAgentsLocalOnly`.
+- **Experimental mode** — `config.experimentalMode`.
+- **Agent factory args schema** — `CustomAgentConfig::argsSchema`.
+- **Permission decision context** — `decisionContext` on permission results.
+- **Built-in plugin directories** — `CopilotClientOptions::builtinPluginDirectories`.
+- **In-process FFI transport** — `CopilotClientOptions::inProcess`.
+
+### v2.4.0
+
+- **BYOK bearer token provider** — `CopilotClientOptions::bearerTokenProvider` (`BearerTokenProvider`).
+- **MCP OAuth token handler** — `config.onMcpAuthRequest` (`McpAuthHandler`).
+- **HTTP request handler** — `CopilotClientOptions::requestHandler` (`CopilotRequestHandler`).
+- **Session citations** — `config.enableCitations`.
+- **Excluded built-in agents** — `config.excludedBuiltinAgents`.
+- **Session spending limits** — `config.sessionLimits` (`SessionLimitsConfig::maxAiCredits`).
+- **Session memory** — `config.memory` (`MemoryConfiguration`).
+- **OTLP telemetry protocol** — `config.otlpProtocol`.
+- **WebSocket transport** — `config.enableWebSocketResponses`.
+- **Experiment assignments** — `config.expAssignments`.
+- **Per-message agent mode** — `MessageOptions::agentMode` and `displayPrompt`.
+- **Post-tool-use / pre-MCP hooks** — `SessionHooks::onPostToolUse`, `onPreMcpToolCall`, `onUserPromptTransformed`.
+- **Tool defer loading** — `ToolDefer::Auto` / `ToolDefer::Never`.
+- **GitHub attachments** — `GitHubAttachment::GitHubCommit` / `GitHubRepository`.
+
+Configure reasoning effort, rewind, extra directories, content exclusion, and tool search:
+
+```cpp
+copilot::SessionConfig config;
+config.reasoningEffort = "high";
+config.rewindEnabled = true;
+config.additionalDirectories = std::vector<std::string>{"../shared", "/data/corpus"};
+config.contentExclusion = true;
+config.toolSearch = nlohmann::json{{"enabled", true}};
+auto session = client.createSession(config);
+```
+
+Supply bring-your-own-key bearer tokens, minted per session:
+
+```cpp
+copilot::CopilotClientOptions options;
+options.bearerTokenProvider = [](const copilot::ProviderTokenArgs& args) -> std::string {
+    return mintTokenFor(args.sessionId);
+};
+copilot::CopilotClient client(options);
+```
+
+Cap spend and turn on citations and persistent memory:
+
+```cpp
+copilot::SessionConfig config;
+config.sessionLimits = copilot::SessionLimitsConfig{5.0};   // maxAiCredits
+config.enableCitations = true;
+config.memory = copilot::MemoryConfiguration{true};         // enabled
+```
+
+Choose an agent mode and display prompt for a single turn:
+
+```cpp
+copilot::MessageOptions opts;
+opts.prompt = "Refactor the auth module";
+opts.agentMode = "plan";
+opts.displayPrompt = "Refactor auth (planning)";
+auto response = session->sendAndWait(opts);
+```
+
 ## License
 
 See the LICENSE file in the repository root.

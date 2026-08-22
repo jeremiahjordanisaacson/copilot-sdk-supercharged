@@ -149,6 +149,87 @@ tool := copilot.define_tool('get_weather', 'Get weather', params,
 )
 ```
 
+## Recent Features (v2.4–v2.5)
+
+The SDK tracks upstream `@github/copilot-sdk`. These fields live on
+`copilot.SessionConfig` (session-scoped), `copilot.CopilotClientOptions`
+(client-scoped), or `copilot.SendOptions` (per message).
+
+### v2.5
+
+- **Reasoning effort** — `reasoning_effort` (e.g. `'low'`, `'medium'`, `'high'`).
+- **Session rewind** — `rewind_enabled` rolls the conversation back to an earlier turn.
+- **Additional directories** — `additional_directories`.
+- **Content exclusion** — `content_exclusion`.
+- **Tool search** — `tool_search` discovers tools on demand.
+- **Disabled MCP servers** — `disabled_mcp_servers`.
+- **GitHub MCP tool config** — `github_mcp_tool_config`.
+- **Canvas provider** — `canvas_provider`.
+- **Custom agents local-only** — `custom_agents_local_only`.
+- **Experimental mode / in-process FFI** — `experimental_mode`; `in_process` on `CopilotClientOptions`.
+- **User-prompt-transformed hook** — `on_user_prompt_transformed` (`UserPromptTransformedHandler`).
+- **Permission decision context** — `decision_context` (wire `decisionContext`).
+- **Agent-factory args schema** — `args_schema` (wire `argsSchema`).
+- **Built-in plugin directories** — `builtin_plugin_directories` on `CopilotClientOptions`.
+
+### v2.4
+
+- **BYOK bearer token provider** — `bearer_token_provider` (`BearerTokenProvider`).
+- **MCP OAuth token handler** — `on_mcp_auth_request` (`McpAuthHandler`).
+- **HTTP request handler** — `request_handler` (`CopilotRequestHandler`).
+- **Session citations** — `enable_citations`.
+- **Excluded built-in agents** — `excluded_builtin_agents`.
+- **Spending limits** — `session_limits` with `SessionLimitsConfig{ max_ai_credits }`.
+- **Session memory** — `memory` with `MemoryConfiguration`.
+- **OTLP protocol / WebSocket transport** — `otlp_protocol`, `enable_web_socket_responses`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `on_post_tool_use`, `on_pre_mcp_tool_call`.
+- **Message agent mode / display prompt** — `agent_mode`, `display_prompt` on `SendOptions`.
+- **Constants** — `system_message_preamble`, `system_message_preserve`, `github_commit_attachment`, `github_repository_attachment`, `otlp_protocol_grpc`.
+- **Experiment assignments** — `exp_assignments`.
+
+```v
+// Reasoning effort + session rewind + extra workspace roots
+mut session := client.create_session(copilot.SessionConfig{
+    reasoning_effort: 'high'
+    rewind_enabled: true
+    additional_directories: ['/repo/pkg-a', '/repo/pkg-b']
+})!
+```
+
+```v
+// Honor content exclusion and discover tools on demand
+mut session := client.create_session(copilot.SessionConfig{
+    content_exclusion: true
+    tool_search: {'mode': 'auto'}
+})!
+```
+
+```v
+// Cap AI-credit spend and emit citations
+mut session := client.create_session(copilot.SessionConfig{
+    enable_citations: true
+    session_limits: copilot.SessionLimitsConfig{ max_ai_credits: 5.0 }
+})!
+```
+
+```v
+// Bring-your-own-key: supply bearer tokens dynamically
+mut session := client.create_session(copilot.SessionConfig{
+    bearer_token_provider: fn (args copilot.ProviderTokenArgs) string {
+        return 'ghs_exampletoken'
+    }
+})!
+```
+
+```v
+// Per-message agent mode and display prompt
+session.send(copilot.SendOptions{
+    prompt: 'Refactor this module'
+    agent_mode: 'plan'
+    display_prompt: 'Refactor (planning)'
+})!
+```
+
 ## Running Tests
 
 ```bash

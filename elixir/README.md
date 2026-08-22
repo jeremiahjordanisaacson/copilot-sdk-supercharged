@@ -276,6 +276,93 @@ config = %SessionConfig{
 }
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Fields added in the v2.4 and v2.5 upstream syncs. These are `%SessionConfig{}`,
+`%CopilotClientOptions{}`, or `%MessageOptions{}` fields (all under
+`Copilot.Types`).
+
+**v2.5.0**
+
+- Reasoning effort — `reasoning_effort`
+- Tool search — `tool_search`
+- Session rewind — `rewind_enabled`
+- Additional directories — `additional_directories`
+- Disabled MCP servers — `disabled_mcp_servers`
+- GitHub MCP tool config — `github_mcp_tool_config`
+- Canvas provider — `canvas_provider`
+- Custom agents local-only — `custom_agents_local_only`
+- Experimental mode — `experimental_mode`
+- Content exclusion — `content_exclusion`
+- User-prompt-transformed hook — `SessionHooks.on_user_prompt_transformed`
+- Permission decision context — `PermissionRequestResult.decision_context`
+- Agent-factory args schema — `CustomAgentConfig.args_schema`
+- Built-in plugin directories — `CopilotClientOptions.builtin_plugin_directories`
+- In-process FFI transport — `CopilotClientOptions.in_process`
+
+**v2.4.0**
+
+- BYOK bearer-token provider — `CopilotClientOptions.bearer_token_provider`
+- MCP OAuth token handler — `on_mcp_auth_request`
+- HTTP request handler — `CopilotClientOptions.request_handler`
+- Session citations — `enable_citations`
+- Excluded built-in agents — `excluded_builtin_agents`
+- Session spending limits — `Copilot.Types.SessionLimitsConfig` (`max_ai_credits`)
+- Session memory — `Copilot.Types.MemoryConfiguration`
+- OTLP protocol — `otlp_protocol`
+- WebSocket responses — `enable_web_socket_responses`
+- Experiment assignments — `exp_assignments`
+- Tool defer loading — `Copilot.Types.ToolDefer` (`auto/0`, `never/0`)
+- System-message sections — `SystemMessageSection.preamble/0`, `SystemMessageSection.preserve/0`
+- Post-tool-use / pre-MCP hooks — `on_post_tool_use`, `on_pre_mcp_tool_call`
+- Message agent mode / display prompt — `MessageOptions.agent_mode`, `MessageOptions.display_prompt`
+- GitHub attachment variants — `GitHubAttachment.github_commit/0`, `GitHubAttachment.github_repository/0`
+
+Reasoning effort, content exclusion, extra directories, and rewind:
+
+```elixir
+{:ok, session} = Client.create_session(client, %SessionConfig{
+  reasoning_effort: "high",
+  content_exclusion: true,
+  additional_directories: ["../shared", "../docs"],
+  rewind_enabled: true,
+  disabled_mcp_servers: ["playwright"]
+})
+```
+
+Tool search and experimental mode:
+
+```elixir
+config = %SessionConfig{
+  tool_search: %{"enabled" => true},
+  experimental_mode: true,
+  custom_agents_local_only: true
+}
+```
+
+Session spending limits, memory, and citations:
+
+```elixir
+alias Copilot.Types.{SessionConfig, SessionLimitsConfig, MemoryConfiguration}
+
+config = %SessionConfig{
+  session_limits: %SessionLimitsConfig{max_ai_credits: 5.0},
+  memory: %MemoryConfiguration{enabled: true},
+  enable_citations: true,
+  otlp_protocol: "http/protobuf"
+}
+```
+
+BYOK bearer-token provider and in-process transport (client options):
+
+```elixir
+{:ok, client} = Client.start_link(%CopilotClientOptions{
+  bearer_token_provider: fn _args -> "ghs_ephemeral_token" end,
+  builtin_plugin_directories: ["./plugins"],
+  in_process: false
+})
+```
+
 ## Protocol Version
 
 The SDK protocol version must match the CLI server's version. The current version is **2**. Version mismatches will produce a clear error message on connection.

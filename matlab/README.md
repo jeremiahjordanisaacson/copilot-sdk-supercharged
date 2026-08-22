@@ -329,6 +329,82 @@ All v2.0 features from the upstream SDK are available:
 - Image generation support
 - Config discovery
 
+## Recent Features (v2.4–v2.5)
+
+The SDK tracks upstream `@github/copilot-sdk`. These are name-value pairs on
+`copilot.SessionConfig`, with per-message options on `copilot.MessageOptions`.
+
+### v2.5
+
+- **Reasoning effort** — `'ReasoningEffort'` (`'low'`, `'medium'`, `'high'`).
+- **Session rewind** — `'RewindEnabled'` rolls the conversation back to an earlier turn.
+- **Additional directories** — `'AdditionalDirectories'` (cell of char).
+- **Content exclusion** — `'ContentExclusion'`.
+- **Tool search** — `'ToolSearch'` discovers tools on demand.
+- **Disabled MCP servers** — `'DisabledMcpServers'`.
+- **GitHub MCP tool config** — `'GithubMcpToolConfig'`.
+- **Canvas provider** — `'CanvasProvider'`.
+- **Custom agents local-only** — `'CustomAgentsLocalOnly'`.
+- **Experimental mode / in-process FFI** — `'ExperimentalMode'`, `'InProcess'`.
+- **User-prompt-transformed hook** — `'OnUserPromptTransformed'` (function handle).
+- **Permission decision context** — `'DecisionContext'`.
+- **Agent-factory args schema** — `'ArgsSchema'`.
+- **Built-in plugin directories** — `'BuiltinPluginDirectories'`.
+
+### v2.4
+
+- **BYOK bearer token provider** — `'BearerTokenProvider'` (function handle).
+- **MCP OAuth token handler** — `'OnMcpAuthRequest'` (function handle).
+- **HTTP request handler** — `'RequestHandler'`.
+- **Session citations** — `'EnableCitations'`.
+- **Excluded built-in agents** — `'ExcludedBuiltinAgents'`.
+- **Spending limits** — `'SessionLimits'` with `copilot.SessionLimits('MaxAiCredits', ...)`.
+- **Session memory** — `'Memory'` with `copilot.MemoryConfiguration('Enabled', ...)`.
+- **OTLP protocol / WebSocket transport** — `'OtlpProtocol'`, `'EnableWebSocketResponses'`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `'OnPostToolUse'`, `'OnPreMcpToolCall'`.
+- **Message agent mode / display prompt** — `copilot.MessageOptions('AgentMode', ...)`, `'DisplayPrompt'`.
+- **Experiment assignments** — `'ExpAssignments'`.
+- **Constants** — `copilot.Types.SystemMessagePreamble`, `copilot.Types.SystemMessagePreserve`, `copilot.Types.GitHubCommit`, `copilot.Types.GitHubRepository`, `copilot.Types.OtlpProtocolGrpc`.
+
+```matlab
+% Reasoning effort + session rewind + extra workspace roots
+config = copilot.SessionConfig( ...
+    'Model',                 'gpt-5', ...
+    'ReasoningEffort',       'high', ...
+    'RewindEnabled',         true, ...
+    'AdditionalDirectories', {'/repo/pkg-a', '/repo/pkg-b'});
+session = client.createSession(config);
+```
+
+```matlab
+% Honor content exclusion and discover tools on demand
+config = copilot.SessionConfig( ...
+    'ContentExclusion', true, ...
+    'ToolSearch',       struct('mode', 'auto'));
+```
+
+```matlab
+% Cap AI-credit spend and emit citations
+config = copilot.SessionConfig( ...
+    'EnableCitations', true, ...
+    'SessionLimits',   copilot.SessionLimits('MaxAiCredits', 5));
+```
+
+```matlab
+% Bring-your-own-key: supply bearer tokens dynamically
+config = copilot.SessionConfig( ...
+    'BearerTokenProvider', @(args) myTokenFor(args));
+```
+
+```matlab
+% Per-message agent mode and display prompt
+msg = copilot.MessageOptions( ...
+    'Prompt',        'Refactor this module', ...
+    'AgentMode',     'plan', ...
+    'DisplayPrompt', 'Refactor (planning)');
+response = session.sendAndWait(msg);
+```
+
 ## License
 
 MIT. See the repository [LICENSE](../LICENSE) for details.

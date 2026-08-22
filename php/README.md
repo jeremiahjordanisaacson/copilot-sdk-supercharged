@@ -405,6 +405,91 @@ $unsubscribe = $client->onLifecycleEvent('session.created', function ($event) {
 $unsubscribe();
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Recent upstream syncs added several session and client options. Session options are named arguments on `SessionConfig`; BYOK transport options are named arguments on `CopilotClientOptions`. Enum and constant helpers live in the `GitHub\Copilot` namespace.
+
+### New in v2.5
+
+- **Reasoning effort** — `reasoningEffort:` (`ReasoningEffort::Low|Medium|High|XHigh`).
+- **Tool search** — `toolSearch:` — discover tools on demand.
+- **Content exclusion** — `contentExclusion:` — honor content-exclusion rules.
+- **Session rewind** — `rewindEnabled:` — allow rolling back to an earlier snapshot.
+- **Additional directories** — `additionalDirectories:` — extra workspace directories.
+- **Disabled MCP servers** — `disabledMcpServers:`.
+- **GitHub MCP tool config** — `githubMcpToolConfig:`.
+- **Canvas provider** — `canvasProvider:`.
+- **Custom agents local-only** — `customAgentsLocalOnly:`.
+- **Built-in plugin directories** — `builtinPluginDirectories:`.
+- **Agent-factory authoring** — `argsSchema:`.
+- **Permission decision context** — `decisionContext:`.
+- **In-process transport** — `inProcess:`.
+- **Experimental mode** — `experimentalMode:`.
+- **MCP OAuth handler** — `onMcpAuthRequest:`.
+
+### New in v2.4
+
+- **Session citations** — `enableCitations:`.
+- **Excluded built-in agents** — `excludedBuiltinAgents:`.
+- **Spending limits** — `sessionLimits:` with `new SessionLimitsConfig(maxAiCredits: ...)`.
+- **Session memory** — `memory:` with `new MemoryConfiguration(enabled: ...)`.
+- **OTLP protocol** — `otlpProtocol:`.
+- **WebSocket responses** — `enableWebSocketResponses:`.
+- **Experiment assignments** — `expAssignments:`.
+- **BYOK request handler / bearer token** — `CopilotClientOptions(requestHandler:, bearerTokenProvider:)` (extend `CopilotRequestHandler`).
+- **Tool defer loading** — `ToolDefer::AUTO` / `ToolDefer::NEVER`.
+- **System-message sections** — `SystemMessageSection::PREAMBLE` / `::PRESERVE`.
+- **GitHub attachments** — `GitHubAttachment::GITHUB_COMMIT`, `::GITHUB_REPOSITORY`.
+- **Hooks** — `SessionHooks(onPostToolUse:, onUserPromptTransformed:, onPreMcpToolCall:)`.
+- **Per-message overrides** — `MessageOptions(agentMode:, displayPrompt:)`.
+
+### Examples
+
+```php
+use GitHub\Copilot\SessionConfig;
+use GitHub\Copilot\ReasoningEffort;
+
+// Reasoning effort + on-demand tool search + content exclusion
+$session = $client->createSession(new SessionConfig(
+    reasoningEffort: ReasoningEffort::High,
+    toolSearch: true,
+    contentExclusion: true,
+));
+```
+
+```php
+use GitHub\Copilot\SessionConfig;
+
+// Enable session rewind and grant extra workspace directories
+$session = $client->createSession(new SessionConfig(
+    rewindEnabled: true,
+    additionalDirectories: ['../shared-lib', '../docs'],
+));
+```
+
+```php
+use GitHub\Copilot\SessionConfig;
+use GitHub\Copilot\SessionLimitsConfig;
+use GitHub\Copilot\MemoryConfiguration;
+
+// Cap AI-credit spend and enable persistent memory
+$session = $client->createSession(new SessionConfig(
+    sessionLimits: new SessionLimitsConfig(maxAiCredits: 500),
+    memory: new MemoryConfiguration(enabled: true),
+));
+```
+
+```php
+use GitHub\Copilot\CopilotClient;
+use GitHub\Copilot\CopilotClientOptions;
+use GitHub\Copilot\ProviderTokenArgs;
+
+// BYOK: supply bearer tokens dynamically per session
+$client = new CopilotClient(new CopilotClientOptions(
+    bearerTokenProvider: fn (ProviderTokenArgs $args): string => getToken($args->sessionId),
+));
+```
+
 ## Transport Modes
 
 ### stdio (default)

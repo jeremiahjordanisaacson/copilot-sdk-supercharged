@@ -186,6 +186,77 @@ Set fields in `WS-SESSION-CONFIG` before creating a session:
 | `WS-SESS-STREAMING` | 9 | 0 | Enable streaming (1=on, 0=off) |
 | `WS-SESS-HISTORY-LEN` | 9(5) | 100 | Conversation history length |
 
+## Recent Features (v2.4–v2.5)
+
+The session module (`COPILOT-SESSION.cob`) emits camelCase wire keys for the options
+added in the v2.4 and v2.5 upstream syncs. Populate the corresponding working-storage
+items (`WS-UPSTREAM-CONFIG`, `WS-UPSTREAM-HANDLERS`, `WS-SEND-OPTIONS-EXT`) before
+creating a session; `BUILD-CREATE-PARAMS` includes any that are set.
+
+### v2.5 session options
+
+| Field | Toggle / PIC | Wire key |
+|---|---|---|
+| `WS-REASONING-EFFORT` | X(16) | `reasoningEffort` |
+| `WS-TOOL-SEARCH` | X(1024) | `toolSearch` |
+| `WS-REWIND-ENABLED` | `SET REWIND-ON` | `rewindEnabled` |
+| `WS-CONTENT-EXCLUSION` | `SET CONTENT-EXCLUSION-ON` | `contentExclusion` |
+| `WS-ADDITIONAL-DIRS` | X(1024) | `additionalDirectories` |
+| `WS-DISABLED-MCP` | X(1024) | `disabledMcpServers` |
+| `WS-GITHUB-MCP-CONFIG` | X(1024) | `githubMcpToolConfig` |
+| `WS-CANVAS-PROVIDER` | X(1024) | `canvasProvider` |
+| `WS-CUSTOM-AGENTS-LCL` | `SET CUSTOM-AGENTS-LOCAL-ON` | `customAgentsLocalOnly` |
+| `WS-DECISION-CONTEXT` | X(1024) | `decisionContext` |
+| `WS-USER-PROMPT-XFORM` | `SET USER-PROMPT-XFORM-ON` | `userPromptTransformed` |
+| `WS-BUILTIN-PLUGIN-DIR` | X(1024) | `builtinPluginDirectories` |
+| `WS-ARGS-SCHEMA` | X(1024) | `argsSchema` |
+| `WS-IN-PROCESS` | `SET IN-PROCESS-ON` | `inProcess` |
+| `WS-EXPERIMENTAL-MODE` | `SET EXPERIMENTAL-ON` | `experimentalMode` |
+
+### v2.4 session options and handlers
+
+| Field | Toggle / PIC | Wire key |
+|---|---|---|
+| `WS-ENABLE-CITATIONS` | `SET CITATIONS-ON` | `enableCitations` |
+| `WS-EXCLUDED-BUILTIN` | X(1024) | `excludedBuiltinAgents` |
+| `WS-MAX-AI-CREDITS` | 9(10) | `sessionLimits.maxAiCredits` |
+| `WS-MEMORY-ENABLED` | `SET MEMORY-ON` | `memory` |
+| `WS-OTLP-PROTOCOL` | X(16) | `otlpProtocol` |
+| `WS-ENABLE-WEBSOCKET` | `SET WEBSOCKET-ON` | `enableWebSocketResponses` |
+| `WS-EXP-ASSIGNMENTS` | X(1024) | `expAssignments` |
+| `WS-MCP-AUTH-HANDLER` | `SET MCP-AUTH-ON` | `mcpAuthHandler` |
+| `WS-BEARER-PROVIDER` | `SET BEARER-PROVIDER-ON` | `bearer_token_provider` |
+| `WS-REQUEST-HANDLER` | `SET REQUEST-HANDLER-ON` | `CopilotRequestHandler` |
+| `WS-POST-TOOL-USE` | `SET POST-TOOL-USE-ON` | `post_tool_use` |
+| `WS-PRE-MCP-TOOL-CALL` | `SET PRE-MCP-TOOL-CALL-ON` | `pre_mcp_tool_call` |
+| `WS-SEND-AGENT-MODE` | X(32) | `agentMode` |
+| `WS-SEND-DISPLAY-PROMPT` | X(4096) | `displayPrompt` |
+
+Constants: `WS-TOOL-DEFER` (`TOOL-DEFER-AUTO`/`TOOL-DEFER-NEVER`),
+`WS-SECTION-PREAMBLE`/`WS-SECTION-PRESERVE`, `WS-GH-COMMIT`/`WS-GH-REPOSITORY`.
+
+### Example
+
+```cobol
+      *    Reasoning effort and tool search
+           MOVE "high" TO WS-REASONING-EFFORT
+           MOVE '{"enabled":true}' TO WS-TOOL-SEARCH
+
+      *    Session rewind and content exclusion
+           SET REWIND-ON TO TRUE
+           SET CONTENT-EXCLUSION-ON TO TRUE
+
+      *    Additional workspace directories (JSON array)
+           MOVE '["/data/shared","/data/reference"]'
+               TO WS-ADDITIONAL-DIRS
+
+      *    Cap AI-credit spend for the session
+           MOVE 500 TO WS-MAX-AI-CREDITS
+
+           CALL "COPILOT-SESSION" USING WS-SESSION-CONFIG
+               WS-SESSION-STATE WS-RETURN-CODE
+```
+
 ## Return Codes
 
 All operations set `WS-RETURN-CODE` with 88-level conditions:

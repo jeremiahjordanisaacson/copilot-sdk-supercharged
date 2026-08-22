@@ -238,6 +238,89 @@ Hooks = #{
 }).
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Keys added in the v2.4 and v2.5 upstream syncs. Session keys go in the
+`copilot_client:create_session/2` config map (atom keys, serialized to the
+camelCase wire keys shown); transport/BYOK options live in `copilot_types`.
+
+**v2.5.0**
+
+- Reasoning effort — `reasoning_effort` → `reasoningEffort`
+- Tool search — `tool_search` → `toolSearch`
+- Session rewind — `rewind_enabled` → `rewindEnabled`
+- Additional directories — `additional_directories` → `additionalDirectories`
+- Disabled MCP servers — `disabled_mcp_servers` → `disabledMcpServers`
+- GitHub MCP tool config — `github_mcp_tool_config` → `githubMcpToolConfig`
+- Canvas provider — `canvas_provider` → `canvasProvider`
+- Custom agents local-only — `custom_agents_local_only` → `customAgentsLocalOnly`
+- Experimental mode — `experimental_mode` → `experimentalMode`
+- Content exclusion — `content_exclusion` → `contentExclusion`
+- Permission decision context — `copilot_types:permission_result/2`
+- Agent-factory args schema — `copilot_types:agent_definition/1` (`argsSchema`)
+- Built-in plugin dirs / in-process — `copilot_types:client_options_params/1`
+
+**v2.4.0**
+
+- BYOK bearer-token provider — `bearer_token_provider` (`copilot_types` client-options record)
+- MCP OAuth handler flag — `on_mcp_auth_request` → `mcpAuthHandler`
+- HTTP request handler — `request_handler` (`copilot_types` client-options record)
+- Session citations — `enable_citations` → `enableCitations`
+- Excluded built-in agents — `excluded_builtin_agents` → `excludedBuiltinAgents`
+- Session spending limits — `copilot_types:session_limits/1` (`maxAiCredits`)
+- Session memory — `copilot_types:memory_configuration/1`
+- OTLP protocol — `otlp_protocol` → `otlpProtocol`
+- WebSocket responses — `enable_web_socket_responses` → `enableWebSocketResponses`
+- Experiment assignments — `exp_assignments` → `expAssignments`
+- Tool defer loading — `copilot_types:tool_defer/1` (`auto` | `never`)
+- System-message sections — `copilot_types:system_message_section/1` (`preamble` | `preserve`)
+- Hook name constants — `copilot_types:hook_type/1` (`post_tool_use`, `pre_mcp_tool_call`, `user_prompt_transformed`)
+- Message agent mode / display prompt — `agent_mode`, `display_prompt`
+- GitHub attachment variants — `copilot_types:github_attachment/1` (`github_commit` | `github_repository`)
+
+Reasoning effort, content exclusion, extra directories, and rewind:
+
+```erlang
+{ok, Session} = copilot_client:create_session(Client, #{
+    reasoning_effort       => <<"high">>,
+    content_exclusion      => true,
+    additional_directories => [<<"../shared">>, <<"../docs">>],
+    rewind_enabled         => true,
+    disabled_mcp_servers   => [<<"playwright">>]
+}).
+```
+
+Tool search, spending limits, memory, and citations:
+
+```erlang
+{ok, Session} = copilot_client:create_session(Client, #{
+    tool_search       => #{<<"enabled">> => true},
+    experimental_mode => true,
+    session_limits    => copilot_types:session_limits(#{max_ai_credits => 5.0}),
+    memory_config     => copilot_types:memory_configuration(#{enabled => true}),
+    enable_citations  => true
+}).
+```
+
+Transport-level client options (built-in plugin dirs, in-process FFI):
+
+```erlang
+Params = copilot_types:client_options_params(#{
+    builtin_plugin_directories => [<<"./plugins">>],
+    in_process                 => false
+}).
+%% => #{<<"builtinPluginDirectories">> => [<<"./plugins">>], <<"inProcess">> => false}
+```
+
+Permission decision context and wire-constant helpers:
+
+```erlang
+Reply = copilot_types:permission_result(approved, #{<<"source">> => <<"policy">>}),
+copilot_types:tool_defer(auto),                  %% <<"auto">>
+copilot_types:system_message_section(preamble),  %% <<"preamble">>
+copilot_types:github_attachment(github_commit).  %% <<"GitHubCommit">>
+```
+
 ## Event Handling
 
 Subscribe to session events using message passing:

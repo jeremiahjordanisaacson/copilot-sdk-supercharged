@@ -315,6 +315,71 @@ The SDK emits standard session events:
 | `session.compaction_start` | Context compaction started |
 | `session.compaction_complete` | Context compaction finished |
 
+## Recent Features (v2.4–v2.5)
+
+Fields added in the v2.4 and v2.5 upstream syncs, set on `session_config` before
+`create_session` (a few live on `copilot_client_options` or `send_options`).
+JSON-valued fields (suffix `_json`) take a JSON string.
+
+### v2.5 session options
+
+- **Reasoning effort** — `config%reasoning_effort` (`'low'`/`'medium'`/`'high'`).
+- **Tool search** — `config%tool_search_json`.
+- **Session rewind** — `config%rewind_enabled`.
+- **Content exclusion** — `config%content_exclusion`.
+- **Additional directories** — `config%additional_directories`.
+- **Disabled MCP servers** — `config%disabled_mcp_servers`.
+- **GitHub MCP tool config** — `config%github_mcp_tool_config_json`.
+- **Canvas provider** — `config%canvas_provider_json`.
+- **Custom agents local-only** — `config%custom_agents_local_only`.
+- **Permission decision context** — `config%decision_context_json`.
+- **User-prompt-transformed hook** — `config%on_user_prompt_transformed`.
+- **Built-in plugin directories** — `config%builtin_plugin_directories`.
+- **Agent-factory args schema** — `config%args_schema_json`.
+- **In-process FFI transport** — `config%in_process`.
+- **Experimental mode** — `config%experimental_mode`.
+
+### v2.4 session options
+
+- **BYOK bearer token provider** — `opts%bearer_token_provider` (`copilot_client_options`).
+- **HTTP request handler** — `opts%request_handler` (`copilot_client_options`).
+- **MCP OAuth token handler** — `config%on_mcp_auth_request`.
+- **Session citations** — `config%enable_citations`.
+- **Excluded built-in agents** — `config%excluded_builtin_agents`.
+- **Session spending limits** — `config%session_limits`.
+- **Session memory** — `config%memory`.
+- **OTLP protocol** — `config%otlp_protocol`.
+- **WebSocket transport** — `config%enable_web_socket_responses`.
+- **Experiment assignments** — `config%exp_assignments_json`.
+- **Post/pre-tool hooks** — `config%on_post_tool_use`, `config%on_pre_mcp_tool_call`.
+- **Per-message overrides** — `sopts%agent_mode`, `sopts%display_prompt`.
+- **Constants** — `SECTION_PREAMBLE`/`SECTION_PRESERVE`, `GITHUB_COMMIT`/`GITHUB_REPOSITORY`.
+
+### Reasoning effort and tool search
+
+```fortran
+type(session_config) :: config
+config%reasoning_effort  = 'high'
+config%tool_search_json  = '{"enabled":true}'
+call client%create_session(config, session, ios)
+```
+
+### Session rewind and content exclusion
+
+```fortran
+config%rewind_enabled    = .true.
+config%content_exclusion = .true.
+call client%create_session(config, session, ios)
+```
+
+### Additional workspace directories
+
+```fortran
+config%additional_directories = [ character(len=16) :: &
+  '/data/shared', '/data/reference' ]
+call client%create_session(config, session, ios)
+```
+
 ## Module Summary
 
 | Module | File | Purpose |

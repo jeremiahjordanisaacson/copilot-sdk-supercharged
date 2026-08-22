@@ -418,6 +418,93 @@ exception
 end;
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Fields added in the v2.4 and v2.5 upstream syncs. Unless noted, they are fields of
+`Session_Config` (start from `Default_Session_Config`); a few live on `Client_Options`
+or `Message_Options`. Fields with a `_Json` suffix take a JSON string.
+
+### v2.5 session options
+
+- **Reasoning effort** — `Cfg.Reasoning_Effort` (`"low"`/`"medium"`/`"high"`).
+- **Tool search** — `Cfg.Tool_Search_Json`.
+- **Session rewind** — `Cfg.Rewind_Enabled`.
+- **Content exclusion** — `Cfg.Content_Exclusion`.
+- **Additional directories** — `Cfg.Additional_Directories_Json`.
+- **Disabled MCP servers** — `Cfg.Disabled_Mcp_Servers_Json`.
+- **GitHub MCP tool config** — `Cfg.Github_Mcp_Tool_Config_Json`.
+- **Canvas provider** — `Cfg.Canvas_Provider_Json`.
+- **Custom agents local-only** — `Cfg.Custom_Agents_Local_Only`.
+- **Permission decision context** — `Cfg.Decision_Context_Json`.
+- **User-prompt-transformed hook** — `Cfg.On_User_Prompt_Transformed`.
+- **Built-in plugin directories** — `Cfg.Builtin_Plugin_Directories_Json`.
+- **Agent-factory args schema** — `Cfg.Args_Schema_Json`.
+- **In-process FFI transport** — `Cfg.In_Process`.
+- **Experimental mode** — `Cfg.Experimental_Mode`.
+
+### v2.4 session options
+
+- **BYOK bearer token provider** — `Opts.Bearer_Token_Provider` (`Client_Options`).
+- **HTTP request handler** — `Opts.Request_Handler` (`Client_Options`).
+- **MCP OAuth token handler** — `Cfg.On_Mcp_Auth_Request`.
+- **Session citations** — `Cfg.Enable_Citations`.
+- **Excluded built-in agents** — `Cfg.Excluded_Builtin_Agents_Json`.
+- **Session spending limits** — `Cfg.Session_Limits.Max_Ai_Credits`.
+- **Session memory** — `Cfg.Memory.Enabled`.
+- **OTLP protocol** — `Cfg.Otlp_Protocol`.
+- **WebSocket transport** — `Cfg.Enable_Web_Socket_Responses`.
+- **Experiment assignments** — `Cfg.Exp_Assignments_Json`.
+- **Post/pre-tool hooks** — `Cfg.On_Post_Tool_Use`, `Cfg.On_Pre_Mcp_Tool_Call`.
+- **Per-message overrides** — `Opts.Agent_Mode`, `Opts.Display_Prompt` (`Message_Options`).
+- **Constants** — `Tool_Defer_Auto`/`Tool_Defer_Never`, `Section_Preamble`/`Section_Preserve`, `GitHub_Commit`/`GitHub_Repository`.
+
+### Reasoning effort and tool search
+
+```ada
+declare
+   Cfg : Session_Config := Default_Session_Config;
+begin
+   Cfg.Reasoning_Effort := To_Unbounded_String ("high");
+   Cfg.Tool_Search_Json := To_Unbounded_String ("{""enabled"":true}");
+   Sess := Create_Session (Client, Cfg);
+end;
+```
+
+### Session rewind and content exclusion
+
+```ada
+declare
+   Cfg : Session_Config := Default_Session_Config;
+begin
+   Cfg.Rewind_Enabled    := True;
+   Cfg.Content_Exclusion := True;
+   Sess := Create_Session (Client, Cfg);
+end;
+```
+
+### Additional workspace directories
+
+```ada
+declare
+   Cfg : Session_Config := Default_Session_Config;
+begin
+   Cfg.Additional_Directories_Json :=
+     To_Unbounded_String ("[""/data/shared"",""/data/reference""]");
+   Sess := Create_Session (Client, Cfg);
+end;
+```
+
+### Session spending limits
+
+```ada
+declare
+   Cfg : Session_Config := Default_Session_Config;
+begin
+   Cfg.Session_Limits.Max_Ai_Credits := 500;
+   Sess := Create_Session (Client, Cfg);
+end;
+```
+
 ## Cookbook
 
 See the [cookbook/](cookbook/) directory for detailed recipes:

@@ -332,6 +332,82 @@ val response = session.sendAndWait(MessageOptions(
 ))
 ```
 
+## Recent Features (v2.4–v2.5)
+
+Parity options tracking the upstream `@github/copilot` SDK, exposed as fields on the
+`SessionConfig`, `CopilotClientOptions`, `MessageOptions`, and `SessionHooks` case classes.
+
+### v2.5.0
+
+- **Reasoning effort** — `SessionConfig(reasoningEffort = Some(ReasoningEffort.High))` (`Low`/`Medium`/`High`/`XHigh`).
+- **Session rewind** — `SessionConfig(rewindEnabled = Some(true))`; roll back to an earlier snapshot (`session.snapshot_rewind` event).
+- **Additional directories** — `SessionConfig(additionalDirectories = ...)`; extra workspace roots the agent may read.
+- **Content exclusion** — `SessionConfig(contentExclusion = Some(true))`; honor repository content-exclusion rules.
+- **Tool search** — `SessionConfig(toolSearch = ...)`; on-demand tool discovery for large tool sets.
+- **Disabled MCP servers** — `SessionConfig(disabledMcpServers = ...)`.
+- **GitHub MCP tool config** — `SessionConfig(githubMcpToolConfig = ...)`.
+- **Canvas provider** — `SessionConfig(canvasProvider = ...)`.
+- **Custom agents local-only** — `SessionConfig(customAgentsLocalOnly = Some(true))`.
+- **Experimental mode** — `SessionConfig(experimentalMode = Some(true))`.
+- **User-prompt-transformed hook** — `SessionHooks(onUserPromptTransformed = ...)`.
+- **Built-in plugin directories** — `CopilotClientOptions(builtinPluginDirectories = ...)`.
+- **In-process (FFI) transport** — `CopilotClientOptions(inProcess = Some(true))`.
+- **Agent factory args schema** — custom agents accept a typed `argsSchema`.
+- **Permission decision context** — permission results carry `decisionContext`.
+
+### v2.4.0
+
+- **BYOK bearer token provider** — `CopilotClientOptions(bearerTokenProvider = ...)`; a `ProviderTokenArgs => Future[String]`.
+- **HTTP request handler** — `CopilotClientOptions(requestHandler = ...)` (`CopilotRequestHandler`).
+- **MCP OAuth token handler** — `SessionConfig(onMcpAuthRequest = ...)` (`McpAuthHandler`).
+- **Session citations** — `SessionConfig(enableCitations = Some(true))`.
+- **Excluded built-in agents** — `SessionConfig(excludedBuiltinAgents = ...)`.
+- **Session spending limits** — `SessionConfig(sessionLimits = Some(SessionLimitsConfig(maxAiCredits = ...)))`.
+- **Session memory** — `SessionConfig(memory = Some(MemoryConfiguration(...)))`.
+- **OTLP protocol** — `SessionConfig(otlpProtocol = Some("grpc"))`.
+- **WebSocket responses** — `SessionConfig(enableWebSocketResponses = Some(true))`.
+- **Experiment assignments** — `SessionConfig(expAssignments = ...)`.
+- **Post-tool-use / pre-MCP-tool-call hooks** — `SessionHooks(onPostToolUse = ..., onPreMcpToolCall = ...)`.
+- **Per-message agent mode & display prompt** — `MessageOptions(agentMode = ..., displayPrompt = ...)`.
+- **System-message sections** — `SystemMessageSection.Preamble` / `.Preserve`.
+- **Tool defer policy** — `ToolDefer.Auto` / `.Never`.
+- **GitHub attachment variants** — `GitHubAttachment.GitHubCommit` / `.GitHubRepository`.
+
+### Examples
+
+```scala
+// Reasoning effort — trade latency for depth on models that support it
+val config = SessionConfig(
+  model = Some("gpt-5"),
+  reasoningEffort = Some(ReasoningEffort.High)   // Low | Medium | High | XHigh
+)
+```
+
+```scala
+// Roll back to an earlier snapshot, expose extra roots, and honor content exclusion
+val config = SessionConfig(
+  rewindEnabled = Some(true),                    // emits session.snapshot_rewind events
+  additionalDirectories = Some(List("/repo/shared", "/repo/docs")),
+  contentExclusion = Some(true)
+)
+```
+
+```scala
+// On-demand tool discovery for large tool sets
+val config = SessionConfig(
+  toolSearch = Some(Map("enabled" -> true.asJson))
+)
+```
+
+```scala
+// BYOK bearer tokens + in-process FFI transport (client-level)
+val client = CopilotClient(CopilotClientOptions(
+  bearerTokenProvider = Some(args => Future.successful(fetchToken(args.sessionId))),
+  builtinPluginDirectories = Some(List("/opt/copilot/plugins")),
+  inProcess = Some(true)
+))
+```
+
 ## License
 
 See [LICENSE](../LICENSE) in the repository root.

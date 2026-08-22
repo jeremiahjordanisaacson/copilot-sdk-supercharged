@@ -332,6 +332,72 @@ copilot_session_send_and_wait \
     '{"size":"1024x1024","quality":"hd","style":"natural"}'
 ```
 
+## Recent Features (v2.4–v2.5)
+
+The SDK tracks upstream `@github/copilot-sdk`. Configure these by setting the
+`COPILOT_*` variables before `copilot_client_create_session` (or, for per-message
+options, before `copilot_session_send*`). Array/object values are JSON strings.
+
+### v2.5
+
+- **Reasoning effort** — `COPILOT_REASONING_EFFORT` (`minimal`|`low`|`medium`|`high`|`max`).
+- **Session rewind** — `COPILOT_REWIND_ENABLED` (`"true"`/`"false"`).
+- **Additional directories** — `COPILOT_ADDITIONAL_DIRECTORIES` (JSON array).
+- **Content exclusion** — `COPILOT_CONTENT_EXCLUSION`.
+- **Tool search** — `COPILOT_TOOL_SEARCH` (JSON object or boolean).
+- **Disabled MCP servers** — `COPILOT_DISABLED_MCP_SERVERS` (JSON array).
+- **GitHub MCP tool config** — `COPILOT_GITHUB_MCP_TOOL_CONFIG` (JSON object).
+- **Canvas provider** — `COPILOT_CANVAS_PROVIDER`.
+- **Custom agents local-only** — `COPILOT_CUSTOM_AGENTS_LOCAL_ONLY`.
+- **Experimental mode / in-process FFI** — `COPILOT_EXPERIMENTAL_MODE`, `COPILOT_IN_PROCESS`.
+- **User-prompt-transformed hook** — `COPILOT_ON_USER_PROMPT_TRANSFORMED` (handler function name).
+- **Permission decision context** — `COPILOT_DECISION_CONTEXT` (JSON object).
+- **Agent-factory args schema** — `COPILOT_ARGS_SCHEMA` (JSON object).
+- **Built-in plugin directories** — `COPILOT_BUILTIN_PLUGIN_DIRECTORIES` (JSON array).
+
+### v2.4
+
+- **BYOK bearer token provider** — `COPILOT_BEARER_TOKEN_PROVIDER` (handler function name).
+- **MCP OAuth token handler** — `COPILOT_ON_MCP_AUTH_REQUEST` (handler function name).
+- **Session citations** — `COPILOT_ENABLE_CITATIONS`.
+- **Excluded built-in agents** — `COPILOT_EXCLUDED_BUILTIN_AGENTS` (JSON array).
+- **Spending limits** — `COPILOT_SESSION_LIMITS` (JSON object) or `COPILOT_MAX_AI_CREDITS`.
+- **Session memory** — `COPILOT_MEMORY_ENABLED`.
+- **OTLP protocol / WebSocket transport** — `COPILOT_OTLP_PROTOCOL`, `COPILOT_ENABLE_WEB_SOCKET_RESPONSES`.
+- **Post-tool-use hook** — `COPILOT_ON_POST_TOOL_USE` (handler function name).
+- **Message agent mode / display prompt** — `COPILOT_AGENT_MODE`, `COPILOT_DISPLAY_PROMPT`.
+- **Section / attachment constants** — `COPILOT_SECTION_PREAMBLE`, `COPILOT_OVERRIDE_PRESERVE`, `COPILOT_GITHUB_COMMIT`, `COPILOT_GITHUB_REPOSITORY`.
+- **Experiment assignments** — `COPILOT_EXP_ASSIGNMENTS` (JSON object).
+
+```bash
+# Reasoning effort + session rewind + extra workspace dirs
+COPILOT_REASONING_EFFORT="high"
+COPILOT_REWIND_ENABLED="true"
+COPILOT_ADDITIONAL_DIRECTORIES='["/repo/pkg-a", "/repo/pkg-b"]'
+copilot_client_create_session
+```
+
+```bash
+# Honor content exclusion and enable on-demand tool search
+COPILOT_CONTENT_EXCLUSION="true"
+COPILOT_TOOL_SEARCH='{"mode":"auto"}'
+copilot_client_create_session
+```
+
+```bash
+# Cap AI-credit spend and emit citations
+COPILOT_ENABLE_CITATIONS="true"
+COPILOT_MAX_AI_CREDITS=5
+copilot_client_create_session
+```
+
+```bash
+# Per-message agent mode and display prompt
+COPILOT_AGENT_MODE="plan"
+COPILOT_DISPLAY_PROMPT="Refactor (planning)"
+copilot_session_send_and_wait "Refactor this module"
+```
+
 ## License
 
 Copyright (c) Microsoft Corporation. All rights reserved.
