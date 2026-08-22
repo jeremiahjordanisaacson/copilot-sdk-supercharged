@@ -25,13 +25,15 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
+          # NOTE: intentionally NO registry-url. When set, setup-node writes an
+          # .npmrc with `_authToken=${NODE_AUTH_TOKEN}` and exports a placeholder
+          # NODE_AUTH_TOKEN (XXXXX-XXXXX-XXXXX-XXXXX). npm then uses that bogus
+          # token instead of attempting OIDC trusted publishing, causing a 404.
+          # Omitting registry-url leaves no token, so `npm publish` performs the
+          # OIDC token exchange against the default registry (registry.npmjs.org).
 
       - name: Install dependencies
         run: npm install --ignore-scripts
-
-      - name: Upgrade npm for OIDC trusted publishing (needs >= 11.5.1)
-        run: npm install -g npm@latest
 
       - name: Set version from tag
         run: |
