@@ -1,13 +1,18 @@
 package embeddedcli
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func resetGlobals() {
@@ -17,7 +22,141 @@ func resetGlobals() {
 	setupDone = false
 	pathInitialized = false
 	runtimeLibPath = ""
+	runtimePath = ""
+	runtimeAssetsInstalled = false
 	linuxMuslBundle = false
+}
+
+func TestInstallRuntimeWritesRetainedAssets(t *testing.T) {
+	resetGlobals()
+	tempDir := t.TempDir()
+	cli := []byte("cli")
+	wrapper := []byte("wrapper")
+	node := []byte("runtime")
+	assets := runtimeAssetsArchive(t, map[string]assetFixture{
+		"ripgrep/bin/test-platform/rg": {content: []byte("ripgrep"), mode: 0755},
+		"definitions/future.json":      {content: []byte("{}"), mode: 0644},
+	})
+	cliHash := sha256.Sum256(cli)
+	wrapperHash := sha256.Sum256(wrapper)
+	nodeHash := sha256.Sum256(node)
+	assetsHash := sha256.Sum256(assets)
+	Setup(Config{
+		Cli:                   bytes.NewReader(cli),
+		CliHash:               cliHash[:],
+		RuntimeExecutable:     bytes.NewReader(wrapper),
+		RuntimeExecutableHash: wrapperHash[:],
+		RuntimeNode:           bytes.NewReader(node),
+		RuntimeNodeHash:       nodeHash[:],
+		RuntimeAssets:         bytes.NewReader(assets),
+		RuntimeAssetsHash:     assetsHash[:],
+		Version:               "1.2.3",
+		Dir:                   tempDir,
+	})
+
+	gotWrapper, err := installRuntimeAt(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installDir := filepath.Dir(gotWrapper)
+	if got, err := os.ReadFile(filepath.Join(installDir, "ripgrep", "bin", "test-platform", "rg")); err != nil || string(got) != "ripgrep" {
+		t.Fatalf("ripgrep content=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(installDir, "definitions", "future.json")); err != nil || string(got) != "{}" {
+		t.Fatalf("definition content=%q err=%v", got, err)
+	}
+}
+
+type assetFixture struct {
+	content []byte
+	mode    int64
+}
+
+func runtimeAssetsArchive(t *testing.T, files map[string]assetFixture) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buffer)
+	tarWriter := tar.NewWriter(gzipWriter)
+	for name, fixture := range files {
+		header := &tar.Header{Name: name, Mode: fixture.mode, Size: int64(len(fixture.content)), Typeflag: tar.TypeReg}
+		if err := tarWriter.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tarWriter.Write(fixture.content); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+func TestInstallRuntimeWritesAdjacentPairWithoutCLI(t *testing.T) {
+	resetGlobals()
+	tempDir := t.TempDir()
+	cli := []byte("cli")
+	wrapper := []byte("wrapper")
+	node := []byte("runtime")
+	cliHash := sha256.Sum256(cli)
+	wrapperHash := sha256.Sum256(wrapper)
+	nodeHash := sha256.Sum256(node)
+	Setup(Config{
+		Cli:                   bytes.NewReader(cli),
+		CliHash:               cliHash[:],
+		RuntimeExecutable:     bytes.NewReader(wrapper),
+		RuntimeExecutableHash: wrapperHash[:],
+		RuntimeNode:           bytes.NewReader(node),
+		RuntimeNodeHash:       nodeHash[:],
+		Version:               "1.2.3",
+		Dir:                   tempDir,
+	})
+
+	gotWrapper, err := installRuntimeAt(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotWrapper != filepath.Join(tempDir, "1.2.3", runtimeExecutableName()) {
+		t.Fatalf("RuntimePath() = %q", gotWrapper)
+	}
+	if got, err := os.ReadFile(filepath.Join(filepath.Dir(gotWrapper), "runtime.node")); err != nil || !bytes.Equal(got, node) {
+		t.Fatalf("runtime.node content=%q err=%v", got, err)
+	}
+	if cliPath := filepath.Join(filepath.Dir(gotWrapper), binaryNameForOS()); fileExists(cliPath) {
+		t.Fatalf("managed runtime installation unexpectedly materialized CLI host at %q", cliPath)
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func TestInstallVerifiedFileRestoresExecutablePermission(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not use Unix execute bits")
+	}
+	path := filepath.Join(t.TempDir(), "copilot-runtime")
+	content := []byte("wrapper")
+	hash := sha256.Sum256(content)
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installVerifiedFile(path, bytes.NewReader(content), hash[:], 0755, "runtime wrapper"); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0111 == 0 {
+		t.Fatal("existing runtime wrapper was not made executable")
+	}
 }
 
 func mustPanic(t *testing.T, fn func()) {
@@ -123,6 +262,46 @@ func TestInstallAtWritesBinaryAndLicense(t *testing.T) {
 	}
 }
 
+func TestInstallAtInstallsRuntimePairAndAssetsWithoutRuntimeLib(t *testing.T) {
+	resetGlobals()
+	tempDir := t.TempDir()
+	wrapper := []byte("wrapper")
+	node := []byte("runtime")
+	assets := runtimeAssetsArchive(t, map[string]assetFixture{
+		"definitions/future.json": {content: []byte("{}"), mode: 0644},
+	})
+	wrapperHash := sha256.Sum256(wrapper)
+	nodeHash := sha256.Sum256(node)
+	assetsHash := sha256.Sum256(assets)
+	Setup(Config{
+		Cli:                   bytes.NewReader(wrapper),
+		CliHash:               wrapperHash[:],
+		RuntimeExecutable:     bytes.NewReader(wrapper),
+		RuntimeExecutableHash: wrapperHash[:],
+		RuntimeNode:           bytes.NewReader(node),
+		RuntimeNodeHash:       nodeHash[:],
+		RuntimeAssets:         bytes.NewReader(assets),
+		RuntimeAssetsHash:     assetsHash[:],
+		Version:               "1.2.3",
+		Dir:                   tempDir,
+	})
+
+	path, err := installAt(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installDir := filepath.Dir(path)
+	if got, err := os.ReadFile(filepath.Join(installDir, runtimeExecutableName())); err != nil || !bytes.Equal(got, wrapper) {
+		t.Fatalf("runtime wrapper content=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(installDir, "runtime.node")); err != nil || !bytes.Equal(got, node) {
+		t.Fatalf("runtime.node content=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(installDir, "definitions", "future.json")); err != nil || string(got) != "{}" {
+		t.Fatalf("definition content=%q err=%v", got, err)
+	}
+}
+
 func TestInstallAtExistingBinaryHashMismatch(t *testing.T) {
 	resetGlobals()
 	tempDir := t.TempDir()
@@ -143,6 +322,62 @@ func TestInstallAtExistingBinaryHashMismatch(t *testing.T) {
 	_, err := installAt(tempDir)
 	if err == nil || !strings.Contains(err.Error(), "hash mismatch") {
 		t.Fatalf("expected hash mismatch error, got %v", err)
+	}
+}
+
+func TestInstallAtRejectsCLIBytesThatDoNotMatchCliHash(t *testing.T) {
+	resetGlobals()
+	tempDir := t.TempDir()
+	goodHash := sha256.Sum256([]byte("good"))
+	config = Config{
+		Cli:     bytes.NewReader([]byte("bad")),
+		CliHash: goodHash[:],
+	}
+
+	path, err := installAt(tempDir)
+	if err == nil || !strings.Contains(err.Error(), "hash mismatch") {
+		t.Fatalf("installAt() = %q, %v; want a hash mismatch error", path, err)
+	}
+	assertNoInstalledCLI(t, tempDir)
+}
+
+func TestInstallAtFailedCLIWriteCanBeRetried(t *testing.T) {
+	resetGlobals()
+	tempDir := t.TempDir()
+	content := []byte("good")
+	hash := sha256.Sum256(content)
+	config = Config{
+		Cli:     io.MultiReader(bytes.NewReader(content[:2]), iotest.ErrReader(errors.New("interrupted"))),
+		CliHash: hash[:],
+	}
+
+	if path, err := installAt(tempDir); err == nil {
+		t.Fatalf("installAt() = %q, nil; want the read error", path)
+	}
+	assertNoInstalledCLI(t, tempDir)
+
+	config.Cli = bytes.NewReader(content)
+	path, err := installAt(tempDir)
+	if err != nil {
+		t.Fatalf("retrying installAt(): %v", err)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("installed CLI content=%q err=%v", got, err)
+	}
+}
+
+// assertNoInstalledCLI fails if a failed install left anything in dir other
+// than the install lock.
+func assertNoInstalledCLI(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != ".copilot-cli.lock" {
+			t.Fatalf("failed install left %q in %s", entry.Name(), dir)
+		}
 	}
 }
 

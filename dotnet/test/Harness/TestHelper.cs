@@ -2,6 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
+using System.Text.RegularExpressions;
+
 namespace GitHub.Copilot.Test.Harness;
 
 public static class TestHelper
@@ -13,122 +15,14 @@ public static class TestHelper
     private static readonly TimeSpan DefaultEventTimeout = TimeSpan.FromSeconds(120);
     private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromMilliseconds(100);
 
-    public static async Task<AssistantMessageEvent?> GetFinalAssistantMessageAsync(
+    public static async Task<AssistantMessageEvent> SendAndGetFinalAssistantMessageAsync(
         CopilotSession session,
-        TimeSpan? timeout = null,
-        bool alreadyIdle = false)
+        MessageOptions options,
+        TimeSpan? timeout = null)
     {
-        var tcs = new TaskCompletionSource<AssistantMessageEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var cts = new CancellationTokenSource(timeout ?? DefaultEventTimeout);
-
-        // Both `finalAssistantMessage` and `sawIdle` are set from two threads — the
-        // subscription callback (CLI read loop) and CheckExistingMessagesAsync (RPC reply).
-        // We complete only once we've observed both, regardless of which path saw which.
-        var stateLock = new object();
-        AssistantMessageEvent? finalAssistantMessage = null;
-        bool sawIdle = false;
-
-        void TryComplete()
-        {
-            AssistantMessageEvent? snapshot;
-            bool idle;
-            lock (stateLock)
-            {
-                snapshot = finalAssistantMessage;
-                idle = sawIdle;
-            }
-            if (snapshot != null && idle) tcs.TrySetResult(snapshot);
-        }
-
-        using var subscription = session.On<SessionEvent>(evt =>
-        {
-            switch (evt)
-            {
-                case AssistantMessageEvent msg:
-                    lock (stateLock) { finalAssistantMessage = msg; }
-                    TryComplete();
-                    break;
-                case SessionIdleEvent:
-                    lock (stateLock) { sawIdle = true; }
-                    TryComplete();
-                    break;
-                case SessionErrorEvent error:
-                    tcs.TrySetException(new Exception(error.Data.Message ?? "session error"));
-                    break;
-            }
-        });
-
-        // Backfill from already-delivered messages so we don't lose events that arrived
-        // between SendAsync returning and the subscription being installed. Run it
-        // concurrently with the live subscription, but keep the Task observable so any
-        // exception is propagated through tcs (not the unobserved-task handler) and so
-        // we can drain it deterministically below. Pass cts.Token so the backfill is
-        // bounded by the same timeout as the wait itself, and so a hung GetEventsAsync
-        // can't block the drain in `finally`.
-        var backfill = CheckExistingMessagesAsync(cts.Token);
-
-        using var registration = cts.Token.Register(
-            static state => ((TaskCompletionSource<AssistantMessageEvent>)state!).TrySetException(
-                new TimeoutException("Timeout waiting for assistant message")),
-            tcs);
-
-        try
-        {
-            return await tcs.Task;
-        }
-        finally
-        {
-            // Drain the backfill before our `using` scopes (cts, subscription) dispose.
-            // Any exception was already routed through tcs above, so swallow here.
-            try { await backfill.ConfigureAwait(false); }
-            catch (Exception) { /* intentionally ignored: already propagated via tcs */ }
-        }
-
-        async Task CheckExistingMessagesAsync(CancellationToken cancellationToken)
-        {
-            try
-            {
-                var (existingFinal, existingIdle) = await GetExistingMessagesAsync(session, alreadyIdle, cancellationToken);
-                lock (stateLock)
-                {
-                    // Preserve a newer message captured by the subscription in the meantime.
-                    if (existingFinal != null && finalAssistantMessage == null)
-                    {
-                        finalAssistantMessage = existingFinal;
-                    }
-                    if (existingIdle) sawIdle = true;
-                }
-                TryComplete();
-            }
-            catch (Exception ex)
-            {
-                tcs.TrySetException(ex);
-            }
-        }
-    }
-
-    private static async Task<(AssistantMessageEvent? Final, bool SawIdle)> GetExistingMessagesAsync(CopilotSession session, bool alreadyIdle, CancellationToken cancellationToken = default)
-    {
-        var messages = (await session.GetEventsAsync(cancellationToken)).ToList();
-
-        var lastUserIdx = messages.FindLastIndex(m => m is UserMessageEvent);
-        var currentTurn = lastUserIdx < 0 ? messages : messages.Skip(lastUserIdx).ToList();
-
-        var error = currentTurn.OfType<SessionErrorEvent>().FirstOrDefault();
-        if (error != null) throw new Exception(error.Data.Message ?? "session error");
-
-        var idleIdx = alreadyIdle ? currentTurn.Count : currentTurn.FindIndex(m => m is SessionIdleEvent);
-        var sawIdle = alreadyIdle || idleIdx >= 0;
-
-        // Find the most recent assistant message in the turn (whether idle has arrived or not).
-        var searchEnd = idleIdx >= 0 ? idleIdx : currentTurn.Count;
-        for (var i = searchEnd - 1; i >= 0; i--)
-        {
-            if (currentTurn[i] is AssistantMessageEvent msg)
-                return (msg, sawIdle);
-        }
-
-        return (null, sawIdle);
+        // Subscribe before sending: session.idle is ephemeral and cannot be backfilled.
+        return await session.SendAndWaitAsync(options, timeout ?? DefaultEventTimeout)
+            ?? throw new InvalidOperationException("Session became idle without an assistant message.");
     }
 
     public static async Task<T> GetNextEventOfTypeAsync<T>(
@@ -180,7 +74,8 @@ public static class TestHelper
         TimeSpan? timeout = null,
         string? timeoutMessage = null,
         Func<Exception, bool>? transientExceptionFilter = null,
-        TimeSpan? pollInterval = null)
+        TimeSpan? pollInterval = null,
+        Func<string>? timeoutMessageFactory = null)
     {
         using var cts = new CancellationTokenSource(timeout ?? DefaultEventTimeout);
         Exception? lastTransientException = null;
@@ -223,11 +118,134 @@ public static class TestHelper
             lastTransientException = ex;
         }
 
+        var message = timeoutMessageFactory?.Invoke() ?? timeoutMessage ?? "Timed out waiting for condition.";
         throw lastTransientException is null
-            ? new TimeoutException(timeoutMessage ?? "Timed out waiting for condition.")
-            : new TimeoutException(timeoutMessage ?? "Timed out waiting for condition.", lastTransientException);
+            ? new TimeoutException(message)
+            : new TimeoutException(message, lastTransientException);
     }
 
     public static bool IsTransientFileSystemException(Exception exception)
         => exception is IOException or UnauthorizedAccessException;
+
+    public static string ExtensionLaunchMarkers(string homeDir, string extensionId)
+    {
+        try
+        {
+            var logsDir = Path.Join(homeDir, "logs");
+            if (!Directory.Exists(logsDir))
+            {
+                return "<no process logs>";
+            }
+
+            var extensionName = extensionId[(extensionId.LastIndexOf(':') + 1)..];
+            var launches = new List<string>();
+            foreach (var path in Directory.EnumerateFiles(logsDir, "process-*.log"))
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                if (reader.ReadLine()?.Contains(extensionName, StringComparison.Ordinal) != true)
+                {
+                    continue;
+                }
+
+                var markers = new List<string>();
+                var errors = new HashSet<string>(StringComparer.Ordinal);
+                var recentLines = new Queue<string>();
+                while (reader.ReadLine() is { } line)
+                {
+                    if (recentLines.Count == 20)
+                    {
+                        recentLines.Dequeue();
+                    }
+                    recentLines.Enqueue(line);
+
+                    if (line.StartsWith("=== ", StringComparison.Ordinal))
+                    {
+                        if (line is "=== initializing ===" or "=== ready ===" or "=== peer-registration-failed ==="
+                            or "=== exited-before-ready ===" or "=== startup-timeout ==="
+                            or "=== peer-closed-before-ready ===")
+                        {
+                            markers.Add(line);
+                        }
+                        var exit = Regex.Match(line, @"^=== exit code=(-?\d+|signal) disposition=(startup-failure|crash|stopped-normally|termination-failure) ===$");
+                        if (exit.Success)
+                        {
+                            var code = exit.Groups[1].Value;
+                            markers.Add($"=== exit code={(code is "0" or "1" or "signal" ? code : "other")} disposition={exit.Groups[2].Value} ===");
+                        }
+                        continue;
+                    }
+
+                    if (line.StartsWith("[extension-bootstrap] Failed to load extension:", StringComparison.Ordinal))
+                    {
+                        errors.Add("bootstrap import failed");
+                        var joinError = Regex.Match(
+                            line,
+                            @"Request (session\.(?:resume|options\.update)) failed with message: (.*)$");
+                        if (joinError.Success)
+                        {
+                            // Only emit fixed vocabulary, never the exception's paths, IDs, or credentials.
+                            var terms = Regex.Matches(
+                                joinError.Groups[2].Value,
+                                @"\b(?:access|already|authentication|callback|cancelled|closed|connection|context|duplicate|event|failed|file|found|hook|invalid|lock|missing|model|not|owner|path|permission|policy|provider|register|registration|rejected|response|resume|session|stale|state|timeout|tool|unavailable|unknown|workspace)\b",
+                                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+                                .Cast<Match>()
+                                .Select(match => match.Value.ToLowerInvariant())
+                                .Take(20);
+                            errors.Add($"{joinError.Groups[1].Value} reason terms: {string.Join(" ", terms)}");
+                        }
+                    }
+
+                    if (line is "[sdk-extension-test] imported" or "[sdk-extension-test] joining"
+                        or "[sdk-extension-test] joined" or "[sdk-extension-test] logged")
+                    {
+                        markers.Add(line);
+                    }
+                    else if (Regex.IsMatch(line, @"^\[sdk-extension-test\] join failed code=(?:-?\d+|none)$"))
+                    {
+                        markers.Add("[sdk-extension-test] join failed");
+                    }
+
+                    AddErrorCategories(line, errors);
+                }
+                var summary = string.Join("; ", markers);
+                if (errors.Count > 0)
+                {
+                    summary += $"; error categories: {string.Join(", ", errors.OrderBy(error => error, StringComparer.Ordinal))}";
+                }
+                var recentErrors = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var line in recentLines)
+                {
+                    AddErrorCategories(line, recentErrors);
+                }
+                if (recentErrors.Count > 0)
+                {
+                    summary += $"; recent error categories: {string.Join(", ", recentErrors.OrderBy(error => error, StringComparer.Ordinal))}";
+                }
+                launches.Add(summary.Length == 0 ? "<no lifecycle markers>" : summary);
+            }
+
+            return launches.Count == 0 ? "<no matching launch logs>" : string.Join(" | ", launches);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return $"<launch logs unavailable: {error.GetType().Name}>";
+        }
+    }
+
+    private static void AddErrorCategories(string line, HashSet<string> errors)
+    {
+        var code = Regex.Match(line, @"\b(?:ERR_[A-Z0-9_]+|ECONNRESET|ECONNREFUSED|EPIPE|ENOENT|ETIMEDOUT)\b");
+        if (code.Success)
+        {
+            errors.Add(code.Value.StartsWith("ERR_", StringComparison.Ordinal) && code.Value != "ERR_INVALID_ARG_TYPE"
+                ? "Node.js error"
+                : code.Value);
+        }
+        var type = Regex.Match(line, @"(?<![\w.])(?:TypeError|ReferenceError|SyntaxError|RangeError|AggregateError|AssertionError|Error)(?=:| \[)");
+        if (type.Success)
+        {
+            errors.Add(type.Value);
+        }
+    }
 }

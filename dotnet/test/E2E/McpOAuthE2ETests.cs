@@ -6,7 +6,9 @@ using GitHub.Copilot.Rpc;
 using GitHub.Copilot.Test.Harness;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Net;
 using System.Text.Json;
+using System.Threading.Channels;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -18,6 +20,69 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
     private const string RefreshToken = ExpectedToken + "-refresh";
     private const string UpscopeToken = ExpectedToken + "-upscope";
     private const string ReauthToken = ExpectedToken + "-reauth";
+    private const string CimdUrl = "https://github.com/copilot/cli/client-metadata.json";
+
+    [Fact]
+    public async Task Should_Reclaim_Server_Process_When_Startup_Is_Canceled()
+    {
+        using var process = Process.Start(new ProcessStartInfo("node")
+        {
+            Arguments = "-e \"console.log('started'); setInterval(() => {}, 1000)\"",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        })!;
+        using var observer = Process.GetProcessById(process.Id);
+        using var cancellation = new CancellationTokenSource();
+        Task<OAuthMcpServer>? startup = null;
+        try
+        {
+            _ = observer.Handle;
+            Assert.Equal("started", await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+            startup = OAuthMcpServer.WaitForListeningAsync(process, cancellation.Token);
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => startup);
+            Assert.True(observer.HasExited, "Canceled startup retained the OAuth server process.");
+        }
+        finally
+        {
+            cancellation.Cancel();
+            startup ??= OAuthMcpServer.WaitForListeningAsync(process, cancellation.Token);
+            try
+            {
+                await startup;
+            }
+            catch (OperationCanceledException)
+            {
+                // The startup owner has already joined cleanup and disposed its Process.
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Should_Use_Cimd_Url_Instead_Of_Dynamic_Registration()
+    {
+        await using var oauthServer = await OAuthMcpServer.StartAsync(ExpectedToken, cimdSupported: true);
+        const string serverName = "oauth-cimd-mcp";
+        await using var session = await CreateSessionAsync(new SessionConfig
+        {
+            AuthClientIdMetadataUrl = CimdUrl,
+            McpServers = new Dictionary<string, McpServerConfig>
+            {
+                [serverName] = new McpHttpServerConfig { Url = $"{oauthServer.Url}/mcp", Tools = ["*"] }
+            }
+        });
+        await WaitForMcpServerStatusAsync(session, serverName, McpServerStatus.NeedsAuth);
+        var result = await session.Rpc.Mcp.Oauth.LoginAsync(serverName);
+        Assert.NotNull(result.AuthorizationUrl);
+        var clientIdParameter = new Uri(result.AuthorizationUrl!).Query.TrimStart('?')
+            .Split('&').Single(part => part.StartsWith("client_id=", StringComparison.Ordinal));
+        var clientId = clientIdParameter.Substring("client_id=".Length);
+        Assert.Equal(CimdUrl, WebUtility.UrlDecode(clientId));
+        Assert.DoesNotContain(await oauthServer.GetRequestsAsync(), request => request.Path == "/register");
+    }
 
     [Fact]
     public async Task Should_Satisfy_MCP_OAuth_Using_Host_Provided_Token()
@@ -48,6 +113,7 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
             }
         });
 
+        await session.Rpc.Mcp.ReloadAsync();
         await WaitForMcpServerStatusAsync(session, serverName, McpServerStatus.Connected);
         var tools = await session.Rpc.Mcp.ListToolsAsync(serverName);
         Assert.Contains(tools.Tools, tool => tool.Name == "whoami");
@@ -75,14 +141,14 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
     {
         await using var oauthServer = await OAuthMcpServer.StartAsync(ExpectedToken);
         var serverName = "oauth-direct-rpc-mcp";
-        var authRequest = new TaskCompletionSource<McpAuthContext>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var authRequests = Channel.CreateUnbounded<McpAuthContext>();
         var releaseHandler = new TaskCompletionSource<McpAuthResult?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         await using var session = await CreateSessionAsync(new SessionConfig
         {
             OnMcpAuthRequest = request =>
             {
-                authRequest.TrySetResult(request);
+                authRequests.Writer.TryWrite(request);
                 return releaseHandler.Task;
             },
             McpServers = new Dictionary<string, McpServerConfig>
@@ -95,8 +161,27 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
             },
         });
 
+        var reload = session.Rpc.Mcp.ReloadAsync();
         var connected = WaitForMcpServerStatusAsync(session, serverName, McpServerStatus.Connected);
-        var request = await authRequest.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var request = await authRequests.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+
+        while (true)
+        {
+            var handled = await session.Rpc.Mcp.Oauth.HandlePendingRequestAsync(
+                request.RequestId,
+                new McpOauthPendingRequestResponseToken
+                {
+                    AccessToken = ExpectedToken,
+                    TokenType = "Bearer",
+                    ExpiresIn = 3600,
+                });
+            if (handled.Success)
+            {
+                break;
+            }
+            request = await authRequests.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
+        }
+
         Assert.NotEmpty(request.RequestId);
         Assert.Equal(serverName, request.ServerName);
         Assert.Equal($"{oauthServer.Url}/mcp", request.ServerUrl);
@@ -104,21 +189,11 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
         Assert.NotNull(request.WwwAuthenticateParams);
         Assert.Equal("mcp.read", request.WwwAuthenticateParams!.Scope);
 
-        var handled = await session.Rpc.Mcp.Oauth.HandlePendingRequestAsync(
-            request.RequestId,
-            new McpOauthPendingRequestResponseToken
-            {
-                AccessToken = ExpectedToken,
-                TokenType = "Bearer",
-                ExpiresIn = 3600,
-            });
-        Assert.True(handled.Success);
-
+        releaseHandler.SetResult(McpAuthResult.FromToken(new McpAuthToken { AccessToken = ExpectedToken }));
+        await reload;
         await connected;
         var tools = await session.Rpc.Mcp.ListToolsAsync(serverName);
         Assert.Contains(tools.Tools, tool => tool.Name == "whoami");
-
-        releaseHandler.SetResult(McpAuthResult.FromToken(new McpAuthToken { AccessToken = ExpectedToken }));
     }
 
     [Fact]
@@ -151,7 +226,7 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
                 {
                     Assert.NotNull(request.WwwAuthenticateParams);
                     Assert.Equal($"{oauthServer.Url}/.well-known/oauth-protected-resource", request.WwwAuthenticateParams!.ResourceMetadataUrl);
-                    Assert.Equal("mcp.write", request.WwwAuthenticateParams.Scope);
+                    Assert.Equal("mcp.read mcp.write", request.WwwAuthenticateParams.Scope);
                     Assert.Equal("insufficient_scope", request.WwwAuthenticateParams.Error);
                 }
 
@@ -178,14 +253,16 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
             }
         });
 
+        await session.Rpc.Mcp.ReloadAsync();
         await WaitForMcpServerStatusAsync(session, serverName, McpServerStatus.Connected);
+        refreshCount = 0;
         await CallWhoamiAsync(session, serverName, "refresh");
         await CallWhoamiAsync(session, serverName, "upscope");
         await CallWhoamiAsync(session, serverName, "reauth");
 
+        observedReasons.RemoveAll(reason => reason == McpOauthRequestReason.Initial);
         Assert.Equal(
             [
-                McpOauthRequestReason.Initial,
                 McpOauthRequestReason.Refresh,
                 McpOauthRequestReason.Upscope,
                 McpOauthRequestReason.Refresh,
@@ -223,6 +300,7 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
             }
         });
 
+        await session.Rpc.Mcp.ReloadAsync();
         await WaitForMcpServerStatusAsync(session, serverName, McpServerStatus.NeedsAuth);
 
         // The MCP connection is kicked off by session.create, but the SDK only registers its
@@ -268,7 +346,7 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
 
         public string Url { get; }
 
-        public static async Task<OAuthMcpServer> StartAsync(string expectedToken)
+        public static async Task<OAuthMcpServer> StartAsync(string expectedToken, bool cimdSupported = false)
         {
             var repoRoot = FindRepoRoot();
             var script = GetRepoRelativePath(repoRoot, "test", "harness", "test-mcp-oauth-server.mjs");
@@ -281,26 +359,57 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
                 UseShellExecute = false
             };
             startInfo.Environment["EXPECTED_TOKEN"] = expectedToken;
+            startInfo.Environment["CIMD_SUPPORTED"] = cimdSupported ? "true" : "false";
 
             var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Failed to start OAuth MCP server.");
-            var stderrTask = process.StandardError.ReadToEndAsync();
-
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            while (!cts.IsCancellationRequested)
+            return await WaitForListeningAsync(process, cts.Token);
+        }
+
+        public static async Task<OAuthMcpServer> WaitForListeningAsync(Process process, CancellationToken cancellationToken)
+        {
+#if NET
+            var stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
+#else
+            var stderrTask = process.StandardError.ReadToEndAsync();
+#endif
+            try
             {
-                var line = await process.StandardOutput.ReadLineAsync(cts.Token);
-                if (line is null)
+                while (true)
                 {
-                    throw new InvalidOperationException($"OAuth MCP server exited before listening: {await stderrTask}");
-                }
-                if (line.StartsWith("Listening: ", StringComparison.Ordinal))
-                {
-                    return new OAuthMcpServer(process, line["Listening: ".Length..]);
+                    var line = await process.StandardOutput.ReadLineAsync(cancellationToken);
+                    if (line is null)
+                    {
+                        throw new InvalidOperationException($"OAuth MCP server exited before listening: {await stderrTask}");
+                    }
+                    if (line.StartsWith("Listening: ", StringComparison.Ordinal))
+                    {
+                        return new OAuthMcpServer(process, line["Listening: ".Length..]);
+                    }
                 }
             }
-
-            throw new TimeoutException($"Timed out waiting for OAuth MCP server: {await stderrTask}");
+            catch (Exception startupError)
+            {
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                    await process.WaitForExitAsync(CancellationToken.None);
+                    await stderrTask;
+                }
+                catch (Exception cleanupError)
+                {
+                    throw new AggregateException(startupError, cleanupError);
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+                throw;
+            }
         }
 
         public async Task<List<OAuthMcpRequest>> GetRequestsAsync()
@@ -312,7 +421,8 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
                     element.TryGetProperty("authorization", out var authorization)
                         && authorization.ValueKind is JsonValueKind.String
                             ? authorization.GetString()
-                            : null))
+                            : null,
+                    element.GetProperty("path").GetString()!))
                 .ToList();
         }
 
@@ -356,5 +466,5 @@ public class McpOAuthE2ETests(E2ETestFixture fixture, ITestOutputHelper output) 
             => "\"" + argument.Replace("\"", "\\\"") + "\"";
     }
 
-    private sealed record OAuthMcpRequest(string? Authorization);
+    private sealed record OAuthMcpRequest(string? Authorization, string Path);
 }

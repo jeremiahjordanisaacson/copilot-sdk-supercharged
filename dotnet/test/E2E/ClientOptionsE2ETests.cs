@@ -16,6 +16,29 @@ namespace GitHub.Copilot.Test.E2E;
 public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
     : E2ETestBase(fixture, "client_options", output)
 {
+    [Theory]
+    [InlineData("", "fallback.ghe.example", "https://fallback.ghe.example")]
+    [InlineData("tenant.ghe.example", "fallback.ghe.example", "https://tenant.ghe.example")]
+    [InlineData("", "", "https://github.com")]
+    public async Task Should_Use_Configured_GitHub_Host_For_Authentication(string copilotHost, string ghHost, string expectedHost)
+    {
+        var environment = Ctx.GetEnvironment();
+        environment["COPILOT_GH_HOST"] = copilotHost;
+        environment["GH_HOST"] = ghHost;
+
+        await using var client = Ctx.CreateClient(
+            options: new CopilotClientOptions
+            {
+                GitHubToken = environment["GITHUB_TOKEN"],
+                UseLoggedInUser = false,
+            },
+            environment: environment);
+
+        var status = await client.GetAuthStatusAsync();
+        Assert.True(status.IsAuthenticated, status.StatusMessage);
+        Assert.Equal(expectedHost, status.Host);
+    }
+
     [Fact]
     public async Task Should_Listen_On_Configured_Tcp_Port()
     {
@@ -57,8 +80,10 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         await session.DisposeAsync();
     }
 
-    [Fact]
-    public async Task Should_Propagate_Process_Options_To_Spawned_Cli()
+    [Theory]
+    [InlineData(true, "SPAN_ONLY")]
+    [InlineData(false, "NO_CONTENT")]
+    public async Task Should_Propagate_Process_Options_To_Spawned_Cli(bool captureContent, string captureMode)
     {
         var (cliPath, capturePath) = await CreateFakeCliCaptureAsync();
         var telemetryPath = Path.Join(Ctx.WorkDir, "telemetry.jsonl");
@@ -66,6 +91,8 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var copilotHomeFromOption = Path.Join(Ctx.WorkDir, "copilot-home-from-option");
         var clientEnv = Ctx.GetEnvironment().ToDictionary(pair => pair.Key, pair => pair.Value);
         clientEnv["COPILOT_HOME"] = copilotHomeFromEnv;
+        clientEnv["COPILOT_RUNTIME_PROCESS_FILE_LOGGING"] = "0";
+        clientEnv["OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT"] = "SPAN_AND_EVENT";
         await File.WriteAllTextAsync(cliPath, FakeStdioCliScript);
 
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
@@ -82,7 +109,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
                 FilePath = telemetryPath,
                 ExporterType = "file",
                 SourceName = "dotnet-sdk-e2e",
-                CaptureContent = true,
+                CaptureContent = captureContent,
             },
             UseLoggedInUser = false,
         }, environment: clientEnv);
@@ -103,13 +130,15 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
         Assert.Equal(copilotHomeFromOption, capturedEnv.GetProperty("COPILOT_HOME").GetString());
         Assert.Equal("process-option-token", capturedEnv.GetProperty("COPILOT_SDK_AUTH_TOKEN").GetString());
+        Assert.Equal("1", capturedEnv.GetProperty("COPILOT_RUNTIME_PROCESS_FILE_LOGGING").GetString());
         Assert.Equal("true", capturedEnv.GetProperty("COPILOT_OTEL_ENABLED").GetString());
         Assert.Equal("http://127.0.0.1:4318", capturedEnv.GetProperty("OTEL_EXPORTER_OTLP_ENDPOINT").GetString());
         Assert.Equal("http/protobuf", capturedEnv.GetProperty("OTEL_EXPORTER_OTLP_PROTOCOL").GetString());
         Assert.Equal(telemetryPath, capturedEnv.GetProperty("COPILOT_OTEL_FILE_EXPORTER_PATH").GetString());
         Assert.Equal("file", capturedEnv.GetProperty("COPILOT_OTEL_EXPORTER_TYPE").GetString());
         Assert.Equal("dotnet-sdk-e2e", capturedEnv.GetProperty("COPILOT_OTEL_SOURCE_NAME").GetString());
-        Assert.Equal("true", capturedEnv.GetProperty("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT").GetString());
+        Assert.Equal(captureMode, capturedEnv.GetProperty("OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT").GetString());
+        Assert.Equal(captureContent ? "true" : "false", capturedEnv.GetProperty("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT").GetString());
 
         var session = await Ctx.CreateSessionAsync(client, new SessionConfig
         {
@@ -253,6 +282,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
         var session = await Ctx.CreateSessionAsync(client, new SessionConfig
         {
+            Name = "named at create",
             SkipEmbeddingRetrieval = false,
             OrganizationCustomInstructions = "Follow org policy.",
             EnableOnDemandInstructionDiscovery = true,
@@ -266,6 +296,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
         using var capture = JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var createRequest = GetCapturedRequestParams(capture.RootElement, "session.create");
+        Assert.Equal("named at create", createRequest.GetProperty("name").GetString());
         Assert.False(createRequest.GetProperty("skipEmbeddingRetrieval").GetBoolean());
         Assert.Equal("Follow org policy.", createRequest.GetProperty("organizationCustomInstructions").GetString());
         Assert.True(createRequest.GetProperty("enableOnDemandInstructionDiscovery").GetBoolean());
@@ -296,7 +327,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var session = await Ctx.CreateSessionAsync(client, new SessionConfig
         {
             ClientName = "advanced-create-client",
-            Model = "claude-sonnet-4.5",
+            Model = "claude-sonnet-5",
             ReasoningEffort = "medium",
             ReasoningSummary = ReasoningSummary.Detailed,
             ContextTier = ContextTier.LongContext,
@@ -336,7 +367,6 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             },
             Memory = new MemoryConfiguration { Enabled = true },
             GitHubToken = "session-create-token",
-            RemoteSession = GitHub.Copilot.Rpc.RemoteSessionMode.Export,
             Cloud = new CloudSessionOptions
             {
                 Repository = new CloudSessionRepository
@@ -379,7 +409,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
                     Provider = "create-provider",
                     Id = "create-model",
                     Name = "Create Model",
-                    ModelId = "claude-sonnet-4.5",
+                    ModelId = "claude-sonnet-5",
                     WireModel = "create-wire-model",
                     MaxContextWindowTokens = 12_000,
                     MaxPromptTokens = 10_000,
@@ -392,7 +422,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         using var capture = JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var createRequest = GetCapturedRequestParams(capture.RootElement, "session.create");
         Assert.Equal("advanced-create-client", createRequest.GetProperty("clientName").GetString());
-        Assert.Equal("claude-sonnet-4.5", createRequest.GetProperty("model").GetString());
+        Assert.Equal("claude-sonnet-5", createRequest.GetProperty("model").GetString());
         Assert.Equal("medium", createRequest.GetProperty("reasoningEffort").GetString());
         Assert.Equal("detailed", createRequest.GetProperty("reasoningSummary").GetString());
         Assert.Equal("long_context", createRequest.GetProperty("contextTier").GetString());
@@ -410,7 +440,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Assert.Equal(outputDirectory, createRequest.GetProperty("largeOutput").GetProperty("outputDir").GetString());
         Assert.True(createRequest.GetProperty("memory").GetProperty("enabled").GetBoolean());
         Assert.Equal("session-create-token", createRequest.GetProperty("gitHubToken").GetString());
-        Assert.Equal("export", createRequest.GetProperty("remoteSession").GetString());
+        Assert.False(createRequest.TryGetProperty("remoteSession", out _));
         Assert.Equal("github", createRequest.GetProperty("cloud").GetProperty("repository").GetProperty("owner").GetString());
         Assert.True(createRequest.GetProperty("requestMcpApps").GetBoolean());
         Assert.True(createRequest.GetProperty("requestCanvasRenderer").GetBoolean());
@@ -442,7 +472,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
         var session = await Ctx.CreateSessionAsync(client, new SessionConfig
         {
-            Model = "claude-sonnet-4.5",
+            Model = "claude-sonnet-5",
             Provider = new ProviderConfig
             {
                 Type = "azure",
@@ -453,7 +483,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
                 BearerToken = "provider-bearer-token",
                 Azure = new AzureOptions { ApiVersion = "2024-02-15-preview" },
                 Headers = new Dictionary<string, string> { ["X-Provider-Wire"] = "yes" },
-                ModelId = "claude-sonnet-4.5",
+                ModelId = "claude-sonnet-5",
                 WireModel = "azure-deployment",
                 MaxPromptTokens = 8192,
                 MaxOutputTokens = 1024,
@@ -471,7 +501,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Assert.Equal("provider-bearer-token", provider.GetProperty("bearerToken").GetString());
         Assert.Equal("2024-02-15-preview", provider.GetProperty("azure").GetProperty("apiVersion").GetString());
         Assert.Equal("yes", provider.GetProperty("headers").GetProperty("X-Provider-Wire").GetString());
-        Assert.Equal("claude-sonnet-4.5", provider.GetProperty("modelId").GetString());
+        Assert.Equal("claude-sonnet-5", provider.GetProperty("modelId").GetString());
         Assert.Equal("azure-deployment", provider.GetProperty("wireModel").GetString());
         Assert.Equal(8192, provider.GetProperty("maxPromptTokens").GetInt32());
         Assert.Equal(1024, provider.GetProperty("maxOutputTokens").GetInt32());
@@ -512,6 +542,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Assert.False(createRequest.GetProperty("enableSkills").GetBoolean());
         Assert.True(createRequest.GetProperty("customAgentsLocalOnly").GetBoolean());
         Assert.False(createRequest.TryGetProperty("organizationCustomInstructions", out _));
+        Assert.False(createRequest.TryGetProperty("name", out _));
 
         await session.DisposeAsync();
     }
@@ -585,17 +616,18 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var unavailablePort = GetAvailableTcpPort();
         await File.WriteAllTextAsync(cliPath, FakeTcpUnavailablePortCliScript);
 
+        using var observer = new RuntimeStartupProcessObserver(pidPath, useStdio: false, Logger);
         await using var client = Ctx.CreateClient(
             options: new CopilotClientOptions
             {
                 Connection = RuntimeConnection.ForTcp(path: cliPath, args: ["--pid-file", pidPath, "--announce-port", unavailablePort.ToString(CultureInfo.InvariantCulture)]),
                 UseLoggedInUser = false,
+                Logger = observer,
             });
 
         await Assert.ThrowsAnyAsync<Exception>(() => client.StartAsync());
 
-        var pid = int.Parse(await File.ReadAllTextAsync(pidPath), CultureInfo.InvariantCulture);
-        await AssertProcessExitedAsync(pid);
+        Assert.True(observer.Process.HasExited, "Failed TCP connection retained the runtime process.");
 
         await client.ForceStopAsync();
     }
@@ -705,7 +737,6 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
                 OutputDirectory = outputDirectory,
             },
             Memory = new MemoryConfiguration { Enabled = false },
-            RemoteSession = GitHub.Copilot.Rpc.RemoteSessionMode.On,
             OpenCanvases =
             [
                 new GitHub.Copilot.Rpc.OpenCanvasInstance
@@ -739,7 +770,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Assert.Equal(2048, resumeRequest.GetProperty("largeOutput").GetProperty("maxSizeBytes").GetInt64());
         Assert.Equal(outputDirectory, resumeRequest.GetProperty("largeOutput").GetProperty("outputDir").GetString());
         Assert.False(resumeRequest.GetProperty("memory").GetProperty("enabled").GetBoolean());
-        Assert.Equal("on", resumeRequest.GetProperty("remoteSession").GetString());
+        Assert.False(resumeRequest.TryGetProperty("remoteSession", out _));
 
         var openCanvas = resumeRequest.GetProperty("openCanvases")[0];
         Assert.Equal("resume-canvas", openCanvas.GetProperty("canvasId").GetString());
@@ -758,6 +789,8 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     public async Task Should_Apply_Empty_Mode_Defaults_To_ResumeSession_Wire_Request()
     {
         var (cliPath, capturePath) = await CreateFakeCliCaptureAsync();
+        var clientEnv = Ctx.GetEnvironment().ToDictionary(pair => pair.Key, pair => pair.Value);
+        clientEnv["COPILOT_RUNTIME_PROCESS_FILE_LOGGING"] = "0";
 
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
@@ -765,7 +798,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             Mode = CopilotClientMode.Empty,
             BaseDirectory = Ctx.WorkDir,
             UseLoggedInUser = false,
-        });
+        }, environment: clientEnv);
 
         await client.StartAsync();
 
@@ -776,6 +809,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         });
 
         using var capture = JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        Assert.Equal("0", capture.RootElement.GetProperty("env").GetProperty("COPILOT_RUNTIME_PROCESS_FILE_LOGGING").GetString());
         var resumeRequest = GetCapturedRequestParams(capture.RootElement, "session.resume");
         Assert.False(resumeRequest.GetProperty("enableSessionTelemetry").GetBoolean());
         Assert.True(resumeRequest.GetProperty("skipEmbeddingRetrieval").GetBoolean());
@@ -909,34 +943,6 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             .GetProperty("params");
     }
 
-    private static async Task AssertProcessExitedAsync(int pid)
-    {
-        for (var i = 0; i < 50; i++)
-        {
-            if (!IsProcessRunning(pid))
-            {
-                return;
-            }
-
-            await Task.Delay(100);
-        }
-
-        Assert.False(IsProcessRunning(pid), $"Expected process {pid} to have exited.");
-    }
-
-    private static bool IsProcessRunning(int pid)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(pid);
-            return !process.HasExited;
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-        {
-            return false;
-        }
-    }
-
     private const string FakeTcpUnavailablePortCliScript = """
         const fs = require("fs");
 
@@ -986,12 +992,14 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             env: {
               COPILOT_HOME: process.env.COPILOT_HOME,
               COPILOT_SDK_AUTH_TOKEN: process.env.COPILOT_SDK_AUTH_TOKEN,
+              COPILOT_RUNTIME_PROCESS_FILE_LOGGING: process.env.COPILOT_RUNTIME_PROCESS_FILE_LOGGING,
               COPILOT_OTEL_ENABLED: process.env.COPILOT_OTEL_ENABLED,
               OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
               OTEL_EXPORTER_OTLP_PROTOCOL: process.env.OTEL_EXPORTER_OTLP_PROTOCOL,
               COPILOT_OTEL_FILE_EXPORTER_PATH: process.env.COPILOT_OTEL_FILE_EXPORTER_PATH,
               COPILOT_OTEL_EXPORTER_TYPE: process.env.COPILOT_OTEL_EXPORTER_TYPE,
               COPILOT_OTEL_SOURCE_NAME: process.env.COPILOT_OTEL_SOURCE_NAME,
+              OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT: process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT,
               OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: process.env.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT
             }
           }));

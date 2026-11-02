@@ -218,6 +218,48 @@ session.on(AssistantMessageDeltaEvent.class, event ->
 > [!TIP]
 > **(TypeScript)** The TypeScript SDK uses a discriminated union—when you match on `event.type`, the `data` payload is automatically narrowed to the correct shape.
 
+## Subscribing before a session starts
+
+A session can emit events before its create or resume call returns. The agent may already be working—especially on resume with `continuePendingWork`—and ephemeral events such as `session.idle` are never written to the session log, so `getMessages` cannot recover them afterwards. A subscription installed after the session handle exists misses that startup window.
+
+> [!TIP]
+> **(Rust)** `Client::prepare_session` and `Client::prepare_resume_session` return a `PreparedSession` that owns the session's event channel before any protocol activity happens. Subscribe first, then call `start()`.
+
+```rust
+use github_copilot_sdk::{Client, SessionConfig};
+
+async fn create_without_missing_startup_events(
+    client: &Client,
+) -> Result<(), github_copilot_sdk::Error> {
+    let prepared = client.prepare_session(
+        SessionConfig::default().with_event_buffer_capacity(2048),
+    )?;
+
+    // Installed before any wire activity: nothing is dropped for lack of a receiver.
+    let mut events = prepared.subscribe();
+    tokio::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            println!("{}", event.event_type);
+        }
+    });
+
+    let session = prepared.start().await?;
+    let _ = session;
+    Ok(())
+}
+```
+
+`prepare_*` is synchronous and inert: it validates the buffer capacity, allocates a local channel, and does nothing else. No session is registered and nothing reaches the CLI until `start()` is first polled. Dropping a prepared session that was never started leaves no state behind and closes its subscriptions; dropping the `start()` future cancels the in-flight startup and unregisters the session, so a retry with the same session ID succeeds. Cleanup is scoped to the exact registration the abandoned startup owned, so it cannot evict a retry that has already taken over the same session ID.
+
+Startup buffering is worth planning for:
+
+* The event buffer is finite—512 events unless `event_buffer_capacity` overrides it. A capacity of `0` is rejected with an invalid-config error rather than clamped.
+* Slow subscribers observe a `Lagged` error reporting how many events were skipped. They never apply backpressure to the session's event loop.
+* Consumers that need a lossless view of a large startup burst must either configure a capacity that covers it or drain the subscription concurrently with `start()`.
+
+> [!NOTE]
+> For cloud sessions where the server assigns the session ID, the SDK cannot route notifications until the create response arrives and the ID is known. Events emitted before that point are not routable to any session. The guarantee is narrower: routed events are never dropped for lack of an installed receiver. Pin `session_id` on the config to get routing—and full pre-response coverage—from the first byte.
+
 ## Render only the parent agent response
 
 Sub-agent events share the parent session stream and include envelope-level `agentId`. Root/main agent events and session-level events omit `agentId`, so main-chat renderers can ignore assistant events where `agentId` is set and route those events to traces or progress UI instead.
@@ -441,11 +483,11 @@ Ephemeral. Token usage and cost information for an individual API call.
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `model` | `string` | ✅ | Model identifier (e.g., `"gpt-5.4"`) |
-| `inputTokens` | `number` | | Input tokens consumed |
+| `inputTokens` | `number` | | Total input tokens for this call, including `cacheReadTokens` and `cacheWriteTokens` |
 | `outputTokens` | `number` | | Output tokens produced |
 | `reasoningTokens` | `number` | | Output tokens used for reasoning/chain-of-thought (subset of `outputTokens`) |
-| `cacheReadTokens` | `number` | | Tokens read from prompt cache |
-| `cacheWriteTokens` | `number` | | Tokens written to prompt cache |
+| `cacheReadTokens` | `number` | | Tokens read from prompt cache (subset of `inputTokens`) |
+| `cacheWriteTokens` | `number` | | Tokens written to prompt cache (subset of `inputTokens`) |
 | `cacheExpiresAt` | `string` | | ISO 8601 timestamp when the prompt cache for this model call expires |
 | `contentFilterTriggered` | `boolean` | | Whether the response was blocked or truncated by content filtering (`finish_reason === 'content_filter'`) |
 | `finishReason` | `string` | | Model finish reason (e.g., `"stop"`, `"length"`, `"tool_calls"`, `"content_filter"`) |
@@ -477,25 +519,45 @@ These events track the full lifecycle of each tool invocation—from the model r
 
 ### `tool.execution_start`
 
-Emitted when a tool begins executing.
+Emitted when a tool begins executing. MCP identity: `mcpConfigServerName ?? mcpServerName` (legacy-compatible).
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `toolCallId` | `string` | ✅ | Unique identifier for this tool call |
 | `toolName` | `string` | ✅ | Name of the tool (e.g., `"bash"`, `"edit"`, `"grep"`) |
 | `arguments` | `object` | | Parsed arguments passed to the tool |
-| `mcpServerName` | `string` | | MCP server name, when the tool is provided by an MCP server |
+| `mcpServerName` | `string` | | Configured MCP server key |
+| `mcpServerDisplayName` | `string` | | Explicit display label; otherwise display `mcpServerName` |
 | `mcpToolName` | `string` | | Original tool name on the MCP server |
 | `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
 
 ### `tool.execution_partial_result`
 
-Ephemeral. Incremental output from a running tool (e.g., streaming bash output).
+Deprecated. Use `tool.shell_output` for live terminal output. This ephemeral event remains emitted alongside the replacement during migration; subscribe to only one representation to avoid displaying the same output twice.
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `toolCallId` | `string` | ✅ | Matches the corresponding `tool.execution_start` |
-| `partialOutput` | `string` | ✅ | Incremental output chunk |
+| `partialOutput` | `string` | ✅ | Bounded, cumulative replacement snapshot with stdout and stderr merged; not an append-only chunk |
+
+### `tool.shell_output`
+
+Ephemeral. Append-only output from an attached terminal command or a user-requested terminal command. Each event contains newly observed, secret-filtered text, without the separators or markers used to format final tool results for the model.
+
+| Data Field | Type | Required | Description |
+|------------|------|----------|-------------|
+| `toolCallId` | `string` | ✅ | Identifies the originating tool call |
+| `text` | `string` | ✅ | New text to append, not a replacement snapshot |
+| `stream` | `"stdout" \| "stderr" \| "terminal"` | | Output source; omitted means `"stdout"`. `"terminal"` identifies inherently merged PTY output, whose stdout/stderr origin cannot be recovered |
+| `sequence` | `number` | ✅ | Starts at zero and increases across all streams for this tool call, in observed publication order |
+
+Accumulate `text` separately by `toolCallId` and `stream`, or join the chunks in sequence order for a combined display. A sequence number identifies duplicates and missing chunks; it does not establish exact ordering between independent operating-system writes. A late subscriber can receive a first sequence greater than zero.
+
+These events are live-only: they are not persisted or replayed after resume. Final `tool.execution_complete` results, model-facing formatting, and detached command capture are unchanged. Text can contain terminal control sequences; renderers must apply their normal terminal-text handling.
+
+An attached terminal command can keep running after `tool.execution_complete` when it runs asynchronously or continues beyond `initial_wait`. Output received while it continues uses the original `toolCallId` and continues the same `sequence`, rather than restarting at zero. Consumers that display only active calls must ignore chunks received after completion instead of recreating completed-call state.
+
+Secret filtering operates on each decoded chunk. The runtime does not artificially split lines, but operating-system reads can divide a line or secret across chunks; cross-chunk secret reconstruction is not provided.
 
 ### `tool.execution_progress`
 
@@ -517,7 +579,7 @@ Emitted when a tool finishes executing—successfully or with an error.
 | `model` | `string` | | Model that generated this tool call |
 | `interactionId` | `string` | | CAPI interaction ID |
 | `isUserRequested` | `boolean` | | `true` when the user explicitly requested this tool call |
-| `result` | `Result` | | Present on success (see below) |
+| `result` | `Result` | | Present on success. On failure, present when the tool returned content with its error, or when the text sent to the LLM differs from `error.message`; `content` is then that text |
 | `error` | `{ message, code? }` | | Present on failure |
 | `toolTelemetry` | `object` | | Tool-specific telemetry (e.g., CodeQL check counts) |
 | `parentToolCallId` | `string` | | Deprecated. Use envelope-level `agentId` for sub-agent attribution |
@@ -648,7 +710,7 @@ The session has ended.
 |------------|------|----------|-------------|
 | `shutdownType` | `"routine" \| "error"` | ✅ | Normal shutdown or crash |
 | `errorReason` | `string` | | Error description when `shutdownType` is `"error"` |
-| `totalPremiumRequests` | `number` | ✅ | Total premium API requests used |
+| `totalPremiumRequests` | `number` | | Total premium API requests used |
 | `totalApiDurationMs` | `number` | ✅ | Cumulative API call time in milliseconds |
 | `sessionStartTime` | `number` | ✅ | Unix timestamp (ms) when the session started |
 | `codeChanges` | `{ linesAdded, linesRemoved, filesModified }` | ✅ | Aggregate code change metrics |
@@ -673,7 +735,7 @@ The `permissionRequest` is a discriminated union on `kind`:
 | `kind` | Key Fields | Description |
 |--------|------------|-------------|
 | `"shell"` | `fullCommandText`, `intention`, `commands[]`, `possiblePaths[]` | Execute a shell command |
-| `"write"` | `fileName`, `diff`, `intention`, `newFileContents?` | Write/modify a file |
+| `"write"` | `fileName`, `diff`, `intention`, `newFileContents?`, `fileEdits?` | Write/modify a file |
 | `"read"` | `path`, `intention` | Read a file or directory |
 | `"mcp"` | `serverName`, `toolName`, `toolTitle`, `args?`, `readOnly` | Call an MCP tool |
 | `"url"` | `url`, `intention` | Fetch a URL |
@@ -681,6 +743,10 @@ The `permissionRequest` is a discriminated union on `kind`:
 | `"custom-tool"` | `toolName`, `toolDescription`, `args?` | Call a custom tool |
 
 All `kind` variants also include an optional `toolCallId` linking back to the tool call that triggered the request.
+
+Write requests can also include `fileEdits` in both `permissionRequest` and `promptRequest`. Each entry contains an optional `before` and `after` snapshot, each with an absolute `path` in the session filesystem namespace and complete UTF-8 `content`. A missing `before` means creation; a missing `after` means deletion. An empty `content` string represents an empty file, not an unavailable preview. A move can have different paths on its two sides. When a move overwrites an existing destination, separate entries describe the source deletion and destination replacement.
+
+These snapshots describe the planned operation, not a later read of the live filesystem. The runtime omits `fileEdits` when it cannot provide a complete text preview, including requests made before reading a sandbox-protected file, non-UTF-8 contents, or an unreadable or non-regular move destination, such as a named pipe. Do not infer a deletion from an empty legacy `newFileContents` value. The existing fields and approval choices remain available to consumers that do not use previews.
 
 ### `permission.completed`
 
@@ -712,14 +778,15 @@ Ephemeral. A user input request was resolved.
 
 ### `elicitation.requested`
 
-Ephemeral. The agent needs structured form input from the user (MCP elicitation protocol).
+Ephemeral. The agent needs input from the user, either as structured form fields (MCP elicitation protocol) or by opening a URL in the user's browser.
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `requestId` | `string` | ✅ | Use this to respond via `session.respondToElicitation()` |
 | `message` | `string` | ✅ | Description of what information is needed |
-| `mode` | `"form"` | | Elicitation mode (currently only `"form"`) |
-| `requestedSchema` | `{ type: "object", properties, required? }` | ✅ | JSON Schema describing the form fields |
+| `mode` | `"form" \| "url"` | | Elicitation mode: structured form or browser URL |
+| `requestedSchema` | `{ type: "object", properties, required? }` | | JSON Schema describing the form fields (form mode only) |
+| `url` | `string` | | URL to open in the user's browser (url mode only) |
 
 ### `elicitation.completed`
 
@@ -795,7 +862,7 @@ A skill was activated for the current conversation.
 | `name` | `string` | ✅ | Skill name |
 | `path` | `string` | ✅ | File path to the SKILL.md definition |
 | `content` | `string` | ✅ | Full skill content injected into the conversation |
-| `allowedTools` | `string[]` | | Tools auto-approved while this skill is active |
+| `allowedTools` | `string[]` | | Tools listed in the skill's `allowed-tools` frontmatter. The SDK doesn't approve them automatically; your permission handler still decides. The Copilot CLI auto-approves them while the skill is active. |
 | `pluginName` | `string` | | Plugin the skill originated from |
 | `pluginVersion` | `string` | | Plugin version |
 
@@ -807,7 +874,7 @@ The current turn was aborted.
 
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
-| `reason` | `string` | ✅ | Why the turn was aborted (e.g., `"user initiated"`) |
+| `reason` | `"user_initiated" \| "remote_command" \| "user_abort" \| "autopilot_credit_limit"` | ✅ | Why the turn was aborted |
 
 ### `user.message`
 
@@ -862,8 +929,9 @@ Ephemeral. The agent has created a plan and wants to exit plan mode.
 | `requestId` | `string` | ✅ | Use this to respond via `session.respondToExitPlanMode()` |
 | `summary` | `string` | ✅ | Summary of the plan |
 | `planContent` | `string` | ✅ | Full plan file content |
-| `actions` | `string[]` | ✅ | Available user actions (e.g., approve, edit, reject) |
-| `recommendedAction` | `string` | ✅ | Suggested action |
+| `actions` | `("exit_only" \| "interactive" \| "autopilot" \| "autopilot_fleet")[]` | ✅ | Available user actions |
+| `recommendedAction` | `"exit_only" \| "interactive" \| "autopilot" \| "autopilot_fleet"` | ✅ | Suggested action to preselect |
+| `model` | `string` | | Model the session had selected when the plan was authored, when one is known |
 
 ### `exit_plan_mode.completed`
 
@@ -872,6 +940,10 @@ Ephemeral. An exit plan mode request was resolved.
 | Data Field | Type | Required | Description |
 |------------|------|----------|-------------|
 | `requestId` | `string` | ✅ | Matches the corresponding `exit_plan_mode.requested` |
+| `approved` | `boolean` | | Whether the user approved the plan |
+| `selectedAction` | `"exit_only" \| "interactive" \| "autopilot" \| "autopilot_fleet"` | | Action the user selected |
+| `autoApproveEdits` | `boolean` | | Whether edits should be auto-approved without confirmation |
+| `feedback` | `string` | | Free-form feedback from the user if they requested changes to the plan |
 
 ### `command.queued`
 
@@ -928,7 +1000,7 @@ assistant.turn_start          → Turn begins
 │   ├── permission.requested  → Needs user approval
 │   ├── permission.completed  → Approval result
 │   ├── tool.execution_start  → Tool begins
-│   ├── tool.execution_partial_result  → Streaming tool output (ephemeral, repeated)
+│   ├── tool.shell_output              → Stream-tagged terminal output (ephemeral, repeated)
 │   ├── tool.execution_progress        → Progress updates (ephemeral, repeated)
 │   ├── tool.execution_complete        → Tool finished
 │   │
@@ -954,8 +1026,9 @@ This table lists key `data` payload fields. Common envelope fields are documente
 | `assistant.turn_end` | | Assistant | `turnId` |
 | `assistant.usage` | ✅ | Assistant | `model`, `apiEndpoint?`, `inputTokens?`, `outputTokens?`, `cost?`, `duration?` |
 | `tool.user_requested` | | Tool | `toolCallId`, `toolName`, `arguments?` |
-| `tool.execution_start` | | Tool | `toolCallId`, `toolName`, `arguments?`, `mcpServerName?` |
+| `tool.execution_start` | | Tool | `toolCallId`, `toolName`, `arguments?`, `mcpServerName?`, `mcpServerDisplayName?` |
 | `tool.execution_partial_result` | ✅ | Tool | `toolCallId`, `partialOutput` |
+| `tool.shell_output` | ✅ | Tool | `toolCallId`, `text`, `stream?`, `sequence` |
 | `tool.execution_progress` | ✅ | Tool | `toolCallId`, `progressMessage` |
 | `tool.execution_complete` | | Tool | `toolCallId`, `success`, `result?`, `error?` |
 | `session.idle` | ✅ | Session | `aborted?` |
@@ -973,7 +1046,7 @@ This table lists key `data` payload fields. Common envelope fields are documente
 | `permission.completed` | | Permission | `requestId`, `result.kind` |
 | `user_input.requested` | ✅ | User Input | `requestId`, `question`, `choices?` |
 | `user_input.completed` | ✅ | User Input | `requestId` |
-| `elicitation.requested` | ✅ | User Input | `requestId`, `message`, `requestedSchema` |
+| `elicitation.requested` | ✅ | User Input | `requestId`, `message`, `mode?`, `requestedSchema?`, `url?` |
 | `elicitation.completed` | ✅ | User Input | `requestId` |
 | `subagent.started` | | Sub-Agent | `toolCallId`, `agentName`, `agentDisplayName`, `model?` |
 | `subagent.completed` | | Sub-Agent | `toolCallId`, `agentName`, `agentDisplayName`, `model?`, `durationMs?`, `totalTokens?`, `totalToolCalls?` |
@@ -991,4 +1064,4 @@ This table lists key `data` payload fields. Common envelope fields are documente
 | `session_limits_exhausted.requested` | ✅ | Session | `requestId`, `maxAiCredits`, `usedAiCredits` |
 | `session_limits_exhausted.completed` | ✅ | Session | `requestId`, `response.action` |
 | `exit_plan_mode.requested` | ✅ | Plan Mode | `requestId`, `summary`, `planContent`, `actions` |
-| `exit_plan_mode.completed` | ✅ | Plan Mode | `requestId` |
+| `exit_plan_mode.completed` | ✅ | Plan Mode | `requestId`, `approved?`, `selectedAction?` |

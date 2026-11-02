@@ -240,6 +240,51 @@ let client = Client::start(
 
 > The example above uses an stdio runtime connection — the default when the SDK bundles the CLI. If you connect to an external runtime via a URL (`forUri` / `ForUri`), pass `--plugin-dir` to the long-running CLI server when you start it; the SDK does not forward `--plugin-dir` to runtimes it didn't spawn.
 
+## Per-session plugin directories
+
+`--plugin-dir` is a launch argument, so it fixes one plugin set for the CLI process and every session created against it. When sessions need different plugin sets, or when the SDK is connected to a runtime it did not spawn, pass the directories on the session config instead. They travel in the `session.create` and `session.resume` payloads over JSON-RPC rather than as process arguments, so they reach an external runtime the same way the startup option does.
+
+<!-- docs-validate: hidden -->
+```typescript
+import { CopilotClient } from "@github/copilot-sdk";
+
+async function main() {
+  const client = new CopilotClient();
+  await client.start();
+
+  const session = await client.createSession({
+    pluginDirectories: ["./plugins/code-reviewer"],
+  });
+}
+
+main();
+```
+<!-- /docs-validate: hidden -->
+
+```typescript
+import { CopilotClient } from "@github/copilot-sdk";
+
+const client = new CopilotClient();
+await client.start();
+
+const session = await client.createSession({
+  pluginDirectories: ["./plugins/code-reviewer"],
+});
+```
+
+Relative paths resolve against `workingDirectory`, or the runtime working directory when that is unset, so absolute paths are recommended. Entries that do not resolve are logged and skipped rather than failing session creation. The option is an explicit opt-in, which means plugin agents and rules load even when `enableConfigDiscovery` is false. Assets loaded this way sit between project sources and personal or home sources in the session-wide precedence order.
+
+The equivalent option in each SDK is:
+
+| SDK | Session option |
+|---|---|
+| Node.js / TypeScript | `pluginDirectories: string[]` |
+| Python | `plugin_directories=[...]` |
+| Go | `PluginDirectories: []string{...}` |
+| .NET | `PluginDirectories = [...]` |
+| Java | `.setPluginDirectories(List.of(...))` |
+| Rust | `.with_plugin_directories([...])` |
+
 ## Trusted host-bundled plugin directories
 
 Applications that ship their own trusted plugins can register them as a client startup option. The SDK sends the complete ordered set after connecting and verifying the protocol, before `start` returns or any session can be created. Paths must be absolute; leaving the option unset or empty makes no RPC call.
@@ -274,6 +319,8 @@ The equivalent option in each SDK is:
 | Rust | `.with_builtin_plugin_directories([...])` |
 
 This is a trust boundary for plugins bundled and controlled by the host application. It is distinct from `--plugin-dir`, which is a CLI process launch argument for explicitly loading ordinary plugin directories. The startup option also works when connecting to an existing runtime because it is sent over JSON-RPC rather than forwarded as a process argument.
+
+The bundled opt-in plugins `computer-use` and `browser-use` are the exception: they contribute no skills, hooks or MCP servers until enabled through `enabledPlugins`, `client.rpc.plugins.enable({ names: ["browser-use"] })`, or settings. Changes apply to sessions created afterwards. Managed `enabledPlugins["browser-use"]` forces Browser Use on or off regardless of user preferences. Computer Use also accepts the legacy `enabledMcpServers` preference; its managed policy veto is `features.computerUse=false`, not `enabledPlugins["computer-use"]`.
 
 ## What a plugin can contribute
 
@@ -375,7 +422,73 @@ for (const plugin of plugins.plugins) {
 
 </details>
 
-Plugins loaded via `--plugin-dir` appear in this list with their cache path set to the directory you provided. Marketplace installs are tagged with their registry source.
+Plugins loaded via `--plugin-dir` appear in this list alongside marketplace installs. Each entry has these fields:
+
+| Field | Description |
+|-------|-------------|
+| `name` | The plugin name. |
+| `marketplace` | The marketplace the plugin came from. Empty for a plugin loaded from a plugin directory. |
+| `version` | The plugin version, when the plugin declares one. |
+| `enabled` | Whether the plugin is enabled. |
+
+An entry for a plugin loaded from a plugin directory doesn't report that directory.
+
+## Retrying plugins required by managed settings
+
+When managed settings require plugins through `enabledPlugins`, the runtime installs or updates them before chat messages. If that fails, the session emits a `session.warning` with `warningType: "managed_plugins"` and waits an hour, or until the managed settings change, before trying again. The experimental `session.rpc.plugins.retryManaged()` tries again right away, for example from a Retry action next to that warning.
+
+Call it with no arguments to retry every plugin the managed settings require, or pass `plugin@marketplace` specs in `plugins` to retry only those. The result has one entry per plugin with a `status`: `installed`, `updated`, `already_present`, `failed`, `deferred`, or `not_required`. `failed` and `deferred` entries include an `error`. The session also emits the usual `session.info` progress and `session.warning` failure events.
+
+<details open>
+<summary><strong>Node.js / TypeScript</strong></summary>
+
+<!-- docs-validate: hidden -->
+```typescript
+import { CopilotClient } from "@github/copilot-sdk";
+
+async function main() {
+  const client = new CopilotClient();
+  await client.start();
+  const session = await client.createSession({
+    onPermissionRequest: async () => ({ kind: "approve-once" }),
+  });
+
+  // Retry every plugin the managed settings require, for example from a Retry action.
+  const result = await session.rpc.plugins.retryManaged();
+  for (const entry of result.plugins) {
+    console.log(`${entry.spec}: ${entry.status}${entry.error ? ` (${entry.error})` : ""}`);
+  }
+
+  // Or retry only the required plugins that are still missing.
+  const { plugins } = await session.rpc.plugins.list();
+  const missing = plugins
+    .filter((plugin) => plugin.managedDesiredEnabled === true && plugin.installed === false)
+    .map((plugin) => `${plugin.name}@${plugin.marketplace}`);
+  await session.rpc.plugins.retryManaged({ plugins: missing });
+}
+
+main();
+```
+<!-- /docs-validate: hidden -->
+
+```typescript
+// Retry every plugin the managed settings require, for example from a Retry action.
+const result = await session.rpc.plugins.retryManaged();
+for (const entry of result.plugins) {
+  console.log(`${entry.spec}: ${entry.status}${entry.error ? ` (${entry.error})` : ""}`);
+}
+
+// Or retry only the required plugins that are still missing.
+const { plugins } = await session.rpc.plugins.list();
+const missing = plugins
+  .filter((plugin) => plugin.managedDesiredEnabled === true && plugin.installed === false)
+  .map((plugin) => `${plugin.name}@${plugin.marketplace}`);
+await session.rpc.plugins.retryManaged({ plugins: missing });
+```
+
+</details>
+
+Runtimes that do not prepare managed plugins for the session reject the call.
 
 ## Troubleshooting
 

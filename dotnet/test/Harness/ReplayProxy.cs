@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
+using Microsoft.Win32.SafeHandles;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -16,6 +17,7 @@ namespace GitHub.Copilot.Test.Harness;
 public sealed partial class ReplayProxy : IAsyncDisposable
 {
     private Process? _process;
+    private SafeJobHandle? _processJob;
     private Task<string>? _startupTask;
 
     public string? ConnectProxyUrl { get; private set; }
@@ -27,40 +29,27 @@ public sealed partial class ReplayProxy : IAsyncDisposable
 
         async Task<string> StartCoreAsync()
         {
-            string filename;
-            string args;
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                filename = "cmd.exe";
-                args = "/c npm.cmd run start";
-
-            }
-            else
-            {
-                filename = "npm";
-                args = "run start";
-            }
-
+            // Spawn the server directly so a stalled npm/cmd wrapper cannot strand startup or cleanup.
             var startInfo = new ProcessStartInfo
             {
-                FileName = filename,
+                FileName = "node",
                 WorkingDirectory = Path.Join(FindRepoRoot(), "test", "harness"),
-                Arguments = args,
+                Arguments = "startup.mjs",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             };
 
-            _process = new Process { StartInfo = startInfo };
+            var process = new Process { StartInfo = startInfo };
+            var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var diagnostics = new StartupDiagnostics();
+            var elapsed = Stopwatch.StartNew();
 
-            var tcs = new TaskCompletionSource<string>();
-            var errorOutput = new StringBuilder();
-
-            _process.OutputDataReceived += (_, e) =>
+            process.OutputDataReceived += (_, e) =>
             {
                 if (e.Data == null) return;
+                diagnostics.AppendOutput(e.Data);
                 var match = Regex.Match(e.Data, @"Listening: (?<url>http://[^\s]+)\s+(?<metadata>\{.*\})$");
                 if (!match.Success)
                 {
@@ -98,71 +87,167 @@ public sealed partial class ReplayProxy : IAsyncDisposable
                 tcs.TrySetResult(match.Groups["url"].Value);
             };
 
-            _process.ErrorDataReceived += (_, e) =>
+            process.ErrorDataReceived += (_, e) =>
             {
                 if (e.Data == null) return;
-                errorOutput.AppendLine(e.Data);
-                Console.Error.WriteLine(e.Data);
+                diagnostics.AppendError(e.Data);
+                if (!e.Data.StartsWith("[SDK proxy startup]", StringComparison.Ordinal))
+                {
+                    Console.Error.WriteLine(e.Data);
+                }
             };
 
-            _process.Start();
-            _process.BeginOutputReadLine();
-            _process.BeginErrorReadLine();
-            _ = _process.WaitForExitAsync().ContinueWith(_ =>
+            try
             {
-                if (_process?.ExitCode is int exitCode && exitCode != 0)
+                process.Start();
+            }
+            catch
+            {
+                process.Dispose();
+                throw;
+            }
+            _processJob = TryBindToKillOnCloseJob(process);
+            _process = process;
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            _ = process.WaitForExitAsync().ContinueWith(_ =>
+            {
+                if (!tcs.Task.IsCompleted)
                 {
-                    tcs.TrySetException(new Exception($"Proxy exited with code {_process.ExitCode}: {errorOutput}"));
+                    tcs.TrySetException(new Exception(
+                        $"Proxy exited before readiness. {diagnostics.Describe(process.Id, elapsed.Elapsed, process.ExitCode)}"));
                 }
             });
 
             // Use longer timeout on Windows due to slower process startup
             var timeoutSeconds = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? 30 : 10;
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
-            cts.Token.Register(() => tcs.TrySetException(new TimeoutException("Timeout waiting for proxy")));
+            using var registration = cts.Token.Register(() => tcs.TrySetException(new TimeoutException(
+                $"Timeout waiting for proxy. {diagnostics.Describe(process.Id, elapsed.Elapsed, process.HasExited ? process.ExitCode : null)}")));
 
             return await tcs.Task;
         }
     }
 
+    internal sealed class StartupDiagnostics
+    {
+        private const int OutputLimit = 4096;
+        private readonly object _gate = new();
+        private readonly StringBuilder _stdout = new();
+        private readonly StringBuilder _stderr = new();
+
+        public void AppendOutput(string line) => Append(_stdout, line);
+
+        public void AppendError(string line) => Append(_stderr, line);
+
+        private void Append(StringBuilder output, string line)
+        {
+            lock (_gate)
+            {
+                output.Append(line, Math.Max(0, line.Length - OutputLimit), Math.Min(line.Length, OutputLimit));
+                output.AppendLine();
+                if (output.Length > OutputLimit)
+                {
+                    output.Remove(0, output.Length - OutputLimit);
+                }
+            }
+        }
+
+        public string Describe(int processId, TimeSpan elapsed, int? exitCode)
+        {
+            lock (_gate)
+            {
+                var state = exitCode is int code ? $"exited with code {code}" : "running";
+                return $"PID {processId}, {state}, elapsed {elapsed.TotalSeconds:F1}s." +
+                    $"\n--- stdout tail ---\n{_stdout}\n--- stderr tail ---\n{_stderr}";
+            }
+        }
+    }
+
     public async Task StopAsync(bool skipWritingCache = false)
     {
+        Exception? shutdownFailure = null;
+        string? url = null;
         if (_startupTask != null)
         {
             try
             {
-                var url = await _startupTask;
+                url = await _startupTask;
+            }
+            catch { /* Startup failure is reported by StartAsync; cleanup still owns the process. */ }
+        }
+
+        if (url != null)
+        {
+            try
+            {
                 var stopUrl = skipWritingCache ? $"{url}/stop?skipWritingCache=true" : $"{url}/stop";
                 using var client = new HttpClient();
-                await client.PostAsync(stopUrl, null);
+                using var response = await client.PostAsync(stopUrl, null);
+                if (!response.IsSuccessStatusCode)
+                {
+                    shutdownFailure = new HttpRequestException(
+                        $"Proxy shutdown failed: HTTP {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+                }
             }
-            catch { /* Best effort */ }
+            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException)
+            {
+                shutdownFailure = ex;
+            }
         }
 
-        if (_process is { HasExited: false })
+        try
         {
-            try { _process.Kill(entireProcessTree: true); await _process.WaitForExitAsync(); }
-            catch { /* Ignore */ }
+            if (_process is { HasExited: false })
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                try
+                {
+                    await _process.WaitForExitAsync(timeout.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    _process.Kill(entireProcessTree: true);
+                    await _process.WaitForExitAsync();
+                }
+            }
+            if (url != null && _process is { HasExited: true, ExitCode: not 0 })
+            {
+                shutdownFailure ??= new InvalidOperationException($"Proxy exited with code {_process.ExitCode}");
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // Process.Start failed before this object was associated with a child.
         }
 
-        _process?.Dispose();
-        _process = null;
-        _startupTask = null;
+        finally
+        {
+            _process?.Dispose();
+            _process = null;
+            _processJob?.Dispose();
+            _processJob = null;
+            _startupTask = null;
+        }
+        if (shutdownFailure != null)
+        {
+            throw shutdownFailure;
+        }
     }
 
-    public async Task ConfigureAsync(string filePath, string workDir, string backend)
+    public async Task ConfigureAsync(string filePath, string workDir, string backend, bool replayOnly = false)
     {
         var url = await (_startupTask ?? throw new InvalidOperationException("Proxy not started"));
 
         using var client = new HttpClient();
         var response = await client.PostAsJsonAsync(
             $"{url}/config",
-            new ConfigureRequest(filePath, workDir, backend),
+            new ConfigureRequest(filePath, workDir, backend, replayOnly),
             ReplayProxyJsonContext.Default.ConfigureRequest);
         response.EnsureSuccessStatusCode();
     }
 
-    private record ConfigureRequest(string FilePath, string WorkDir, string Backend);
+    private record ConfigureRequest(string FilePath, string WorkDir, string Backend, bool ReplayOnly);
 
     private record ProxyStartupMetadata(string? ConnectProxyUrl, string? CaFilePath);
 
@@ -195,11 +280,111 @@ public sealed partial class ReplayProxy : IAsyncDisposable
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir != null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "justfile")))
+            if (File.Exists(Path.Combine(dir.FullName, "test", "harness", "package.json")))
                 return dir.FullName;
             dir = dir.Parent;
         }
         throw new InvalidOperationException("Could not find repository root");
+    }
+
+    // On Windows, puts the proxy and everything it starts in a job that Windows terminates when
+    // its last handle closes. Only this process holds that handle (it is not inheritable), so the
+    // proxy dies with the test host even when the host crashes. Otherwise the orphaned proxy keeps
+    // the host's inherited stdout/stderr pipes open and `dotnet test` waits on them indefinitely.
+    private static SafeJobHandle? TryBindToKillOnCloseJob(Process process)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return null;
+        }
+
+        var job = CreateJobObjectW(IntPtr.Zero, IntPtr.Zero);
+        var limits = new JobObjectExtendedLimitInformation();
+        limits.BasicLimitInformation.LimitFlags = JobObjectLimitKillOnJobClose;
+        if (job.IsInvalid
+            || !SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformationClass,
+                ref limits,
+                (uint)Marshal.SizeOf<JobObjectExtendedLimitInformation>())
+            || !AssignProcessToJobObject(job, process.SafeHandle))
+        {
+            var error = Marshal.GetLastWin32Error();
+            job.Dispose();
+            Console.Error.WriteLine(
+                $"[SDK proxy] Could not bind PID {process.Id} to a kill-on-close job (Win32 error {error}); it can outlive a crashed test host.");
+            return null;
+        }
+
+        return job;
+    }
+
+    private const int JobObjectExtendedLimitInformationClass = 9;
+    private const uint JobObjectLimitKillOnJobClose = 0x2000;
+
+    [DllImport("kernel32", SetLastError = true)]
+    private static extern SafeJobHandle CreateJobObjectW(IntPtr jobAttributes, IntPtr name);
+
+    [DllImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetInformationJobObject(
+        SafeJobHandle job,
+        int infoClass,
+        ref JobObjectExtendedLimitInformation info,
+        uint infoLength);
+
+    [DllImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AssignProcessToJobObject(SafeJobHandle job, SafeHandle process);
+
+    [DllImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    private sealed class SafeJobHandle : SafeHandleZeroOrMinusOneIsInvalid
+    {
+        public SafeJobHandle()
+            : base(ownsHandle: true)
+        {
+        }
+
+        protected override bool ReleaseHandle() => CloseHandle(handle);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobObjectBasicLimitInformation
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobObjectExtendedLimitInformation
+    {
+        public JobObjectBasicLimitInformation BasicLimitInformation;
+        public IoCounters IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
     }
 
     [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
@@ -222,7 +407,9 @@ public record CopilotUserConfig(
     string AnalyticsTrackingId,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [property: JsonPropertyName("quota_snapshots")]
-    IReadOnlyDictionary<string, CopilotUserQuotaSnapshot>? QuotaSnapshots = null);
+    IReadOnlyDictionary<string, CopilotUserQuotaSnapshot>? QuotaSnapshots = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    long? Id = null);
 
 public record CopilotUserEndpoints(string Api, string Telemetry);
 
@@ -245,12 +432,17 @@ public record CopilotUserQuotaSnapshot(
 public record ParsedHttpExchange(
     ChatCompletionRequest Request,
     ChatCompletionResponse? Response,
-    Dictionary<string, JsonElement>? RequestHeaders);
+    Dictionary<string, JsonElement>? RequestHeaders,
+    CompactionProviderUsage? CompactionUsage = null);
+
+public record CompactionProviderUsage(string InteractionId, string Summary, int ResponseCount, long? InputTokens);
 
 public record ChatCompletionRequest(
     string Model,
     List<ChatCompletionMessage> Messages,
-    List<ChatCompletionTool>? Tools);
+    List<ChatCompletionTool>? Tools,
+    [property: JsonPropertyName("tool_choice")] JsonElement? ToolChoice = null,
+    [property: JsonPropertyName("response_format")] JsonElement? ResponseFormat = null);
 
 public record ChatCompletionMessage(
     string Role,

@@ -32,12 +32,10 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
         // Create a file for the model to read
         await File.WriteAllTextAsync(Path.Join(Ctx.WorkDir, "hello.txt"), "Hello from the test!");
 
-        await session.SendAsync(new MessageOptions
+        await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
             Prompt = "Read the contents of hello.txt and tell me what it says"
         });
-
-        await TestHelper.GetFinalAssistantMessageAsync(session);
 
         // Should have received at least one preToolUse hook call
         Assert.NotEmpty(preToolUseInputs);
@@ -68,12 +66,10 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
         // Create a file for the model to read
         await File.WriteAllTextAsync(Path.Join(Ctx.WorkDir, "world.txt"), "World from the test!");
 
-        await session.SendAsync(new MessageOptions
+        await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
             Prompt = "Read the contents of world.txt and tell me what it says"
         });
-
-        await TestHelper.GetFinalAssistantMessageAsync(session);
 
         // Should have received at least one postToolUse hook call
         Assert.NotEmpty(postToolUseInputs);
@@ -109,21 +105,23 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
 
         await File.WriteAllTextAsync(Path.Join(Ctx.WorkDir, "both.txt"), "Testing both hooks!");
 
-        await session.SendAsync(new MessageOptions
+        await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
             Prompt = "Read the contents of both.txt"
         });
-
-        await TestHelper.GetFinalAssistantMessageAsync(session);
 
         // Both hooks should have been called
         Assert.NotEmpty(preToolUseInputs);
         Assert.NotEmpty(postToolUseInputs);
 
-        // The same tool should appear in both
-        var preToolNames = preToolUseInputs.Select(i => i.ToolName).Where(n => !string.IsNullOrEmpty(n)).ToHashSet();
-        var postToolNames = postToolUseInputs.Select(i => i.ToolName).Where(n => !string.IsNullOrEmpty(n)).ToHashSet();
-        Assert.True(preToolNames.Overlaps(postToolNames), "Expected the same tool to appear in both pre and post hooks");
+        Assert.All(preToolUseInputs, input => Assert.False(string.IsNullOrEmpty(input.ToolCallId)));
+        Assert.All(postToolUseInputs, post =>
+        {
+            Assert.False(string.IsNullOrEmpty(post.ToolCallId));
+            var pre = Assert.Single(preToolUseInputs, input =>
+                input.SessionId == post.SessionId && input.ToolCallId == post.ToolCallId);
+            Assert.Equal(pre.ToolName, post.ToolName);
+        });
     }
 
     [Fact]
@@ -149,12 +147,10 @@ public class HooksE2ETests(E2ETestFixture fixture, ITestOutputHelper output) : E
         var originalContent = "Original content that should not be modified";
         await File.WriteAllTextAsync(Path.Join(Ctx.WorkDir, "protected.txt"), originalContent);
 
-        await session.SendAsync(new MessageOptions
+        var response = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions
         {
             Prompt = "Edit protected.txt and replace 'Original' with 'Modified'"
         });
-
-        var response = await TestHelper.GetFinalAssistantMessageAsync(session);
 
         // The hook should have been called
         Assert.NotEmpty(preToolUseInputs);

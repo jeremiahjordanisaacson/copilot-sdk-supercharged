@@ -94,7 +94,6 @@ class TestMCPServers:
         self, ctx: E2ETestContext
     ):
         """Test that MCP server configuration is accepted on session resume"""
-        # Create a session first
         session1 = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all
         )
@@ -177,12 +176,13 @@ class TestCustomAgents:
         self, ctx: E2ETestContext
     ):
         """Test that custom agent configuration is accepted on session resume"""
-        # Create a session first
         session1 = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all
         )
         session_id = session1.session_id
         await session1.send_and_wait("What is 1+1?")
+        # End the first attachment before testing resume-time reconfiguration.
+        await session1.disconnect()
 
         # Resume with custom agents
         custom_agents: list[CustomAgentConfig] = [

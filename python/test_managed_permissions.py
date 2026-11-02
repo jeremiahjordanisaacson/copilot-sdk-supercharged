@@ -3,6 +3,10 @@ import pytest
 from copilot.rpc import PermissionDecisionApproveOnce, PermissionDecisionUserNotAvailable
 from copilot.session import CopilotSession, PermissionHandler, PermissionNoResult
 from copilot.session_events import (
+    AssistedApprovalAssessmentCompleted,
+    AssistedApprovalCompletedRecommendation,
+    AssistedApprovalRecommendation,
+    PermissionPromptRequestCommands,
     PermissionRequestCustomTool,
     PermissionRequestedData,
     PermissionRequestRead,
@@ -119,3 +123,60 @@ async def test_legacy_permission_callback_rejects_no_result() -> None:
     result = await session._handle_permission_request(request)
 
     assert isinstance(result, PermissionDecisionUserNotAvailable)
+
+
+async def test_permission_callback_receives_derived_prompt_context() -> None:
+    data = PermissionRequestedData.from_dict(
+        {
+            "requestId": "permission-1",
+            "permissionRequest": {
+                "kind": "shell",
+                "fullCommandText": "ls",
+                "intention": "List files",
+                "commands": [],
+                "possiblePaths": [],
+                "possibleUrls": [],
+                "hasWriteFileRedirection": False,
+                "canOfferSessionApproval": False,
+                "managedApprovalRequired": True,
+            },
+            "promptRequest": {
+                "kind": "commands",
+                "fullCommandText": "ls",
+                "intention": "List files",
+                "commandIdentifiers": ["ls"],
+                "canOfferSessionApproval": False,
+                "assistedApproval": {"recommendation": "approve"},
+            },
+            "assistedApprovalAssessment": {
+                "status": "completed",
+                "recommendation": "requireApproval",
+                "rationale": "The command modifies protected files.",
+            },
+        }
+    )
+    captured = {}
+    session = CopilotSession("session-1", client=None, managed_settings_enabled=True)
+
+    def handler(_request, invocation):
+        captured.update(invocation)
+        return PermissionNoResult()
+
+    await session._execute_permission_and_respond(
+        data.request_id,
+        data.permission_request,
+        handler,
+        data.prompt_request,
+        data.assisted_approval_assessment,
+    )
+
+    prompt_request = captured["prompt_request"]
+    assert isinstance(prompt_request, PermissionPromptRequestCommands)
+    assert prompt_request.managed_approval_required is None
+    assert prompt_request.assisted_approval is not None
+    assert prompt_request.assisted_approval.recommendation is AssistedApprovalRecommendation.APPROVE
+    assessment = captured["assisted_approval_assessment"]
+    assert isinstance(assessment, AssistedApprovalAssessmentCompleted)
+    assert assessment.recommendation is AssistedApprovalCompletedRecommendation.REQUIRE_APPROVAL
+    assert assessment.rationale == "The command modifies protected files."
+    assert captured["managed_settings_enabled"] is True

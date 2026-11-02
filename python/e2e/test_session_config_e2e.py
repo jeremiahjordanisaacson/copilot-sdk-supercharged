@@ -12,6 +12,7 @@ from copilot import (
     CopilotClient,
     CopilotRequestHandler,
     ModelCapabilitiesOverride,
+    ModelLimitsOverride,
     ModelSupportsOverride,
     RuntimeConnection,
 )
@@ -19,6 +20,7 @@ from copilot.copilot_request_handler import CopilotRequestContext
 from copilot.session import PermissionHandler
 
 from ._copilot_request_helpers import (
+    SYNTHETIC_TEXT,
     build_inference_response,
     build_non_inference_response,
     is_inference_url,
@@ -167,8 +169,8 @@ def _create_anthropic_provider() -> dict:
         "type": "anthropic",
         "base_url": "https://anthropic-citations.invalid/v1",
         "api_key": "test-provider-key",
-        "model_id": "claude-sonnet-4.5",
-        "wire_model": "claude-sonnet-4.5",
+        "model_id": "claude-sonnet-5",
+        "wire_model": "claude-sonnet-5",
     }
 
 
@@ -194,6 +196,72 @@ VIEW_IMAGE_PROMPT = "Use the view tool to look at the file test.png and describe
 class TestSessionConfig:
     """Tests for session configuration including model capabilities overrides."""
 
+    @pytest.mark.parametrize("limit_source", ["capabilities", "provider"])
+    async def test_effective_compaction_limits_on_create_and_resume(
+        self, ctx: E2ETestContext, limit_source: str
+    ):
+        client = CopilotClient(
+            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
+            working_directory=ctx.work_dir,
+            env=ctx.get_env(),
+            github_token=DEFAULT_GITHUB_TOKEN,
+            request_handler=_RecordingRequestHandler(),
+        )
+        await client.start()
+        try:
+            session_id = str(uuid.uuid4())
+            for phase, prompt_limit, window_limit in [
+                ("create", 1_000_000, 1_048_576),
+                ("warm_resume", 1_000_000, 65_536),
+                ("cold_resume", 96_000, 1_048_576),
+            ]:
+                provider = {
+                    "type": "openai",
+                    "base_url": "https://context-limits.invalid/v1",
+                    "api_key": "test-provider-key",
+                    "max_output_tokens": 4096,
+                }
+                capabilities = None
+                if limit_source == "capabilities":
+                    capabilities = ModelCapabilitiesOverride(
+                        limits=ModelLimitsOverride(
+                            max_prompt_tokens=prompt_limit,
+                            max_context_window_tokens=window_limit,
+                            max_output_tokens=4096,
+                        )
+                    )
+                else:
+                    provider["max_prompt_tokens"] = prompt_limit
+                    provider["max_context_window_tokens"] = window_limit
+
+                config = {
+                    "model": "custom-context-model",
+                    "provider": provider,
+                    "model_capabilities": capabilities,
+                    "on_permission_request": PermissionHandler.approve_all,
+                    "available_tools": [],
+                    "enable_config_discovery": False,
+                }
+                if phase == "create":
+                    session = await client.create_session(session_id=session_id, **config)
+                else:
+                    if phase == "cold_resume":
+                        await client.stop()
+                        await client.start()
+                    session = await client.resume_session(session_id, **config)
+
+                reply = await session.send_and_wait(f"Remember context limit phase {phase}.")
+                assert reply is not None
+                assert reply.data.content == SYNTHETIC_TEXT
+                compact = await session.rpc.history.compact()
+                assert compact.success is True
+                assert compact.context_window is not None
+                assert compact.context_window.token_limit == min(
+                    prompt_limit, window_limit - 4096
+                ), (limit_source, phase, compact)
+        finally:
+            await client.stop()
+
     async def test_vision_disabled_then_enabled_via_setmodel(self, ctx: E2ETestContext):
         png_path = os.path.join(ctx.work_dir, "test.png")
         with open(png_path, "wb") as f:
@@ -201,6 +269,7 @@ class TestSessionConfig:
 
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all,
+            model="claude-sonnet-5",
             model_capabilities=ModelCapabilitiesOverride(
                 supports=ModelSupportsOverride(vision=False)
             ),
@@ -213,7 +282,7 @@ class TestSessionConfig:
 
         # Switch vision on
         await session.set_model(
-            "claude-sonnet-4.5",
+            "claude-sonnet-5",
             model_capabilities=ModelCapabilitiesOverride(
                 supports=ModelSupportsOverride(vision=True)
             ),
@@ -234,6 +303,7 @@ class TestSessionConfig:
 
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all,
+            model="claude-sonnet-5",
             model_capabilities=ModelCapabilitiesOverride(
                 supports=ModelSupportsOverride(vision=True)
             ),
@@ -246,7 +316,7 @@ class TestSessionConfig:
 
         # Switch vision off
         await session.set_model(
-            "claude-sonnet-4.5",
+            "claude-sonnet-5",
             model_capabilities=ModelCapabilitiesOverride(
                 supports=ModelSupportsOverride(vision=False)
             ),
@@ -295,7 +365,7 @@ class TestSessionConfig:
     async def test_should_forward_custom_provider_headers_on_create(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all,
-            model="claude-sonnet-4.5",
+            model="claude-sonnet-5",
             provider=_make_proxy_provider(ctx.proxy_url, "create-provider-header"),
         )
 
@@ -319,7 +389,7 @@ class TestSessionConfig:
         session2 = await ctx.client.resume_session(
             session_id,
             on_permission_request=PermissionHandler.approve_all,
-            model="claude-sonnet-4.5",
+            model="claude-sonnet-5",
             provider=_make_proxy_provider(ctx.proxy_url, "resume-provider-header"),
         )
 
@@ -345,7 +415,7 @@ class TestSessionConfig:
         # it directly (see unit tests for serialization coverage).
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all,
-            model="claude-sonnet-4.5",
+            model="claude-sonnet-5",
             provider={
                 "type": "openai",
                 "base_url": ctx.proxy_url,
@@ -374,7 +444,7 @@ class TestSessionConfig:
                 "type": "openai",
                 "base_url": ctx.proxy_url,
                 "api_key": "test-provider-key",
-                "model_id": "claude-sonnet-4.5",
+                "model_id": "claude-sonnet-5",
             },
         )
 
@@ -382,7 +452,7 @@ class TestSessionConfig:
 
         exchanges = await ctx.get_exchanges()
         assert len(exchanges) == 1
-        assert exchanges[0]["request"]["model"] == "claude-sonnet-4.5"
+        assert exchanges[0]["request"]["model"] == "claude-sonnet-5"
 
         await session.disconnect()
 
@@ -473,7 +543,7 @@ class TestSessionConfig:
         try:
             session = await client.create_session(
                 on_permission_request=PermissionHandler.approve_all,
-                model="claude-sonnet-4.5",
+                model="claude-sonnet-5",
                 enable_citations=True,
                 provider=_create_anthropic_provider(),
             )
@@ -521,7 +591,7 @@ class TestSessionConfig:
                 session2 = await resume_client.resume_session(
                     session1.session_id,
                     on_permission_request=PermissionHandler.approve_all,
-                    model="claude-sonnet-4.5",
+                    model="claude-sonnet-5",
                     enable_citations=True,
                     provider=_create_anthropic_provider(),
                 )

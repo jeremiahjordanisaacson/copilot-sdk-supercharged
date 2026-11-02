@@ -3,21 +3,627 @@
  *--------------------------------------------------------------------------------------------*/
 
 #if NET8_0_OR_GREATER
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using GitHub.Copilot.Rpc;
+using GitHub.Copilot.Test.Harness;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace GitHub.Copilot.Test.Unit;
 
-public sealed class ClientSessionLifetimeTests
+public sealed partial class ClientSessionLifetimeTests
 {
     private sealed record RpcRequestRecord(string Method, JsonElement Params);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Stop_RetiresPendingModelFetches(bool force)
+    {
+        IList<ModelInfo> oldModels = [new ModelInfo { Id = "old-model" }];
+        IList<ModelInfo> newModels = [new ModelInfo { Id = "new-model" }];
+        var oldFetch = new TaskCompletionSource<IList<ModelInfo>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var newFetch = new TaskCompletionSource<IList<ModelInfo>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            OnListModels = _ => Interlocked.Increment(ref calls) == 1 ? oldFetch.Task : newFetch.Task
+        });
+        try
+        {
+            var first = client.ListModelsAsync();
+            var queuedOld = client.ListModelsAsync();
+            if (force)
+            {
+                await client.ForceStopAsync();
+            }
+            else
+            {
+                await client.StopAsync();
+            }
+
+            var current = client.ListModelsAsync();
+            Assert.Equal(2, Volatile.Read(ref calls));
+            oldFetch.SetResult(oldModels);
+            Assert.Equal("old-model", (await first.WaitAsync(TimeSpan.FromSeconds(5)))[0].Id);
+            Assert.Equal("old-model", (await queuedOld.WaitAsync(TimeSpan.FromSeconds(5)))[0].Id);
+            var queuedNew = client.ListModelsAsync();
+            Assert.False(queuedNew.IsCompleted);
+            newFetch.SetResult(newModels);
+
+            Assert.Equal("new-model", (await current.WaitAsync(TimeSpan.FromSeconds(5)))[0].Id);
+            Assert.Equal("new-model", (await queuedNew.WaitAsync(TimeSpan.FromSeconds(5)))[0].Id);
+            Assert.Equal("new-model", (await client.ListModelsAsync())[0].Id);
+            Assert.Equal(2, Volatile.Read(ref calls));
+        }
+        finally
+        {
+            oldFetch.TrySetResult(oldModels);
+            newFetch.TrySetResult(newModels);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LegacyPingFallback_RequiresNoEntraConfiguration(bool entra)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.RejectConnect = true;
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForUri(server.Url),
+            Entra = entra ? new EntraAuthOptions { ClientId = "host-entra-client" } : null
+        });
+        if (entra)
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.StartAsync());
+            Assert.Contains("does not support Entra client configuration", error.Message);
+            Assert.DoesNotContain(server.Requests, r => r.Method == "ping");
+        }
+        else
+        {
+            await client.StartAsync();
+            Assert.Single(server.Requests, r => r.Method == "ping");
+        }
+    }
+
+    [Fact]
+    public async Task TypedHookDispatch_RetainsChildIdentityAndOldRootInputs()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var captured = new List<object>();
+        Task<T?> Capture<T>(object input, HookInvocation invocation) where T : class
+        {
+            captured.Add(input);
+            Assert.False(string.IsNullOrEmpty(invocation.SessionId));
+            return Task.FromResult<T?>(null);
+        }
+        var hooks = new SessionHooks
+        {
+            OnPreToolUse = (i, c) => Capture<PreToolUseHookOutput>(i, c),
+            OnPreMcpToolCall = (i, c) => Capture<PreMcpToolCallHookOutput>(i, c),
+            OnPostToolUse = (i, c) => Capture<PostToolUseHookOutput>(i, c),
+            OnPostToolUseFailure = (i, c) => Capture<PostToolUseFailureHookOutput>(i, c),
+            OnUserPromptSubmitted = (i, c) => Capture<UserPromptSubmittedHookOutput>(i, c),
+            OnUserPromptTransformed = (i, c) => Capture<UserPromptTransformedHookOutput>(i, c),
+            OnSessionStart = (i, c) => Capture<SessionStartHookOutput>(i, c),
+            OnSessionEnd = (i, c) => Capture<SessionEndHookOutput>(i, c),
+            OnErrorOccurred = (i, c) => Capture<ErrorOccurredHookOutput>(i, c),
+            OnAgentStop = (i, c) => Capture<AgentStopHookOutput>(i, c),
+            OnSubagentStart = (i, c) => Capture<SubagentStartHookOutput>(i, c),
+            OnSubagentStop = (i, c) => Capture<SubagentStopHookOutput>(i, c)
+        };
+        await using var session = await client.CreateSessionAsync(new SessionConfig { Hooks = hooks });
+        foreach (var hook in new[] { "preToolUse", "preMcpToolCall", "postToolUse", "postToolUseFailure",
+            "userPromptSubmitted", "userPromptTransformed", "sessionStart", "sessionEnd", "errorOccurred",
+            "agentStop", "subagentStart", "subagentStop" })
+        {
+            foreach (var enriched in new[] { true, false })
+            {
+                var input = new Dictionary<string, object?>
+                {
+                    ["sessionId"] = "reported-session",
+                    ["timestamp"] = 1L,
+                    ["cwd"] = "work"
+                };
+                if (enriched)
+                {
+                    input["agentId"] = "child-actor";
+                    input["agentType"] = "explore";
+                    input["parentAgentId"] = "parent-actor";
+                    input["traceparent"] = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01";
+                    input["tracestate"] = "vendor=state";
+                    input["toolCallId"] = "model-call";
+                }
+                captured.Clear();
+                await server.SendRequestAsync("hooks.invoke", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = session.SessionId,
+                    ["hookType"] = hook,
+                    ["input"] = input
+                }).WaitAsync(TimeSpan.FromSeconds(5));
+                var actual = Assert.Single(captured);
+                Assert.Equal("reported-session", actual.GetType().GetProperty("SessionId")!.GetValue(actual));
+                var fields = new Dictionary<string, string>
+                {
+                    ["AgentId"] = "child-actor",
+                    ["AgentType"] = "explore",
+                    ["ParentAgentId"] = "parent-actor"
+                };
+                if (hook is "preToolUse" or "postToolUse" or "postToolUseFailure" or "preMcpToolCall")
+                {
+                    fields["ToolCallId"] = "model-call";
+                }
+                foreach (var field in fields)
+                {
+                    var property = actual.GetType().GetProperty(field.Key);
+                    Assert.NotNull(property);
+                    var value = property.GetValue(actual) as string;
+                    Assert.Equal(enriched ? field.Value : "", value ?? "");
+                }
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    [InlineData(false, null)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(true, null)]
+    [InlineData(false, null, true)]
+    [InlineData(false, null, false)]
+    [InlineData(true, null, true)]
+    [InlineData(true, null, false)]
+    [InlineData(false, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(false, null, null, true)]
+    [InlineData(false, null, null, false)]
+    [InlineData(true, null, null, true)]
+    [InlineData(true, null, null, false)]
+    [InlineData(false, true, false, true)]
+    [InlineData(true, false, true, false)]
+    public async Task ImageGeneration_ForwardsCreateAndResumeOptIn(bool resume, bool? enabled, bool? watermark = null, bool? saveToDisk = null)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var imageGeneration = enabled is null && watermark is null && saveToDisk is null
+            ? null
+            : new ImageGenerationConfig { Enabled = enabled, Watermark = watermark, SaveToDisk = saveToDisk };
+        await using var session = resume
+            ? await client.ResumeSessionAsync("image-test", new ResumeSessionConfig
+            {
+                OnPermissionRequest = PermissionHandler.ApproveAll,
+                ImageGeneration = imageGeneration
+            }.Clone())
+            : await client.CreateSessionAsync(new SessionConfig
+            {
+                OnPermissionRequest = PermissionHandler.ApproveAll,
+                ImageGeneration = imageGeneration
+            }.Clone());
+        var request = Assert.Single(server.Requests, r => r.Method == (resume ? "session.resume" : "session.create")).Params;
+        if (enabled is null && watermark is null && saveToDisk is null)
+        {
+            Assert.False(request.TryGetProperty("imageGeneration", out _), request.ToString());
+        }
+        else
+        {
+            var options = request.GetProperty("imageGeneration");
+            if (enabled is null)
+            {
+                Assert.False(options.TryGetProperty("enabled", out _));
+            }
+            else
+            {
+                Assert.Equal(enabled.Value, options.GetProperty("enabled").GetBoolean());
+            }
+            if (watermark is null)
+            {
+                Assert.False(options.TryGetProperty("watermark", out _));
+            }
+            else
+            {
+                Assert.Equal(watermark.Value, options.GetProperty("watermark").GetBoolean());
+            }
+            if (saveToDisk is null)
+            {
+                Assert.False(options.TryGetProperty("saveToDisk", out _));
+            }
+            else
+            {
+                Assert.Equal(saveToDisk.Value, options.GetProperty("saveToDisk").GetBoolean());
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(CopilotClientMode.CopilotCli, null, null)]
+    [InlineData(CopilotClientMode.Empty, null, null)]
+    [InlineData(CopilotClientMode.CopilotCli, false, false)]
+    [InlineData(CopilotClientMode.CopilotCli, true, true)]
+    [InlineData(CopilotClientMode.Empty, false, false)]
+    [InlineData(CopilotClientMode.Empty, true, true)]
+    public async Task ResumeTranscriptRecovery_PreservesOverridesAndProjectsReport(CopilotClientMode mode, bool? setting, bool? expected)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.IncludeTranscriptRecovery = true;
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url), Mode = mode });
+        var session = await client.ResumeSessionAsync("transcript-test", new ResumeSessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            AvailableTools = [],
+            AllowTranscriptRecovery = setting
+        });
+        var request = Assert.Single(server.Requests, request => request.Method == "session.resume").Params;
+        if (expected is null)
+        {
+            Assert.False(request.TryGetProperty("allowTranscriptRecovery", out _), request.ToString());
+        }
+        else
+        {
+            Assert.Equal(expected.Value, request.GetProperty("allowTranscriptRecovery").GetBoolean());
+        }
+        Assert.NotNull(session.TranscriptRecovery);
+        Assert.Equal("backup.jsonl", session.TranscriptRecovery.PlannedBackupPath);
+        Assert.Collection(session.TranscriptRecovery.InvalidLineNumbers,
+            line => Assert.Equal(3, line),
+            line => Assert.Equal(4, line));
+        Assert.True(session.TranscriptRecovery.SessionStartMoved);
+        await session.DisposeAsync();
+        server.IncludeTranscriptRecovery = false;
+        await using var unrepaired = await client.ResumeSessionAsync("transcript-unrepaired", new ResumeSessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            AvailableTools = []
+        });
+        Assert.Null(unrepaired.TranscriptRecovery);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SubagentStartHook_RegistersOnCreateAndResume_AndMapsInputAndOutput(bool resume)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var calls = new List<(SubagentStartHookInput Input, string InvocationSessionId)>();
+        var hooks = new SessionHooks
+        {
+            OnSubagentStart = (input, invocation) =>
+            {
+                calls.Add((input, invocation.SessionId));
+                return Task.FromResult<SubagentStartHookOutput?>(new SubagentStartHookOutput
+                {
+                    AdditionalContext = "Context for the child"
+                });
+            }
+        };
+        await using var session = resume
+            ? await client.ResumeSessionAsync("resumed-session", new ResumeSessionConfig { Hooks = hooks })
+            : await client.CreateSessionAsync(new SessionConfig { Hooks = hooks });
+
+        var registration = Assert.Single(server.Requests, r => r.Method == (resume ? "session.resume" : "session.create"));
+        Assert.True(registration.Params.GetProperty("hooks").GetBoolean());
+
+        var input = new Dictionary<string, object?>
+        {
+            ["sessionId"] = session.SessionId,
+            ["timestamp"] = 1_730_000_000_000L,
+            ["cwd"] = "workdir",
+            ["transcriptPath"] = "parent.jsonl",
+            ["agentName"] = "explore",
+            ["agentDisplayName"] = "Explorer",
+            ["agentDescription"] = "Reads files"
+        };
+        var request = new Dictionary<string, object?>
+        {
+            ["sessionId"] = session.SessionId,
+            ["hookType"] = "subagentStart",
+            ["input"] = input
+        };
+        var result = await server.SendRequestAsync("hooks.invoke", request).WaitAsync(TimeSpan.FromSeconds(5));
+        var output = result.GetProperty("output");
+        var property = Assert.Single(output.EnumerateObject());
+        Assert.Equal("additionalContext", property.Name);
+        Assert.Equal("Context for the child", property.Value.GetString());
+
+        var (first, invocationSessionId) = Assert.Single(calls);
+        Assert.Equal(session.SessionId, invocationSessionId);
+        Assert.Equal(session.SessionId, first.SessionId);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1_730_000_000_000L), first.Timestamp);
+        Assert.Equal("workdir", first.WorkingDirectory);
+        Assert.Equal("parent.jsonl", first.TranscriptPath);
+        Assert.Equal("explore", first.AgentName);
+        Assert.Equal("Explorer", first.AgentDisplayName);
+        Assert.Equal("Reads files", first.AgentDescription);
+
+        input.Remove("agentDisplayName");
+        input.Remove("agentDescription");
+        await server.SendRequestAsync("hooks.invoke", request).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, calls.Count);
+        Assert.Null(calls[1].Input.AgentDisplayName);
+        Assert.Null(calls[1].Input.AgentDescription);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SubagentStopHook_RegistersOnCreateAndResume_AndMapsInputAndBothOutputs(bool resume)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var calls = new List<(SubagentStopHookInput Input, string InvocationSessionId)>();
+        var block = true;
+        var hooks = new SessionHooks
+        {
+            OnSubagentStop = (input, invocation) =>
+            {
+                calls.Add((input, invocation.SessionId));
+                return Task.FromResult<SubagentStopHookOutput?>(block
+                    ? new SubagentStopHookOutput { Decision = "block", Reason = "Continue reading" }
+                    : new SubagentStopHookOutput { ModifiedResponse = "Replaced child response" });
+            }
+        };
+        await using var session = resume
+            ? await client.ResumeSessionAsync("resumed-session", new ResumeSessionConfig { Hooks = hooks })
+            : await client.CreateSessionAsync(new SessionConfig { Hooks = hooks });
+
+        var registration = Assert.Single(server.Requests, r => r.Method == (resume ? "session.resume" : "session.create"));
+        Assert.True(registration.Params.GetProperty("hooks").GetBoolean());
+
+        var input = new Dictionary<string, object?>
+        {
+            ["sessionId"] = session.SessionId,
+            ["timestamp"] = 1_730_000_000_000L,
+            ["cwd"] = "workdir",
+            ["transcriptPath"] = "parent.jsonl",
+            ["agentName"] = "explore",
+            ["agentDisplayName"] = "Explorer",
+            ["agentDescription"] = "Reads files",
+            ["agentId"] = "read-file",
+            ["agentType"] = "explore",
+            ["stopReason"] = "end_turn",
+            ["response"] = "Hello from subagent test!"
+        };
+        var request = new Dictionary<string, object?>
+        {
+            ["sessionId"] = session.SessionId,
+            ["hookType"] = "subagentStop",
+            ["input"] = input
+        };
+        var blocked = await server.SendRequestAsync("hooks.invoke", request).WaitAsync(TimeSpan.FromSeconds(5));
+        var blockOutput = blocked.GetProperty("output");
+        Assert.Equal(2, blockOutput.EnumerateObject().Count());
+        Assert.Equal("block", blockOutput.GetProperty("decision").GetString());
+        Assert.Equal("Continue reading", blockOutput.GetProperty("reason").GetString());
+        Assert.False(blockOutput.TryGetProperty("modifiedResponse", out _));
+
+        var (first, invocationSessionId) = Assert.Single(calls);
+        Assert.Equal(session.SessionId, invocationSessionId);
+        Assert.Equal(session.SessionId, first.SessionId);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1_730_000_000_000L), first.Timestamp);
+        Assert.Equal("workdir", first.WorkingDirectory);
+        Assert.Equal("parent.jsonl", first.TranscriptPath);
+        Assert.Equal("explore", first.AgentName);
+        Assert.Equal("Explorer", first.AgentDisplayName);
+        Assert.Equal("Reads files", first.AgentDescription);
+        Assert.Equal("read-file", first.AgentId);
+        Assert.Equal("explore", first.AgentType);
+        Assert.Equal("end_turn", first.StopReason);
+        Assert.Equal("Hello from subagent test!", first.Response);
+
+        input.Remove("agentId");
+        input.Remove("agentDisplayName");
+        input.Remove("agentDescription");
+        block = false;
+        var modified = await server.SendRequestAsync("hooks.invoke", request).WaitAsync(TimeSpan.FromSeconds(5));
+        var modifiedOutput = modified.GetProperty("output");
+        var property = Assert.Single(modifiedOutput.EnumerateObject());
+        Assert.Equal("modifiedResponse", property.Name);
+        Assert.Equal("Replaced child response", property.Value.GetString());
+        Assert.Equal(2, calls.Count);
+        Assert.Null(calls[1].Input.AgentId);
+        Assert.Null(calls[1].Input.AgentDisplayName);
+        Assert.Null(calls[1].Input.AgentDescription);
+    }
+
+    [Theory]
+    [InlineData("static")]
+    [InlineData("")]
+    public async Task GitHubTokenProvider_Is_Mutually_Exclusive_With_Static_Token(string staticToken)
+    {
+        await using var client = new CopilotClient();
+        var config = new SessionConfig
+        {
+            GitHubToken = staticToken,
+            GitHubTokenProvider = _ => Task.FromResult(GitHubTokenProviderResult.Cancel())
+        };
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => client.CreateSessionAsync(config));
+
+        Assert.Contains("cannot be used together", error.Message);
+    }
+
+    [Fact]
+    public async Task GitHubTokenProvider_Is_Released_When_Session_Is_Deleted()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            GitHubTokenProvider = _ => Task.FromResult(GitHubTokenProviderResult.Cancel())
+        });
+        var registrationId = Assert.Single(server.Requests, request => request.Method == "session.create")
+            .Params.GetProperty("gitHubTokenProviderRegistrationId").GetString();
+
+        await client.DeleteSessionAsync(session.SessionId);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            server.SendRequestAsync("gitHubToken.getToken", TokenRequest(registrationId)));
+        Assert.Contains("Unknown GitHub token provider registration ID", error.Message);
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task GitHubTokenProvider_Is_Serialized_And_Maps_Callbacks()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        GitHubTokenProviderArgs? callbackArgs = null;
+        var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            GitHubTokenProvider = args =>
+            {
+                callbackArgs = args;
+                return Task.FromResult(GitHubTokenProviderResult.FromToken(new GitHubToken
+                {
+                    AccessToken = "secret-token",
+                    TokenType = "bearer",
+                    ExpiresIn = 8 * 60 * 60
+                }));
+            }
+        });
+        var request = Assert.Single(server.Requests, request => request.Method == "session.create");
+        var registrationId = request.Params.GetProperty("gitHubTokenProviderRegistrationId").GetString();
+        Assert.False(string.IsNullOrEmpty(registrationId));
+        Assert.False(request.Params.TryGetProperty("gitHubToken", out _));
+
+        var result = await server.SendRequestAsync("gitHubToken.getToken", new Dictionary<string, object?>
+        {
+            ["registrationId"] = registrationId,
+            ["host"] = "github.example.com",
+            ["sessionId"] = session.SessionId,
+            ["reason"] = "refresh"
+        });
+
+        Assert.True(result.TryGetProperty("kind", out var kind), result.ToString());
+        Assert.Equal("token", kind.GetString());
+        Assert.Equal("secret-token", result.GetProperty("accessToken").GetString());
+        Assert.Equal(8 * 60 * 60, result.GetProperty("expiresIn").GetInt64());
+        Assert.NotNull(callbackArgs);
+        Assert.Equal("github.example.com", callbackArgs.Host);
+        Assert.Equal(session.SessionId, callbackArgs.SessionId);
+        Assert.Equal(GitHubTokenRequestReason.Refresh, callbackArgs.Reason);
+        Assert.DoesNotContain("secret-token", new GitHubToken
+        {
+            AccessToken = "secret-token",
+            ExpiresIn = 8 * 60 * 60
+        }.ToString());
+
+        await session.DisposeAsync();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            server.SendRequestAsync("gitHubToken.getToken", new Dictionary<string, object?>
+            {
+                ["registrationId"] = registrationId,
+                ["host"] = "github.com",
+                ["reason"] = "initial"
+            }));
+        Assert.Contains("Unknown GitHub token provider registration ID", error.Message);
+
+        server.ClearRequests();
+        var resumed = await client.ResumeSessionAsync("resumed-session", new ResumeSessionConfig
+        {
+            GitHubTokenProvider = _ => Task.FromResult(GitHubTokenProviderResult.Cancel())
+        });
+        var resumeRequest = Assert.Single(server.Requests, request => request.Method == "session.resume");
+        Assert.False(string.IsNullOrEmpty(
+            resumeRequest.Params.GetProperty("gitHubTokenProviderRegistrationId").GetString()));
+        await resumed.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task GitHubTokenProvider_Handles_Cancellation_Errors_And_Rollback()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var cancelledSession = await client.CreateSessionAsync(new SessionConfig
+        {
+            GitHubTokenProvider = _ => Task.FromResult(GitHubTokenProviderResult.Cancel())
+        });
+        var cancelledId = Assert.Single(server.Requests, request => request.Method == "session.create")
+            .Params.GetProperty("gitHubTokenProviderRegistrationId").GetString();
+        var cancelled = await server.SendRequestAsync("gitHubToken.getToken", TokenRequest(cancelledId));
+        Assert.True(cancelled.TryGetProperty("kind", out var cancelledKind), cancelled.ToString());
+        Assert.Equal("cancelled", cancelledKind.GetString());
+        await cancelledSession.DisposeAsync();
+
+        server.ClearRequests();
+        var providerSession = await client.CreateSessionAsync(new SessionConfig
+        {
+            GitHubTokenProvider = _ => Task.FromException<GitHubTokenProviderResult>(
+                new InvalidOperationException("provider failed"))
+        });
+        var providerId = Assert.Single(server.Requests, request => request.Method == "session.create")
+            .Params.GetProperty("gitHubTokenProviderRegistrationId").GetString();
+        var callbackError = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            server.SendRequestAsync("gitHubToken.getToken", TokenRequest(providerId)));
+        Assert.Contains("provider failed", callbackError.Message);
+        await providerSession.DisposeAsync();
+
+        server.ClearRequests();
+        server.FailSessionCreate();
+        await Assert.ThrowsAsync<IOException>(() => client.CreateSessionAsync(new SessionConfig
+        {
+            GitHubTokenProvider = _ => Task.FromResult(GitHubTokenProviderResult.Cancel())
+        }));
+        var rolledBackId = Assert.Single(server.Requests, request => request.Method == "session.create")
+            .Params.GetProperty("gitHubTokenProviderRegistrationId").GetString();
+        var rollbackError = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            server.SendRequestAsync("gitHubToken.getToken", TokenRequest(rolledBackId)));
+        Assert.Contains("Unknown GitHub token provider registration ID", rollbackError.Message);
+    }
+
+    [Fact]
+    public async Task GitHubTokenProvider_Resume_Replaces_Ownership()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var first = await client.CreateSessionAsync(new SessionConfig
+        {
+            SessionId = "replacement-session",
+            GitHubTokenProvider = _ => Task.FromResult(GitHubTokenProviderResult.Cancel())
+        });
+        var firstId = Assert.Single(server.Requests, request => request.Method == "session.create")
+            .Params.GetProperty("gitHubTokenProviderRegistrationId").GetString();
+
+        await first.DisposeAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            server.SendRequestAsync("gitHubToken.getToken", TokenRequest(firstId)));
+
+        server.ClearRequests();
+        var resumed = await client.ResumeSessionAsync("replacement-session", new ResumeSessionConfig
+        {
+            GitHubTokenProvider = _ => Task.FromResult(GitHubTokenProviderResult.Cancel())
+        });
+        var secondId = Assert.Single(server.Requests, request => request.Method == "session.resume")
+            .Params.GetProperty("gitHubTokenProviderRegistrationId").GetString();
+
+        var result = await server.SendRequestAsync("gitHubToken.getToken", TokenRequest(secondId));
+        Assert.Equal("cancelled", result.GetProperty("kind").GetString());
+
+        await resumed.DisposeAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            server.SendRequestAsync("gitHubToken.getToken", TokenRequest(secondId)));
+    }
+
+    private static Dictionary<string, object?> TokenRequest(string? registrationId) => new()
+    {
+        ["registrationId"] = registrationId,
+        ["host"] = "github.com",
+        ["reason"] = "initial"
+    };
 
     [Fact]
     public async Task StopAsync_Requests_Runtime_Shutdown_For_Owned_Process()
@@ -26,7 +632,7 @@ public sealed class ClientSessionLifetimeTests
         await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
         await client.StartAsync();
         using var process = StartExitedProcess();
-        await ReplaceConnectionCliProcessAsync(client, process);
+        await ReplaceConnectionResourcesAsync(client, process);
 
         await client.StopAsync();
 
@@ -40,7 +646,7 @@ public sealed class ClientSessionLifetimeTests
         var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
         await client.StartAsync();
         using var process = StartExitedProcess();
-        await ReplaceConnectionCliProcessAsync(client, process);
+        await ReplaceConnectionResourcesAsync(client, process);
 
         await client.DisposeAsync();
 
@@ -55,7 +661,7 @@ public sealed class ClientSessionLifetimeTests
         await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
         await client.StartAsync();
         using var process = StartExitedProcess();
-        await ReplaceConnectionCliProcessAsync(client, process);
+        await ReplaceConnectionResourcesAsync(client, process);
 
         await client.StopAsync();
 
@@ -69,7 +675,7 @@ public sealed class ClientSessionLifetimeTests
         await using var forceClient = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(forceServer.Url) });
         await forceClient.StartAsync();
         using var process = StartExitedProcess();
-        await ReplaceConnectionCliProcessAsync(forceClient, process);
+        await ReplaceConnectionResourcesAsync(forceClient, process);
 
         await forceClient.ForceStopAsync();
 
@@ -82,6 +688,62 @@ public sealed class ClientSessionLifetimeTests
         await externalClient.StopAsync();
 
         Assert.Equal(0, externalServer.RuntimeShutdownCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Async_Stop_Keeps_Caller_Scheduler_Responsive_During_Native_Shutdown(bool force)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await client.StartAsync();
+        var shutdownStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var releaseShutdown = new ManualResetEventSlim();
+        var shutdownCalls = 0;
+        var hostType = typeof(CopilotClient).Assembly.GetType("GitHub.Copilot.FfiRuntimeHost", throwOnError: true)!;
+        var constructor = hostType.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Single(candidate => candidate.GetParameters().Length == 8);
+        using var host = (IDisposable)constructor.Invoke(
+            [
+                "test-runtime",
+                null,
+                null,
+                Array.Empty<string>(),
+                NullLogger.Instance,
+                new Func<uint, bool>(_ => true),
+                new Func<uint, bool>(_ =>
+                {
+                    Interlocked.Increment(ref shutdownCalls);
+                    shutdownStarted.TrySetResult();
+                    releaseShutdown.Wait();
+                    return true;
+                }),
+                new Action(() => { }),
+            ]);
+        hostType.GetField("_serverId", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(host, (uint)11);
+        await ReplaceConnectionResourcesAsync(client, ffiHost: host);
+
+        var scheduler = new ConcurrentExclusiveSchedulerPair(TaskScheduler.Default, maxConcurrencyLevel: 1);
+        var factory = new TaskFactory(CancellationToken.None, TaskCreationOptions.None, TaskContinuationOptions.None, scheduler.ExclusiveScheduler);
+        var stop = factory.StartNew(() => force ? client.ForceStopAsync() : client.StopAsync()).Unwrap();
+        try
+        {
+            await shutdownStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await factory.StartNew(() => { }).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(stop.IsCompleted, "Stop returned before native shutdown completed.");
+        }
+        finally
+        {
+            releaseShutdown.Set();
+            await stop.WaitAsync(TimeSpan.FromSeconds(5));
+            scheduler.Complete();
+            await scheduler.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        Assert.Equal(1, shutdownCalls);
+        Assert.Equal(force ? 0 : 1, server.RuntimeShutdownCount);
     }
 
     [Fact]
@@ -252,6 +914,44 @@ public sealed class ClientSessionLifetimeTests
         Assert.Equal("high", agent.GetProperty("reasoningEffort").GetString());
     }
 
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData(WorkingDirectoryTrust.Session, "preferred")]
+    [InlineData(WorkingDirectoryTrust.User, "required")]
+    public async Task CreateSessionAsync_Forwards_Trust_And_CustomAgent_ModelPolicy(WorkingDirectoryTrust? trust, string? modelPolicy)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var config = new SessionConfig
+        {
+            TrustWorkingDirectory = trust,
+            CustomAgents =
+            [
+                new CustomAgentConfig
+                {
+                    Name = "policy-agent",
+                    Prompt = "Use the authored model.",
+                    Model = "claude-haiku-4.5",
+                    ModelPolicy = modelPolicy is null ? null : new AgentModelPolicy(modelPolicy)
+                }
+            ],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        };
+        await using var session = await client.CreateSessionAsync(config.Clone());
+        var request = Assert.Single(server.Requests, request => request.Method == "session.create");
+        var agent = Assert.Single(request.Params.GetProperty("customAgents").EnumerateArray());
+        if (trust is null)
+        {
+            Assert.False(request.Params.TryGetProperty("trustWorkingDirectory", out _));
+            Assert.False(agent.TryGetProperty("modelPolicy", out _));
+        }
+        else
+        {
+            Assert.Equal(trust == WorkingDirectoryTrust.Session ? "session" : "user", request.Params.GetProperty("trustWorkingDirectory").GetString());
+            Assert.Equal(modelPolicy, agent.GetProperty("modelPolicy").GetString());
+        }
+    }
+
     [Fact]
     public async Task CreateSessionAsync_Omits_CustomAgent_ReasoningEffort_When_Unset()
     {
@@ -275,6 +975,302 @@ public sealed class ClientSessionLifetimeTests
         var request = Assert.Single(server.Requests, request => request.Method == "session.create");
         var agent = Assert.Single(request.Params.GetProperty("customAgents").EnumerateArray());
         Assert.False(agent.TryGetProperty("reasoningEffort", out _));
+    }
+
+    public static TheoryData<AutoTier, string, bool?> CapiAutoTiers => new()
+    {
+        { AutoTier.Efficiency, "efficiency", null },
+        { AutoTier.Balance, "balance", null },
+        { AutoTier.Intelligence, "intelligence", null },
+        { AutoTier.Fast, "fast", null },
+        { AutoTier.Efficiency, "efficiency", false },
+        { AutoTier.Balance, "balance", false },
+        { AutoTier.Intelligence, "intelligence", false },
+        { AutoTier.Fast, "fast", false },
+    };
+
+    [Theory]
+    [MemberData(nameof(CapiAutoTiers))]
+    public async Task SessionRequests_Serialize_CapiAutoTier(AutoTier tier, string expectedTier, bool? enableWebSocketResponses)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var capi = new CapiSessionOptions { AutoTier = tier, EnableWebSocketResponses = enableWebSocketResponses };
+
+        await using var created = await client.CreateSessionAsync(new SessionConfig
+        {
+            Model = "auto",
+            Capi = capi,
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        await using var resumed = await client.ResumeSessionAsync("resume-with-auto-tier", new ResumeSessionConfig
+        {
+            Model = "auto",
+            Capi = capi,
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        foreach (var method in new[] { "session.create", "session.resume" })
+        {
+            var request = Assert.Single(server.Requests, request => request.Method == method);
+            var serializedCapi = request.Params.GetProperty("capi");
+            Assert.Equal(expectedTier, serializedCapi.GetProperty("autoTier").GetString());
+            if (enableWebSocketResponses.HasValue)
+            {
+                Assert.Equal(enableWebSocketResponses.Value, serializedCapi.GetProperty("enableWebSocketResponses").GetBoolean());
+            }
+            else
+            {
+                Assert.False(serializedCapi.TryGetProperty("enableWebSocketResponses", out _));
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("efficiency")]
+    [InlineData("balance")]
+    [InlineData("intelligence")]
+    [InlineData("fast")]
+    public async Task SetModelAsync_Serializes_AutoTier(string expectedTier)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        await session.SetModelAsync("auto", new SetModelOptions { AutoTier = new AutoTier(expectedTier) });
+
+        var request = Assert.Single(server.Requests, request => request.Method == "session.model.switchTo");
+        Assert.Equal("auto", request.Params.GetProperty("modelId").GetString());
+        Assert.Equal(expectedTier, request.Params.GetProperty("autoTier").GetString());
+    }
+
+    [Fact]
+    public async Task SetModelAsync_Omits_AutoTier_WhenUnset()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        await session.SetModelAsync("gpt-5.4");
+
+        var request = Assert.Single(server.Requests, request => request.Method == "session.model.switchTo");
+        Assert.False(request.Params.TryGetProperty("autoTier", out _));
+    }
+
+    [Fact]
+    public async Task SetModelAsync_Writes_Null_AutoTier_WhenCleared()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        await session.SetModelAsync("auto", new SetModelOptions { ResetAutoTier = true });
+
+        // An explicit null must survive to the wire. Omitting it would mean "leave the
+        // preference alone" rather than "use provider-default routing".
+        var request = Assert.Single(server.Requests, request => request.Method == "session.model.switchTo");
+        Assert.True(request.Params.TryGetProperty("autoTier", out var autoTier));
+        Assert.Equal(JsonValueKind.Null, autoTier.ValueKind);
+    }
+
+    [Fact]
+    public async Task SetModelAsync_Rejects_Conflicting_AutoTier_Options()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        await Assert.ThrowsAsync<ArgumentException>(() => session.SetModelAsync(
+            "auto",
+            new SetModelOptions { AutoTier = AutoTier.Balance, ResetAutoTier = true }));
+    }
+
+    [Fact]
+    public async Task SetAutoTierAsync_Serializes_Tier_And_Returns_Snapshot()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var result = await session.SetAutoTierAsync(AutoTier.Fast);
+
+        var request = Assert.Single(server.Requests, request => request.Method == "session.model.switchAutoTier");
+        Assert.Equal("fast", request.Params.GetProperty("autoTier").GetString());
+        Assert.Equal(ModelSwitchAutoTierStatus.Pending, result.Status);
+        Assert.Equal(AutoTier.Balance, result.EffectiveAutoTier);
+    }
+
+    [Fact]
+    public async Task SetAutoTierAsync_Writes_Null_Tier_ForDefaultRouting()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        await session.SetAutoTierAsync(null);
+
+        var request = Assert.Single(server.Requests, request => request.Method == "session.model.switchAutoTier");
+        Assert.True(request.Params.TryGetProperty("autoTier", out var autoTier));
+        Assert.Equal(JsonValueKind.Null, autoTier.ValueKind);
+    }
+
+    [Theory]
+    [InlineData(false, null)]
+    [InlineData(true, null)]
+    [InlineData(true, false)]
+    public async Task SessionRequests_Omit_CapiAutoTier_WhenUnset(bool includeCapi, bool? enableWebSocketResponses)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var capi = includeCapi ? new CapiSessionOptions { EnableWebSocketResponses = enableWebSocketResponses } : null;
+
+        await using var created = await client.CreateSessionAsync(new SessionConfig
+        {
+            Model = "auto",
+            Capi = capi,
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        await using var resumed = await client.ResumeSessionAsync("resume-without-auto-tier", new ResumeSessionConfig
+        {
+            Capi = capi,
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        foreach (var method in new[] { "session.create", "session.resume" })
+        {
+            var request = Assert.Single(server.Requests, request => request.Method == method);
+            Assert.Equal(includeCapi, request.Params.TryGetProperty("capi", out var serializedCapi));
+            if (includeCapi)
+            {
+                Assert.False(serializedCapi.TryGetProperty("autoTier", out _));
+                if (enableWebSocketResponses.HasValue)
+                {
+                    Assert.Equal(enableWebSocketResponses.Value, serializedCapi.GetProperty("enableWebSocketResponses").GetBoolean());
+                }
+                else
+                {
+                    Assert.Empty(serializedCapi.EnumerateObject());
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task CreateSessionAsync_Forwards_AskUserVariant()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            AskUserVariant = AskUserVariant.Elicitation,
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var request = Assert.Single(server.Requests, request => request.Method == "session.create");
+        Assert.Equal("elicitation", request.Params.GetProperty("askUserVariant").GetString());
+
+        server.ClearRequests();
+        await using var defaultSession = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        var defaultRequest = Assert.Single(server.Requests, request => request.Method == "session.create");
+        Assert.False(defaultRequest.Params.TryGetProperty("askUserVariant", out _));
+    }
+
+    [Fact]
+    public async Task ResumeSessionAsync_Forwards_AskUserVariant_On_Cold_Resume()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+
+        await using var session = await client.ResumeSessionAsync("ask-user-variant", new ResumeSessionConfig
+        {
+            AskUserVariant = AskUserVariant.Legacy,
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var request = Assert.Single(server.Requests, request => request.Method == "session.resume");
+        Assert.Equal("legacy", request.Params.GetProperty("askUserVariant").GetString());
+
+        server.ClearRequests();
+        await using var defaultSession = await client.ResumeSessionAsync("ask-user-variant-default", new ResumeSessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        var defaultRequest = Assert.Single(server.Requests, request => request.Method == "session.resume");
+        Assert.False(defaultRequest.Params.TryGetProperty("askUserVariant", out _));
+    }
+
+    [Fact]
+    public async Task SessionRequests_Forward_And_Omit_Diagnostics()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+
+        await using var created = await client.CreateSessionAsync(new SessionConfig
+        {
+            Diagnostics = new DiagnosticsConfiguration
+            {
+                Sources = new DiagnosticSourcesConfiguration
+                {
+                    Mcp = new McpDiagnosticSourceConfiguration { Level = DiagnosticLogLevel.Debug }
+                }
+            },
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        await using var resumed = await client.ResumeSessionAsync("diagnostics-resume", new ResumeSessionConfig
+        {
+            Diagnostics = new DiagnosticsConfiguration
+            {
+                Sources = new DiagnosticSourcesConfiguration
+                {
+                    Mcp = new McpDiagnosticSourceConfiguration { Level = DiagnosticLogLevel.Trace }
+                }
+            },
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var createRequest = Assert.Single(server.Requests, request => request.Method == "session.create");
+        var resumeRequest = Assert.Single(server.Requests, request => request.Method == "session.resume");
+        Assert.Equal("debug", createRequest.Params.GetProperty("diagnostics").GetProperty("sources")
+            .GetProperty("mcp").GetProperty("level").GetString());
+        Assert.Equal("trace", resumeRequest.Params.GetProperty("diagnostics").GetProperty("sources")
+            .GetProperty("mcp").GetProperty("level").GetString());
+
+        server.ClearRequests();
+        await using var defaultCreated = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        await using var defaultResumed = await client.ResumeSessionAsync("diagnostics-default-resume", new ResumeSessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var defaultCreateRequest = Assert.Single(server.Requests, request => request.Method == "session.create");
+        var defaultResumeRequest = Assert.Single(server.Requests, request => request.Method == "session.resume");
+        Assert.False(defaultCreateRequest.Params.TryGetProperty("diagnostics", out _));
+        Assert.False(defaultResumeRequest.Params.TryGetProperty("diagnostics", out _));
     }
 
     [Fact]
@@ -340,6 +1336,350 @@ public sealed class ClientSessionLifetimeTests
 
         var resumeRequest = Assert.Single(server.Requests, request => request.Method == "session.resume");
         Assert.True(resumeRequest.Params.GetProperty("tools")[0].GetProperty("isTerminal").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Edit Word documents")]
+    public async Task SessionRequests_Serialize_Tool_Namespaces(string? description)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var namespacedTool = CopilotTool.DefineTool(
+            (Func<string>)(() => "created"),
+            new CopilotToolOptions { Namespace = new ToolNamespace { Name = "word", Description = description } },
+            new AIFunctionFactoryOptions { Name = "word_create" });
+        var plainTool = CopilotTool.DefineTool((Func<string>)(() => "plain"));
+
+        await using var created = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [namespacedTool, plainTool],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var createRequest = Assert.Single(server.Requests, request => request.Method == "session.create");
+        var createTools = createRequest.Params.GetProperty("tools");
+        Assert.False(createTools[1].TryGetProperty("namespace", out _));
+
+        server.ClearRequests();
+
+        await using var resumed = await client.ResumeSessionAsync("resume-with-namespaced-tool", new ResumeSessionConfig
+        {
+            Tools = [namespacedTool],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var resumeRequest = Assert.Single(server.Requests, request => request.Method == "session.resume");
+        foreach (var tool in new[] { createTools[0], resumeRequest.Params.GetProperty("tools")[0] })
+        {
+            var toolNamespace = tool.GetProperty("namespace");
+            Assert.Equal("word", toolNamespace.GetProperty("name").GetString());
+            Assert.Equal(description is not null, toolNamespace.TryGetProperty("description", out var actualDescription));
+            if (description is not null)
+            {
+                Assert.Equal(description, actualDescription.GetString());
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ExternalTool_String_Arguments_Bind_To_Single_Function_Parameter()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        string? receivedPatch = null;
+        var tool = CopilotTool.DefineTool(
+            (string patch) =>
+            {
+                receivedPatch = patch;
+                return "applied";
+            },
+            new CopilotToolOptions { OverridesBuiltInTool = true },
+            new AIFunctionFactoryOptions { Name = "apply_patch" });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [tool],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        server.ClearRequests();
+        using var arguments = JsonDocument.Parse("\"*** Begin Patch\\n*** End Patch\"");
+
+        DispatchEvent(session, new ExternalToolRequestedEvent
+        {
+            Data = new ExternalToolRequestedData
+            {
+                Arguments = arguments.RootElement.Clone(),
+                RequestId = "apply-patch-request",
+                SessionId = session.SessionId,
+                ToolCallId = "apply-patch-call",
+                ToolName = "apply_patch"
+            }
+        });
+
+        var request = await WaitForRequestAsync(server, "session.tools.handlePendingToolCall");
+        Assert.Equal("*** Begin Patch\n*** End Patch", receivedPatch);
+        Assert.False(request.Params.TryGetProperty("error", out _));
+        Assert.Equal("applied", request.Params.GetProperty("result").GetProperty("textResultForLlm").GetString());
+    }
+
+    [Fact]
+    public async Task ExternalTool_String_Arguments_Reject_Ambiguous_Function_Parameters()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var invoked = false;
+        var tool = CopilotTool.DefineTool(
+            (string patch, string explanation) =>
+            {
+                invoked = true;
+                return "applied";
+            },
+            new CopilotToolOptions { OverridesBuiltInTool = true },
+            new AIFunctionFactoryOptions { Name = "apply_patch" });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [tool],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        server.ClearRequests();
+        using var arguments = JsonDocument.Parse("\"*** Begin Patch\\n*** End Patch\"");
+
+        DispatchEvent(session, new ExternalToolRequestedEvent
+        {
+            Data = new ExternalToolRequestedData
+            {
+                Arguments = arguments.RootElement.Clone(),
+                RequestId = "ambiguous-apply-patch-request",
+                SessionId = session.SessionId,
+                ToolCallId = "ambiguous-apply-patch-call",
+                ToolName = "apply_patch"
+            }
+        });
+
+        var request = await WaitForRequestAsync(server, "session.tools.handlePendingToolCall");
+        Assert.False(invoked);
+        Assert.Contains("received non-object arguments", request.Params.GetProperty("error").GetString());
+        Assert.False(request.Params.TryGetProperty("result", out _));
+    }
+
+    [Fact]
+    public async Task ExternalTool_Number_Arguments_Bind_To_Single_Function_Parameter()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        int? receivedLine = null;
+        var tool = CopilotTool.DefineTool(
+            (int line) =>
+            {
+                receivedLine = line;
+                return "selected";
+            },
+            factoryOptions: new AIFunctionFactoryOptions { Name = "select_line" });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [tool],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        server.ClearRequests();
+        using var arguments = JsonDocument.Parse("42");
+
+        DispatchEvent(session, new ExternalToolRequestedEvent
+        {
+            Data = new ExternalToolRequestedData
+            {
+                Arguments = arguments.RootElement.Clone(),
+                RequestId = "select-line-request",
+                SessionId = session.SessionId,
+                ToolCallId = "select-line-call",
+                ToolName = "select_line"
+            }
+        });
+
+        var request = await WaitForRequestAsync(server, "session.tools.handlePendingToolCall");
+        Assert.Equal(42, receivedLine);
+        Assert.False(request.Params.TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task ExternalTool_String_Arguments_Bind_To_Sole_Required_Function_Parameter()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        string? receivedPatch = null;
+        string? receivedExplanation = null;
+        var tool = CopilotTool.DefineTool(
+            (string patch, string? explanation = null) =>
+            {
+                receivedPatch = patch;
+                receivedExplanation = explanation;
+                return "applied";
+            },
+            new CopilotToolOptions { OverridesBuiltInTool = true },
+            new AIFunctionFactoryOptions { Name = "apply_patch" });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [tool],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        server.ClearRequests();
+        using var arguments = JsonDocument.Parse("\"*** Begin Patch\\n*** End Patch\"");
+
+        DispatchEvent(session, new ExternalToolRequestedEvent
+        {
+            Data = new ExternalToolRequestedData
+            {
+                Arguments = arguments.RootElement.Clone(),
+                RequestId = "optional-apply-patch-request",
+                SessionId = session.SessionId,
+                ToolCallId = "optional-apply-patch-call",
+                ToolName = "apply_patch"
+            }
+        });
+
+        var request = await WaitForRequestAsync(server, "session.tools.handlePendingToolCall");
+        Assert.Equal("*** Begin Patch\n*** End Patch", receivedPatch);
+        Assert.Null(receivedExplanation);
+        Assert.False(request.Params.TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task EmptyMode_Create_Sends_Empty_IncludedBuiltinSkills()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForUri(server.Url),
+            Mode = CopilotClientMode.Empty,
+            BaseDirectory = Path.GetTempPath(),
+        });
+
+        await using var created = await client.CreateSessionAsync(new SessionConfig
+        {
+            AvailableTools = [],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var update = Assert.Single(server.Requests, request => request.Method == "session.options.update");
+        Assert.True(update.Params.TryGetProperty("includedBuiltinSkills", out var skills));
+        Assert.Equal(JsonValueKind.Array, skills.ValueKind);
+        Assert.Equal(0, skills.GetArrayLength());
+        // Adjacent unconditional plugin isolation is still present.
+        Assert.True(update.Params.TryGetProperty("installedPlugins", out var plugins));
+        Assert.Equal(0, plugins.GetArrayLength());
+    }
+
+    [Fact]
+    public async Task EmptyMode_Resume_Sends_Empty_IncludedBuiltinSkills()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForUri(server.Url),
+            Mode = CopilotClientMode.Empty,
+            BaseDirectory = Path.GetTempPath(),
+        });
+
+        await using var resumed = await client.ResumeSessionAsync("resume-empty-skills", new ResumeSessionConfig
+        {
+            AvailableTools = [],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var update = Assert.Single(server.Requests, request => request.Method == "session.options.update");
+        Assert.True(update.Params.TryGetProperty("includedBuiltinSkills", out var skills));
+        Assert.Equal(JsonValueKind.Array, skills.ValueKind);
+        Assert.Equal(0, skills.GetArrayLength());
+    }
+
+    [Fact]
+    public async Task EmptyMode_Resume_Preserves_Explicit_IncludedBuiltinSkills()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForUri(server.Url),
+            Mode = CopilotClientMode.Empty,
+            BaseDirectory = Path.GetTempPath(),
+        });
+
+        await using var resumed = await client.ResumeSessionAsync("resume-selected-skills", new ResumeSessionConfig
+        {
+            AvailableTools = [],
+            IncludedBuiltinSkills = ["code-review"],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var update = Assert.Single(server.Requests, request => request.Method == "session.options.update");
+        var skills = update.Params.GetProperty("includedBuiltinSkills");
+        Assert.Equal(["code-review"], skills.EnumerateArray().Select(value => value.GetString()));
+    }
+
+    [Fact]
+    public async Task EmptyMode_Create_With_EnableSkills_Still_Sends_Empty_IncludedBuiltinSkills()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForUri(server.Url),
+            Mode = CopilotClientMode.Empty,
+            BaseDirectory = Path.GetTempPath(),
+        });
+
+        // Caller opts into their own custom skills. Runtime-bundled built-ins must
+        // still be excluded: the empty post-patch cannot be weakened by the caller.
+        await using var created = await client.CreateSessionAsync(new SessionConfig
+        {
+            AvailableTools = [],
+            EnableSkills = true,
+            SkillDirectories = [Path.Combine(Path.GetTempPath(), "skills")],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var update = Assert.Single(server.Requests, request => request.Method == "session.options.update");
+        Assert.True(update.Params.TryGetProperty("includedBuiltinSkills", out var skills));
+        Assert.Equal(JsonValueKind.Array, skills.ValueKind);
+        Assert.Equal(0, skills.GetArrayLength());
+    }
+
+    [Fact]
+    public async Task EmptyMode_Create_Preserves_Explicit_IncludedBuiltinSkills()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForUri(server.Url),
+            Mode = CopilotClientMode.Empty,
+            BaseDirectory = Path.GetTempPath(),
+        });
+
+        await using var created = await client.CreateSessionAsync(new SessionConfig
+        {
+            AvailableTools = [],
+            IncludedBuiltinSkills = ["code-review"],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var update = Assert.Single(server.Requests, request => request.Method == "session.options.update");
+        var skills = update.Params.GetProperty("includedBuiltinSkills");
+        Assert.Equal(["code-review"], skills.EnumerateArray().Select(value => value.GetString()));
+    }
+
+    [Fact]
+    public async Task CopilotCliMode_Create_Does_Not_Inject_IncludedBuiltinSkills()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+
+        await using var created = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        // In the default copilot-cli mode with no overridable options set, no
+        // options patch is sent at all, so the field is never injected.
+        Assert.DoesNotContain(server.Requests, request =>
+            request.Method == "session.options.update"
+            && request.Params.TryGetProperty("includedBuiltinSkills", out _));
     }
 
     [Fact]
@@ -424,6 +1764,140 @@ public sealed class ClientSessionLifetimeTests
     }
 
     [Fact]
+    public async Task CreateSessionAsync_Preserves_Server_Assigned_Session_When_McpAuth_Interest_Fails()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.FailMcpAuthInterestRegistration = true;
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+
+        var error = await Assert.ThrowsAsync<IOException>(() => client.CreateSessionAsync(new SessionConfig
+        {
+            Cloud = new CloudSessionOptions
+            {
+                Repository = new CloudSessionRepository { Owner = "github", Name = "copilot-sdk", Branch = "main" }
+            },
+            OnMcpAuthRequest = _ => Task.FromResult<McpAuthResult?>(McpAuthResult.Cancel())
+        }));
+
+        Assert.Contains("interest registration failed", error.Message);
+        var create = Assert.Single(server.Requests, request => request.Method == "session.create");
+        Assert.False(create.Params.TryGetProperty("sessionId", out _));
+        Assert.NotNull(server.LastSessionId);
+        var interest = Assert.Single(server.Requests, request => request.Method == "session.eventLog.registerInterest");
+        Assert.Equal(server.LastSessionId, interest.Params.GetProperty("sessionId").GetString());
+        Assert.DoesNotContain(server.Requests, request => request.Method == "session.delete");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateSessionAsync_Deletes_Server_Assigned_Session_When_Binary_Provider_Validation_Fails(bool failSessionDelete)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.FailSessionDelete = failSessionDelete;
+        server.ResponseFactory = request => request.Method == "sessionFs.setProvider"
+            ? new Dictionary<string, object?> { ["success"] = true }
+            : throw new InvalidOperationException($"Unexpected RPC method '{request.Method}'.");
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForUri(server.Url),
+            SessionFs = new SessionFsConfig
+            {
+                InitialWorkingDirectory = "/",
+                SessionStatePath = "/session-state",
+                Conventions = SessionFsSetProviderConventions.Posix,
+                Capabilities = new SessionFsSetProviderCapabilities { Binary = true }
+            }
+        });
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.CreateSessionAsync(new SessionConfig
+        {
+            Cloud = new CloudSessionOptions
+            {
+                Repository = new CloudSessionRepository { Owner = "github", Name = "copilot-sdk", Branch = "main" }
+            },
+            CreateSessionFsProvider = _ => new TextOnlySessionFsProvider()
+        }));
+
+        Assert.Contains("does not implement ISessionFsBinaryProvider", error.Message);
+        var create = Assert.Single(server.Requests, request => request.Method == "session.create");
+        Assert.False(create.Params.TryGetProperty("sessionId", out _));
+        var delete = Assert.Single(server.Requests, request => request.Method == "session.delete");
+        Assert.NotNull(server.LastSessionId);
+        Assert.Equal(server.LastSessionId, delete.Params.GetProperty("sessionId").GetString());
+    }
+
+    [Fact]
+    public async Task Binary_SessionFs_Provider_Rejects_Oversized_Bytes_Before_Encoding()
+    {
+        var provider = new BinarySessionFsProvider(_ => Task.FromResult(new byte[(64 * 1024 * 1024 - 1024) / 4 * 3 + 1]));
+        var result = await ((ISessionFsHandler)provider).ReadFileBytesAsync(
+            new SessionFsReadFileBytesRequest { SessionId = "session", Path = "/image.png" }, CancellationToken.None);
+
+        Assert.Empty(result.Content);
+        Assert.NotNull(result.Error);
+        Assert.Equal(SessionFsErrorCode.UNKNOWN, result.Error.Code);
+        Assert.Contains("binary read limit", result.Error.Message);
+    }
+
+    [Fact]
+    public async Task Binary_SessionFs_Provider_Propagates_Cancellation()
+    {
+        var provider = new BinarySessionFsProvider(token => Task.FromCanceled<byte[]>(token));
+        var cancellationToken = new CancellationToken(canceled: true);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ((ISessionFsHandler)provider).ReadFileBytesAsync(
+            new SessionFsReadFileBytesRequest { SessionId = "session", Path = "/image.png" }, cancellationToken));
+    }
+
+    [Fact]
+    public async Task Binary_SessionFs_Provider_Writes_Exact_Bytes_And_Rejects_Invalid_Input()
+    {
+        ReadOnlyMemory<byte>? received = null;
+        int? receivedMode = null;
+        var provider = new BinarySessionFsProvider(
+            _ => Task.FromResult(Array.Empty<byte>()),
+            (content, mode) => { received = content; receivedMode = mode; return Task.CompletedTask; });
+        var handler = (ISessionFsHandler)provider;
+        var result = await handler.WriteFileBytesAsync(
+            new SessionFsWriteFileBytesRequest { SessionId = "session", Path = "/image.png", Content = "AP/+AQ==", Mode = 384 },
+            CancellationToken.None);
+        Assert.Null(result);
+        Assert.Equal(new byte[] { 0, 255, 254, 1 }, received?.ToArray());
+        Assert.Equal(384, receivedMode);
+
+        foreach (var content in new[] { "AA==AAAA", "AA==\r\n", new string('A', 64 * 1024 * 1024) })
+        {
+            var error = await handler.WriteFileBytesAsync(
+                new SessionFsWriteFileBytesRequest { SessionId = "session", Path = "/image.png", Content = content },
+                CancellationToken.None);
+            Assert.NotNull(error);
+            Assert.Equal(new byte[] { 0, 255, 254, 1 }, received?.ToArray());
+        }
+    }
+
+    private sealed class BinarySessionFsProvider(Func<CancellationToken, Task<byte[]>> read, Func<ReadOnlyMemory<byte>, int?, Task>? write = null)
+        : TextOnlySessionFsProvider, ISessionFsBinaryProvider
+    {
+        public Task<byte[]> ReadFileBytesAsync(string path, CancellationToken cancellationToken) => read(cancellationToken);
+        public Task WriteFileBytesAsync(string path, ReadOnlyMemory<byte> content, int? mode, CancellationToken cancellationToken) =>
+            write?.Invoke(content, mode) ?? Task.CompletedTask;
+    }
+
+    private class TextOnlySessionFsProvider : SessionFsProvider
+    {
+        protected override Task<string> ReadFileAsync(string path, CancellationToken cancellationToken) => throw new NotSupportedException();
+        protected override Task WriteFileAsync(string path, string content, int? mode, CancellationToken cancellationToken) => throw new NotSupportedException();
+        protected override Task AppendFileAsync(string path, string content, int? mode, CancellationToken cancellationToken) => throw new NotSupportedException();
+        protected override Task<bool> ExistsAsync(string path, CancellationToken cancellationToken) => throw new NotSupportedException();
+        protected override Task<SessionFsStatResult> StatAsync(string path, CancellationToken cancellationToken) => throw new NotSupportedException();
+        protected override Task MakeDirectoryAsync(string path, bool recursive, int? mode, CancellationToken cancellationToken) => throw new NotSupportedException();
+        protected override Task<IList<string>> ReadDirectoryAsync(string path, CancellationToken cancellationToken) => throw new NotSupportedException();
+        protected override Task<IList<SessionFsReaddirWithTypesEntry>> ReadDirectoryWithTypesAsync(string path, CancellationToken cancellationToken) => throw new NotSupportedException();
+        protected override Task RemoveAsync(string path, bool recursive, bool force, CancellationToken cancellationToken) => throw new NotSupportedException();
+        protected override Task RenameAsync(string src, string dest, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    [Fact]
     public async Task ResumeSessionAsync_Registers_McpAuth_Interest_Only_When_Handler_Configured()
     {
         await using var server = await FakeCopilotServer.StartAsync();
@@ -461,6 +1935,178 @@ public sealed class ClientSessionLifetimeTests
     }
 
     [Fact]
+    public async Task McpAuth_RuntimeRefresh_Retains_Advertised_Request_And_Wire_Discriminant()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            OnMcpAuthRequest = context =>
+            {
+                Assert.Equal(McpOauthRequestReason.Refresh, context.Reason);
+                Assert.True(context.RuntimeRefreshSupported);
+                return Task.FromResult<McpAuthResult?>(McpAuthResult.RefreshInRuntime());
+            }
+        });
+        DispatchEvent(session, new McpOauthRequiredEvent
+        {
+            Data = new McpOauthRequiredData
+            {
+                RequestId = "oauth-request",
+                ServerName = "oauth-mcp",
+                ServerUrl = "http://localhost/mcp",
+                Reason = McpOauthRequestReason.Refresh,
+                RuntimeRefreshSupported = true
+            }
+        });
+        var request = await WaitForRequestAsync(server, "session.mcp.oauth.handlePendingRequest");
+        Assert.Equal("oauth-request", request.Params.GetProperty("requestId").GetString());
+        var result = request.Params.GetProperty("result");
+        Assert.Equal("runtimeRefresh", result.GetProperty("kind").GetString());
+        Assert.Single(result.EnumerateObject());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(false)]
+    public async Task McpAuth_RuntimeRefresh_Without_Advertised_Capability_Sends_Cancelled(bool? supported)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            OnMcpAuthRequest = context =>
+            {
+                Assert.False(context.RuntimeRefreshSupported);
+                return Task.FromResult<McpAuthResult?>(McpAuthResult.RefreshInRuntime());
+            }
+        });
+        DispatchEvent(session, new McpOauthRequiredEvent
+        {
+            Data = new McpOauthRequiredData
+            {
+                RequestId = "oauth-request",
+                ServerName = "oauth-mcp",
+                ServerUrl = "http://localhost/mcp",
+                Reason = McpOauthRequestReason.Refresh,
+                RuntimeRefreshSupported = supported
+            }
+        });
+        var request = await WaitForRequestAsync(server, "session.mcp.oauth.handlePendingRequest");
+        Assert.Equal("oauth-request", request.Params.GetProperty("requestId").GetString());
+        var result = request.Params.GetProperty("result");
+        Assert.Equal("cancelled", result.GetProperty("kind").GetString());
+        Assert.Single(result.EnumerateObject());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task McpAuth_Token_Takes_Precedence_Over_RuntimeRefresh(bool? supported)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            OnMcpAuthRequest = _ => Task.FromResult<McpAuthResult?>(new McpAuthResult
+            {
+                RuntimeRefresh = true,
+                Token = new McpAuthToken { AccessToken = "host-token" }
+            })
+        });
+        DispatchEvent(session, new McpOauthRequiredEvent
+        {
+            Data = new McpOauthRequiredData
+            {
+                RequestId = "oauth-request",
+                ServerName = "oauth-mcp",
+                ServerUrl = "http://localhost/mcp",
+                Reason = McpOauthRequestReason.Refresh,
+                RuntimeRefreshSupported = supported
+            }
+        });
+        var request = await WaitForRequestAsync(server, "session.mcp.oauth.handlePendingRequest");
+        var result = request.Params.GetProperty("result");
+        Assert.Equal("token", result.GetProperty("kind").GetString());
+        Assert.Equal("host-token", result.GetProperty("accessToken").GetString());
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(null, true)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task McpAuth_Cancelled_Remains_Cancelled_With_Any_Capability(bool? supported, bool retainToken)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            OnMcpAuthRequest = _ => Task.FromResult<McpAuthResult?>(retainToken
+                ? new McpAuthResult { Cancelled = true, RuntimeRefresh = true, Token = new McpAuthToken { AccessToken = "host-token" } }
+                : McpAuthResult.Cancel())
+        });
+        DispatchEvent(session, new McpOauthRequiredEvent
+        {
+            Data = new McpOauthRequiredData
+            {
+                RequestId = "oauth-request",
+                ServerName = "oauth-mcp",
+                ServerUrl = "http://localhost/mcp",
+                Reason = McpOauthRequestReason.Refresh,
+                RuntimeRefreshSupported = supported
+            }
+        });
+        var request = await WaitForRequestAsync(server, "session.mcp.oauth.handlePendingRequest");
+        Assert.Equal("oauth-request", request.Params.GetProperty("requestId").GetString());
+        var result = request.Params.GetProperty("result");
+        Assert.Equal("cancelled", result.GetProperty("kind").GetString());
+        Assert.Single(result.EnumerateObject());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task McpAuth_Empty_Token_Does_Not_Mask_RuntimeRefresh(bool? supported)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            OnMcpAuthRequest = _ => Task.FromResult<McpAuthResult?>(new McpAuthResult
+            {
+                RuntimeRefresh = true,
+                Token = new McpAuthToken { AccessToken = "" }
+            })
+        });
+        DispatchEvent(session, new McpOauthRequiredEvent
+        {
+            Data = new McpOauthRequiredData
+            {
+                RequestId = "oauth-request",
+                ServerName = "oauth-mcp",
+                ServerUrl = "http://localhost/mcp",
+                Reason = McpOauthRequestReason.Refresh,
+                RuntimeRefreshSupported = supported
+            }
+        });
+        var request = await WaitForRequestAsync(server, "session.mcp.oauth.handlePendingRequest");
+        Assert.Equal("oauth-request", request.Params.GetProperty("requestId").GetString());
+        var result = request.Params.GetProperty("result");
+        Assert.Equal(supported == true ? "runtimeRefresh" : "cancelled", result.GetProperty("kind").GetString());
+        Assert.Single(result.EnumerateObject());
+    }
+
+    [Fact]
     public async Task McpAuth_Handler_Exception_Cancels_Pending_Request()
     {
         await using var server = await FakeCopilotServer.StartAsync();
@@ -488,6 +2134,954 @@ public sealed class ClientSessionLifetimeTests
     }
 
     [Fact]
+    public async Task ExternalToolCompleted_Cancels_Blocked_Tool_When_Cancellation_Callback_Throws()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var toolStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var toolCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [AIFunctionFactory.Create(BlockedTool, "blocked_tool")],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        DispatchEvent(session, ExternalToolRequested("request-1"));
+        await toolStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        DispatchEvent(session, new ExternalToolCompletedEvent
+        {
+            Data = new ExternalToolCompletedData { RequestId = "request-1" }
+        });
+
+        await toolCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(50);
+        Assert.DoesNotContain(server.Requests,
+            request => request.Method == "session.tools.handlePendingToolCall"
+                && request.Params.GetProperty("requestId").GetString() == "request-1");
+
+        async Task<string> BlockedTool(CancellationToken cancellationToken)
+        {
+            toolStarted.TrySetResult();
+            using var registration = cancellationToken.Register(
+                () => throw new InvalidOperationException("cancellation callback failed"));
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return "unreachable";
+            }
+            catch (OperationCanceledException)
+            {
+                toolCancelled.TrySetResult();
+                throw;
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ExternalToolCompleted_Does_Not_Block_Event_Dispatch_On_Cancellation_Callback()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var toolStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var toolCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [AIFunctionFactory.Create(BlockedTool, "blocked_tool")],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        try
+        {
+            DispatchEvent(session, ExternalToolRequested("request-blocking-callback"));
+            await toolStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var dispatchTask = Task.Run(() => DispatchEvent(session, new ExternalToolCompletedEvent
+            {
+                Data = new ExternalToolCompletedData { RequestId = "request-blocking-callback" }
+            }));
+            await callbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await dispatchTask.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            releaseCallback.TrySetResult();
+        }
+        await toolCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        async Task<string> BlockedTool(CancellationToken cancellationToken)
+        {
+            using var registration = cancellationToken.Register(() =>
+            {
+                callbackStarted.TrySetResult();
+                releaseCallback.Task.GetAwaiter().GetResult();
+            });
+            toolStarted.TrySetResult();
+            try
+            {
+                // Keep the registration alive until cancellation enters the blocking callback.
+                await callbackStarted.Task;
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return "unreachable";
+            }
+            catch (OperationCanceledException)
+            {
+                toolCancelled.TrySetResult();
+                throw;
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ForceStopAsync_Cancels_Blocked_Tool_When_Cancellation_Callback_Throws()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var toolStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var toolCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [AIFunctionFactory.Create(BlockedTool, "blocked_tool")],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        DispatchEvent(session, ExternalToolRequested("request-force-stop"));
+        await toolStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await client.ForceStopAsync();
+
+        await toolCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        async Task<string> BlockedTool(CancellationToken cancellationToken)
+        {
+            toolStarted.TrySetResult();
+            using var registration = cancellationToken.Register(
+                () => throw new InvalidOperationException("cancellation callback failed"));
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return "unreachable";
+            }
+            catch (OperationCanceledException)
+            {
+                toolCancelled.TrySetResult();
+                throw;
+            }
+        }
+    }
+
+    [Fact]
+    public Task ForceStopAsync_Does_Not_Invoke_Remaining_Event_Handlers() =>
+        AssertRemainingEventHandlersStoppedAsync(static (client, _, _) => client.ForceStopAsync());
+
+    [Fact]
+    public Task DisposeAsync_Does_Not_Invoke_Remaining_Event_Handlers() =>
+        AssertRemainingEventHandlersStoppedAsync(static (_, session, _) => session.DisposeAsync().AsTask());
+
+    [Fact]
+    public Task Unsubscribe_Releases_Unadmitted_Event_Handler_Captures() =>
+        AssertRemainingEventHandlersStoppedAsync(static (_, _, unsubscribe) =>
+        {
+            unsubscribe();
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ForceStopAsync_Fails_Pending_SendAndWait_After_Send_Response() =>
+        AssertPendingSendAndWaitStoppedAsync(static (client, _) => client.ForceStopAsync());
+
+    [Fact]
+    public Task DisposeAsync_Fails_Pending_SendAndWait_After_Send_Response() =>
+        AssertPendingSendAndWaitStoppedAsync(static (_, session) => session.DisposeAsync().AsTask());
+
+    [Fact]
+    public async Task ForceStopAsync_Rejects_Event_Handler_Registration()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+
+        await client.ForceStopAsync();
+
+        Assert.Throws<IOException>(() => session.On<SessionEvent>(_ => { }));
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    public async Task Stop_Rejects_And_Retires_Session_Initialized_Before_Registration(bool resume, bool force)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.ResponseFactory = request => request.Method == "sessionFs.setProvider"
+            ? new Dictionary<string, object?> { ["success"] = true }
+            : throw new InvalidOperationException($"Unexpected RPC method '{request.Method}'.");
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForUri(server.Url),
+            SessionFs = new SessionFsConfig
+            {
+                InitialWorkingDirectory = "/",
+                SessionStatePath = "/session-state",
+                Conventions = SessionFsSetProviderConventions.Posix
+            }
+        });
+        await client.StartAsync();
+        using var releaseSetup = new ManualResetEventSlim();
+        var setupStarted = new TaskCompletionSource<CopilotSession>(TaskCreationOptions.RunContinuationsAsynchronously);
+        SessionFsProvider CreateProvider(CopilotSession session)
+        {
+            setupStarted.SetResult(session);
+            releaseSetup.Wait();
+            return new TextOnlySessionFsProvider();
+        }
+        var creation = Task.Run(() => resume
+            ? client.ResumeSessionAsync("late-registration", new ResumeSessionConfig { CreateSessionFsProvider = CreateProvider })
+            : client.CreateSessionAsync(new SessionConfig { CreateSessionFsProvider = CreateProvider }));
+        try
+        {
+            var session = await setupStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (force)
+            {
+                await client.ForceStopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            else
+            {
+                await client.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            releaseSetup.Set();
+            var error = await Assert.ThrowsAsync<IOException>(() => creation.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Contains("stopped connection", error.Message);
+            Assert.Throws<IOException>(() => session.On<SessionEvent>(_ => { }));
+            Assert.DoesNotContain(server.Requests, request => request.Method is "session.create" or "session.resume");
+        }
+        finally
+        {
+            releaseSetup.Set();
+            await Record.ExceptionAsync(() => creation.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Stop_Closes_Session_Admission_Before_Transport_Cleanup(bool resume)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.ResponseFactory = request => request.Method == "sessionFs.setProvider"
+            ? new Dictionary<string, object?> { ["success"] = true }
+            : throw new InvalidOperationException($"Unexpected RPC method '{request.Method}'.");
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForUri(server.Url),
+            SessionFs = new SessionFsConfig
+            {
+                InitialWorkingDirectory = "/",
+                SessionStatePath = "/session-state",
+                Conventions = SessionFsSetProviderConventions.Posix
+            }
+        });
+        _ = await client.CreateSessionAsync(new SessionConfig { CreateSessionFsProvider = _ => new TextOnlySessionFsProvider() });
+        server.DelayDestroy();
+        var stop = client.StopAsync();
+        await server.DestroyStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            CopilotSession? initialized = null;
+            SessionFsProvider CreateProvider(CopilotSession session)
+            {
+                initialized = session;
+                return new TextOnlySessionFsProvider();
+            }
+            var creation = resume
+                ? client.ResumeSessionAsync("late-registration", new ResumeSessionConfig { CreateSessionFsProvider = CreateProvider })
+                : client.CreateSessionAsync(new SessionConfig { CreateSessionFsProvider = CreateProvider });
+            var error = await Assert.ThrowsAsync<IOException>(() => creation.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Contains("stopped connection", error.Message);
+            Assert.NotNull(initialized);
+            Assert.Throws<IOException>(() => initialized.On<SessionEvent>(_ => { }));
+            Assert.False(stop.IsCompleted);
+        }
+        finally
+        {
+            await client.ForceStopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            await stop.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cloud_Create_Cleanup_Does_Not_Reconnect_During_Stop(bool dispose)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.ResponseFactory = request => request.Method == "sessionFs.setProvider"
+            ? new Dictionary<string, object?> { ["success"] = true }
+            : throw new InvalidOperationException($"Unexpected RPC method '{request.Method}'.");
+        await using var client = new CopilotClient(new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForUri(server.Url),
+            SessionFs = new SessionFsConfig
+            {
+                InitialWorkingDirectory = "/",
+                SessionStatePath = "/session-state",
+                Conventions = SessionFsSetProviderConventions.Posix
+            }
+        });
+        await client.StartAsync();
+        using var process = StartExitedProcess();
+        await ReplaceConnectionResourcesAsync(client, process);
+        using var releaseSetup = new ManualResetEventSlim();
+        using var reconnectCancellation = new CancellationTokenSource();
+        var reconnect = server.ObserveReconnectAsync(reconnectCancellation.Token);
+        var setupStarted = new TaskCompletionSource<CopilotSession>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var shutdownStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseShutdown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.BeforeResponseAsync = async (request, token) =>
+        {
+            if (request.Method == "runtime.shutdown")
+            {
+                shutdownStarted.TrySetResult();
+                await releaseShutdown.Task.WaitAsync(token);
+            }
+        };
+        var creation = client.CreateSessionAsync(new SessionConfig
+        {
+            Cloud = new CloudSessionOptions
+            {
+                Repository = new CloudSessionRepository { Owner = "github", Name = "copilot-sdk", Branch = "main" }
+            },
+            CreateSessionFsProvider = session =>
+            {
+                setupStarted.TrySetResult(session);
+                releaseSetup.Wait();
+                return new TextOnlySessionFsProvider();
+            }
+        });
+        Task? stop = null;
+        Exception? failure = null;
+        var timeout = TimeSpan.FromSeconds(5);
+        try
+        {
+            var session = await setupStarted.Task.WaitAsync(timeout);
+            stop = dispose ? client.DisposeAsync().AsTask() : client.StopAsync();
+            await shutdownStarted.Task.WaitAsync(timeout);
+            releaseSetup.Set();
+            releaseShutdown.TrySetResult();
+
+            var error = await Assert.ThrowsAsync<IOException>(() => creation.WaitAsync(timeout));
+            Assert.Contains("stopped connection", error.Message);
+            await stop.WaitAsync(timeout);
+            Assert.Throws<IOException>(() => session.On<SessionEvent>(_ => { }));
+            Assert.False(server.ReconnectObserved, "Cloud-create cleanup reconnected after session admission closed.");
+        }
+        catch (Exception error)
+        {
+            failure = error;
+        }
+        finally
+        {
+            releaseSetup.Set();
+            releaseShutdown.TrySetResult();
+            foreach (var operation in new Task?[] { creation, stop })
+            {
+                if (operation is null) continue;
+                try
+                {
+                    await operation.WaitAsync(timeout);
+                }
+                catch (IOException) when (ReferenceEquals(operation, creation))
+                {
+                    // The rejected creation is the expected result, not a cleanup failure.
+                }
+                catch (Exception cleanupError)
+                {
+                    failure = failure is null ? cleanupError : new AggregateException(failure, cleanupError);
+                }
+            }
+            reconnectCancellation.Cancel();
+            try
+            {
+                await reconnect.WaitAsync(timeout);
+            }
+            catch (OperationCanceledException) when (reconnectCancellation.IsCancellationRequested)
+            {
+            }
+            catch (Exception cleanupError)
+            {
+                failure = failure is null ? cleanupError : new AggregateException(failure, cleanupError);
+            }
+        }
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+    }
+
+    [Theory]
+    [InlineData("hooks", true)]
+    [InlineData("mcp", true)]
+    [InlineData("bearer", true)]
+    [InlineData("transforms", true)]
+    [InlineData("tools", true)]
+    [InlineData("commands", true)]
+    [InlineData("permission", true)]
+    [InlineData("input", true)]
+    [InlineData("hooks", false)]
+    [InlineData("mcp", false)]
+    [InlineData("bearer", false)]
+    [InlineData("transforms", false)]
+    [InlineData("tools", false)]
+    [InlineData("commands", false)]
+    [InlineData("permission", false)]
+    [InlineData("input", false)]
+    public async Task Retirement_Releases_Retained_Session_Callback_Captures(string registration, bool forceStop)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var (session, capture) = await CreateCapturedSessionAsync(client, registration);
+        await using var retainedSession = session;
+        ForceCollect();
+        Assert.True(CaptureIsAlive(capture));
+
+        if (forceStop)
+        {
+            await client.ForceStopAsync();
+        }
+        else
+        {
+            await session.DisposeAsync();
+        }
+        ForceCollect();
+
+        Assert.False(CaptureIsAlive(capture));
+        GC.KeepAlive(session);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool CaptureIsAlive(WeakReference<object> capture) => capture.TryGetTarget(out _);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task<(CopilotSession Session, WeakReference<object> Capture)> CreateCapturedSessionAsync(
+        CopilotClient client, string registration)
+    {
+        var scheduler = new ConcurrentExclusiveSchedulerPair(TaskScheduler.Default, maxConcurrencyLevel: 1);
+        var factory = new TaskFactory(CancellationToken.None, TaskCreationOptions.None, TaskContinuationOptions.None, scheduler.ExclusiveScheduler);
+        var result = await factory.StartNew(() => CreateCapturedSessionCoreAsync(client, registration)).Unwrap();
+        // Task completion can inline the caller while CreateSessionAsync still roots its config.
+        // A queued fence runs only after those creation frames unwind.
+        await factory.StartNew(static () => { });
+        return result;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task<(CopilotSession Session, WeakReference<object> Capture)> CreateCapturedSessionCoreAsync(
+        CopilotClient client, string registration)
+    {
+        var capture = new object();
+        var weak = new WeakReference<object>(capture);
+        var config = new SessionConfig { OnPermissionRequest = PermissionHandler.ApproveAll };
+        switch (registration)
+        {
+            case "hooks":
+                config.Hooks = new SessionHooks
+                {
+                    OnSessionStart = (_, _) =>
+                    {
+                        GC.KeepAlive(capture);
+                        return Task.FromResult<SessionStartHookOutput?>(null);
+                    }
+                };
+                break;
+            case "mcp":
+                config.OnMcpAuthRequest = _ =>
+                {
+                    GC.KeepAlive(capture);
+                    return Task.FromResult<McpAuthResult?>(McpAuthResult.Cancel());
+                };
+                break;
+            case "bearer":
+                config.Model = "test-model";
+                config.Provider = new ProviderConfig
+                {
+                    BaseUrl = "http://127.0.0.1",
+                    BearerTokenProvider = _ =>
+                    {
+                        GC.KeepAlive(capture);
+                        return Task.FromResult("test-token");
+                    }
+                };
+                break;
+            case "transforms":
+                config.SystemMessage = new SystemMessageConfig
+                {
+                    Mode = SystemMessageMode.Customize,
+                    Sections = new Dictionary<SystemMessageSection, SectionOverride>
+                    {
+                        [SystemMessageSection.Tone] = new()
+                        {
+                            Transform = content =>
+                            {
+                                GC.KeepAlive(capture);
+                                return Task.FromResult(content);
+                            }
+                        }
+                    }
+                };
+                break;
+            case "tools":
+                config.Tools = [AIFunctionFactory.Create(() =>
+                {
+                    GC.KeepAlive(capture);
+                    return "test-result";
+                }, "captured_tool")];
+                break;
+            case "commands":
+                config.Commands = [new CommandDefinition
+                {
+                    Name = "captured",
+                    Handler = _ =>
+                    {
+                        GC.KeepAlive(capture);
+                        return Task.CompletedTask;
+                    }
+                }];
+                break;
+            case "permission":
+                config.OnPermissionRequest = (_, _) =>
+                {
+                    GC.KeepAlive(capture);
+                    return Task.FromResult(PermissionDecision.UserNotAvailable());
+                };
+                break;
+            case "input":
+                config.OnUserInputRequest = (_, _) =>
+                {
+                    GC.KeepAlive(capture);
+                    return Task.FromResult(new UserInputResponse { Answer = "test-answer" });
+                };
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(registration), registration, "Unknown callback registration.");
+        }
+        return (await client.CreateSessionAsync(config), weak);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_Keeps_Hooks_Through_Detach_Acknowledgement()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var detachStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDetach = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hookStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hooks = new SessionHooks
+        {
+            OnSessionEnd = (_, _) =>
+            {
+                hookStarted.TrySetResult();
+                return Task.FromResult<SessionEndHookOutput?>(null);
+            }
+        };
+        var endHook = hooks.OnSessionEnd;
+        await using var session = await client.CreateSessionAsync(new SessionConfig { Hooks = hooks });
+        server.BeforeResponseAsync = async (request, token) =>
+        {
+            if (request.Method == "session.detach")
+            {
+                detachStarted.TrySetResult();
+                await releaseDetach.Task.WaitAsync(token);
+            }
+        };
+        var timeout = TimeSpan.FromSeconds(5);
+        var disposal = session.DisposeAsync().AsTask();
+        Task<JsonElement>? hookRequest = null;
+        Exception? bodyFailure = null;
+        try
+        {
+            await detachStarted.Task.WaitAsync(timeout);
+            hookRequest = server.SendRequestAsync("hooks.invoke", new Dictionary<string, object?>
+            {
+                ["sessionId"] = session.SessionId,
+                ["hookType"] = "sessionEnd",
+                ["input"] = new Dictionary<string, object?>
+                {
+                    ["sessionId"] = session.SessionId,
+                    ["timestamp"] = 1_730_000_000_000L,
+                    ["cwd"] = "workdir",
+                    ["reason"] = "complete"
+                }
+            });
+            await hookStarted.Task.WaitAsync(timeout);
+        }
+        catch (Exception error)
+        {
+            bodyFailure = error;
+        }
+        finally
+        {
+            releaseDetach.TrySetResult();
+            foreach (var operation in new Task?[] { disposal, hookRequest })
+            {
+                if (operation is null) continue;
+                try
+                {
+                    await operation.WaitAsync(timeout);
+                }
+                catch (Exception cleanupError)
+                {
+                    bodyFailure = bodyFailure is null ? cleanupError : new AggregateException(bodyFailure, cleanupError);
+                }
+            }
+        }
+        if (bodyFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(bodyFailure).Throw();
+        }
+        Assert.Same(endHook, hooks.OnSessionEnd);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_Releases_Event_Handler_Captures()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        var capture = RegisterCapturedEventHandler(session, out _);
+
+        await session.DisposeAsync();
+        ForceCollect();
+
+        Assert.False(capture.TryGetTarget(out _));
+        GC.KeepAlive(session);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference<object> RegisterCapturedEventHandler(CopilotSession session, out IDisposable subscription)
+    {
+        var capture = new object();
+        subscription = session.On<AssistantMessageEvent>(_ => GC.KeepAlive(capture));
+        return new WeakReference<object>(capture);
+    }
+
+    private static async Task AssertPendingSendAndWaitStoppedAsync(Func<CopilotClient, CopilotSession, Task> stop)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        using var cancellation = new CancellationTokenSource();
+        var timeout = TimeSpan.FromSeconds(5);
+        var responseDrained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.AfterResponseAsync = async (request, token) =>
+        {
+            if (request.Method == "session.send")
+            {
+                await server.SendAndDrainSessionEventAsync(session, "assistant.message", new()
+                {
+                    ["messageId"] = "message-1",
+                    ["content"] = "WAITING_FOR_IDLE"
+                }, timeout, token);
+                responseDrained.TrySetResult();
+            }
+        };
+        var pending = session.SendAndWaitAsync(new MessageOptions { Prompt = "wait until idle" }, cancellationToken: cancellation.Token);
+        Exception? bodyFailure = null;
+        try
+        {
+            await responseDrained.Task.WaitAsync(timeout);
+            await stop(client, session).WaitAsync(timeout);
+            await Assert.ThrowsAsync<IOException>(() => pending.WaitAsync(timeout));
+        }
+        catch (Exception error)
+        {
+            bodyFailure = error;
+        }
+        finally
+        {
+            try
+            {
+                cancellation.Cancel();
+                await pending.WaitAsync(timeout);
+            }
+            catch (Exception error) when (error is IOException or OperationCanceledException)
+            {
+                // The stopped operation may fault, or the owned cleanup cancellation may end it.
+            }
+            catch (Exception cleanupError)
+            {
+                bodyFailure = bodyFailure is null ? cleanupError : new AggregateException(bodyFailure, cleanupError);
+            }
+        }
+        if (bodyFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(bodyFailure).Throw();
+        }
+    }
+
+    private static async Task AssertRemainingEventHandlersStoppedAsync(Func<CopilotClient, CopilotSession, Action, Task> stop)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        // Channel closure may queue a final continuation after disposal; an idle pair owns no thread.
+        var scheduler = new ConcurrentExclusiveSchedulerPair(TaskScheduler.Default, maxConcurrencyLevel: 1);
+        var factory = new TaskFactory(CancellationToken.None, TaskCreationOptions.None, TaskContinuationOptions.None, scheduler.ExclusiveScheduler);
+        using var releaseHandler = new ManualResetEventSlim();
+        var handlerStarted = new TaskCompletionSource<TaskScheduler>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var laterHandlerCalls = 0;
+        CopilotSession? session = null;
+        Exception? bodyFailure = null;
+        try
+        {
+            // Resume starts the event consumer on the caller's scheduler. A queued task fences
+            // that consumer's current dispatch without relying on a delay or private SDK state.
+            session = await factory.StartNew(() => client.ResumeSessionAsync("force-stop-event-handler", new ResumeSessionConfig
+            {
+                OnPermissionRequest = PermissionHandler.ApproveAll
+            })).Unwrap();
+            using var first = session.On<AssistantMessageEvent>(_ =>
+            {
+                handlerStarted.TrySetResult(TaskScheduler.Current);
+                releaseHandler.Wait();
+            });
+            using var second = session.On<AssistantMessageEvent>(_ => Interlocked.Increment(ref laterHandlerCalls));
+            var capture = RegisterCapturedEventHandler(session, out var capturedSubscription);
+            using var captureSubscription = capturedSubscription;
+            await server.SendSessionEventAsync(session.SessionId, "assistant.message", new()
+            {
+                ["messageId"] = "force-stop-dispatch",
+                ["content"] = "STOP_EVENT_DISPATCH"
+            });
+            Assert.Same(scheduler.ExclusiveScheduler, await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            await stop(client, session, () =>
+            {
+                second.Dispose();
+                captureSubscription.Dispose();
+            }).WaitAsync(TimeSpan.FromSeconds(5));
+            ForceCollect();
+            Assert.False(capture.TryGetTarget(out _));
+            releaseHandler.Set();
+            await factory.StartNew(() => { }).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(0, Volatile.Read(ref laterHandlerCalls));
+        }
+        catch (Exception error)
+        {
+            bodyFailure = error;
+        }
+        finally
+        {
+            releaseHandler.Set();
+            try
+            {
+                await factory.StartNew(() => { }).WaitAsync(TimeSpan.FromSeconds(5));
+                if (session is not null)
+                {
+                    await session.DisposeAsync();
+                }
+            }
+            catch (Exception cleanupError)
+            {
+                bodyFailure = bodyFailure is null ? cleanupError : new AggregateException(bodyFailure, cleanupError);
+            }
+        }
+        if (bodyFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(bodyFailure).Throw();
+        }
+    }
+
+    [Fact]
+    public async Task ForceStopAsync_Does_Not_Start_Late_External_Tool()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var toolStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [AIFunctionFactory.Create(Tool, "late_tool")],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        await client.ForceStopAsync();
+        DispatchEvent(session, ExternalToolRequested("request-after-force-stop", "late_tool"));
+
+        Assert.False(toolStarted.Task.IsCompleted);
+
+        string Tool()
+        {
+            toolStarted.TrySetResult();
+            return "unexpected";
+        }
+    }
+
+    [Fact]
+    public async Task ConnectionClose_Cancels_Blocked_Tool_Delegate()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var toolStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var toolCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [AIFunctionFactory.Create(BlockedTool, "blocked_tool")],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        DispatchEvent(session, ExternalToolRequested("request-connection-close"));
+        await toolStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        server.CloseConnection();
+
+        await toolCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await client.ForceStopAsync();
+
+        async Task<string> BlockedTool(CancellationToken cancellationToken)
+        {
+            toolStarted.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return "unreachable";
+            }
+            catch (OperationCanceledException)
+            {
+                toolCancelled.TrySetResult();
+                throw;
+            }
+        }
+    }
+
+    [Fact]
+    public async Task DisposeAsync_Cancels_Blocked_Tool_Delegate()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var toolStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var toolCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [AIFunctionFactory.Create(BlockedTool, "blocked_tool")],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        DispatchEvent(session, ExternalToolRequested("request-2"));
+        await toolStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await session.DisposeAsync();
+
+        await toolCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        async Task<string> BlockedTool(CancellationToken cancellationToken)
+        {
+            toolStarted.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return "unreachable";
+            }
+            catch (OperationCanceledException)
+            {
+                toolCancelled.TrySetResult();
+                throw;
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ExternalTool_Invocation_Names_The_Sub_Agent_And_Request_Behind_The_Call()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var invocations = new ConcurrentQueue<ToolInvocation>();
+        var tool = CopilotTool.DefineTool(
+            (ToolInvocation invocation) =>
+            {
+                invocations.Enqueue(invocation);
+                return "ok";
+            },
+            factoryOptions: new AIFunctionFactoryOptions { Name = "calc" });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            Tools = [tool],
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        server.ClearRequests();
+
+        DispatchEvent(session, new ExternalToolRequestedEvent
+        {
+            AgentId = "task-agent-1",
+            Data = new ExternalToolRequestedData
+            {
+                RequestId = "req-sub-agent",
+                SessionId = session.SessionId,
+                ToolCallId = "tc-sub-agent",
+                ToolName = "calc"
+            }
+        });
+        await WaitForRequestAsync(server, "session.tools.handlePendingToolCall");
+        server.ClearRequests();
+        DispatchEvent(session, new ExternalToolRequestedEvent
+        {
+            Data = new ExternalToolRequestedData
+            {
+                RequestId = "req-root",
+                SessionId = session.SessionId,
+                ToolCallId = "tc-root",
+                ToolName = "calc"
+            }
+        });
+        await WaitForRequestAsync(server, "session.tools.handlePendingToolCall");
+        server.ClearRequests();
+        DispatchEvent(session, new ExternalToolRequestedEvent
+        {
+            AgentId = "",
+            Data = new ExternalToolRequestedData
+            {
+                RequestId = "req-blank-agent",
+                SessionId = session.SessionId,
+                ToolCallId = "tc-blank-agent",
+                ToolName = "calc"
+            }
+        });
+        await WaitForRequestAsync(server, "session.tools.handlePendingToolCall");
+
+        Assert.Collection(
+            invocations,
+            subAgentCall =>
+            {
+                Assert.Equal("tc-sub-agent", subAgentCall.ToolCallId);
+                Assert.Equal("task-agent-1", subAgentCall.AgentId);
+                Assert.Equal("req-sub-agent", subAgentCall.RequestId);
+            },
+            rootCall =>
+            {
+                Assert.Equal("tc-root", rootCall.ToolCallId);
+                Assert.Null(rootCall.AgentId);
+                Assert.Equal("req-root", rootCall.RequestId);
+            },
+            blankAgentCall =>
+            {
+                Assert.Equal("tc-blank-agent", blankAgentCall.ToolCallId);
+                Assert.Null(blankAgentCall.AgentId);
+                Assert.Equal("req-blank-agent", blankAgentCall.RequestId);
+            });
+    }
+
+    private static ExternalToolRequestedEvent ExternalToolRequested(string requestId, string toolName = "blocked_tool") =>
+        new()
+        {
+            Data = new ExternalToolRequestedData
+            {
+                RequestId = requestId,
+                SessionId = "session-1",
+                ToolCallId = "tool-call-1",
+                ToolName = toolName
+            }
+        };
+
+    [Fact]
     public async Task Generated_Session_Rpc_Throws_When_Session_Disposed()
     {
         await using var server = await FakeCopilotServer.StartAsync();
@@ -500,6 +3094,779 @@ public sealed class ClientSessionLifetimeTests
         await session.DisposeAsync();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(() => session.Rpc.Model.GetCurrentAsync());
+    }
+
+    [Fact]
+    public async Task SendAsync_MessageSource_Is_Omitted_By_Default()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        var options = new MessageOptions { Prompt = "User input" };
+        Assert.Null(options.Source);
+        Assert.Null(options.Clone().Source);
+
+        await session.SendAsync(options);
+        await session.SendAsync("More user input");
+
+        var requests = server.Requests.Where(request => request.Method == "session.send").ToArray();
+        Assert.Equal(2, requests.Length);
+        Assert.All(requests, request => AssertMessageSource(request.Params, null));
+    }
+
+    [Theory]
+    [MemberData(nameof(SerializationTests.MessageSources), MemberType = typeof(SerializationTests))]
+    public async Task SendAsync_MessageSource_Preserves_Other_Options(MessageSource? source, string? wireSource)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        var options = new MessageOptions { Prompt = "Background context", Source = source };
+
+        Assert.Equal("message-1", await session.SendAsync(options));
+        var request = Assert.Single(server.Requests, request => request.Method == "session.send").Params;
+        AssertMessageSource(request, wireSource);
+        foreach (var property in new[] { "mode", "agentMode", "attachments", "displayPrompt", "requestHeaders" })
+        {
+            Assert.False(request.TryGetProperty(property, out _));
+        }
+
+        using var activity = new Activity("message-source-test").SetIdFormat(ActivityIdFormat.W3C);
+        activity.TraceStateString = "test=message-source";
+        activity.Start();
+
+        foreach (var mode in new[] { "enqueue", "immediate" })
+        {
+            server.ClearRequests();
+            options.Mode = mode;
+            options.AgentMode = AgentMode.Plan;
+            options.DisplayPrompt = "Background update";
+            options.Attachments = [new AttachmentFile { Path = "/context.txt", DisplayName = "context.txt" }];
+            options.RequestHeaders = new Dictionary<string, string> { ["X-Test"] = "source-parity" };
+
+            Assert.Equal("message-1", await session.SendAsync(options));
+
+            request = Assert.Single(server.Requests, request => request.Method == "session.send").Params;
+            AssertMessageSource(request, wireSource);
+            Assert.Equal(session.SessionId, request.GetProperty("sessionId").GetString());
+            Assert.Equal(options.Prompt, request.GetProperty("prompt").GetString());
+            Assert.Equal(mode, request.GetProperty("mode").GetString());
+            Assert.Equal("plan", request.GetProperty("agentMode").GetString());
+            Assert.Equal(options.DisplayPrompt, request.GetProperty("displayPrompt").GetString());
+            Assert.Equal("source-parity", request.GetProperty("requestHeaders").GetProperty("X-Test").GetString());
+            var attachment = Assert.Single(request.GetProperty("attachments").EnumerateArray());
+            Assert.Equal("file", attachment.GetProperty("type").GetString());
+            Assert.Equal("/context.txt", attachment.GetProperty("path").GetString());
+            Assert.Equal("context.txt", attachment.GetProperty("displayName").GetString());
+            Assert.Equal(activity.Id, request.GetProperty("traceparent").GetString());
+            Assert.Equal(activity.TraceStateString, request.GetProperty("tracestate").GetString());
+            Assert.Equal(source, options.Source);
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("user")]
+    [InlineData("system")]
+    [InlineData("agent-Reviewer-7")]
+    public async Task Raw_SendAsync_MessageSource_Remains_Available(string? source)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+
+        var result = await session.Rpc.SendAsync("Context", source: source);
+
+        Assert.Equal("message-1", result.MessageId);
+        AssertMessageSource(Assert.Single(server.Requests, request => request.Method == "session.send").Params, source);
+    }
+
+    [Fact]
+    public async Task SessionEvents_Recover_From_Malformed_Input_And_Isolate_Multiple_Handlers()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        var firstHandlerEvents = new List<string>();
+        var secondHandlerEvents = new List<SessionEvent>();
+        var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var firstSubscription = session.On<SessionEvent>(@event =>
+        {
+            firstHandlerEvents.Add(@event.Type);
+            throw new InvalidOperationException("Expected test handler failure.");
+        });
+        using var secondSubscription = session.On<SessionEvent>(@event =>
+        {
+            secondHandlerEvents.Add(@event);
+            if (secondHandlerEvents.Count == 2)
+            {
+                received.TrySetResult();
+            }
+        });
+
+        await server.SendSessionEventPayloadAsync(session.SessionId, 42);
+        await server.SendSessionEventPayloadAsync(session.SessionId, new Dictionary<string, object?>
+        {
+            ["id"] = Guid.NewGuid().ToString(),
+            ["timestamp"] = DateTimeOffset.UtcNow.ToString("O"),
+            ["parentId"] = null,
+            ["type"] = "future.event",
+            ["data"] = new object?[] { null, false, 42, "text", new Dictionary<string, object?> { ["nested"] = true } }
+        });
+        await server.SendSessionEventAsync(session.SessionId, "tool.execution_start", new()
+        {
+            ["toolCallId"] = "tool-1",
+            ["toolName"] = "view",
+            ["arguments"] = new Dictionary<string, object?>
+            {
+                ["path"] = "README.md",
+                ["nested"] = new object?[] { null, false, 42, "text", new Dictionary<string, object?> { ["value"] = true } }
+            }
+        });
+
+        await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(["unknown", "tool.execution_start"], firstHandlerEvents);
+        Assert.IsType<SessionEvent>(secondHandlerEvents[0]);
+        var toolEvent = Assert.IsType<ToolExecutionStartEvent>(secondHandlerEvents[1]);
+        Assert.Equal("README.md", toolEvent.Data.Arguments?.GetProperty("path").GetString());
+        Assert.True(toolEvent.Data.Arguments?.GetProperty("nested")[4].GetProperty("value").GetBoolean());
+    }
+
+    public static IEnumerable<object?[]> MessageSourcesAndOutcomes
+    {
+        get
+        {
+            foreach (var row in SerializationTests.MessageSources)
+            {
+                yield return [row[0], row[1], false, null];
+                yield return [row[0], row[1], true, null];
+            }
+            yield return [MessageSource.Agent("Reviewer-7"), "agent-Reviewer-7", false, "enqueue"];
+            yield return [MessageSource.Agent("Reviewer-7"), "agent-Reviewer-7", true, "enqueue"];
+            yield return [MessageSource.Agent("Reviewer-7"), "agent-Reviewer-7", false, "immediate"];
+            yield return [MessageSource.Agent("Reviewer-7"), "agent-Reviewer-7", true, "immediate"];
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(MessageSourcesAndOutcomes))]
+    public async Task SendAndWaitAsync_MessageSource_Completes_On_Idle(MessageSource? source, string? wireSource, bool hasAssistantMessage, string? mode)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        var assistantReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var subscription = session.On<AssistantMessageEvent>(_ => assistantReceived.TrySetResult());
+
+        var sendTask = session.SendAndWaitAsync(new MessageOptions { Prompt = "Context", Source = source, Mode = mode });
+        var request = await WaitForRequestAsync(server, "session.send");
+        AssertMessageSource(request.Params, wireSource);
+        if (mode is null)
+        {
+            Assert.False(request.Params.TryGetProperty("mode", out _));
+        }
+        else
+        {
+            Assert.Equal(mode, request.Params.GetProperty("mode").GetString());
+        }
+
+        await server.SendSessionEventAsync(session.SessionId, "user.message", new()
+        {
+            ["messageId"] = "message-1",
+            ["content"] = "Context"
+        });
+        if (hasAssistantMessage)
+        {
+            await server.SendSessionEventAsync(session.SessionId, "assistant.message", new()
+            {
+                ["messageId"] = "assistant-1",
+                ["content"] = "Acknowledged"
+            });
+            await assistantReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.False(sendTask.IsCompleted);
+
+        await server.SendSessionEventAsync(session.SessionId, "session.idle", new());
+        var result = await sendTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        if (hasAssistantMessage)
+        {
+            Assert.NotNull(result);
+            Assert.Equal("Acknowledged", result.Data.Content);
+        }
+        else
+        {
+            Assert.Null(result);
+        }
+    }
+
+    [Fact]
+    public async Task SendAndWaitAsync_Ignores_Stale_Aborted_Idle_But_Rejects_Current_Abort()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        server.UniqueMessageIds = true;
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+
+        var staleWait = session.SendAndWaitAsync(new MessageOptions { Prompt = "queued" });
+        await WaitForRequestAsync(server, "session.send");
+        await server.SendAndDrainSessionEventAsync(
+            session, "session.idle", new() { ["aborted"] = true }, TimeSpan.FromSeconds(5));
+        await server.SendAndDrainSessionEventAsync(
+            session, "session.idle", new(), TimeSpan.FromSeconds(5));
+        Assert.False(staleWait.IsCompleted);
+        await server.SendSessionEventAsync(session.SessionId, "user.message", new()
+        {
+            ["messageId"] = "message-1",
+            ["content"] = "queued"
+        });
+        await server.SendSessionEventAsync(session.SessionId, "session.idle", new());
+        Assert.Null(await staleWait.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        var currentWait = session.SendAndWaitAsync(new MessageOptions { Prompt = "cancel" });
+        await WaitForRequestAsync(server, "session.send");
+        await server.SendSessionEventAsync(session.SessionId, "user.message", new()
+        {
+            ["messageId"] = "message-2",
+            ["content"] = "cancel"
+        });
+        await server.SendSessionEventAsync(session.SessionId, "session.idle", new() { ["aborted"] = true });
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            currentWait.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Contains("aborted", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SendAndWaitAsync_Completes_Policy_Blocked_Prompt_On_Correlated_Warning()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(
+            new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+
+        var sendTask = session.SendAndWaitAsync(new MessageOptions { Prompt = "blocked" });
+        await WaitForRequestAsync(server, "session.send");
+        var timeout = TimeSpan.FromSeconds(5);
+        await server.SendAndDrainSessionEventAsync(session, "session.warning", new()
+        {
+            ["warningType"] = "policy_blocked",
+            ["message"] = "blocked",
+            ["originatingMessageId"] = "other"
+        }, timeout);
+        await server.SendAndDrainSessionEventAsync(session, "session.idle", new(), timeout);
+        Assert.False(sendTask.IsCompleted);
+
+        await server.SendSessionEventAsync(session.SessionId, "session.warning", new()
+        {
+            ["warningType"] = "policy_blocked",
+            ["message"] = "blocked",
+            ["originatingMessageId"] = "message-1"
+        });
+        await server.SendSessionEventAsync(session.SessionId, "session.idle", new());
+        Assert.Null(await sendTask.WaitAsync(timeout));
+    }
+
+    [Fact]
+    public async Task CapabilitiesChanged_Keeps_Capabilities_The_Event_Does_Not_Name()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(
+            new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        var timeout = TimeSpan.FromSeconds(5);
+
+        Task ChangeAsync(Dictionary<string, object?>? ui) =>
+            server.SendAndDrainSessionEventAsync(
+                session,
+                "capabilities.changed",
+                ui is null ? new Dictionary<string, object?>() : new Dictionary<string, object?> { ["ui"] = ui },
+                timeout);
+
+        await ChangeAsync(new() { ["mcpApps"] = true });
+        await ChangeAsync(new() { ["elicitation"] = true });
+        Assert.True(session.Capabilities.Ui?.McpApps);
+        Assert.True(session.Capabilities.Ui?.Elicitation);
+
+        var before = session.Capabilities;
+        await ChangeAsync(new() { ["canvases"] = true });
+        await ChangeAsync(null);
+        Assert.True(session.Capabilities.Ui?.McpApps);
+        Assert.True(session.Capabilities.Ui?.Elicitation);
+
+        await ChangeAsync(new() { ["elicitation"] = false });
+        Assert.True(session.Capabilities.Ui?.McpApps);
+        Assert.False(session.Capabilities.Ui?.Elicitation);
+        Assert.True(before.Ui?.Elicitation);
+    }
+
+    [Theory]
+    [MemberData(nameof(MessageSourcesAndOutcomes))]
+    public async Task SendAndWaitAsync_MessageSource_Propagates_Errors(MessageSource? source, string? wireSource, bool rpcError, string? mode)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        if (rpcError)
+        {
+            server.FailSessionSend();
+        }
+
+        var sendTask = session.SendAndWaitAsync(new MessageOptions { Prompt = "Context", Source = source, Mode = mode });
+        var request = await WaitForRequestAsync(server, "session.send");
+        AssertMessageSource(request.Params, wireSource);
+        if (mode is null)
+        {
+            Assert.False(request.Params.TryGetProperty("mode", out _));
+        }
+        else
+        {
+            Assert.Equal(mode, request.Params.GetProperty("mode").GetString());
+        }
+
+        if (rpcError)
+        {
+            var error = await Assert.ThrowsAsync<IOException>(() => sendTask.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Contains("session send failed", error.Message);
+        }
+        else
+        {
+            await server.SendSessionEventAsync(session.SessionId, "session.error", new()
+            {
+                ["errorType"] = "query",
+                ["message"] = "model request failed"
+            });
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => sendTask.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal("Session error: model request failed", error.Message);
+        }
+    }
+
+    public static TheoryData<MessageSource, bool> MessageSourcesAndCancellation => new()
+    {
+        { MessageSource.System, false },
+        { MessageSource.System, true },
+        { MessageSource.Agent("Reviewer-7"), false },
+        { MessageSource.Agent("Reviewer-7"), true },
+    };
+
+    [Theory]
+    [MemberData(nameof(MessageSourcesAndCancellation))]
+    public async Task SendAndWaitAsync_MessageSource_Preserves_Timeout_And_Cancellation(MessageSource source, bool cancel)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        using var cancellation = new CancellationTokenSource();
+
+        var sendTask = session.SendAndWaitAsync(
+            new MessageOptions { Prompt = "Context", Source = source },
+            timeout: cancel ? TimeSpan.FromSeconds(30) : TimeSpan.FromMilliseconds(50),
+            cancellationToken: cancellation.Token);
+        if (cancel)
+        {
+            var request = await WaitForRequestAsync(server, "session.send");
+            AssertMessageSource(request.Params, source.Value);
+            cancellation.Cancel();
+            var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sendTask.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(cancellation.Token, error.CancellationToken);
+        }
+        else
+        {
+            // The timeout can expire during the unsupported completion-RPC probe, before session.send.
+            var error = await Assert.ThrowsAsync<TimeoutException>(() => sendTask.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Contains("SendAndWaitAsync timed out", error.Message);
+        }
+    }
+
+    private static void AssertMessageSource(JsonElement request, string? source)
+    {
+        if (source is null)
+        {
+            Assert.False(request.TryGetProperty("source", out _));
+        }
+        else
+        {
+            Assert.Equal(source, request.GetProperty("source").GetString());
+        }
+        Assert.False(request.TryGetProperty("billable", out _));
+        Assert.False(request.TryGetProperty("wait", out _));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Approve_All_Permission_Handler_Observes_Early_Events(bool completesBeforeReply)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        var timeout = TimeSpan.FromSeconds(5);
+        var sendReplied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.BeforeResponseAsync = async (request, cancellationToken) =>
+        {
+            if (request.Method == "session.send")
+            {
+                Assert.Equal("What is 2+2?", request.Params.GetProperty("prompt").GetString());
+                await server.SendSessionEventAsync(session.SessionId, "user.message", new()
+                {
+                    ["messageId"] = "message-1",
+                    ["content"] = request.Params.GetProperty("prompt").GetString()
+                });
+                await server.SendAndDrainSessionEventAsync(session, "assistant.message", new()
+                {
+                    ["messageId"] = "permission-message",
+                    ["content"] = "4"
+                }, timeout, cancellationToken);
+                if (completesBeforeReply)
+                {
+                    await server.SendAndDrainSessionEventAsync(session, "session.idle", new(), timeout, cancellationToken);
+                }
+            }
+        };
+        server.AfterResponseAsync = (request, _) =>
+        {
+            if (request.Method == "session.send")
+            {
+                sendReplied.TrySetResult();
+            }
+            return Task.CompletedTask;
+        };
+
+        // Exercise the E2E test's actual ordering and assertion, without launching a CLI.
+        var scenario = E2E.PermissionE2ETests.AssertApproveAllPermissionHandlerAsync(session, timeout);
+        await sendReplied.Task.WaitAsync(timeout);
+        if (!completesBeforeReply)
+        {
+            Assert.False(scenario.IsCompleted);
+            await server.SendAndDrainSessionEventAsync(session, "session.idle", new(), timeout);
+        }
+        await scenario;
+
+        Assert.Single(server.Requests, request => request.Method == "session.send");
+        var history = await session.GetEventsAsync();
+        Assert.DoesNotContain(history, evt => evt is SessionIdleEvent);
+        Assert.Equal("4", Assert.Single(history.OfType<AssistantMessageEvent>()).Data.Content);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SendAndGetFinalAssistantMessage_Requires_Current_Turn_Message(bool hasPreviousTurn)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        var timeout = TimeSpan.FromSeconds(5);
+        server.BeforeResponseAsync = async (request, cancellationToken) =>
+        {
+            if (request.Method == "session.send")
+            {
+                var prompt = request.Params.GetProperty("prompt").GetString();
+                await server.SendSessionEventAsync(session.SessionId, "user.message", new()
+                {
+                    ["messageId"] = "message-1",
+                    ["content"] = prompt
+                });
+                if (prompt == "previous turn")
+                {
+                    await server.SendAndDrainSessionEventAsync(session, "assistant.message", new()
+                    {
+                        ["messageId"] = "previous-message",
+                        ["content"] = "previous answer"
+                    }, timeout, cancellationToken);
+                }
+                await server.SendAndDrainSessionEventAsync(session, "session.idle", new(), timeout, cancellationToken);
+            }
+        };
+
+        if (hasPreviousTurn)
+        {
+            var previous = await TestHelper.SendAndGetFinalAssistantMessageAsync(
+                session, new MessageOptions { Prompt = "previous turn" }, timeout);
+            Assert.Equal("previous answer", previous.Data.Content);
+        }
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            TestHelper.SendAndGetFinalAssistantMessageAsync(
+                session, new MessageOptions { Prompt = "no assistant message" }, timeout));
+        Assert.Equal("Session became idle without an assistant message.", error.Message);
+        Assert.DoesNotContain(await session.GetEventsAsync(), evt => evt is SessionIdleEvent);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Abort_Recovery_Observes_Early_Events(bool recoveryCompletesBeforeReply)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        var timeout = TimeSpan.FromSeconds(5);
+        var sendCount = 0;
+        server.BeforeResponseAsync = async (request, cancellationToken) =>
+        {
+            if (request.Method == "session.send")
+            {
+                sendCount++;
+                await server.SendSessionEventAsync(session.SessionId, "user.message", new()
+                {
+                    ["messageId"] = "message-1",
+                    ["content"] = request.Params.GetProperty("prompt").GetString()
+                });
+                if (sendCount == 1)
+                {
+                    await server.SendAndDrainSessionEventAsync(session, "tool.execution_start", new()
+                    {
+                        ["toolCallId"] = "slow-tool",
+                        ["toolName"] = "shell"
+                    }, timeout, cancellationToken);
+                }
+                else
+                {
+                    Assert.Equal(2, sendCount);
+                    await server.SendAndDrainSessionEventAsync(session, "assistant.message", new()
+                    {
+                        ["messageId"] = "recovery-message",
+                        ["content"] = "4"
+                    }, timeout, cancellationToken);
+                    if (recoveryCompletesBeforeReply)
+                    {
+                        await server.SendAndDrainSessionEventAsync(session, "session.idle", new(), timeout, cancellationToken);
+                    }
+                }
+            }
+            else if (request.Method == "session.abort")
+            {
+                Assert.Equal(1, sendCount);
+                await server.SendSessionEventAsync(session.SessionId, "abort", new()
+                {
+                    ["reason"] = "user"
+                });
+                await server.SendAndDrainSessionEventAsync(session, "session.idle", new() { ["aborted"] = true }, timeout, cancellationToken);
+            }
+        };
+        server.AfterResponseAsync = async (request, cancellationToken) =>
+        {
+            if (request.Method == "session.send" && sendCount == 2 && !recoveryCompletesBeforeReply)
+            {
+                await server.SendAndDrainSessionEventAsync(session, "session.idle", new(), timeout, cancellationToken);
+            }
+        };
+
+        // Exercise the E2E test's actual ordering and assertions, without launching a CLI.
+        await E2E.SessionE2ETests.AssertAbortAndRecoveryAsync(session, timeout);
+
+        Assert.Equal(
+            ["session.send", "session.abort", "session.send"],
+            server.Requests.Select(request => request.Method)
+                .Where(method => method is "session.send" or "session.abort"));
+        var history = await session.GetEventsAsync();
+        Assert.DoesNotContain(history, evt => evt is SessionIdleEvent);
+        Assert.Equal("4", Assert.Single(history.OfType<AssistantMessageEvent>()).Data.Content);
+    }
+
+    [Fact]
+    public async Task SendAndWaitAsync_Skips_Autopilot_Continuation_Idle()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var sendTask = session.SendAndWaitAsync(new MessageOptions { Prompt = "keep going" });
+        await WaitForRequestAsync(server, "session.send");
+        await server.SendSessionEventAsync(session.SessionId, "user.message", new()
+        {
+            ["messageId"] = "message-1",
+            ["content"] = "keep going"
+        });
+
+        var continuationIdleProcessed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var subscription = session.On<SessionIdleEvent>(idle =>
+        {
+            if (idle.Data.Mode == SessionMode.Autopilot)
+            {
+                continuationIdleProcessed.TrySetResult();
+            }
+        });
+
+        DispatchEvent(session, new AssistantMessageEvent
+        {
+            Id = Guid.NewGuid(),
+            Data = new AssistantMessageData
+            {
+                Content = "intermediate",
+                MessageId = "assistant-1",
+                OriginatingMessageId = "message-1"
+            }
+        });
+        DispatchEvent(session, new SessionIdleEvent
+        {
+            Id = Guid.NewGuid(),
+            Data = new SessionIdleData { Mode = SessionMode.Autopilot }
+        });
+
+        await continuationIdleProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(sendTask.IsCompleted);
+
+        DispatchEvent(session, new AssistantMessageEvent
+        {
+            Id = Guid.NewGuid(),
+            Data = new AssistantMessageData
+            {
+                Content = "final",
+                MessageId = "assistant-2"
+            }
+        });
+        DispatchEvent(session, new SessionIdleEvent
+        {
+            Id = Guid.NewGuid(),
+            Data = new SessionIdleData { Mode = SessionMode.Interactive }
+        });
+
+        var result = await sendTask.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.NotNull(result);
+        Assert.Equal("final", result.Data.Content);
+    }
+
+    [Fact]
+    public async Task SendAndWaitAsync_Ignores_Child_Events()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        var sendTask = session.SendAndWaitAsync(new MessageOptions { Prompt = "delegate" });
+        await WaitForRequestAsync(server, "session.send");
+        var childMessageReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var childErrorReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var childIdleReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var messageSubscription = session.On<AssistantMessageEvent>(message =>
+        {
+            if (message.AgentId == "child-1")
+            {
+                childMessageReceived.TrySetResult();
+            }
+        });
+        using var errorSubscription = session.On<SessionErrorEvent>(error =>
+        {
+            if (error.AgentId == "child-1")
+            {
+                childErrorReceived.TrySetResult();
+            }
+        });
+        using var idleSubscription = session.On<SessionIdleEvent>(idle =>
+        {
+            if (idle.AgentId == "child-1")
+            {
+                childIdleReceived.TrySetResult();
+            }
+        });
+        await server.SendSessionEventAsync(session.SessionId, "assistant.message", new()
+        {
+            ["messageId"] = "child-message",
+            ["content"] = "child reply"
+        }, "child-1");
+        await server.SendSessionEventAsync(session.SessionId, "session.error", new()
+        {
+            ["errorType"] = "query",
+            ["message"] = "child failed"
+        }, "child-1");
+        await server.SendSessionEventAsync(session.SessionId, "session.idle", new(), "child-1");
+        await childMessageReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await childErrorReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await childIdleReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(sendTask.IsCompleted);
+
+        await server.SendSessionEventAsync(session.SessionId, "user.message", new()
+        {
+            ["messageId"] = "message-1",
+            ["content"] = "delegate"
+        });
+        await server.SendSessionEventAsync(session.SessionId, "session.idle", new());
+        var result = await sendTask.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task SendAndWaitAsync_Waits_For_Earlier_Idle_Handler()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var handlerFinished = false;
+        using var subscription = session.On<SessionIdleEvent>(_ =>
+        {
+            entered.TrySetResult();
+            release.Wait();
+            handlerFinished = true;
+        });
+        var pending = session.SendAndWaitAsync(new MessageOptions { Prompt = "hello" });
+        await WaitForRequestAsync(server, "session.send");
+        try
+        {
+            await server.SendSessionEventAsync(session.SessionId, "user.message", new()
+            {
+                ["messageId"] = "message-1",
+                ["content"] = "hello"
+            });
+            await server.SendSessionEventAsync(session.SessionId, "session.idle", new());
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Assert.ThrowsAsync<TimeoutException>(() =>
+                pending.WaitAsync(TimeSpan.FromMilliseconds(250)));
+        }
+        finally
+        {
+            release.Set();
+        }
+        Assert.Null(await pending.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(handlerFinished);
+    }
+
+    [Fact]
+    public async Task SendAndWaitAsync_Classifies_Events_Before_User_Handler_Mutates_AgentId()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await using var session = await client.CreateSessionAsync(new SessionConfig());
+        using var mutation = session.On<SessionEvent>(evt =>
+            evt.AgentId = evt.AgentId == "child-1" ? null : "root");
+
+        var sendTask = session.SendAndWaitAsync(new MessageOptions { Prompt = "delegate" });
+        await WaitForRequestAsync(server, "session.send");
+        var childIdleReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var observer = session.On<SessionIdleEvent>(idle =>
+        {
+            if (idle.AgentId is null)
+            {
+                childIdleReceived.TrySetResult();
+            }
+        });
+        await server.SendSessionEventAsync(session.SessionId, "assistant.message", new()
+        {
+            ["messageId"] = "child-message",
+            ["content"] = "child reply"
+        }, "child-1");
+        await server.SendSessionEventAsync(session.SessionId, "session.idle", new(), "child-1");
+        await childIdleReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(sendTask.IsCompleted);
+
+        await server.SendSessionEventAsync(session.SessionId, "assistant.message", new()
+        {
+            ["messageId"] = "root-message",
+            ["originatingMessageId"] = "message-1",
+            ["content"] = "root reply"
+        });
+        await server.SendSessionEventAsync(session.SessionId, "session.idle", new());
+        var result = await sendTask.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("root reply", result?.Data.Content);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -548,14 +3915,19 @@ public sealed class ClientSessionLifetimeTests
 
         await using var session = await client.CreateSessionAsync(new SessionConfig
         {
+            ExcludedManagedSettings = ["sandbox", "allowedMcpServers"],
+            EnforceManagedModelDefaults = true,
+            InteractiveUser = true,
             ManagedSettings = new ManagedSettings
             {
                 Permissions = new ManagedSettingsPermissions
                 {
-                    DisableBypassPermissionsMode = DisableBypassPermissionsMode.Disable,
+                    DisableBypassPermissionsMode = DisableBypassPermissionsModes.Disable,
+                    DisableAssistedPermissionsMode = true,
                     Deny = ["shell(rm*)"],
                     Ask = ["write"],
-                    Allow = []
+                    Allow = [],
+                    LimitTo = ["Domain(github.com)"]
                 }
             },
             OnPermissionRequest = (_, invocation) =>
@@ -566,23 +3938,85 @@ public sealed class ClientSessionLifetimeTests
         });
 
         var request = Assert.Single(server.Requests, request => request.Method == "session.create");
+        Assert.Collection(
+            request.Params.GetProperty("excludedManagedSettings").EnumerateArray(),
+            value => Assert.Equal("sandbox", value.GetString()),
+            value => Assert.Equal("allowedMcpServers", value.GetString()));
+        Assert.True(request.Params.GetProperty("enforceManagedModelDefaults").GetBoolean());
         Assert.False(request.Params.TryGetProperty("enableManagedSettings", out _));
+        Assert.True(request.Params.GetProperty("interactiveUser").GetBoolean());
         var permissions = request.Params.GetProperty("managedSettings").GetProperty("permissions");
         Assert.Equal("disable", permissions.GetProperty("disableBypassPermissionsMode").GetString());
+        Assert.True(permissions.GetProperty("disableAssistedPermissionsMode").GetBoolean());
         Assert.Equal("shell(rm*)", Assert.Single(permissions.GetProperty("deny").EnumerateArray()).GetString());
         Assert.Equal("write", Assert.Single(permissions.GetProperty("ask").EnumerateArray()).GetString());
         Assert.Empty(permissions.GetProperty("allow").EnumerateArray());
+        Assert.Equal(
+            "Domain(github.com)",
+            Assert.Single(permissions.GetProperty("limitTo").EnumerateArray()).GetString());
 
         DispatchEvent(session, new PermissionRequestedEvent
         {
             Data = new PermissionRequestedData
             {
-                PermissionRequest = new PermissionRequest { Kind = "read" },
+                PermissionRequest = new PermissionRequest
+                {
+                    Kind = "read",
+                    ManagedApprovalRequired = true
+                },
+                PromptRequest = new PermissionPromptRequestCommands
+                {
+                    FullCommandText = "ls",
+                    Intention = "List files",
+                    CommandIdentifiers = ["ls"],
+                    CanOfferSessionApproval = false,
+                    AssistedApproval = new PermissionAssistedApproval
+                    {
+                        Recommendation = AssistedApprovalRecommendation.Approve
+                    }
+                },
+                AssistedApprovalAssessment = new AssistedApprovalAssessmentCompleted
+                {
+                    Recommendation = AssistedApprovalCompletedRecommendation.RequireApproval,
+                    Rationale = "The command modifies protected files."
+                },
                 RequestId = "managed-permission"
             }
         });
         var invocation = await permissionInvocation.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(invocation.ManagedSettingsEnabled);
+        var promptRequest = Assert.IsType<PermissionPromptRequestCommands>(invocation.PromptRequest);
+        Assert.Null(promptRequest.ManagedApprovalRequired);
+        Assert.Equal(AssistedApprovalRecommendation.Approve, promptRequest.AssistedApproval?.Recommendation);
+        var assessment = Assert.IsType<AssistedApprovalAssessmentCompleted>(invocation.AssistedApprovalAssessment);
+        Assert.Equal(AssistedApprovalCompletedRecommendation.RequireApproval, assessment.Recommendation);
+        Assert.Equal("The command modifies protected files.", assessment.Rationale);
+    }
+
+    [Fact]
+    public async Task CreateSessionAsync_Serializes_Future_ManagedSettings_Bypass_Mode()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await client.StartAsync();
+
+        await using var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            ManagedSettings = new ManagedSettings
+            {
+                Permissions = new ManagedSettingsPermissions
+                {
+                    DisableBypassPermissionsMode = "future-fail-closed-mode"
+                }
+            },
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+
+        var request = Assert.Single(server.Requests, request => request.Method == "session.create");
+        var permissions = request.Params.GetProperty("managedSettings").GetProperty("permissions");
+        Assert.Equal(
+            "future-fail-closed-mode",
+            permissions.GetProperty("disableBypassPermissionsMode").GetString());
     }
 
     [Fact]
@@ -801,6 +4235,7 @@ public sealed class ClientSessionLifetimeTests
 
         var request = Assert.Single(server.Requests, request => request.Method == "session.create");
         Assert.False(request.Params.TryGetProperty("managedSettings", out _));
+        Assert.False(request.Params.TryGetProperty("interactiveUser", out _));
     }
 
     [Fact]
@@ -811,6 +4246,9 @@ public sealed class ClientSessionLifetimeTests
 
         await using var session = await client.ResumeSessionAsync("session-managed", new ResumeSessionConfig
         {
+            ExcludedManagedSettings = ["deniedMcpServers"],
+            EnforceManagedModelDefaults = true,
+            InteractiveUser = true,
             ManagedSettings = new ManagedSettings
             {
                 Permissions = new ManagedSettingsPermissions
@@ -823,8 +4261,86 @@ public sealed class ClientSessionLifetimeTests
         });
 
         var request = Assert.Single(server.Requests, request => request.Method == "session.resume");
+        Assert.Equal("deniedMcpServers", Assert.Single(request.Params.GetProperty("excludedManagedSettings").EnumerateArray()).GetString());
+        Assert.True(request.Params.GetProperty("enforceManagedModelDefaults").GetBoolean());
+        Assert.True(request.Params.GetProperty("interactiveUser").GetBoolean());
         var permissions = request.Params.GetProperty("managedSettings").GetProperty("permissions");
         Assert.Equal("shell(rm*)", Assert.Single(permissions.GetProperty("deny").EnumerateArray()).GetString());
+    }
+
+    [Fact]
+    public async Task ResumeSessionAsync_Omits_InteractiveUser_When_Unset()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+
+        await using var session = await client.ResumeSessionAsync("session-no-interactive", new ResumeSessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            OnEvent = _ => { }
+        });
+
+        var request = Assert.Single(server.Requests, request => request.Method == "session.resume");
+        Assert.False(request.Params.TryGetProperty("interactiveUser", out _));
+    }
+
+    [Fact]
+    public async Task CreateAndResumeSessionAsync_Serialize_Explicit_InteractiveUser_False()
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        await client.StartAsync();
+
+        await using var created = await client.CreateSessionAsync(new SessionConfig
+        {
+            InteractiveUser = false,
+            OnPermissionRequest = PermissionHandler.ApproveAll
+        });
+        await using var resumed = await client.ResumeSessionAsync("session-declined-interactive", new ResumeSessionConfig
+        {
+            InteractiveUser = false,
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+            OnEvent = _ => { }
+        });
+
+        foreach (var method in new[] { "session.create", "session.resume" })
+        {
+            var request = Assert.Single(server.Requests, request => request.Method == method);
+            Assert.Equal(JsonValueKind.False, request.Params.GetProperty("interactiveUser").ValueKind);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [InlineData(null)]
+    public async Task CreateSessionAsync_Serializes_RefreshCustomInstructions_Only_On_Create(bool? refresh)
+    {
+        await using var server = await FakeCopilotServer.StartAsync();
+        await using var client = new CopilotClient(new CopilotClientOptions { Connection = RuntimeConnection.ForUri(server.Url) });
+        var config = new SessionConfig();
+        if (refresh.HasValue)
+        {
+            config.RefreshCustomInstructions = refresh;
+        }
+
+        await using var session = await client.CreateSessionAsync(config);
+
+        var createRequest = Assert.Single(server.Requests, request => request.Method == "session.create");
+        if (refresh.HasValue)
+        {
+            Assert.True(createRequest.Params.TryGetProperty("refreshCustomInstructions", out var value), createRequest.Params.ToString());
+            Assert.Equal(refresh.Value, value.GetBoolean());
+        }
+        else
+        {
+            Assert.False(createRequest.Params.TryGetProperty("refreshCustomInstructions", out _), createRequest.Params.ToString());
+        }
+
+        await using var resumed = await client.ResumeSessionAsync("resumed-session", new ResumeSessionConfig());
+
+        var resumeRequest = Assert.Single(server.Requests, request => request.Method == "session.resume");
+        Assert.False(resumeRequest.Params.TryGetProperty("refreshCustomInstructions", out _), resumeRequest.Params.ToString());
     }
 
     private static void DispatchEvent(CopilotSession session, SessionEvent evt)
@@ -836,22 +4352,19 @@ public sealed class ClientSessionLifetimeTests
 
     private static async Task<RpcRequestRecord> WaitForRequestAsync(FakeCopilotServer server, string method)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (!timeout.IsCancellationRequested)
-        {
-            var request = server.Requests.FirstOrDefault(request => request.Method == method);
-            if (request is not null)
+        RpcRequestRecord? request = null;
+        await server.RequestsChanged.WaitForAsync(
+            () =>
             {
-                return request;
-            }
-
-            await Task.Delay(20, CancellationToken.None);
-        }
-
-        throw new TimeoutException($"Timed out waiting for RPC method '{method}'.");
+                request = server.Requests.FirstOrDefault(candidate => candidate.Method == method);
+                return request is not null;
+            },
+            TimeSpan.FromSeconds(5),
+            timeoutMessage: $"Timed out waiting for RPC method '{method}'.");
+        return request!;
     }
 
-    private static async Task ReplaceConnectionCliProcessAsync(CopilotClient client, Process process)
+    private static async Task ReplaceConnectionResourcesAsync(CopilotClient client, Process? process = null, IDisposable? ffiHost = null)
     {
         var field = typeof(CopilotClient).GetField("_connectionTask", BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("_connectionTask field was not found.");
@@ -865,7 +4378,7 @@ public sealed class ClientSessionLifetimeTests
         var rpc = connectionType.GetProperty("Rpc")!.GetValue(connection);
         var networkStream = connectionType.GetProperty("NetworkStream")!.GetValue(connection);
         var constructor = connectionType.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).Single();
-        var updatedConnection = constructor.Invoke([rpc, process, networkStream, null, null]);
+        var updatedConnection = constructor.Invoke([rpc, process, networkStream, null, ffiHost]);
         var fromResult = typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(connectionType);
         field.SetValue(client, fromResult.Invoke(null, [updatedConnection]));
     }
@@ -873,7 +4386,7 @@ public sealed class ClientSessionLifetimeTests
     private static Process StartExitedProcess()
     {
         var startInfo = OperatingSystem.IsWindows()
-            ? new ProcessStartInfo(Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe", "/c exit 0")
+            ? new ProcessStartInfo(System.Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe", "/c exit 0")
             : new ProcessStartInfo("/bin/sh", "-c \"exit 0\"");
         startInfo.UseShellExecute = false;
         var process = Process.Start(startInfo)
@@ -882,7 +4395,7 @@ public sealed class ClientSessionLifetimeTests
         return process;
     }
 
-    private sealed class FakeCopilotServer : IAsyncDisposable
+    private sealed partial class FakeCopilotServer : IAsyncDisposable
     {
         private readonly TcpListener _listener;
         private readonly CancellationTokenSource _cts = new();
@@ -890,11 +4403,32 @@ public sealed class ClientSessionLifetimeTests
         private readonly TaskCompletionSource _destroyStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _allowDestroy = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly Task _serverTask;
+        private readonly List<Task> _sendCompletionTasks = [];
         private readonly List<RpcRequestRecord> _requests = [];
+        private readonly ConcurrentQueue<object?> _sessionEvents = new();
         private readonly object _requestsLock = new();
+        public AsyncTestSignal RequestsChanged { get; } = new();
+        private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _pendingRequests = new();
+        private NetworkStream? _stream;
+        private int _nextRequestId;
         private string? _lastSessionId;
         private bool _delayDestroy;
         private bool _failRuntimeShutdown;
+        private bool _failSessionCreate;
+        private bool _failSessionSend;
+        private bool _reconnectObserved;
+        private int _nextMessageId;
+        public bool IncludeTranscriptRecovery { get; set; }
+        public bool RejectConnect { get; set; }
+
+        public string? LastSessionId => _lastSessionId;
+        public bool UniqueMessageIds { get; set; }
+        public bool FailSessionDelete { get; set; }
+        public bool FailMcpAuthInterestRegistration { get; set; }
+        public bool ReconnectObserved => Volatile.Read(ref _reconnectObserved);
+
+        public Func<string, Task>? BeforeSendResponse { get; set; }
+        public Func<RpcRequestRecord, CancellationToken, Task<object?>>? SendCompletion { get; set; }
 
         private FakeCopilotServer(TcpListener listener)
         {
@@ -922,6 +4456,12 @@ public sealed class ClientSessionLifetimeTests
 
         public int RuntimeShutdownCount { get; private set; }
 
+        public Func<RpcRequestRecord, CancellationToken, Task>? BeforeResponseAsync { get; set; }
+
+        public Func<RpcRequestRecord, CancellationToken, Task>? AfterResponseAsync { get; set; }
+
+        public Func<RpcRequestRecord, object?>? ResponseFactory { get; set; }
+
         public IReadOnlyList<RpcRequestRecord> Requests
         {
             get
@@ -941,6 +4481,12 @@ public sealed class ClientSessionLifetimeTests
             }
         }
 
+        public async Task ObserveReconnectAsync(CancellationToken cancellationToken)
+        {
+            using var connection = await _listener.AcceptTcpClientAsync(cancellationToken);
+            Volatile.Write(ref _reconnectObserved, true);
+        }
+
         public void DelayDestroy()
         {
             _delayDestroy = true;
@@ -954,6 +4500,101 @@ public sealed class ClientSessionLifetimeTests
         public void FailRuntimeShutdown()
         {
             _failRuntimeShutdown = true;
+        }
+
+        public void FailSessionCreate()
+        {
+            _failSessionCreate = true;
+        }
+
+        public void FailSessionSend()
+        {
+            _failSessionSend = true;
+        }
+
+        public void CloseConnection()
+        {
+            // RunAsync owns the stream and disposes it after its I/O has stopped.
+            _cts.Cancel();
+        }
+
+        public async Task<JsonElement> SendRequestAsync(string method, Dictionary<string, object?> parameters)
+        {
+            var stream = _stream ?? throw new InvalidOperationException("Client is not connected.");
+            var id = Interlocked.Increment(ref _nextRequestId);
+            var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_pendingRequests.TryAdd(id, completion))
+            {
+                throw new InvalidOperationException("Failed to track callback request.");
+            }
+
+            await WriteMessageAsync(stream, new Dictionary<string, object?>
+            {
+                ["jsonrpc"] = "2.0",
+                ["id"] = id,
+                ["method"] = method,
+                ["params"] = parameters
+            }, _cts.Token);
+            return await completion.Task.WaitAsync(_cts.Token);
+        }
+
+        public Task SendSessionEventAsync(string sessionId, string type, Dictionary<string, object?> data, string? agentId = null)
+        {
+            var stream = _stream ?? throw new InvalidOperationException("Client is not connected.");
+            var evt = new Dictionary<string, object?>
+            {
+                ["id"] = Guid.NewGuid().ToString(),
+                ["timestamp"] = DateTimeOffset.UtcNow.ToString("O"),
+                ["parentId"] = null,
+                ["agentId"] = agentId,
+                ["type"] = type,
+                ["data"] = data
+            };
+            // Idle is ephemeral in the runtime and cannot be backfilled from history.
+            if (type != "session.idle")
+            {
+                _sessionEvents.Enqueue(evt);
+            }
+            return WriteMessageAsync(stream, new Dictionary<string, object?>
+            {
+                ["jsonrpc"] = "2.0",
+                ["method"] = "session.event",
+                ["params"] = new Dictionary<string, object?>
+                {
+                    ["sessionId"] = sessionId,
+                    ["event"] = evt
+                }
+            }, _cts.Token);
+        }
+
+        public Task SendSessionEventPayloadAsync(string sessionId, object? @event)
+        {
+            var stream = _stream ?? throw new InvalidOperationException("Client is not connected.");
+            return WriteMessageAsync(stream, new Dictionary<string, object?>
+            {
+                ["jsonrpc"] = "2.0",
+                ["method"] = "session.event",
+                ["params"] = new Dictionary<string, object?>
+                {
+                    ["sessionId"] = sessionId,
+                    ["event"] = @event
+                }
+            }, _cts.Token);
+        }
+
+        public async Task SendAndDrainSessionEventAsync(
+            CopilotSession session,
+            string type,
+            Dictionary<string, object?> data,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default)
+        {
+            var drained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var subscription = session.On<SessionTitleChangedEvent>(_ => drained.TrySetResult());
+            await SendSessionEventAsync(session.SessionId, type, data);
+            // A later event is a fence: every subscriber has finished handling the target event.
+            await SendSessionEventAsync(session.SessionId, "session.title_changed", new() { ["title"] = "fence" });
+            await drained.Task.WaitAsync(timeout, cancellationToken);
         }
 
         public async ValueTask DisposeAsync()
@@ -970,6 +4611,14 @@ public sealed class ClientSessionLifetimeTests
             {
             }
 
+            try
+            {
+                await Task.WhenAll(_sendCompletionTasks);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or IOException or SocketException)
+            {
+            }
+
             _cts.Dispose();
             _writeLock.Dispose();
         }
@@ -978,16 +4627,45 @@ public sealed class ClientSessionLifetimeTests
         {
             using var tcpClient = await _listener.AcceptTcpClientAsync(_cts.Token);
             using var stream = tcpClient.GetStream();
+            _stream = stream;
 
             while (!_cts.Token.IsCancellationRequested)
             {
-                using var request = await ReadMessageAsync(stream, _cts.Token);
-                if (request is null)
+                using var message = await ReadMessageAsync(stream, _cts.Token);
+                if (message is null)
                 {
                     return;
                 }
 
-                await HandleRequestAsync(stream, request.RootElement, _cts.Token);
+                var root = message.RootElement;
+                if (root.TryGetProperty("method", out var method))
+                {
+                    if (method.GetString() == "session.sendAndWait" && SendCompletion is not null)
+                    {
+                        _sendCompletionTasks.Add(HandleRequestAsync(stream, root.Clone(), _cts.Token));
+                    }
+                    else
+                    {
+                        await HandleRequestAsync(stream, root, _cts.Token);
+                    }
+                    continue;
+                }
+
+                if (root.TryGetProperty("id", out var responseId)
+                    && responseId.TryGetInt32(out var id)
+                    && _pendingRequests.TryRemove(id, out var completion))
+                {
+                    if (root.TryGetProperty("error", out var error))
+                    {
+                        var exception = new InvalidOperationException(error.GetProperty("message").GetString());
+                        exception.Data["error"] = error.Clone();
+                        completion.TrySetException(exception);
+                    }
+                    else
+                    {
+                        completion.TrySetResult(root.GetProperty("result").Clone());
+                    }
+                }
             }
         }
 
@@ -1023,23 +4701,138 @@ public sealed class ClientSessionLifetimeTests
             {
                 _requests.Add(new RpcRequestRecord(method!, paramsElement));
             }
+            RequestsChanged.Pulse();
+            if (method == "connect" && RejectConnect)
+            {
+                await WriteMessageAsync(stream, new Dictionary<string, object?>
+                {
+                    ["jsonrpc"] = "2.0",
+                    ["id"] = id,
+                    ["error"] = new Dictionary<string, object?>
+                    {
+                        ["code"] = -32601,
+                        ["message"] = "Method not found"
+                    }
+                }, cancellationToken);
+                return;
+            }
+            if (method == "session.sendAndWait")
+            {
+                var response = new Dictionary<string, object?>
+                {
+                    ["jsonrpc"] = "2.0",
+                    ["id"] = id,
+                };
+                if (SendCompletion is { } complete)
+                {
+                    response["result"] = await complete(new RpcRequestRecord(method, paramsElement), cancellationToken);
+                }
+                else
+                {
+                    response["error"] = new Dictionary<string, object?>
+                    {
+                        ["code"] = -32601,
+                        ["message"] = "Method not found",
+                    };
+                }
+                await WriteMessageAsync(stream, response, cancellationToken);
+                return;
+            }
+            if (method == "session.create" && _failSessionCreate)
+            {
+                _failSessionCreate = false;
+                await WriteMessageAsync(stream, new Dictionary<string, object?>
+                {
+                    ["jsonrpc"] = "2.0",
+                    ["id"] = id,
+                    ["error"] = new Dictionary<string, object?>
+                    {
+                        ["code"] = -32000,
+                        ["message"] = "session create failed"
+                    }
+                }, cancellationToken);
+                return;
+            }
+            if (method == "session.eventLog.registerInterest" && FailMcpAuthInterestRegistration)
+            {
+                await WriteMessageAsync(stream, new Dictionary<string, object?>
+                {
+                    ["jsonrpc"] = "2.0",
+                    ["id"] = id,
+                    ["error"] = new Dictionary<string, object?>
+                    {
+                        ["code"] = -32000,
+                        ["message"] = "interest registration failed"
+                    }
+                }, cancellationToken);
+                return;
+            }
+            if (method == "session.send" && _failSessionSend)
+            {
+                _failSessionSend = false;
+                await WriteMessageAsync(stream, new Dictionary<string, object?>
+                {
+                    ["jsonrpc"] = "2.0",
+                    ["id"] = id,
+                    ["error"] = new Dictionary<string, object?>
+                    {
+                        ["code"] = -32000,
+                        ["message"] = "session send failed"
+                    }
+                }, cancellationToken);
+                return;
+            }
+            var requestRecord = new RpcRequestRecord(method!, paramsElement);
+            if (BeforeResponseAsync is { } beforeResponse)
+            {
+                await beforeResponse(requestRecord, cancellationToken);
+            }
+            var sendMessageId = method == "session.send" && UniqueMessageIds ? $"message-{Interlocked.Increment(ref _nextMessageId)}" : "message-1";
+            if (method == "session.send" && BeforeSendResponse is { } beforeSendResponse)
+            {
+                await beforeSendResponse(sendMessageId);
+            }
             object? result = method switch
             {
-                "connect" => new Dictionary<string, object?>
+                "connect" or "ping" => new Dictionary<string, object?>
                 {
                     ["ok"] = true,
                     ["protocolVersion"] = 3,
                     ["version"] = "test"
                 },
                 "session.create" => CreateSessionResult(request),
-                "session.resume" => CreateSessionResult(request),
+                "session.resume" => ResumeSessionResult(request),
+                "host.start" => CreateAhpHostResult(paramsElement),
+                "host.dispose" => new Dictionary<string, object?>(),
+                "host.publishSession" => new Dictionary<string, object?>
+                {
+                    ["sessionId"] = paramsElement.GetProperty("sessionId").GetString(),
+                    ["sessionUri"] = "ahp-session:/" + paramsElement.GetProperty("sessionId").GetString()
+                },
+                "host.listSessions" => new Dictionary<string, object?>
+                {
+                    ["sessions"] = Array.Empty<object>()
+                },
                 "session.eventLog.registerInterest" => new Dictionary<string, object?>
                 {
                     ["id"] = "interest-1"
                 },
                 "session.send" => new Dictionary<string, object?>
                 {
-                    ["messageId"] = "message-1"
+                    ["messageId"] = sendMessageId
+                },
+                "session.sendMessages" => new Dictionary<string, object?>
+                {
+                    ["messageIds"] = new[] { sendMessageId }
+                },
+                "session.abort" => new Dictionary<string, object?>(),
+                "session.getMessages" => new Dictionary<string, object?>
+                {
+                    ["events"] = _sessionEvents.ToArray()
+                },
+                "session.options.update" => new Dictionary<string, object?>
+                {
+                    ["success"] = true
                 },
                 "session.mcp.oauth.handlePendingRequest" => new Dictionary<string, object?>
                 {
@@ -1049,12 +4842,26 @@ public sealed class ClientSessionLifetimeTests
                 {
                     ["success"] = true
                 },
-                "session.delete" => new Dictionary<string, object?>
+                "session.tools.handlePendingToolCall" => new Dictionary<string, object?>
                 {
                     ["success"] = true
                 },
-                "session.destroy" => await DestroySessionAsync(cancellationToken),
+                "session.model.switchTo" => new Dictionary<string, object?>
+                {
+                    ["modelId"] = "auto"
+                },
+                "session.model.switchAutoTier" => new Dictionary<string, object?>
+                {
+                    ["status"] = "pending",
+                    ["effectiveAutoTier"] = "balance"
+                },
+                "session.delete" => new Dictionary<string, object?>
+                {
+                    ["success"] = !FailSessionDelete
+                },
+                "session.detach" => await DetachSessionAsync(cancellationToken),
                 "runtime.shutdown" => HandleRuntimeShutdown(),
+                _ when ResponseFactory is { } responseFactory => responseFactory(requestRecord),
                 _ => throw new InvalidOperationException($"Unexpected RPC method '{method}'.")
             };
 
@@ -1064,6 +4871,10 @@ public sealed class ClientSessionLifetimeTests
                 ["id"] = id,
                 ["result"] = result
             }, cancellationToken);
+            if (AfterResponseAsync is { } afterResponse)
+            {
+                await afterResponse(requestRecord, cancellationToken);
+            }
         }
 
         private Dictionary<string, object?> CreateSessionResult(JsonElement request)
@@ -1076,6 +4887,7 @@ public sealed class ClientSessionLifetimeTests
             {
                 sessionId = sidProp.GetString();
             }
+
             if (string.IsNullOrEmpty(sessionId))
             {
                 sessionId = Guid.NewGuid().ToString();
@@ -1090,7 +4902,22 @@ public sealed class ClientSessionLifetimeTests
             };
         }
 
-        private async Task<Dictionary<string, object?>> DestroySessionAsync(CancellationToken cancellationToken)
+        private Dictionary<string, object?> ResumeSessionResult(JsonElement request)
+        {
+            var result = CreateSessionResult(request);
+            if (IncludeTranscriptRecovery)
+            {
+                result["transcriptRecovery"] = new Dictionary<string, object?>
+                {
+                    ["plannedBackupPath"] = "backup.jsonl",
+                    ["invalidLineNumbers"] = new object?[] { 3, 4 },
+                    ["sessionStartMoved"] = true
+                };
+            }
+            return result;
+        }
+
+        private async Task<Dictionary<string, object?>> DetachSessionAsync(CancellationToken cancellationToken)
         {
             if (_delayDestroy)
             {
@@ -1098,7 +4925,7 @@ public sealed class ClientSessionLifetimeTests
                 await _allowDestroy.Task.WaitAsync(cancellationToken);
             }
 
-            return [];
+            return new Dictionary<string, object?> { ["success"] = true };
         }
 
         private Dictionary<string, object?> HandleRuntimeShutdown()
@@ -1153,6 +4980,10 @@ public sealed class ClientSessionLifetimeTests
 
                 case long longValue:
                     writer.WriteNumberValue(longValue);
+                    break;
+
+                case double doubleValue:
+                    writer.WriteNumberValue(doubleValue);
                     break;
 
                 case JsonElement jsonElement:

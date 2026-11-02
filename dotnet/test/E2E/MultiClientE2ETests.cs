@@ -33,7 +33,10 @@ public class MultiClientTestFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        await Ctx.DisposeAsync();
+        if (Ctx is not null)
+        {
+            await Ctx.DisposeAsync();
+        }
     }
 }
 
@@ -323,6 +326,9 @@ public class MultiClientE2ETests : IClassFixture<MultiClientTestFixture>, IAsync
 
         // Disconnect client 2
         await Client2.ForceStopAsync();
+
+        // Give the server time to process the connection close and remove tools.
+        await Task.Delay(500);
 
         // Recreate client2 for cleanup
         var port = Client1.RuntimePort!.Value;

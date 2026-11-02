@@ -131,8 +131,8 @@ public interface UserPromptSubmittedHandler {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `timestamp` | number | Unix timestamp when the hook was triggered |
-| `cwd` | string | Current working directory |
+| `timestamp` | SDK timestamp type | When the hook was triggered |
+| `workingDirectory` | string | Current working directory |
 | `prompt` | string | The user's submitted prompt |
 
 ## Output
@@ -144,6 +144,28 @@ Return `null` or `undefined` to use the prompt unchanged. Otherwise, return an o
 | `modifiedPrompt` | string | Modified prompt to use instead of original |
 | `additionalContext` | string | Extra context added to the conversation |
 | `suppressOutput` | boolean | If true, suppress the assistant's response output |
+| `decision` | `"block"` | Refuse the prompt (see [Blocking a prompt](#blocking-a-prompt)) |
+| `reason` | string | Why the prompt was blocked; required with `decision` |
+
+### Blocking a prompt
+
+Return a block decision to refuse the prompt:
+
+```json
+{
+  "decision": "block",
+  "reason": "Prompts may not include credentials."
+}
+```
+
+No model turn runs and no user message is recorded. The session emits an ephemeral `session.warning` with `warningType: "policy_blocked"` that carries the reason. The public member names follow each language's conventions:
+
+| Meaning | Node.js / Python | Go / .NET | Rust | Java |
+|---------|------------------|-----------|------|------|
+| Block the prompt | `decision: "block"` | `Decision = "block"` | `decision: Some("block".into())` | `UserPromptSubmittedHookOutput.block(reason)` |
+| Why it was blocked | `reason` | `Reason` | `reason` | the `reason` argument |
+
+In Go, an empty `Reason` is omitted from the output, and the prompt is blocked only when a reason is present.
 
 ## Examples
 
@@ -169,7 +191,10 @@ const session = await client.createSession({
 <summary><strong>Python</strong></summary>
 
 ```python
+from copilot import CopilotClient
 from copilot.session import PermissionHandler
+
+client = CopilotClient()
 
 async def on_user_prompt_submitted(input_data, invocation):
     print(f"[{invocation['session_id']}] User: {input_data['prompt']}")
@@ -267,7 +292,31 @@ var session = await client.CreateSessionAsync(new SessionConfig
 <details>
 <summary><strong>Java</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```java
+import com.github.copilot.*;
+import com.github.copilot.rpc.*;
+import java.util.concurrent.CompletableFuture;
+
+public class UserPromptSubmittedExample {
+    public static void main(String[] args) throws Exception {
+        try (var client = new CopilotClient()) {
+            var hooks = new SessionHooks()
+                .setOnUserPromptSubmitted((input, invocation) -> {
+                    System.out.println("[" + invocation.getSessionId() + "] User: " + input.prompt());
+                    return CompletableFuture.completedFuture(null);
+                });
+
+            var session = client.createSession(
+                new SessionConfig()
+                    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
+                    .setHooks(hooks)
+            ).get();
+        }
+    }
+}
+```
+<!-- /docs-validate: hidden -->
 ```java
 import com.github.copilot.*;
 import com.github.copilot.rpc.*;
@@ -349,10 +398,10 @@ const session = await client.createSession({
     onUserPromptSubmitted: async (input) => {
       for (const pattern of BLOCKED_PATTERNS) {
         if (pattern.test(input.prompt)) {
-          // Replace the prompt with a warning message
+          // Refuse the prompt; the reason reaches the client as a session.warning
           return {
-            modifiedPrompt: "[Content blocked: Please don't include sensitive credentials in your prompts. Use environment variables instead.]",
-            suppressOutput: true,
+            decision: "block",
+            reason: "Please don't include sensitive credentials in your prompts. Use environment variables instead.",
           };
         }
       }

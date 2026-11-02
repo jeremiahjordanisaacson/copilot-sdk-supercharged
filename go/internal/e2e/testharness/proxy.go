@@ -4,15 +4,21 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+const proxyShutdownTimeout = 5 * time.Second
 
 // CapiProxy manages a child process that acts as a replaying proxy to AI endpoints.
 // It spawns the shared test harness server from test/harness/server.ts.
@@ -118,26 +124,89 @@ func (p *CapiProxy) StopWithOptions(skipWritingCache bool) error {
 	if p.cmd == nil || p.cmd.Process == nil {
 		return nil
 	}
+	cmd := p.cmd
+	defer func() {
+		p.cmd = nil
+		p.proxyURL = ""
+	}()
 
+	releaseSignalGuard := ProtectProcessWait()
+	defer releaseSignalGuard()
+
+	var shutdownErr error
 	// Send stop request to the server
 	if p.proxyURL != "" {
 		stopURL := p.proxyURL + "/stop"
 		if skipWritingCache {
 			stopURL += "?skipWritingCache=true"
 		}
-		// Best effort - ignore errors
-		resp, err := http.Post(stopURL, "application/json", nil)
-		if err == nil {
+		client := http.Client{Timeout: proxyShutdownTimeout}
+		resp, err := client.Post(stopURL, "application/json", nil)
+		if err != nil {
+			shutdownErr = err
+		} else {
+			if resp.StatusCode != http.StatusOK {
+				body, readErr := io.ReadAll(resp.Body)
+				shutdownErr = errors.Join(
+					fmt.Errorf("proxy shutdown failed: HTTP %d: %s", resp.StatusCode, body),
+					readErr,
+				)
+			}
 			resp.Body.Close()
 		}
 	}
 
-	// Wait for process to exit
-	p.cmd.Wait()
-	p.cmd = nil
-	p.proxyURL = ""
+	exited := make(chan struct{}, 1)
+	var waitErr error
+	go func() {
+		PrepareForProcessWait()
+		waitErr = cmd.Wait()
+		exited <- struct{}{}
+	}()
+	if !waitForProcessExit(exited, proxyShutdownTimeout) {
+		// Windows Wait can release the process handle before the kill attempt.
+		// A late kill error is harmless only when our own Wait confirms exit.
+		killErr := killProcessTree(cmd)
+		if !waitForProcessExit(exited, proxyShutdownTimeout) {
+			if killErr != nil {
+				return fmt.Errorf("failed to kill proxy process: %w", killErr)
+			}
+			return fmt.Errorf("proxy process did not exit after being killed")
+		}
+	}
+	return errors.Join(shutdownErr, waitErr)
+}
 
+func killProcessTree(cmd *exec.Cmd) error {
+	if runtime.GOOS == "windows" {
+		taskkill := exec.Command(
+			"taskkill",
+			"/PID",
+			strconv.Itoa(cmd.Process.Pid),
+			"/T",
+			"/F",
+		)
+		if err := taskkill.Run(); err == nil {
+			return nil
+		}
+	}
+
+	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return err
+	}
 	return nil
+}
+
+func waitForProcessExit(exited <-chan struct{}, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-exited:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 // Configure sends configuration to the proxy.
@@ -222,16 +291,27 @@ type CapturedRequest struct {
 
 // ParsedHttpExchange represents a captured HTTP exchange.
 type ParsedHttpExchange struct {
-	Request        ChatCompletionRequest      `json:"request"`
-	Response       *ChatCompletionResponse    `json:"response,omitempty"`
-	RequestHeaders map[string]json.RawMessage `json:"requestHeaders,omitempty"`
+	Request         ChatCompletionRequest      `json:"request"`
+	Response        *ChatCompletionResponse    `json:"response,omitempty"`
+	RequestHeaders  map[string]json.RawMessage `json:"requestHeaders,omitempty"`
+	CompactionUsage *CompactionProviderUsage   `json:"compactionUsage,omitempty"`
+}
+
+// CompactionProviderUsage folds all responses in one correlated compaction request chain.
+type CompactionProviderUsage struct {
+	InteractionID string `json:"interactionId"`
+	Summary       string `json:"summary"`
+	ResponseCount int    `json:"responseCount"`
+	InputTokens   *int64 `json:"inputTokens,omitempty"`
 }
 
 // ChatCompletionRequest represents an OpenAI chat completion request.
 type ChatCompletionRequest struct {
-	Model    string                  `json:"model"`
-	Messages []ChatCompletionMessage `json:"messages"`
-	Tools    []ChatCompletionTool    `json:"tools,omitempty"`
+	ToolChoice     json.RawMessage         `json:"tool_choice,omitempty"`
+	ResponseFormat map[string]any          `json:"response_format,omitempty"`
+	Model          string                  `json:"model"`
+	Messages       []ChatCompletionMessage `json:"messages"`
+	Tools          []ChatCompletionTool    `json:"tools,omitempty"`
 }
 
 // ChatCompletionMessage represents a message in the chat completion request.

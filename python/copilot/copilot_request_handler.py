@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from .generated.rpc import (
@@ -61,6 +61,11 @@ _FORBIDDEN_REQUEST_HEADERS = frozenset(
 )
 
 _shared_http_client: httpx.AsyncClient | None = None
+_HTTP_RESPONSE_READ_AHEAD_BYTES = 32 * 1024
+# Largest upstream WebSocket message the default forwarder relays. The
+# websockets library rejects messages above 1 MiB by default, which model
+# responses can exceed; 64 MiB matches the Rust SDK's forwarder.
+_WEBSOCKET_MAX_MESSAGE_BYTES = 64 * 1024 * 1024
 
 
 def _get_shared_http_client() -> httpx.AsyncClient:
@@ -107,6 +112,9 @@ class CopilotRequestContext:
 
     _bridge: _CopilotWebSocketResponseBridge | None = field(default=None, repr=False)
 
+    agent_invocation_id: str | None = None
+    """Runtime-provided logical invocation identity, unchanged across physical retries."""
+
 
 @dataclass
 class CopilotWebSocketCloseStatus:
@@ -127,7 +135,10 @@ class CopilotWebSocketHandler:
 
     Subclass and override :meth:`send_request_message` (runtime → upstream) to
     mutate, drop, or inject messages, and :meth:`send_response_message`
-    (upstream → runtime) for the reverse direction. A full transport replacement
+    (upstream → runtime) for the reverse direction. Override
+    :meth:`send_request_message_with_context` to also observe each message's
+    invocation identity, which may differ from ``self.context`` on a reused
+    connection. A full transport replacement
     overrides :meth:`open` to stand up its own connection and receive loop.
     """
 
@@ -150,6 +161,16 @@ class CopilotWebSocketHandler:
     async def send_request_message(self, data: str | bytes) -> None:
         """Forward a runtime message to the upstream connection. Override to mutate."""
         raise NotImplementedError
+
+    async def send_request_message_with_context(
+        self, data: str | bytes, ctx: CopilotRequestContext
+    ) -> None:
+        """Forward a message with its own invocation identity, not the connection's.
+
+        Override to observe per-message metadata. The default calls the existing
+        single-argument hook so existing handlers continue to forward messages.
+        """
+        await self.send_request_message(data)
 
     async def close(self, status: CopilotWebSocketCloseStatus | None = None) -> None:
         """Initiate close: end the runtime response and resolve completion."""
@@ -201,14 +222,21 @@ class CopilotWebSocketForwarder(CopilotWebSocketHandler):
             (name, value)
             for name, values in self.context.headers.items()
             if name.lower() not in _FORBIDDEN_REQUEST_HEADERS
+            and not name.lower().startswith("sec-websocket-")
             for value in (values or [])
         ]
-        self._upstream = await websockets.connect(self.context.url, additional_headers=headers)
+        self._upstream = await websockets.connect(
+            self.context.url,
+            additional_headers=headers,
+            max_size=_WEBSOCKET_MAX_MESSAGE_BYTES,
+        )
         self._receive_task = asyncio.create_task(self._receive_loop())
 
     async def _receive_loop(self) -> None:
+        upstream = self._upstream
+        assert upstream is not None
         try:
-            async for message in self._upstream:  # type: ignore[union-attr]
+            async for message in upstream:
                 await self.send_response_message(message)
             await self.close(CopilotWebSocketCloseStatus.normal_closure())
         except asyncio.CancelledError:
@@ -263,6 +291,7 @@ class CopilotRequestHandler:
             request_id=exchange.request_id,
             session_id=exchange.session_id,
             agent_id=exchange.agent_id,
+            agent_invocation_id=exchange.agent_invocation_id,
             parent_agent_id=exchange.parent_agent_id,
             interaction_type=exchange.interaction_type,
             transport=exchange.transport,
@@ -309,7 +338,10 @@ class CopilotRequestHandler:
 
             async def pump_client() -> str:
                 async for chunk in exchange.request_body:
-                    await handler.send_request_message(_decode_frame(chunk))
+                    await handler.send_request_message_with_context(
+                        _decode_frame(chunk.chunk if chunk.chunk is not None else b""),
+                        replace(ctx, agent_invocation_id=chunk.agent_invocation_id),
+                    )
                 return "client-complete"
 
             client_task = asyncio.create_task(pump_client())
@@ -318,11 +350,11 @@ class CopilotRequestHandler:
                 {client_task, completion}, return_when=asyncio.FIRST_COMPLETED
             )
 
-            if client_task in done and client_task.exception() is not None:
-                handler._suppress_close_on_dispose = True
-                raise client_task.exception()  # type: ignore[misc]
-
             if client_task in done:
+                error = client_task.exception()
+                if error is not None:
+                    handler._suppress_close_on_dispose = True
+                    raise error
                 await handler.close(CopilotWebSocketCloseStatus.normal_closure())
                 await handler._completion
                 return
@@ -342,6 +374,7 @@ class CopilotRequestHandler:
 @dataclass
 class _BodyItem:
     chunk: bytes | None = None
+    agent_invocation_id: str | None = None
     end: bool = False
     cancel: bool = False
     cancel_reason: str | None = None
@@ -357,10 +390,10 @@ class _BodyQueue:
     def push(self, item: _BodyItem) -> None:
         self._queue.put_nowait(item)
 
-    def __aiter__(self) -> AsyncIterator[bytes]:
+    def __aiter__(self) -> AsyncIterator[_BodyItem]:
         return self
 
-    async def __anext__(self) -> bytes:
+    async def __anext__(self) -> _BodyItem:
         if self._done:
             raise StopAsyncIteration
         item = await self._queue.get()
@@ -375,7 +408,7 @@ class _BodyQueue:
         if item.end:
             self._done = True
             raise StopAsyncIteration
-        return item.chunk if item.chunk is not None else b""
+        return item
 
 
 class _CopilotRequestExchange:
@@ -395,6 +428,7 @@ class _CopilotRequestExchange:
         self.request_id = request_id
         self.session_id: str | None = None
         self.agent_id: str | None = None
+        self.agent_invocation_id: str | None = None
         self.parent_agent_id: str | None = None
         self.interaction_type: str | None = None
         self.method: str = "GET"
@@ -413,6 +447,7 @@ class _CopilotRequestExchange:
         """Fill in the request context once the matching start frame arrives."""
         self.session_id = params.session_id
         self.agent_id = params.agent_id
+        self.agent_invocation_id = params.agent_invocation_id
         self.parent_agent_id = params.parent_agent_id
         self.interaction_type = params.interaction_type
         self.method = params.method
@@ -537,7 +572,10 @@ class _CopilotRequestAdapterHandler:
             return
         if params.data:
             exchange._queue.push(
-                _BodyItem(chunk=_decode_chunk_data(params.data, bool(params.binary)))
+                _BodyItem(
+                    chunk=_decode_chunk_data(params.data, bool(params.binary)),
+                    agent_invocation_id=params.agent_invocation_id,
+                )
             )
         if params.end:
             exchange._queue.push(_BodyItem(end=True))
@@ -558,6 +596,14 @@ class _CopilotRequestAdapterHandler:
             await _finalize(exchange, 502, str(exc))
         finally:
             self._pending.pop(exchange.request_id, None)
+
+    def cancel_pending(self) -> None:
+        exchanges = tuple(self._pending.values())
+        self._pending.clear()
+        for exchange in exchanges:
+            exchange.cancelled = True
+            exchange.cancel_event.set()
+            exchange._queue.push(_BodyItem(cancel=True, cancel_reason="RPC connection closed"))
 
     def _get_or_create(self, request_id: str) -> _CopilotRequestExchange:
         # The runtime dispatches httpRequestStart and httpRequestChunk frames
@@ -709,11 +755,11 @@ async def _build_httpx_request(exchange: _CopilotRequestExchange) -> httpx.Reque
     return httpx.Request(method, exchange.url, headers=header_pairs, content=content)
 
 
-async def _drain_async(stream: AsyncIterator[bytes]) -> bytes:
+async def _drain_async(stream: AsyncIterator[_BodyItem]) -> bytes:
     parts: list[bytes] = []
     async for chunk in stream:
-        if chunk:
-            parts.append(chunk)
+        if chunk.chunk:
+            parts.append(chunk.chunk)
     return b"".join(parts)
 
 
@@ -727,15 +773,125 @@ async def _stream_response_to_exchange(
     )
     if response.is_stream_consumed:
         # An in-memory response (built with ``content=``) has already buffered its
-        # body, so its raw stream cannot be iterated; forward the buffered bytes.
-        body = response.content
-        if body:
-            await exchange.write_response(body)
+        # body, so its raw stream cannot be iterated.
+        async def body_stream() -> AsyncIterator[bytes]:
+            if response.content:
+                yield response.content
+
+        source = body_stream()
     else:
-        async for chunk in response.aiter_raw():
-            if chunk:
-                await exchange.write_response(chunk)
-    await exchange.end_response()
+        source = response.aiter_raw()
+
+    reader = _HttpResponseReader(source, response.aclose)
+    try:
+        while True:
+            chunk = await reader.next_chunk()
+            if chunk is None:
+                await exchange.end_response()
+                return
+            await exchange.write_response(chunk)
+    finally:
+        await reader.aclose()
+
+
+class _HttpResponseReader:
+    """Bounded response-body read-ahead with immediate partial flushes."""
+
+    def __init__(
+        self,
+        source: AsyncIterator[bytes],
+        close_response: Callable[[], Awaitable[None]],
+    ) -> None:
+        self._source = source.__aiter__()
+        self._close_response = close_response
+        self._frames: list[bytes] = []
+        self._queued = 0
+        self._error: Exception | None = None
+        self._done = False
+        self._closed = False
+        self._condition = asyncio.Condition()
+        self._producer = asyncio.create_task(self._produce())
+
+    async def _produce(self) -> None:
+        try:
+            while True:
+                async with self._condition:
+                    await self._condition.wait_for(
+                        lambda: self._closed or self._queued < _HTTP_RESPONSE_READ_AHEAD_BYTES
+                    )
+                    if self._closed:
+                        return
+
+                # Always-ready custom iterators must yield so an awaiting
+                # consumer can flush the first available frame immediately.
+                await asyncio.sleep(0)
+                frame = await anext(self._source)
+                if not frame:
+                    continue
+
+                async with self._condition:
+                    if self._closed:
+                        return
+                    self._frames.append(frame)
+                    self._queued += len(frame)
+                    self._condition.notify_all()
+        except StopAsyncIteration:
+            # Normal source exhaustion.
+            pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            async with self._condition:
+                if not self._closed:
+                    self._error = exc
+        finally:
+            close_error: Exception | None = None
+            close = getattr(self._source, "aclose", None)
+            if close is not None:
+                try:
+                    await close()
+                except Exception as exc:
+                    close_error = exc
+            try:
+                await self._close_response()
+            except Exception as exc:
+                close_error = close_error or exc
+            async with self._condition:
+                if not self._closed and self._error is None:
+                    self._error = close_error
+                self._done = True
+                self._condition.notify_all()
+
+    async def next_chunk(self) -> bytes | None:
+        async with self._condition:
+            await self._condition.wait_for(
+                lambda: self._frames or self._error is not None or self._done
+            )
+            if self._frames:
+                # A lone frame is forwarded as-is; joining is only needed once
+                # read-ahead has run past the chunk awaiting acknowledgement.
+                chunk = self._frames[0] if len(self._frames) == 1 else b"".join(self._frames)
+                self._frames.clear()
+                self._queued = 0
+                self._condition.notify_all()
+                return chunk
+            if self._error is not None:
+                error = self._error
+                self._error = None
+                raise error
+            return None
+
+    async def aclose(self) -> None:
+        async with self._condition:
+            self._closed = True
+            self._condition.notify_all()
+        if not self._producer.done():
+            self._producer.cancel()
+        try:
+            await self._producer
+        except asyncio.CancelledError:
+            # Producer cancellation is expected during teardown.
+            pass
 
 
 def _headers_to_multi_map(headers: Any) -> LlmInferenceHeaders:

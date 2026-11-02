@@ -4,6 +4,8 @@
 
 using GitHub.Copilot.Test.Harness;
 using Microsoft.Extensions.AI;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
@@ -21,6 +23,34 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
         const string sourceName = "dotnet-sdk-telemetry-e2e";
         const string toolName = "echo_telemetry_marker";
         const string prompt = $"Use the {toolName} tool with value '{marker}', then respond with TELEMETRY_E2E_DONE.";
+
+        using var toolSource = new ActivitySource($"dotnet-telemetry-{Guid.NewGuid():N}");
+        var sdkSpans = new ConcurrentQueue<Activity>();
+        var handlerStopped = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ActivityTraceId traceId = default;
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source == toolSource || source.Name == "github.copilot",
+            Sample = (ref ActivityCreationOptions<ActivityContext> options) =>
+                options.Source == toolSource || options.Parent.TraceId == traceId
+                    ? ActivitySamplingResult.AllDataAndRecorded
+                    : ActivitySamplingResult.None,
+            ActivityStopped = activity =>
+            {
+                if (activity.TraceId == traceId)
+                {
+                    sdkSpans.Enqueue(activity);
+                    if (activity.Source.Name == "github.copilot" && activity.OperationName == "copilot.tool_handler")
+                    {
+                        handlerStopped.TrySetResult(true);
+                    }
+                }
+            },
+        };
+        ActivitySource.AddActivityListener(listener);
+        using var parent = toolSource.CreateActivity("host", ActivityKind.Internal)!
+            .SetIdFormat(ActivityIdFormat.W3C).Start();
+        traceId = parent.TraceId;
 
         await using var client = Ctx.CreateClient(options: new CopilotClientOptions
         {
@@ -40,10 +70,10 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
             OnPermissionRequest = PermissionHandler.ApproveAll,
         });
 
-        await session.SendAsync(new MessageOptions { Prompt = prompt });
-        var assistantMessage = await TestHelper.GetFinalAssistantMessageAsync(session);
+        var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions { Prompt = prompt });
         Assert.NotNull(assistantMessage);
         Assert.Contains("TELEMETRY_E2E_DONE", assistantMessage!.Data.Content ?? string.Empty, StringComparison.Ordinal);
+        await handlerStopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         await session.DisposeAsync();
         await client.StopAsync();
@@ -54,21 +84,21 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
         Assert.NotEmpty(spans);
         Assert.All(spans, span => Assert.Equal(sourceName, GetInstrumentationScopeName(span)));
 
-        // All spans for one SDK turn must share the same trace id and must not be in error state.
-        var traceIds = spans.Select(GetTraceId).Where(id => !string.IsNullOrEmpty(id)).Distinct().ToList();
-        Assert.Single(traceIds);
         Assert.All(spans, span => Assert.NotEqual(2, GetStatusCode(span)));
 
         var invokeAgentSpan = AssertSpanWithOperation(spans, "invoke_agent");
         Assert.Equal(session.SessionId, GetStringAttribute(invokeAgentSpan, "gen_ai.conversation.id"));
-        Assert.True(IsRootSpan(invokeAgentSpan),
-            "invoke_agent should be the root of the SDK turn trace.");
+        Assert.Equal(parent.SpanId.ToHexString(), GetParentSpanId(invokeAgentSpan));
+        Assert.Equal(parent.TraceId.ToHexString(), GetTraceId(invokeAgentSpan));
         var invokeAgentSpanId = GetSpanId(invokeAgentSpan);
         Assert.False(string.IsNullOrEmpty(invokeAgentSpanId));
+        var invokeAgentTraceId = GetTraceId(invokeAgentSpan);
+        Assert.False(string.IsNullOrEmpty(invokeAgentTraceId));
 
         var chatSpans = spans.Where(span => IsSpanWithOperation(span, "chat")).ToList();
         Assert.NotEmpty(chatSpans);
         Assert.All(chatSpans, chat => Assert.Equal(invokeAgentSpanId, GetParentSpanId(chat)));
+        Assert.All(chatSpans, chat => Assert.Equal(invokeAgentTraceId, GetTraceId(chat)));
         Assert.Contains(
             chatSpans,
             span => (GetStringAttribute(span, "gen_ai.input.messages") ?? string.Empty).Contains(prompt, StringComparison.Ordinal));
@@ -78,13 +108,103 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
 
         var toolSpan = AssertSpanWithOperation(spans, "execute_tool");
         Assert.Equal(invokeAgentSpanId, GetParentSpanId(toolSpan));
+        Assert.Equal(invokeAgentTraceId, GetTraceId(toolSpan));
         Assert.Equal(toolName, GetStringAttribute(toolSpan, "gen_ai.tool.name"));
         Assert.False(string.IsNullOrWhiteSpace(GetStringAttribute(toolSpan, "gen_ai.tool.call.id")),
             "execute_tool span should carry gen_ai.tool.call.id.");
         Assert.Equal($"{{\"value\":\"{marker}\"}}", GetStringAttribute(toolSpan, "gen_ai.tool.call.arguments"));
-        Assert.Equal(marker, GetStringAttribute(toolSpan, "gen_ai.tool.call.result"));
+        using var toolResult = JsonDocument.Parse(GetStringAttribute(toolSpan, "gen_ai.tool.call.result")!);
+        var resultProperty = Assert.Single(toolResult.RootElement.EnumerateObject());
+        Assert.Equal("content", resultProperty.Name);
+        Assert.Equal(marker, resultProperty.Value.GetString());
 
-        static string EchoTelemetryMarker(string value) => value;
+        var child = Assert.Single(sdkSpans, span => span.OperationName == "tool work");
+        var handler = Assert.Single(sdkSpans, span => span.SpanId == child.ParentSpanId);
+        Assert.Equal("copilot.tool_handler", handler.OperationName);
+        Assert.Equal("github.copilot", handler.Source.Name);
+        Assert.Equal(GetSpanId(toolSpan), handler.ParentSpanId.ToHexString());
+        Assert.Equal(invokeAgentTraceId, child.TraceId.ToHexString());
+
+        string EchoTelemetryMarker(string value)
+        {
+            using var child = toolSource.StartActivity("tool work");
+            return value;
+        }
+    }
+
+    [Fact]
+    public async Task Should_Export_Per_Request_Subagent_Chat_Spans()
+    {
+        var telemetryPath = Path.Join(Ctx.WorkDir, $"telemetry-{Guid.NewGuid():N}.jsonl");
+        const string sourceName = "dotnet-sdk-subagent-telemetry-e2e";
+        const string prompt = "Use the task tool in sync mode to ask a task agent to read subagent-otel.txt with the view tool. Then reply with SUBAGENT_OTEL_DONE.";
+
+        await using var client = Ctx.CreateClient(options: new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForStdio(),
+            Telemetry = new TelemetryConfig
+            {
+                FilePath = telemetryPath,
+                ExporterType = "file",
+                SourceName = sourceName,
+                CaptureContent = true,
+            },
+        });
+
+        await File.WriteAllTextAsync(Path.Join(Ctx.WorkDir, "subagent-otel.txt"), "SUBAGENT_OTEL_FILE_CONTENT");
+        var session = await Ctx.CreateSessionAsync(client, new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+        });
+
+        var response = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions { Prompt = prompt });
+        Assert.Contains("SUBAGENT_OTEL_DONE", response?.Data.Content ?? string.Empty, StringComparison.Ordinal);
+
+        await session.DisposeAsync();
+        await client.StopAsync();
+
+        var spans = (await ReadTelemetryEntriesAsync(telemetryPath))
+            .Where(entry => GetTypeName(entry) == "span")
+            .ToList();
+        Assert.All(spans, span => Assert.Equal(sourceName, GetInstrumentationScopeName(span)));
+        Assert.All(spans, span => Assert.NotEqual(2, GetStatusCode(span)));
+
+        var root = Assert.Single(spans, span => IsSpanWithOperation(span, "invoke_agent") && IsRootSpan(span));
+        Assert.Equal(2, spans.Count(span => IsSpanWithOperation(span, "invoke_agent")));
+        Assert.Equal(session.SessionId, GetStringAttribute(root, "gen_ai.conversation.id"));
+        var rootId = GetSpanId(root);
+        var traceId = GetTraceId(root);
+        Assert.False(string.IsNullOrEmpty(traceId));
+        var taskTool = Assert.Single(spans, span =>
+            IsSpanWithOperation(span, "execute_tool") && GetStringAttribute(span, "gen_ai.tool.name") == "task");
+        Assert.Equal(rootId, GetParentSpanId(taskTool));
+        var subagent = Assert.Single(spans, span =>
+            IsSpanWithOperation(span, "invoke_agent") && GetParentSpanId(span) == GetSpanId(taskTool));
+        Assert.Equal(traceId, GetTraceId(taskTool));
+        Assert.Equal(traceId, GetTraceId(subagent));
+
+        Assert.Equal(4, spans.Count(span => IsSpanWithOperation(span, "chat")));
+        var rootChats = spans.Where(span =>
+            IsSpanWithOperation(span, "chat") && GetParentSpanId(span) == rootId).ToList();
+        Assert.Equal(2, rootChats.Count);
+        Assert.All(rootChats, chat => Assert.Equal(traceId, GetTraceId(chat)));
+        var subagentChats = spans.Where(span =>
+            IsSpanWithOperation(span, "chat") && GetParentSpanId(span) == GetSpanId(subagent)).ToList();
+        Assert.True(subagentChats.Count == 2,
+            $"Expected two subagent chats; got {subagentChats.Count}. Span hierarchy: {string.Join("; ", spans.Where(span => GetStringAttribute(span, "gen_ai.operation.name") is "chat" or "invoke_agent" or "execute_tool").Select(span => $"{GetStringAttribute(span, "gen_ai.operation.name")}:{GetSpanId(span)} parent={GetParentSpanId(span)}"))}");
+        Assert.All(subagentChats, chat =>
+        {
+            Assert.Equal(traceId, GetTraceId(chat));
+            Assert.Equal("sub-agent", GetStringAttribute(chat, "github.copilot.initiator"));
+        });
+        var requestingChat = Assert.Single(subagentChats, chat =>
+            (GetStringAttribute(chat, "gen_ai.output.messages") ?? string.Empty).Contains("\"view\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("SUBAGENT_OTEL_FILE_CONTENT",
+            GetStringAttribute(requestingChat, "gen_ai.input.messages") ?? string.Empty, StringComparison.Ordinal);
+        var finalChat = Assert.Single(subagentChats, chat =>
+            (GetStringAttribute(chat, "gen_ai.output.messages") ?? string.Empty).Contains("SUBAGENT_OTEL_CHILD_DONE", StringComparison.Ordinal));
+        Assert.Contains("SUBAGENT_OTEL_FILE_CONTENT",
+            GetStringAttribute(finalChat, "gen_ai.input.messages") ?? string.Empty, StringComparison.Ordinal);
     }
 
     private static async Task<IReadOnlyList<JsonElement>> ReadTelemetryEntriesAsync(string path)
@@ -130,7 +250,8 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
     private static JsonElement AssertSpanWithOperation(IEnumerable<JsonElement> spans, string operationName)
     {
         var matchingSpan = spans.FirstOrDefault(span => GetStringAttribute(span, "gen_ai.operation.name") == operationName);
-        Assert.NotEqual(JsonValueKind.Undefined, matchingSpan.ValueKind);
+        Assert.True(matchingSpan.ValueKind != JsonValueKind.Undefined,
+            $"Missing {operationName} span. Exported operations: {string.Join(", ", spans.Select(span => GetStringAttribute(span, "gen_ai.operation.name") ?? "<unnamed>"))}");
         return matchingSpan;
     }
 

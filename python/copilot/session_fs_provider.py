@@ -17,11 +17,12 @@ Errors whose ``errno`` matches :data:`errno.ENOENT` are mapped to the
 from __future__ import annotations
 
 import abc
+import base64
 import errno
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from .generated.rpc import (
     SessionFSError,
@@ -31,6 +32,8 @@ from .generated.rpc import (
     SessionFSReaddirResult,
     SessionFSReaddirWithTypesEntry,
     SessionFSReaddirWithTypesResult,
+    SessionFSReadFileBytesResult,
+    SessionFSReadFileRangeResult,
     SessionFSReadFileResult,
     SessionFSSqliteExistsResult,
     SessionFSSqliteQueryType,
@@ -48,6 +51,9 @@ from .generated.rpc import (
     SessionFSSqliteTransactionResult as _GeneratedSqliteTransactionResult,
 )
 
+_MAX_BINARY_BYTES = (64 * 1024 * 1024 - 1024) // 4 * 3
+_MAX_BINARY_CONTENT_LENGTH = ((_MAX_BINARY_BYTES + 2) // 3) * 4
+
 
 @dataclass
 class SessionFsFileInfo:
@@ -58,6 +64,37 @@ class SessionFsFileInfo:
     size: int
     mtime: datetime
     birthtime: datetime
+
+
+class SessionFsWriteFailure(Exception):
+    """Raise from ``write_file`` only when the failed write changed its target."""
+
+
+@dataclass
+class SessionFsByteRange:
+    """Raw bytes and the authoritative total file byte length at the read."""
+
+    content: bytes
+    byte_length: int
+
+
+class SessionFsReadFileRangeProvider(abc.ABC):
+    """Optional bounded byte reads, independent of binary support.
+
+    Advertise ``capabilities.read_file_range`` only when every provider implements
+    this capability without downloading the full file.
+    """
+
+    @abc.abstractmethod
+    async def read_file_range(
+        self, path: str, offset: int, length: int | None = None
+    ) -> SessionFsByteRange:
+        """Read raw bytes at a non-negative safe integer offset.
+
+        Omit length to read through EOF; zero returns only file byte length.
+        At or beyond EOF, content is empty. Boundaries may split UTF-8.
+        Offset and length must be from 0 through 9007199254740991.
+        """
 
 
 class SessionFsProvider(abc.ABC):
@@ -75,7 +112,10 @@ class SessionFsProvider(abc.ABC):
 
     @abc.abstractmethod
     async def write_file(self, path: str, content: str, mode: int | None = None) -> None:
-        """Write *content* to a file, creating parent directories if needed."""
+        """Write *content* to a file, creating parent directories if needed.
+
+        Raise :class:`SessionFsWriteFailure` if a failed write changed the target.
+        """
 
     @abc.abstractmethod
     async def append_file(self, path: str, content: str, mode: int | None = None) -> None:
@@ -108,6 +148,19 @@ class SessionFsProvider(abc.ABC):
     @abc.abstractmethod
     async def rename(self, src: str, dest: str) -> None:
         """Rename / move a file or directory."""
+
+
+@runtime_checkable
+class SessionFsBinaryProvider(Protocol):
+    """Optional interface for providers that support exact binary reads and writes."""
+
+    async def read_file_bytes(self, path: str) -> bytes:
+        """Read the exact bytes of a file. Raise if it does not exist."""
+        ...
+
+    async def write_file_bytes(self, path: str, content: bytes, mode: int | None = None) -> None:
+        """Write the exact bytes of a file, respecting the optional mode."""
+        ...
 
 
 class SessionFsSqliteProvider(abc.ABC):
@@ -200,6 +253,14 @@ def create_session_fs_adapter(provider: SessionFsProvider) -> SessionFsHandler:
     return _SessionFsAdapter(provider)
 
 
+def _is_safe_byte_position(value: object) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and 0 <= value <= 9_007_199_254_740_991
+    )
+
+
 class _SessionFsAdapter:
     """Internal adapter that bridges SessionFsProvider → SessionFsHandler."""
 
@@ -214,9 +275,76 @@ class _SessionFsAdapter:
             err = _to_session_fs_error(exc)
             return SessionFSReadFileResult.from_dict({"content": "", "error": err.to_dict()})
 
+    async def read_file_bytes(self, params: Any) -> SessionFSReadFileBytesResult:
+        try:
+            if not isinstance(self._p, SessionFsBinaryProvider):
+                raise NotImplementedError("Binary reads are not supported by this provider")
+            data = await self._p.read_file_bytes(params.path)
+            if len(data) > _MAX_BINARY_BYTES:
+                raise ValueError("sessionFs.readFileBytes content exceeds the binary read limit")
+            content = base64.b64encode(data).decode("ascii")
+            return SessionFSReadFileBytesResult.from_dict({"content": content})
+        except Exception as exc:
+            err = _to_session_fs_error(exc)
+            return SessionFSReadFileBytesResult.from_dict({"content": "", "error": err.to_dict()})
+
+    async def read_file_range(self, params: Any) -> SessionFSReadFileRangeResult:
+        try:
+            length = getattr(params, "length", None)
+            if not _is_safe_byte_position(params.offset) or (
+                length is not None and not _is_safe_byte_position(length)
+            ):
+                raise ValueError(
+                    "SessionFs byte offset and length must be non-negative safe integers"
+                )
+            if not isinstance(self._p, SessionFsReadFileRangeProvider):
+                raise NotImplementedError(
+                    "Byte-range reads are not supported by this SessionFs provider"
+                )
+            result = await self._p.read_file_range(params.path, params.offset, length)
+            if not _is_safe_byte_position(result.byte_length):
+                raise ValueError("SessionFs byte length must be a non-negative safe integer")
+            available = max(0, result.byte_length - params.offset)
+            if len(result.content) != min(available, length if length is not None else available):
+                raise ValueError("SessionFs returned an incorrect byte range length")
+            return SessionFSReadFileRangeResult.from_dict(
+                {
+                    "content": base64.b64encode(result.content).decode("ascii"),
+                    "byteLength": result.byte_length,
+                }
+            )
+        except Exception as exc:
+            err = _to_session_fs_error(exc)
+            return SessionFSReadFileRangeResult.from_dict(
+                {
+                    "content": "",
+                    "byteLength": 0,
+                    "error": err.to_dict(),
+                }
+            )
+
     async def write_file(self, params: Any) -> SessionFSError | None:
         try:
             await self._p.write_file(params.path, params.content, getattr(params, "mode", None))
+            return None
+        except Exception as exc:
+            error = _to_session_fs_error(exc)
+            if isinstance(exc, SessionFsWriteFailure):
+                error.write_changed = True
+            return error
+
+    async def write_file_bytes(self, params: Any) -> SessionFSError | None:
+        try:
+            if not isinstance(self._p, SessionFsBinaryProvider):
+                raise NotImplementedError("Binary writes are not supported by this provider")
+            if len(params.content) > _MAX_BINARY_CONTENT_LENGTH:
+                raise ValueError("sessionFs.writeFileBytes content exceeds the binary write limit")
+            data = base64.b64decode(params.content, validate=True)
+            if base64.b64encode(data).decode("ascii") != params.content:
+                raise ValueError("invalid sessionFs.writeFileBytes base64 content")
+            if len(data) > _MAX_BINARY_BYTES:
+                raise ValueError("sessionFs.writeFileBytes content exceeds the binary write limit")
+            await self._p.write_file_bytes(params.path, data, getattr(params, "mode", None))
             return None
         except Exception as exc:
             return _to_session_fs_error(exc)

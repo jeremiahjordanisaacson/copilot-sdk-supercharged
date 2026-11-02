@@ -19,8 +19,7 @@ Copilot: In Tokyo it's 75°F and sunny. Great day to be outside!
 Before you begin, make sure you have:
 
 * **GitHub Copilot CLI** installed and authenticated (the Node.js, Python, and .NET SDKs provide the CLI automatically—see [Bundled CLI](./setup/bundled-cli.md). Required for Go, Java, and Rust unless using their application-level CLI bundling features.)
-* Your preferred language runtime:
-  * **Node.js** 20+ or **Python** 3.11+ or **Go** 1.24+ or **Rust** 1.94+ or **Java** 17+ or **.NET** 8.0+
+* Your preferred language runtime, at or above the version its SDK requires. Each SDK states its own floor in the Prerequisites section of its README: [Node.js](../nodejs/README.md#prerequisites), [Python](../python/README.md#prerequisites), [Go](../go/README.md#prerequisites), [Rust](../rust/README.md#prerequisites), [Java](../java/README.md#prerequisites), [.NET](../dotnet/README.md#prerequisites).
 
 Verify the CLI is working:
 
@@ -146,6 +145,7 @@ Create a new file and add the following code. This is the simplest way to use th
 
 Create `index.ts`:
 
+<!-- docs-validate: strict -->
 ```typescript
 import { CopilotClient } from "@github/copilot-sdk";
 
@@ -176,6 +176,7 @@ Create `main.py`:
 import asyncio
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
+from copilot.session_events import AssistantMessageData
 
 async def main():
     client = CopilotClient()
@@ -183,7 +184,8 @@ async def main():
 
     session = await client.create_session(on_permission_request=PermissionHandler.approve_all, model="auto")
     response = await session.send_and_wait("What is 2 + 2?")
-    print(response.data.content)
+    if response and isinstance(response.data, AssistantMessageData):
+        print(response.data.content)
 
     await client.stop()
 
@@ -325,7 +327,6 @@ dotnet run
 
 Create `HelloCopilot.java`:
 
-<!-- docs-validate: skip -->
 ```java
 import com.github.copilot.CopilotClient;
 import com.github.copilot.rpc.*;
@@ -378,6 +379,7 @@ Right now, you wait for the complete response before seeing anything. Let's make
 
 Update `index.ts`:
 
+<!-- docs-validate: strict -->
 ```typescript
 import { CopilotClient } from "@github/copilot-sdk";
 
@@ -590,9 +592,10 @@ await session.SendAndWaitAsync(new MessageOptions { Prompt = "Tell me a short jo
 
 Update `HelloCopilot.java`:
 
-<!-- docs-validate: skip -->
 ```java
 import com.github.copilot.CopilotClient;
+import com.github.copilot.generated.AssistantMessageDeltaEvent;
+import com.github.copilot.generated.SessionIdleEvent;
 import com.github.copilot.rpc.*;
 
 public class HelloCopilot {
@@ -665,8 +668,9 @@ unsubscribeIdle();
 
 <!-- docs-validate: hidden -->
 ```python
-from copilot import CopilotClient, PermissionDecisionApproveOnce
-from copilot.session_events import SessionEvent, SessionEventType
+from copilot import CopilotClient
+from copilot.session import PermissionDecisionApproveOnce
+from copilot.session_events import AssistantMessageData, SessionEvent, SessionEventType
 
 client = CopilotClient()
 
@@ -679,7 +683,7 @@ unsubscribe = session.on(lambda event: print(f"Event: {event.type}"))
 def handle_event(event: SessionEvent) -> None:
     if event.type == SessionEventType.SESSION_IDLE:
         print("Session is idle")
-    elif event.type == SessionEventType.ASSISTANT_MESSAGE:
+    elif isinstance(event.data, AssistantMessageData):
         print(f"Message: {event.data.content}")
 
 unsubscribe = session.on(handle_event)
@@ -690,6 +694,8 @@ unsubscribe()
 <!-- /docs-validate: hidden -->
 
 ```python
+from copilot.session_events import AssistantMessageData, SessionEventType
+
 # Subscribe to all events
 unsubscribe = session.on(lambda event: print(f"Event: {event.type}"))
 
@@ -697,7 +703,7 @@ unsubscribe = session.on(lambda event: print(f"Event: {event.type}"))
 def handle_event(event):
     if event.type == SessionEventType.SESSION_IDLE:
         print("Session is idle")
-    elif event.type == SessionEventType.ASSISTANT_MESSAGE:
+    elif isinstance(event.data, AssistantMessageData):
         print(f"Message: {event.data.content}")
 
 unsubscribe = session.on(handle_event)
@@ -726,7 +732,7 @@ func main() {
 
 	// Subscribe to all events
 	unsubscribe := session.On(func(event copilot.SessionEvent) {
-		fmt.Println("Event:", event.Type)
+		fmt.Println("Event:", event.Type())
 	})
 
 	// Filter by event type in your handler
@@ -749,7 +755,7 @@ func main() {
 ```go
 // Subscribe to all events
 unsubscribe := session.On(func(event copilot.SessionEvent) {
-    fmt.Println("Event:", event.Type)
+    fmt.Println("Event:", event.Type())
 })
 
 // Filter by event type in your handler
@@ -856,8 +862,48 @@ unsubscribe.Dispose();
 <details>
 <summary><strong>Java</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
 ```java
+import com.github.copilot.CopilotClient;
+import com.github.copilot.generated.AssistantMessageEvent;
+import com.github.copilot.generated.SessionIdleEvent;
+import com.github.copilot.rpc.*;
+
+public class SubscribeToEvents {
+    public static void main(String[] args) throws Exception {
+        try (var client = new CopilotClient()) {
+            client.start().get();
+
+            var session = client.createSession(
+                new SessionConfig().setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
+            ).get();
+
+            // Subscribe to all events
+            var unsubscribe = session.on(event -> {
+                System.out.println("Event: " + event.getType());
+            });
+
+            // Subscribe to a specific event type
+            session.on(AssistantMessageEvent.class, msg -> {
+                System.out.println("Message: " + msg.getData().content());
+            });
+
+            session.on(SessionIdleEvent.class, idle -> {
+                System.out.println("Session is idle");
+            });
+
+            // Later, to unsubscribe:
+            unsubscribe.close();
+        }
+    }
+}
+```
+<!-- /docs-validate: hidden -->
+
+```java
+import com.github.copilot.generated.AssistantMessageEvent;
+import com.github.copilot.generated.SessionIdleEvent;
+
 // Subscribe to all events
 var unsubscribe = session.on(event -> {
     System.out.println("Event: " + event.getType());
@@ -887,6 +933,7 @@ Now for the powerful part. Let's give Copilot the ability to call your code by d
 
 Update `index.ts`:
 
+<!-- docs-validate: strict -->
 ```typescript
 import { CopilotClient, defineTool } from "@github/copilot-sdk";
 
@@ -1216,9 +1263,10 @@ await session.SendAndWaitAsync(new MessageOptions
 
 Update `HelloCopilot.java`:
 
-<!-- docs-validate: skip -->
 ```java
 import com.github.copilot.CopilotClient;
+import com.github.copilot.generated.AssistantMessageDeltaEvent;
+import com.github.copilot.generated.SessionIdleEvent;
 import com.github.copilot.rpc.*;
 
 import java.util.List;
@@ -1501,7 +1549,8 @@ func main() {
 	})
 
 	fmt.Println("🌤️  Weather Assistant (type 'exit' to quit)")
-	fmt.Println("   Try: 'What's the weather in Paris?' or 'Compare weather in NYC and LA'\n")
+	fmt.Println("   Try: 'What's the weather in Paris?' or 'Compare weather in NYC and LA'")
+	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
@@ -1722,9 +1771,10 @@ dotnet run
 
 Create `WeatherAssistant.java`:
 
-<!-- docs-validate: skip -->
 ```java
 import com.github.copilot.CopilotClient;
+import com.github.copilot.generated.AssistantMessageDeltaEvent;
+import com.github.copilot.generated.SessionIdleEvent;
 import com.github.copilot.rpc.*;
 
 import java.util.List;
@@ -1767,9 +1817,7 @@ public class WeatherAssistant {
                 new SessionConfig()
                     .setModel("auto")
                     .setStreaming(true)
-                    .setOnPermissionRequest(request ->
-                        CompletableFuture.completedFuture(PermissionDecision.allow())
-                    )
+                    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
                     .setTools(List.of(getWeather))
             ).get();
 
@@ -1844,6 +1892,14 @@ Copilot decides when to call your tool based on the user's question. When it doe
 1. The result is sent back to Copilot
 1. Copilot incorporates the result into its response
 
+### Updating external tools in a running session
+
+The existing low-level `session.tools.set` request replaces the definitions owned by that SDK connection. Send the complete desired list (or an empty list to remove them), rather than a patch. The updated definitions apply to the next model request that reads them. During a tool round, a change processed before the post-tool refresh is visible on the next model call; a concurrent update processed after that refresh takes effect on a later request. It does **not** update the high-level SDK tool-handler map: register and manage handlers separately, or handle `external_tool.requested` and complete it with `session.tools.handlePendingToolCall`.
+
+On direct Anthropic API connections to `https://api.anthropic.com` using a model marked for Anthropic tool updates in the runtime's model catalog (currently Claude Fable 5 or 5.1, or Claude Opus 4.8, 5, or 5.5), the runtime can keep the original tool prefix and represent eligible between-turn SDK changes in provider-native conversation items to preserve a cacheable prefix. On the CAPI WebSocket Responses route for a model marked for Responses tool updates in that catalog (currently GPT-5.4 and 5.4 Mini, GPT-5.5, GPT-5.6 Luna, Sol, Terra, and Sol-fast, GPT-6 Astra, Sol, and Luna, and GPT-6.1 Sol), eligible append-only additions can use positioned `additional_tools` items. Eligible removals retain historical definitions and restrict callable tools with `tool_choice: { type: "allowed_tools", ... }`, or `"none"` when no tools remain. This removal optimization requires every callable survivor to be present in the original top-level tool list: CAPI rejects allowlist references to inline-added definitions when full history is resent. Removing an inline-added tool can preserve its historical position, but retaining a callable inline-added tool while removing another tool falls back to the complete current list. Schema replacements and unsupported tool-choice or provider-native tool configurations also use that fallback.
+
+Model support is an explicit catalog opt-in, independent of support for reasoning configuration updates, and other models should be enabled only after their route is verified. If historical changes no longer fit the prompt budget, or an optimized request receives a recognized pre-output provider rejection, the runtime returns to the current complete tool list. Anthropic through CAPI, unannotated OpenAI Responses models, other provider endpoints, mid-turn changes, and history rewrites use the current complete tool list. Removing every callable tool selects the runtime's existing single-shot HTTP path, which also uses the complete current list rather than this optimization. Successful compaction starts a new prefix with the tools currently provided; resuming in a new process does not replay previous tool changes. A stable request shape does not guarantee cached tokens or lower cost.
+
 ## What's next?
 
 Now that you've got the basics, here are more powerful features to explore:
@@ -1852,6 +1908,7 @@ Now that you've got the basics, here are more powerful features to explore:
 
 MCP (Model Context Protocol) servers provide pre-built tools. Connect to GitHub's MCP server to give Copilot access to repositories, issues, and pull requests:
 
+<!-- docs-validate: strict -->
 ```typescript
 const session = await client.createSession({
     mcpServers: {
@@ -1869,6 +1926,7 @@ const session = await client.createSession({
 
 Define specialized AI personas for specific tasks:
 
+<!-- docs-validate: strict -->
 ```typescript
 const session = await client.createSession({
     customAgents: [{
@@ -1887,6 +1945,7 @@ const session = await client.createSession({
 
 Control the AI's behavior and personality by appending instructions:
 
+<!-- docs-validate: strict -->
 ```typescript
 const session = await client.createSession({
     systemMessage: {
@@ -1897,6 +1956,7 @@ const session = await client.createSession({
 
 For more fine-grained control, use `mode: "customize"` to override individual sections of the system prompt while preserving the rest:
 
+<!-- docs-validate: strict -->
 ```typescript
 const session = await client.createSession({
     systemMessage: {
@@ -1915,7 +1975,7 @@ Available section IDs: `preamble`, `identity`, `tone`, `tool_efficiency`, `envir
 
 `identity` and `tool_instructions` are section *groups*: they target a collection of related sub-sections as a unit. Use `preamble` to target just the identity preamble without affecting its sibling sub-sections.
 
-Each override supports five actions: `replace`, `remove`, `append`, `prepend`, and `preserve`. The `preserve` action is a no-op that opts an individually-addressable section out of a group-level `remove` (for example, keep `tone` when removing the `identity` group). Unknown section IDs are handled gracefully: content from `replace`/`append`/`prepend` overrides is appended to additional instructions, and `remove` overrides are silently ignored.
+Each override supports five static actions: `replace`, `remove`, `append`, `prepend`, and `preserve`. The `preserve` action is a no-op that opts an individually-addressable section out of a group-level `remove` (for example, keep `tone` when removing the `identity` group). Every SDK also lets you register a transform for a section instead of a static action: it receives the section's current content and returns the new content (see the language-specific READMEs below). Unknown section IDs are handled gracefully: content from `replace`/`append`/`prepend` overrides is appended to additional instructions, and `remove` overrides are silently ignored.
 
 See the language-specific SDK READMEs for examples in [TypeScript](../nodejs/README.md), [Python](../python/README.md), [Go](../go/README.md), [Rust](../rust/README.md), [Java](../java/README.md), and [C#](../dotnet/README.md).
 
@@ -1954,11 +2014,12 @@ Once the CLI is running in server mode, configure your SDK client to connect to 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
+<!-- docs-validate: strict -->
 ```typescript
-import { CopilotClient, approveAll } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection, approveAll } from "@github/copilot-sdk";
 
 const client = new CopilotClient({
-    cliUrl: "localhost:4321"
+    connection: RuntimeConnection.forUri("localhost:4321"),
 });
 
 // Use the client normally
@@ -2108,7 +2169,7 @@ var session = client.createSession(
 
 </details>
 
-**Note:** When `cli_url` / `cliUrl` / Go's `URIConnection` is provided, or Rust uses `Transport::External`, the SDK will not spawn or manage a CLI process - it will only connect to the existing server at the specified URL.
+**Note:** When a URI connection is provided (`RuntimeConnection.forUri` in Node.js, `RuntimeConnection.for_uri` in Python, `RuntimeConnection.ForUri` in .NET, Go's `URIConnection`, or Java's `setCliUrl`), or Rust uses `Transport::External`, the SDK will not spawn or manage a CLI process - it will only connect to the existing server at the specified URL.
 
 ## Telemetry and observability
 
@@ -2121,7 +2182,19 @@ Pass a `telemetry` (or `Telemetry`) config when creating the client. This is the
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: strict -->
+<!-- docs-validate: hidden -->
+```typescript
+import { CopilotClient as SdkClient } from "@github/copilot-sdk";
+
+new SdkClient({
+  telemetry: {
+    otlpEndpoint: "http://localhost:4318",
+  },
+});
+```
+<!-- /docs-validate: hidden -->
+
 ```typescript
 import { CopilotClient } from "@github/copilot-sdk";
 
@@ -2139,25 +2212,42 @@ Optional peer dependency: `@opentelemetry/api`
 <details>
 <summary><strong>Python</strong></summary>
 
-<!-- docs-validate: skip -->
 ```python
-from copilot import CopilotClient, CopilotClientOptions
+from copilot import CopilotClient
 
-client = CopilotClient(CopilotClientOptions(
+client = CopilotClient(
     telemetry={
         "otlp_endpoint": "http://localhost:4318",
     },
-))
+)
 ```
 
-Install with telemetry extras: `pip install copilot-sdk[telemetry]` (provides `opentelemetry-api`)
+Install with telemetry extras: `pip install "github-copilot-sdk[telemetry]"` (provides `opentelemetry-api`)
 
 </details>
 
 <details>
 <summary><strong>Go</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```go
+package main
+
+import (
+	copilot "github.com/github/copilot-sdk/go"
+)
+
+func main() {
+	client := copilot.NewClient(&copilot.ClientOptions{
+		Telemetry: &copilot.TelemetryConfig{
+			OTLPEndpoint: "http://localhost:4318",
+		},
+	})
+	_ = client
+}
+```
+<!-- /docs-validate: hidden -->
+
 ```go
 client := copilot.NewClient(&copilot.ClientOptions{
     Telemetry: &copilot.TelemetryConfig{
@@ -2193,7 +2283,6 @@ No extra dependencies—the SDK injects telemetry environment variables for the 
 <details>
 <summary><strong>.NET</strong></summary>
 
-<!-- docs-validate: skip -->
 ```csharp
 var client = new CopilotClient(new CopilotClientOptions
 {
@@ -2211,7 +2300,6 @@ No extra dependencies—uses built-in `System.Diagnostics.Activity`.
 <details>
 <summary><strong>Java</strong></summary>
 
-<!-- docs-validate: skip -->
 ```java
 import com.github.copilot.CopilotClient;
 import com.github.copilot.rpc.*;
@@ -2242,7 +2330,20 @@ The OTLP protocol field configures the CLI's `"otlp-http"` exporter for all sign
 
 To write traces to a local file instead of an OTLP endpoint:
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: strict -->
+<!-- docs-validate: hidden -->
+```typescript
+import { CopilotClient as SdkClient } from "@github/copilot-sdk";
+
+new SdkClient({
+  telemetry: {
+    filePath: "./traces.jsonl",
+    exporterType: "file",
+  },
+});
+```
+<!-- /docs-validate: hidden -->
+
 ```typescript
 const client = new CopilotClient({
   telemetry: {

@@ -14,17 +14,26 @@ import pytest
 
 from copilot.session_events import (
     AttachmentGitHubReferenceType,
+    AutoTier,
+    AutoTierSwitchFailureReason,
     Data,
     ElicitationCompletedAction,
     ElicitationRequestedMode,
     ElicitationRequestedSchema,
     ManagedSettingsResolvedSource,
+    PermissionApprovalEvaluationReasonCode,
     PermissionPromptRequestMemory,
+    PermissionRequestedData,
     PermissionRequestMemory,
     PermissionRequestMemoryAction,
+    SessionAutoTierSwitchFailedData,
+    SessionEvent,
     SessionEventType,
     SessionManagedSettingsResolvedData,
+    SessionResumeData,
+    SessionStartData,
     SessionTaskCompleteData,
+    ToolExecutionCompleteData,
     UserMessageAgentMode,
     session_event_from_dict,
     session_event_to_dict,
@@ -33,6 +42,358 @@ from copilot.session_events import (
 
 class TestEventForwardCompatibility:
     """Test forward compatibility for unknown event types."""
+
+    @pytest.mark.parametrize("ephemeral", [False, True])
+    def test_event_preserves_legacy_positional_constructor(self, ephemeral):
+        original = session_event_from_dict(
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "timestamp": "2026-09-18T22:00:00+00:00",
+                "parentId": "22222222-2222-2222-2222-222222222222",
+                "type": "future.event",
+                "data": {"future": "payload"},
+            }
+        )
+        event = SessionEvent(
+            original.data,
+            original.id,
+            original.timestamp,
+            original.type,
+            "worker",
+            ephemeral,
+            original.parent_id,
+            original.raw_type,
+        )
+        assert event.ephemeral is ephemeral
+        assert event.parent_id == original.parent_id
+        assert event.raw_type == "future.event"
+        assert event.checkpoint is None
+        wire = session_event_to_dict(event)
+        assert wire["ephemeral"] is ephemeral
+        assert wire["parentId"] == str(original.parent_id)
+        assert wire["type"] == "future.event"
+        assert "checkpoint" not in wire
+
+    @pytest.mark.parametrize("checkpoint", [None, False, True])
+    def test_checkpoint_metadata_round_trips_as_a_keyword(self, checkpoint):
+        event = session_event_from_dict(
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "timestamp": "2026-09-18T22:00:00+00:00",
+                "type": "session.idle",
+                "data": {},
+            }
+        )
+        event = SessionEvent(
+            event.data, event.id, event.timestamp, event.type, checkpoint=checkpoint
+        )
+        wire = session_event_to_dict(event)
+        assert session_event_from_dict(wire).checkpoint is checkpoint
+        if checkpoint is None:
+            assert "checkpoint" not in wire
+        else:
+            assert wire["checkpoint"] is checkpoint
+
+    def test_future_file_edit_kind_preserves_tool_completion(self):
+        wire = {
+            "id": str(uuid4()),
+            "timestamp": datetime.now().isoformat(),
+            "parentId": None,
+            "type": "tool.execution_complete",
+            "data": {
+                "toolCallId": "call-1",
+                "success": True,
+                "fileEdits": [{"path": "/future.txt", "kind": "append"}],
+            },
+        }
+
+        event = session_event_from_dict(wire)
+        assert isinstance(event.data, ToolExecutionCompleteData)
+        assert event.data.file_edits is not None
+        assert event.data.file_edits[0].kind.name == "UNKNOWN"
+        assert event.data.file_edits[0].kind.value == "append"
+        assert session_event_to_dict(event)["data"]["fileEdits"] == wire["data"]["fileEdits"]
+        other = session_event_from_dict(wire)
+        assert event.data.file_edits[0].kind is other.data.file_edits[0].kind
+        assert event.data.file_edits[0] == other.data.file_edits[0]
+        assert len({event.data.file_edits[0].kind, other.data.file_edits[0].kind}) == 1
+
+    @staticmethod
+    def _permission_requested_with_reason(reason_code):
+        return {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "timestamp": "2026-09-18T22:00:00+00:00",
+            "parentId": None,
+            "type": "permission.requested",
+            "data": {
+                "requestId": "request-1",
+                "permissionRequest": {
+                    "kind": "memory",
+                    "fact": "fact",
+                    "assistedApproval": {
+                        "recommendation": "requireApproval",
+                        "evaluation": {
+                            "reasonCode": reason_code,
+                            "judgeStatus": "not_called",
+                            "evaluationStage": "pre_judge",
+                            "judgeAttempted": False,
+                        },
+                    },
+                },
+            },
+        }
+
+    @pytest.mark.parametrize("reason", list(PermissionApprovalEvaluationReasonCode))
+    def test_permission_event_decodes_every_published_reason_code(self, reason):
+        wire = self._permission_requested_with_reason(reason.value)
+
+        event = session_event_from_dict(wire)
+        assert isinstance(event.data, PermissionRequestedData)
+        evaluation = event.data.permission_request.assisted_approval.evaluation
+        assert evaluation.reason_code is reason
+        assert session_event_to_dict(event) == wire
+
+    def test_shell_evidence_reason_codes_are_published(self):
+        assert {
+            "content-excluded",
+            "unsupported-command-shape",
+            "unsupported-source",
+            "dynamic-source",
+            "too-many-sources",
+            "executable-unavailable",
+            "executable-too-large",
+        } <= {reason.value for reason in PermissionApprovalEvaluationReasonCode}
+
+    def test_future_reason_code_decodes_as_unknown(self):
+        event = session_event_from_dict(
+            self._permission_requested_with_reason("future-runtime-reason")
+        )
+
+        assert isinstance(event.data, PermissionRequestedData)
+        evaluation = event.data.permission_request.assisted_approval.evaluation
+        assert evaluation.reason_code is PermissionApprovalEvaluationReasonCode.UNKNOWN
+        assert evaluation.judge_status.value == "not_called"
+        assert evaluation.evaluation_stage.value == "pre_judge"
+
+    def test_non_string_reason_code_still_raises(self):
+        with pytest.raises(ValueError):
+            PermissionApprovalEvaluationReasonCode(7)
+
+    @pytest.mark.parametrize(
+        ("event_type", "data"), [("session.idle", {}), ("user.message", {"content": "hello"})]
+    )
+    def test_object_event_preserves_complete_envelope(self, event_type, data):
+        wire = {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "timestamp": "2026-09-18T22:00:00+00:00",
+            "parentId": "22222222-2222-2222-2222-222222222222",
+            "type": event_type,
+            "data": data,
+        }
+        assert session_event_to_dict(session_event_from_dict(wire)) == wire
+
+    @pytest.mark.parametrize(
+        ("event_type", "kind", "fields"),
+        [
+            ("session.indexed_search", "status", {"state": "ready"}),
+            (
+                "session.indexed_search",
+                "startup",
+                {
+                    "outcome": "started",
+                    "startupDurationMs": 1.5,
+                    "forcedByEnv": False,
+                    "warmStart": False,
+                    "fileCount": 0,
+                    "eligible": False,
+                    "errorMessage": "diagnostic",
+                },
+            ),
+            (
+                "session.indexed_search",
+                "server_error",
+                {"errorType": "unexpected_exit", "exitCode": 0, "errorMessage": "diagnostic"},
+            ),
+            (
+                "session.indexed_search",
+                "incremental",
+                {
+                    "phase": "updated",
+                    "changedFileCount": 0,
+                    "addedFileCount": 1,
+                    "deletedFileCount": 0,
+                    "totalChangeCount": 1,
+                    "walkDurationMs": 0.5,
+                    "updateDurationMs": 1.25,
+                    "totalDurationMs": 1.75,
+                },
+            ),
+            (
+                "sandbox.decision",
+                "policy_resolved",
+                {
+                    "backend": "seatbelt",
+                    "policySource": "default_policy",
+                    "readwritePathsCount": 0,
+                    "readonlyPathsCount": 1,
+                    "deniedPathsCount": 0,
+                    "addCurrentWorkingDirectory": False,
+                    "allowOutbound": False,
+                    "allowLocalNetwork": False,
+                    "proxyMode": "none",
+                    "allowBypass": False,
+                    "gitAuth": False,
+                    "ghAuth": False,
+                    "keychainAccess": False,
+                },
+            ),
+            ("sandbox.decision", "spawn_completed", {"backend": "seatbelt", "durationMs": 1.5}),
+            (
+                "sandbox.decision",
+                "enforcement_state",
+                {"backend": "seatbelt", "command": "echo test", "attestation": "spawn_succeeded"},
+            ),
+            (
+                "sandbox.decision",
+                "access_denied",
+                {
+                    "denialClass": "filesystem_read",
+                    "attestation": "builtin_policy_checked",
+                    "deniedResource": "/example",
+                    "command": "cat example",
+                },
+            ),
+            (
+                "sandbox.decision",
+                "access_recorded",
+                {
+                    "denialClass": "filesystem_write",
+                    "permissiveSource": "policy",
+                    "deniedResource": "/example",
+                },
+            ),
+            (
+                "sandbox.decision",
+                "bypass_decided",
+                {"source": "user_prompted", "deniedResource": "/example"},
+            ),
+            (
+                "sandbox.decision",
+                "permissive_retry_decided",
+                {"source": "model_requested", "command": "echo test"},
+            ),
+            (
+                "sandbox.decision",
+                "permissive_retry_completed",
+                {"processName": "example", "command": "echo test"},
+            ),
+        ],
+    )
+    def test_union_event_preserves_complete_envelope(self, event_type, kind, fields):
+        data = {"kind": kind, **fields}
+        if event_type == "sandbox.decision":
+            data.update(
+                control="process",
+                outcome="resolved",
+                platform="macos",
+                enforcementPoint="shell",
+                toolCallId="tool-1",
+            )
+        wire = {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "timestamp": "2026-09-18T22:00:00+00:00",
+            "parentId": "22222222-2222-2222-2222-222222222222",
+            "ephemeral": True,
+            "agentId": "agent-1",
+            "type": event_type,
+            "data": data,
+        }
+        event = session_event_from_dict(wire)
+        assert event.type.value == event_type
+        assert session_event_to_dict(event) == wire
+
+    @pytest.mark.parametrize("event_type", ["session.start", "session.resume"])
+    @pytest.mark.parametrize(
+        "tier", ["efficiency", "balance", "intelligence", "fast", "premium-v2", None]
+    )
+    def test_auto_tier_lifecycle_events_round_trip(self, event_type, tier):
+        timestamp = "2026-08-28T00:00:00Z"
+        data = (
+            {
+                "copilotVersion": "1.0.82-1",
+                "producer": "copilot-agent",
+                "sessionId": str(uuid4()),
+                "startTime": timestamp,
+                "version": 1,
+            }
+            if event_type == "session.start"
+            else {"eventCount": 1, "resumeTime": timestamp}
+        )
+        if tier is not None:
+            data["autoTier"] = tier
+        event = session_event_from_dict(
+            {
+                "id": str(uuid4()),
+                "timestamp": timestamp,
+                "parentId": None,
+                "type": event_type,
+                "data": data,
+            }
+        )
+        assert isinstance(event.data, (SessionStartData, SessionResumeData))
+        assert event.data.auto_tier == (AutoTier(tier) if tier is not None else None)
+        serialized = session_event_to_dict(event)["data"]
+        if tier is None:
+            assert "autoTier" not in serialized
+        else:
+            assert serialized["autoTier"] == tier
+
+    @pytest.mark.parametrize(
+        "reason",
+        ["policy_rejected", "request_failed", "setup_failed", "unsupported"],
+    )
+    def test_auto_tier_switch_failed_event_decodes_every_reason(self, reason):
+        timestamp = "2026-08-28T00:00:00Z"
+        event = session_event_from_dict(
+            {
+                "id": str(uuid4()),
+                "timestamp": timestamp,
+                "parentId": None,
+                "type": "session.auto_tier_switch_failed",
+                "data": {
+                    "effectiveAutoTier": "balance",
+                    "requestedAutoTier": "fast",
+                    "reason": reason,
+                },
+            }
+        )
+        assert isinstance(event.data, SessionAutoTierSwitchFailedData)
+        assert event.data.reason == AutoTierSwitchFailureReason(reason)
+        assert event.data.effective_auto_tier == AutoTier.BALANCE
+        assert event.data.requested_auto_tier == AutoTier.FAST
+
+    def test_auto_tier_switch_failed_event_allows_null_requested_tier(self):
+        # A null requested tier means the attempt to return to provider-default
+        # Auto routing is what failed.
+        timestamp = "2026-08-28T00:00:00Z"
+        event = session_event_from_dict(
+            {
+                "id": str(uuid4()),
+                "timestamp": timestamp,
+                "parentId": None,
+                "type": "session.auto_tier_switch_failed",
+                "data": {
+                    "effectiveAutoTier": "efficiency",
+                    "requestedAutoTier": None,
+                    "reason": "unsupported",
+                },
+            }
+        )
+        assert isinstance(event.data, SessionAutoTierSwitchFailedData)
+        assert event.data.requested_auto_tier is None
+        assert event.data.effective_auto_tier == AutoTier.EFFICIENCY
+        serialized = session_event_to_dict(event)["data"]
+        assert serialized["requestedAutoTier"] is None
 
     def test_session_usage_info_is_recognized(self):
         """The session.usage_info event type should be in the enum."""
@@ -144,6 +505,7 @@ class TestEventForwardCompatibility:
             "server",
             "device",
             "client",
+            "policyHelper",
             "mixed",
             "none",
         ]

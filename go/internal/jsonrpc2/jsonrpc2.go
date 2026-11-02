@@ -1,19 +1,26 @@
 package jsonrpc2
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"reflect"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const version = "2.0"
+
+// processExitGracePeriod bounds how long a request whose connection has closed
+// waits for the watched CLI process to report its exit.
+const processExitGracePeriod = time.Second
 
 // Standard JSON-RPC 2.0 error codes.
 var (
@@ -61,17 +68,26 @@ type NotificationHandler func(method string, params json.RawMessage)
 // RequestHandler handles incoming server requests and returns a result or error
 type RequestHandler func(params json.RawMessage) (json.RawMessage, *Error)
 
+// RequestContextHandler handles incoming server requests with a per-request
+// context that is cancelled by JSON-RPC $/cancelRequest for numeric IDs.
+type RequestContextHandler func(ctx context.Context, params json.RawMessage) (json.RawMessage, *Error)
+
 // Client is a minimal JSON-RPC 2.0 client for stdio transport.
 type Client struct {
 	reader                 *headerReader // reads frames from the remote side
 	stdout                 io.ReadCloser
+	stdin                  io.WriteCloser
 	writer                 chan *headerWriter // 1-buffered; holds the writer when not in use
 	mu                     sync.Mutex
 	pendingRequests        map[string]chan *Response
 	pendingInlineCallbacks map[string]func(json.RawMessage) error
-	requestHandlers        map[string]RequestHandler
+	requestHandlers        map[string]RequestContextHandler
+	requestPreparations    map[string]func(json.RawMessage) *Error
+	incomingRequestCancels map[string]*incomingRequestCancel
 	running                atomic.Bool
 	stopChan               chan struct{}
+	connectionClosed       chan struct{}
+	connectionClosedOnce   sync.Once
 	wg                     sync.WaitGroup
 	processDone            chan struct{} // closed when the underlying process exits
 	processErrorPtr        *error        // points to the process error
@@ -84,11 +100,15 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser) *Client {
 	c := &Client{
 		reader:                 newHeaderReader(stdout),
 		stdout:                 stdout,
+		stdin:                  stdin,
 		writer:                 make(chan *headerWriter, 1),
 		pendingRequests:        make(map[string]chan *Response),
 		pendingInlineCallbacks: make(map[string]func(json.RawMessage) error),
-		requestHandlers:        make(map[string]RequestHandler),
+		requestHandlers:        make(map[string]RequestContextHandler),
+		requestPreparations:    make(map[string]func(json.RawMessage) *Error),
+		incomingRequestCancels: make(map[string]*incomingRequestCancel),
 		stopChan:               make(chan struct{}),
+		connectionClosed:       make(chan struct{}),
 	}
 	c.writer <- newHeaderWriter(stdin)
 	return c
@@ -126,12 +146,18 @@ func (c *Client) Start() {
 
 // Stop stops the client and cleans up
 func (c *Client) Stop() {
+	c.mu.Lock()
 	if !c.running.Load() {
+		c.mu.Unlock()
 		return
 	}
 	c.running.Store(false)
 	close(c.stopChan)
+	c.mu.Unlock()
 
+	if err := c.stdin.Close(); err != nil && !errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, os.ErrClosed) {
+		log.Printf("Failed to close JSON-RPC writer: %v", err)
+	}
 	// Close stdout to unblock the readLoop
 	if c.stdout != nil {
 		c.stdout.Close()
@@ -193,13 +219,42 @@ func RequestHandlerFor[In, Out any](handler func(params In) (Out, *Error)) Reque
 
 // SetRequestHandler registers a handler for incoming requests from the server
 func (c *Client) SetRequestHandler(method string, handler RequestHandler) {
+	if handler == nil {
+		c.SetRequestContextHandler(method, nil)
+		return
+	}
+	c.SetRequestContextHandler(method, func(_ context.Context, params json.RawMessage) (json.RawMessage, *Error) {
+		return handler(params)
+	})
+}
+
+// SetRequestContextHandler registers a handler for incoming requests from the
+// server. The supplied context is cancelled when a numeric $/cancelRequest for
+// this request ID is received.
+func (c *Client) SetRequestContextHandler(method string, handler RequestContextHandler) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	delete(c.requestPreparations, method)
 	if handler == nil {
 		delete(c.requestHandlers, method)
 		return
 	}
 	c.requestHandlers[method] = handler
+}
+
+// SetRequestHandlerWithPreparation registers request state in read order before
+// later notifications can run. Preparation must not block or invoke user code.
+func (c *Client) SetRequestHandlerWithPreparation(method string, handler RequestHandler, prepare func(json.RawMessage) *Error) {
+	c.SetRequestHandler(method, handler)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.requestPreparations[method] = prepare
+}
+
+// ConnectionClosed returns a channel that closes when the JSON-RPC read loop
+// exits or the client is stopped.
+func (c *Client) ConnectionClosed() <-chan struct{} {
+	return c.connectionClosed
 }
 
 // Request sends a JSON-RPC request and waits for the response
@@ -241,7 +296,7 @@ func (c *Client) RequestWithInlineResponse(ctx context.Context, method string, p
 		c.mu.Unlock()
 	}()
 
-	// Check if process already exited before sending
+	// Check if the process exited or the connection closed before sending
 	if c.processDone != nil {
 		select {
 		case <-ctx.Done():
@@ -251,8 +306,16 @@ func (c *Client) RequestWithInlineResponse(ctx context.Context, method string, p
 				return nil, err
 			}
 			return nil, fmt.Errorf("process exited unexpectedly")
+		case <-c.connectionClosed:
+			return c.responseAfterConnectionClosed(ctx, responseChan)
 		default:
 			// Process still running, continue
+		}
+	} else {
+		select {
+		case <-c.connectionClosed:
+			return nil, fmt.Errorf("connection closed")
+		default:
 		}
 	}
 
@@ -281,12 +344,32 @@ func (c *Client) RequestWithInlineResponse(ctx context.Context, method string, p
 		}
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
+	if method == "session.sendAndWait" {
+		defer func() {
+			if ctx.Err() != nil {
+				c.mu.Lock()
+				if c.running.Load() {
+					c.wg.Add(1)
+					go func() {
+						defer c.wg.Done()
+						if err := c.sendMessage(context.WithoutCancel(ctx), map[string]any{
+							"jsonrpc": version, "method": "$/cancelRequest",
+							"params": map[string]string{"id": requestID},
+						}); err != nil && c.running.Load() {
+							log.Printf("Failed to cancel completion request: %v", err)
+						}
+					}()
+				}
+				c.mu.Unlock()
+			}
+		}()
+	}
 
 	// Wait for response, also checking for process exit
 	if c.processDone != nil {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return responseAfterShutdown(responseChan, ctx.Err())
 		case response := <-responseChan:
 			if response.Error != nil {
 				return nil, response.Error
@@ -294,23 +377,73 @@ func (c *Client) RequestWithInlineResponse(ctx context.Context, method string, p
 			return response.Result, nil
 		case <-c.processDone:
 			if err := c.getProcessError(); err != nil {
-				return nil, err
+				return responseAfterShutdown(responseChan, err)
 			}
-			return nil, fmt.Errorf("process exited unexpectedly")
+			return responseAfterShutdown(responseChan, fmt.Errorf("process exited unexpectedly"))
+		case <-c.connectionClosed:
+			return c.responseAfterConnectionClosed(ctx, responseChan)
 		case <-c.stopChan:
-			return nil, fmt.Errorf("client stopped")
+			return responseAfterShutdown(responseChan, fmt.Errorf("client stopped"))
 		}
 	}
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return responseAfterShutdown(responseChan, ctx.Err())
 	case response := <-responseChan:
 		if response.Error != nil {
 			return nil, response.Error
 		}
 		return response.Result, nil
+	case <-c.connectionClosed:
+		return responseAfterShutdown(responseChan, fmt.Errorf("connection closed"))
+	case <-c.stopChan:
+		return responseAfterShutdown(responseChan, fmt.Errorf("client stopped"))
+	}
+}
+
+// responseAfterConnectionClosed settles a request whose connection closed while
+// the CLI process is watched. The connection usually closes because the process
+// exited, and the exit is reported moments later with the error that carries
+// the CLI's stderr, so wait up to processExitGracePeriod for it. A process still
+// running after that has lost its connection, and no reply will ever come.
+func (c *Client) responseAfterConnectionClosed(ctx context.Context, responseChan <-chan *Response) (json.RawMessage, error) {
+	select {
+	case response := <-responseChan:
+		// The read loop admitted this reply before it ended.
+		if response.Error != nil {
+			return nil, response.Error
+		}
+		return response.Result, nil
+	default:
+	}
+
+	timer := time.NewTimer(processExitGracePeriod)
+	defer timer.Stop()
+	select {
+	case <-c.processDone:
+		if err := c.getProcessError(); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("process exited unexpectedly")
 	case <-c.stopChan:
 		return nil, fmt.Errorf("client stopped")
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return nil, fmt.Errorf("connection closed")
+	}
+}
+
+func responseAfterShutdown(responseChan <-chan *Response, shutdownErr error) (json.RawMessage, error) {
+	// Shutdown can win the outer select after the read loop has already admitted a reply.
+	select {
+	case response := <-responseChan:
+		if response.Error != nil {
+			return nil, response.Error
+		}
+		return response.Result, nil
+	default:
+		return nil, shutdownErr
 	}
 }
 
@@ -356,6 +489,7 @@ func (c *Client) readLoop() {
 		if c.onClose != nil && c.running.Load() {
 			c.onClose()
 		}
+		c.connectionClosedOnce.Do(func() { close(c.connectionClosed) })
 	}()
 
 	for c.running.Load() {
@@ -431,45 +565,121 @@ func (c *Client) handleResponse(response *Response) {
 }
 
 func (c *Client) handleRequest(request *Request) {
-	ctx := context.Background()
+	if request.Method == "$/cancelRequest" {
+		c.handleCancelRequest(request.Params)
+		return
+	}
 
 	c.mu.Lock()
 	handler := c.requestHandlers[request.Method]
+	prepare := c.requestPreparations[request.Method]
 	c.mu.Unlock()
 
 	if handler == nil {
 		if request.IsCall() {
-			c.sendErrorResponse(ctx, request.ID, &Error{
+			c.sendErrorResponse(context.Background(), request.ID, &Error{
 				Code:    ErrMethodNotFound.Code,
 				Message: fmt.Sprintf("Method not found: %s", request.Method),
 			})
 		}
 		return
 	}
+	if prepare != nil {
+		if err := prepare(request.Params); err != nil {
+			if request.IsCall() {
+				c.sendErrorResponse(context.Background(), request.ID, err)
+			}
+			return
+		}
+	}
+
+	handlerCtx := context.Background()
+	var entry *incomingRequestCancel
+	var cancelKey string
+	if request.IsCall() {
+		if key, ok := numericRequestIDKey(request.ID); ok {
+			var cancel context.CancelFunc
+			handlerCtx, cancel = context.WithCancel(handlerCtx)
+			entry = &incomingRequestCancel{cancel: cancel}
+			cancelKey = key
+			c.mu.Lock()
+			c.incomingRequestCancels[cancelKey] = entry
+			c.mu.Unlock()
+		}
+	}
 
 	// Notifications run synchronously, calls run in a goroutine to avoid blocking
 	if !request.IsCall() {
-		handler(request.Params)
+		handler(handlerCtx, request.Params)
 		return
 	}
 
 	go func() {
 		defer func() {
+			if entry != nil {
+				c.mu.Lock()
+				if c.incomingRequestCancels[cancelKey] == entry {
+					delete(c.incomingRequestCancels, cancelKey)
+				}
+				c.mu.Unlock()
+				entry.cancel()
+			}
+		}()
+		defer func() {
 			if r := recover(); r != nil {
-				c.sendErrorResponse(ctx, request.ID, &Error{
+				c.sendErrorResponse(context.Background(), request.ID, &Error{
 					Code:    ErrInternal.Code,
 					Message: fmt.Sprintf("request handler panic: %v", r),
 				})
 			}
 		}()
 
-		result, err := handler(request.Params)
+		result, err := handler(handlerCtx, request.Params)
 		if err != nil {
-			c.sendErrorResponse(ctx, request.ID, err)
+			c.sendErrorResponse(context.Background(), request.ID, err)
 			return
 		}
-		c.sendResponse(ctx, request.ID, result)
+		c.sendResponse(context.Background(), request.ID, result)
 	}()
+}
+
+func (c *Client) handleCancelRequest(params json.RawMessage) {
+	var request struct {
+		ID json.RawMessage `json:"id"`
+	}
+	if err := json.Unmarshal(params, &request); err != nil {
+		return
+	}
+	key, ok := numericRequestIDKey(request.ID)
+	if !ok {
+		return
+	}
+	c.mu.Lock()
+	entry := c.incomingRequestCancels[key]
+	c.mu.Unlock()
+	if entry != nil {
+		entry.cancel()
+	}
+}
+
+// incomingRequestCancel is stored by pointer so a completed handler only
+// removes its own entry when a peer reuses the same request ID.
+type incomingRequestCancel struct {
+	cancel context.CancelFunc
+}
+
+func numericRequestIDKey(id json.RawMessage) (string, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(id))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return "", false
+	}
+	number, ok := value.(json.Number)
+	if !ok {
+		return "", false
+	}
+	return number.String(), true
 }
 
 func (c *Client) sendResponse(ctx context.Context, id json.RawMessage, result json.RawMessage) {
@@ -513,7 +723,7 @@ func decodeMessage(data []byte) (any, error) {
 		Method  string          `json:"method,omitempty"`
 		Params  json.RawMessage `json:"params,omitempty"`
 		Result  json.RawMessage `json:"result,omitempty"`
-		Error   *Error          `json:"error,omitempty"`
+		Error   json.RawMessage `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return nil, fmt.Errorf("unmarshaling jsonrpc message: %w", err)
@@ -530,17 +740,30 @@ func decodeMessage(data []byte) (any, error) {
 		}, nil
 	}
 	if len(msg.ID) > 0 {
-		if msg.Error != nil && len(msg.Result) > 0 {
+		var responseError *Error
+		if len(msg.Error) > 0 {
+			err := json.Unmarshal(msg.Error, &responseError)
+			if err == nil && responseError == nil {
+				err = errors.New("error must be an object")
+			}
+			if err != nil {
+				responseError = &Error{
+					Code:    ErrInternal.Code,
+					Message: fmt.Sprintf("invalid JSON-RPC error response: %v", err),
+				}
+			}
+		}
+		if responseError != nil && len(msg.Result) > 0 {
 			return nil, fmt.Errorf("response must not contain both result and error: %w", ErrInvalidRequest)
 		}
-		if msg.Error == nil && len(msg.Result) == 0 {
+		if responseError == nil && len(msg.Result) == 0 {
 			return nil, fmt.Errorf("response must contain either result or error: %w", ErrInvalidRequest)
 		}
 		return &Response{
 			JSONRPC: msg.JSONRPC,
 			ID:      msg.ID,
 			Result:  msg.Result,
-			Error:   msg.Error,
+			Error:   responseError,
 		}, nil
 	}
 	return nil, fmt.Errorf("message is neither a request nor a response: %w", ErrInvalidRequest)

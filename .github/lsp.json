@@ -12,7 +12,7 @@
       "fileExtensions": {
         ".cs": "csharp"
       },
-      "rootUri": "dotnet"
+      "rootUri": "${configDir}/../dotnet"
     },
     "go": {
       "command": "gopls",
@@ -20,7 +20,7 @@
       "fileExtensions": {
         ".go": "go"
       },
-      "rootUri": "go"
+      "rootUri": "${configDir}/../go"
     },
     "rust": {
       "command": "rust-analyzer",
@@ -28,7 +28,7 @@
       "fileExtensions": {
         ".rs": "rust"
       },
-      "rootUri": "rust"
+      "rootUri": "${configDir}/../rust"
     },
     "python": {
       "command": "pylsp",
@@ -36,7 +36,7 @@
       "fileExtensions": {
         ".py": "python"
       },
-      "rootUri": "python"
+      "rootUri": "${configDir}/../python"
     },
     "java": {
       "command": "jdtls",
@@ -44,7 +44,7 @@
       "fileExtensions": {
         ".java": "java"
       },
-      "rootUri": "java"
+      "rootUri": "${configDir}/../java"
     },
     "kotlin": {
       "command": "kotlin-language-server",
@@ -53,7 +53,7 @@
         ".kt": "kotlin",
         ".kts": "kotlin"
       },
-      "rootUri": "kotlin"
+      "rootUri": "${configDir}/../kotlin"
     },
     "ruby": {
       "command": "solargraph",
@@ -61,7 +61,7 @@
       "fileExtensions": {
         ".rb": "ruby"
       },
-      "rootUri": "ruby"
+      "rootUri": "${configDir}/../ruby"
     },
     "swift": {
       "command": "sourcekit-lsp",
@@ -69,7 +69,7 @@
       "fileExtensions": {
         ".swift": "swift"
       },
-      "rootUri": "swift"
+      "rootUri": "${configDir}/../swift"
     },
     "elixir": {
       "command": "elixir-ls",
@@ -78,7 +78,7 @@
         ".ex": "elixir",
         ".exs": "elixir"
       },
-      "rootUri": "elixir"
+      "rootUri": "${configDir}/../elixir"
     },
     "haskell": {
       "command": "haskell-language-server-wrapper",
@@ -86,7 +86,7 @@
       "fileExtensions": {
         ".hs": "haskell"
       },
-      "rootUri": "haskell"
+      "rootUri": "${configDir}/../haskell"
     },
     "ocaml": {
       "command": "ocamllsp",
@@ -95,7 +95,7 @@
         ".ml": "ocaml",
         ".mli": "ocaml"
       },
-      "rootUri": "ocaml"
+      "rootUri": "${configDir}/../ocaml"
     },
     "zig": {
       "command": "zls",
@@ -103,7 +103,7 @@
       "fileExtensions": {
         ".zig": "zig"
       },
-      "rootUri": "zig"
+      "rootUri": "${configDir}/../zig"
     },
     "erlang": {
       "command": "erlang_ls",
@@ -111,7 +111,7 @@
       "fileExtensions": {
         ".erl": "erlang"
       },
-      "rootUri": "erlang"
+      "rootUri": "${configDir}/../erlang"
     },
     "nim": {
       "command": "nimlangserver",
@@ -119,7 +119,7 @@
       "fileExtensions": {
         ".nim": "nim"
       },
-      "rootUri": "nim"
+      "rootUri": "${configDir}/../nim"
     },
     "fsharp": {
       "command": "fsautocomplete",
@@ -128,7 +128,7 @@
         ".fs": "fsharp",
         ".fsx": "fsharp"
       },
-      "rootUri": "fsharp"
+      "rootUri": "${configDir}/../fsharp"
     },
     "dlang": {
       "command": "serve-d",
@@ -136,7 +136,7 @@
       "fileExtensions": {
         ".d": "d"
       },
-      "rootUri": "dlang"
+      "rootUri": "${configDir}/../dlang"
     },
     "dart": {
       "command": "dart",
@@ -144,7 +144,7 @@
       "fileExtensions": {
         ".dart": "dart"
       },
-      "rootUri": "dart"
+      "rootUri": "${configDir}/../dart"
     },
     "lua": {
       "command": "lua-language-server",
@@ -152,7 +152,7 @@
       "fileExtensions": {
         ".lua": "lua"
       },
-      "rootUri": "lua"
+      "rootUri": "${configDir}/../lua"
     },
     "scala": {
       "command": "metals",
@@ -161,7 +161,7 @@
         ".scala": "scala",
         ".sbt": "scala"
       },
-      "rootUri": "scala"
+      "rootUri": "${configDir}/../scala"
     },
     "crystal": {
       "command": "crystalline",
@@ -169,7 +169,7 @@
       "fileExtensions": {
         ".cr": "crystal"
       },
-      "rootUri": "crystal"
+      "rootUri": "${configDir}/../crystal"
     },
     "ada": {
       "command": "ada_language_server",
@@ -178,7 +178,7 @@
         ".ads": "ada",
         ".adb": "ada"
       },
-      "rootUri": "ada"
+      "rootUri": "${configDir}/../ada"
     },
     "fortran": {
       "command": "fortls",
@@ -188,7 +188,7 @@
         ".f95": "fortran",
         ".f03": "fortran"
       },
-      "rootUri": "fortran"
+      "rootUri": "${configDir}/../fortran"
     }
   }
 }

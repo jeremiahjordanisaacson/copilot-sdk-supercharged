@@ -1,15 +1,27 @@
-# OpenTelemetry Instrumentation for Copilot SDK
+# OpenTelemetry instrumentation for Copilot SDK
 
 This guide shows how to add OpenTelemetry tracing to your Copilot SDK applications.
 
-## Built-in Telemetry Support
+## Built-in telemetry support
 
 The SDK has built-in support for configuring OpenTelemetry on the CLI process and propagating W3C Trace Context between the SDK and CLI. Provide a `TelemetryConfig` when creating the client to opt in:
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: strict -->
+<!-- docs-validate: hidden -->
+```typescript
+import { CopilotClient as SdkClient } from "@github/copilot-sdk";
+
+new SdkClient({
+  telemetry: {
+    otlpEndpoint: "http://localhost:4318",
+  },
+});
+```
+<!-- /docs-validate: hidden -->
+
 ```typescript
 import { CopilotClient } from "@github/copilot-sdk";
 
@@ -25,15 +37,14 @@ const client = new CopilotClient({
 <details>
 <summary><strong>Python</strong></summary>
 
-<!-- docs-validate: skip -->
 ```python
-from copilot import CopilotClient, SubprocessConfig
+from copilot import CopilotClient
 
-client = CopilotClient(SubprocessConfig(
+client = CopilotClient(
     telemetry={
         "otlp_endpoint": "http://localhost:4318",
     },
-))
+)
 ```
 
 </details>
@@ -41,7 +52,25 @@ client = CopilotClient(SubprocessConfig(
 <details>
 <summary><strong>Go</strong></summary>
 
-<!-- docs-validate: skip -->
+<!-- docs-validate: hidden -->
+```go
+package main
+
+import (
+	copilot "github.com/github/copilot-sdk/go"
+)
+
+func main() {
+	client := copilot.NewClient(&copilot.ClientOptions{
+		Telemetry: &copilot.TelemetryConfig{
+			OTLPEndpoint: "http://localhost:4318",
+		},
+	})
+	_ = client
+}
+```
+<!-- /docs-validate: hidden -->
+
 ```go
 client := copilot.NewClient(&copilot.ClientOptions{
     Telemetry: &copilot.TelemetryConfig{
@@ -55,7 +84,6 @@ client := copilot.NewClient(&copilot.ClientOptions{
 <details>
 <summary><strong>.NET</strong></summary>
 
-<!-- docs-validate: skip -->
 ```csharp
 var client = new CopilotClient(new CopilotClientOptions
 {
@@ -71,10 +99,9 @@ var client = new CopilotClient(new CopilotClientOptions
 <details>
 <summary><strong>Java</strong></summary>
 
-<!-- docs-validate: skip -->
 ```java
-import com.github.copilot.sdk.CopilotClient;
-import com.github.copilot.sdk.json.*;
+import com.github.copilot.CopilotClient;
+import com.github.copilot.rpc.*;
 
 var client = new CopilotClient(new CopilotClientOptions()
     .setTelemetry(new TelemetryConfig()
@@ -84,23 +111,108 @@ var client = new CopilotClient(new CopilotClientOptions()
 
 </details>
 
-> **40 languages supported.** See the [full SDK list](https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged#available-sdks) with cookbooks for Objective-C, F#, Groovy, Julia, COBOL, OCaml, Zig, Nim, D, Erlang, Crystal, Tcl, Solidity, V, and 18 more.
+<details>
+<summary><strong>Rust</strong></summary>
 
-### TelemetryConfig Options
+```rust
+use github_copilot_sdk::{Client, ClientOptions, TelemetryConfig};
 
-| Option | Node.js | Python | Go | .NET | Java | Description |
-|---|---|---|---|---|---|---|
-| OTLP endpoint | `otlpEndpoint` | `otlp_endpoint` | `OTLPEndpoint` | `OtlpEndpoint` | `otlpEndpoint` | OTLP HTTP endpoint URL |
-| File path | `filePath` | `file_path` | `FilePath` | `FilePath` | `filePath` | File path for JSON-lines trace output |
-| Exporter type | `exporterType` | `exporter_type` | `ExporterType` | `ExporterType` | `exporterType` | `"otlp-http"` or `"file"` |
-| Source name | `sourceName` | `source_name` | `SourceName` | `SourceName` | `sourceName` | Instrumentation scope name |
-| Capture content | `captureContent` | `capture_content` | `CaptureContent` | `CaptureContent` | `captureContent` | Whether to capture message content |
+let client = Client::start(ClientOptions::new()
+    .with_telemetry(TelemetryConfig::new()
+        .with_otlp_endpoint("http://localhost:4318"))
+).await?;
+```
 
-### Trace Context Propagation
+</details>
+
+### TelemetryConfig options
+
+| Option | Node.js | Python | Go | .NET | Java | Rust | Description |
+|---|---|---|---|---|---|---|---|
+| OTLP endpoint | `otlpEndpoint` | `otlp_endpoint` | `OTLPEndpoint` | `OtlpEndpoint` | `otlpEndpoint` | `otlp_endpoint` | OTLP HTTP endpoint URL |
+| OTLP protocol | `otlpProtocol` | `otlp_protocol` | `OTLPProtocol` | `OtlpProtocol` | `otlpProtocol` | `otlp_protocol` | OTLP HTTP protocol for all signals: `"http/json"` or `"http/protobuf"` |
+| File path | `filePath` | `file_path` | `FilePath` | `FilePath` | `filePath` | `file_path` | File path for JSON-lines trace output |
+| Exporter type | `exporterType` | `exporter_type` | `ExporterType` | `ExporterType` | `exporterType` | `exporter_type` | `"otlp-http"` or `"file"` |
+| Source name | `sourceName` | `source_name` | `SourceName` | `SourceName` | `sourceName` | `source_name` | Instrumentation scope name |
+| Capture content | `captureContent` | `capture_content` | `CaptureContent` | `CaptureContent` | `captureContent` | `capture_content` | Whether to capture message content |
+
+The OTLP protocol field configures the CLI's `"otlp-http"` exporter for all signals. Leave it unset to use the CLI default, or set it to `"http/protobuf"` to export protobuf over HTTP.
+
+### Images and multimodal tool results
+
+Content remains opt-in. Prompt capture includes supported user image attachments
+as base64 `blob` parts with `modality=image` and the image MIME type. Tool output
+capture records `gen_ai.tool.call.result` as an object, including available
+client-facing multimodal content. The subsequent conversation inference instead
+records the model-facing tool response: client-only images are not substituted
+for model input. Interned images are resolved locally; unavailable, unsupported,
+and oversized model-facing images retain their omission behavior. Local asset
+hashes are never reported as provider file IDs.
+Telemetry does not read image paths: attachments need materialized bytes or
+resolvable asset data.
+
+Multimodal tool results use the existing session events and INTERNAL
+`execute_tool` spans, regardless of which tool produced the image.
+Tool-origin images require tool-output capture, not assistant-response capture.
+Changing capture policy clears the binary cache. The existing feature-gated
+image HTTP trace carrier continues to identify the tool span.
+
+### Skill and command telemetry
+
+The runtime follows the [GenAI skill semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai/commit/771e3210f7518694666834f7243573b8018c7a4f)
+by refining existing `execute_tool` spans, not adding a separate skill
+operation. A loader is named `execute_tool skill {skill}`. An unambiguously
+identified resource or script is named
+`execute_tool {tool} {skill} {resource}`, with a skill-relative resource name.
+Other command spans append the actual known launcher name.
+
+* `gen_ai.skill.name` and `gen_ai.skill.resource.name`: Available independently of content capture
+* `gen_ai.skill.description` and `gen_ai.skill.source.uri`: Require content capture through `TelemetryConfig`
+* `process.executable.name`: The directly launched executable, such as the shell launcher, not a guessed command token
+* `process.executable.path`: An absolute known path; requires content capture
+* `process.exit.code`: An integer, including zero, when a command-executing tool reports an exit; unavailable exits and pre-spawn failures are omitted
+
+Poll tools do not inherit process attributes from the command they read.
+Sandboxed executable identities are omitted when the sandbox backend does
+not expose them. A nonzero exit does not imply that the tool itself failed.
+Skill definitions and directory listings are not named skill resources.
+Preloaded skills produce invocation events without a fabricated tool span.
+Repeated preparation of the same selected-agent skill context emits one receipt;
+changed content or provenance emits another. Child sessions report their own
+preloads independently. Detached command spans identify the directly spawned
+Unix `sh` supervisor or selected Windows PowerShell executable.
+
+Custom tools that override built-in names do not inherit native skill or process
+attributes. Visible, enabled skills still own resources when model invocation
+is disabled. Script attribution uses the post-hook command and the selected
+shell's directory; it is omitted when startup scripts or profiles make the
+execution context uncertain.
+
+While managed telemetry settings are unresolved, pending tracking buffers only
+capture-independent tool facts. Descriptions, source URIs, and executable paths
+observed before the policy resolves are omitted, even if capture is later enabled.
+The final policy governs replay; disabled or cancelled tracking discards the buffer.
+
+These are breaking telemetry-name changes: use `gen_ai.skill.name` instead
+of `github.copilot.tool.parameters.skill_name` or
+`github.copilot.skill.name`, and use `gen_ai.skill.source.uri` instead of
+`github.copilot.skill.path`. Local source values are file URIs, not bare paths.
+The `github.copilot.skill.invoked` event and its content, source-category,
+trigger, and plugin fields remain Copilot-specific. Skill content retains its
+existing capture gate.
+
+The skill attributes and span refinements have Development stability; the
+process attributes have Release Candidate stability.
+
+### Trace context propagation
 
 > **Most users don't need this.** The `TelemetryConfig` above is all you need to collect traces from the CLI. The trace context propagation described in this section is an **advanced feature** for applications that create their own OpenTelemetry spans and want them to appear in the **same distributed trace** as the CLI's spans.
 
 The SDK can propagate W3C Trace Context (`traceparent`/`tracestate`) on JSON-RPC payloads so that your application's spans and the CLI's spans are linked in one distributed trace. This is useful when, for example, you want to see a "handle tool call" span in your app nested inside the CLI's "execute tool" span, or show the SDK call as a child of your request-handling span.
+
+For cost attribution alongside traces, subscribe to `assistant.usage` events and inspect `apiEndpoint` (`AssistantUsageApiEndpoint`) to see whether a turn used Chat Completions, Responses, or Anthropic Messages; see [Streaming events](../features/streaming-events.md).
+
+Manual and automatic conversation compaction also emit a separate `chat {model}` span for each logical model dispatch, falling back to `chat` when the model is unavailable, and mark it with `github.copilot.request.type = "compaction"`. The span covers retries and ends on success, failure, or cancellation. Successful responses include provider-reported token usage and AI credits when available, even if the resulting summary is not applied. Compaction contributes to the existing `gen_ai.client.inference.usage.*` token counters, `gen_ai.client.inference.operation.input_tokens` and `gen_ai.client.inference.operation.output_tokens` histograms, and `gen_ai.client.inference.duration` histogram. These metrics aggregate foreground and compaction work; `github.copilot.request.type` is only a span attribute, not a metric dimension for separating them. Each dispatch counts once toward the originating active agent or subagent's `gen_ai.invoke_agent.inference_calls`, including failures; idle manual compaction has no active invocation to charge. Compaction does not emit an additional `assistant.usage` event or change session billing, and its spans do not capture the conversation or summary text. Charges not reported by the provider cannot be recovered from these spans.
 
 #### SDK → CLI (outbound)
 
@@ -121,16 +233,16 @@ const client = new CopilotClient({
 });
 ```
 
-For **Python**, **Go**, and **.NET**, trace context injection is automatic when the respective OpenTelemetry/Activity API is configured — no callback is needed.
+For **Python**, **Go**, and **.NET**, trace context injection is automatic when the respective OpenTelemetry/Activity API is configured—no callback is needed.
 
 #### CLI → SDK (inbound)
 
 When the CLI invokes a tool handler, the `traceparent` and `tracestate` from the CLI's span are available in all languages:
 
-- **Go**: The `ToolInvocation.TraceContext` field is a `context.Context` with the trace already restored — use it directly as the parent for your spans.
-- **Python**: Trace context is automatically restored around the handler via `trace_context()` — child spans are parented to the CLI's span automatically.
-- **.NET**: Trace context is automatically restored via `RestoreTraceContext()` — child `Activity` instances are parented to the CLI's span automatically.
-- **Node.js**: Since the SDK has no OpenTelemetry dependency, `traceparent` and `tracestate` are passed as raw strings on the `ToolInvocation` object. Restore the context manually if needed:
+* **Go**: The `ToolInvocation.TraceContext` field is a `context.Context` with the trace already restored—use it directly as the parent for your spans.
+* **Python**: Trace context is automatically restored around the handler via `trace_context()`—child spans are parented to the CLI's span automatically.
+* **.NET**: Configure `AddSource("github.copilot")` to export `copilot.tool_handler` parents under CLI spans; without listeners, only context propagates.
+* **Node.js**: Since the SDK has no OpenTelemetry dependency, `traceparent` and `tracestate` are passed as raw strings on the `ToolInvocation` object. Restore the context manually if needed:
 
 <!-- docs-validate: skip -->
 ```typescript
@@ -166,19 +278,19 @@ const myTool = defineTool("my-tool", {
 const session = await client.createSession({ tools: [myTool] });
 ```
 
-### Per-Language Dependencies
+### Per-language dependencies
 
 | Language | Dependency | Notes |
 |---|---|---|
-| Node.js | — | No dependency; provide `onGetTraceContext` callback for outbound propagation |
-| Python | `opentelemetry-api` | Install with `pip install copilot-sdk[telemetry]` |
+| Node.js |—| No dependency; provide `onGetTraceContext` callback for outbound propagation |
+| Python | `opentelemetry-api` | Install with `pip install "copilot-sdk-supercharged[telemetry]"` |
 | Go | `go.opentelemetry.io/otel` | Required dependency |
-| .NET | — | Uses built-in `System.Diagnostics.Activity` |
+| .NET |—| Uses built-in `System.Diagnostics.Activity` |
 | Java | `io.opentelemetry:opentelemetry-api` | Add this dependency for SDK-based setup; trace context injection is automatic when the OpenTelemetry Java agent or SDK is configured |
 
 ## References
 
-- [OpenTelemetry GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
-- [OpenTelemetry MCP Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/mcp/)
-- [OpenTelemetry Python SDK](https://opentelemetry.io/docs/instrumentation/python/)
-- [Copilot SDK Documentation](https://github.com/github/copilot-sdk)
+* [OpenTelemetry GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+* [OpenTelemetry MCP Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/mcp/)
+* [OpenTelemetry Python SDK](https://opentelemetry.io/docs/instrumentation/python/)
+* [Copilot SDK Documentation](https://github.com/github/copilot-sdk)

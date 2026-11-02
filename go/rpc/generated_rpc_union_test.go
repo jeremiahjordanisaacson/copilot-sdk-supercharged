@@ -14,6 +14,7 @@ func TestExternalToolResultJSONUnion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal string result: %v", err)
 	}
+
 	if string(raw) != `"tool result"` {
 		t.Fatalf("marshal string result = %s", raw)
 	}
@@ -43,6 +44,68 @@ func TestExternalToolResultJSONUnion(t *testing.T) {
 	decodedObjectValue, ok := decodedObject.(*ExternalToolTextResultForLlm)
 	if !ok || decodedObjectValue.TextResultForLlm != "expanded" {
 		t.Fatalf("unmarshal object result = %#v", decodedObject)
+	}
+}
+
+func TestOptionalNullableFieldsPreserveOmittedAndNull(t *testing.T) {
+	unset, err := json.Marshal(TaskClientUpdateProgress{})
+	if err != nil {
+		t.Fatalf("marshal unset progress: %v", err)
+	}
+	if string(unset) != `{"kind":"progress"}` {
+		t.Fatalf("marshal unset progress = %s", unset)
+	}
+
+	var clearedPercentage *float64
+	var clearedPhase *string
+	cleared, err := json.Marshal(TaskClientUpdateProgress{
+		Percentage: &clearedPercentage,
+		Phase:      &clearedPhase,
+	})
+	if err != nil {
+		t.Fatalf("marshal cleared progress: %v", err)
+	}
+	if string(cleared) != `{"kind":"progress","percentage":null,"phase":null}` {
+		t.Fatalf("marshal cleared progress = %s", cleared)
+	}
+}
+
+func TestPendingPermissionRequestUnmarshalsAssistedApprovalAssessment(t *testing.T) {
+	var result PendingPermissionRequestList
+	err := json.Unmarshal([]byte(`{
+		"items": [{
+			"requestId": "permission-1",
+			"request": {
+				"kind": "commands",
+				"fullCommandText": "git status",
+				"commandIdentifiers": ["git"],
+				"canOfferSessionApproval": false
+			},
+			"assistedApprovalAssessment": {
+				"status": "completed",
+				"recommendation": "requireApproval",
+				"rationale": "The command may change repository state."
+			}
+		}]
+	}`), &result)
+	if err != nil {
+		t.Fatalf("unmarshal pending permission requests: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("pending permission request count = %d, want 1", len(result.Items))
+	}
+	assessment, ok := result.Items[0].AssistedApprovalAssessment.(*AssistedApprovalAssessmentCompleted)
+	if !ok {
+		t.Fatalf(
+			"pending assessment = %T, want *AssistedApprovalAssessmentCompleted",
+			result.Items[0].AssistedApprovalAssessment,
+		)
+	}
+	if assessment.Recommendation != AssistedApprovalCompletedRecommendationRequireApproval {
+		t.Fatalf("pending recommendation = %q, want requireApproval", assessment.Recommendation)
+	}
+	if assessment.Rationale == nil || *assessment.Rationale != "The command may change repository state." {
+		t.Fatalf("pending rationale = %v", assessment.Rationale)
 	}
 }
 

@@ -1,9 +1,11 @@
+# Copyright (c) Microsoft Corporation. All rights reserved.
+
 """Unit tests for define_tool"""
 
 import json
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
 from copilot import define_tool
 from copilot.generated.rpc import ExternalToolTextResultForLlm
@@ -18,6 +20,27 @@ from copilot.tools import (
 
 
 class TestDefineTool:
+    @pytest.mark.parametrize("patch", ["", "*** Begin Patch\n*** End Patch"])
+    async def test_string_schema_handler_preserves_scalar_arguments(self, patch: str):
+        calls = []
+
+        @define_tool("apply_patch", description="Apply a patch", overrides_built_in_tool=True)
+        def apply_patch(params: RootModel[str], invocation: ToolInvocation) -> str:
+            calls.append((params.root, invocation.arguments))
+            return "accepted"
+
+        result = await apply_patch.handler(
+            ToolInvocation(
+                session_id="session-1",
+                tool_call_id="call-1",
+                tool_name="apply_patch",
+                arguments=patch,
+            )
+        )
+
+        assert result.result_type == "success", result.error
+        assert calls == [(patch, patch)]
+
     def test_creates_tool_with_correct_name_and_description(self):
         class Params(BaseModel):
             query: str
@@ -420,6 +443,39 @@ class TestNormalizeResult:
             "id": "12345678-1234-5678-1234-567812345678",
             "created": "2026-01-15T10:30:00",
             "day": "2026-01-15",
+            "score": "99.5",
+            "status": "active",
+            "tags": parsed["tags"],
+        }
+        assert set(parsed["tags"]) == {"python", "sdk"}
+        assert result.result_type == "success"
+
+    def test_plain_dict_with_non_primitive_fields_is_serialized(self):
+        from datetime import date, datetime, time
+        from decimal import Decimal
+        from enum import Enum
+        from uuid import UUID
+
+        class Status(Enum):
+            ACTIVE = "active"
+
+        result = _normalize_result(
+            {
+                "id": UUID("12345678-1234-5678-1234-567812345678"),
+                "created": datetime(2026, 1, 15, 10, 30, 0),
+                "day": date(2026, 1, 15),
+                "at": time(10, 30, 0),
+                "score": Decimal("99.5"),
+                "status": Status.ACTIVE,
+                "tags": {"python", "sdk"},
+            }
+        )
+        parsed = json.loads(result.text_result_for_llm)
+        assert parsed == {
+            "id": "12345678-1234-5678-1234-567812345678",
+            "created": "2026-01-15T10:30:00",
+            "day": "2026-01-15",
+            "at": "10:30:00",
             "score": "99.5",
             "status": "active",
             "tags": parsed["tags"],

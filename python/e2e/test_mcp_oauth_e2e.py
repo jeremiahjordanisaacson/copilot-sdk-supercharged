@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -10,11 +11,9 @@ import pytest
 from copilot.generated.rpc import (
     MCPAppsCallToolRequest,
     MCPListToolsRequest,
-    MCPOauthHandlePendingRequest,
-    MCPOauthPendingRequestResponse,
-    MCPOauthPendingRequestResponseKind,
+    MCPOauthLoginRequest,
 )
-from copilot.session import MCPServerConfig, PermissionHandler
+from copilot.session import MCPHTTPServerConfig, MCPServerConfig, PermissionHandler
 from copilot.session_events import McpServerStatus
 
 from .testharness import E2ETestContext, wait_for_condition
@@ -26,17 +25,24 @@ EXPECTED_TOKEN = "sdk-host-token"
 REFRESH_TOKEN = f"{EXPECTED_TOKEN}-refresh"
 UPSCOPE_TOKEN = f"{EXPECTED_TOKEN}-upscope"
 REAUTH_TOKEN = f"{EXPECTED_TOKEN}-reauth"
+CIMD_URL = "https://github.com/copilot/cli/client-metadata.json"
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 
-async def _start_oauth_mcp_server() -> tuple[str, asyncio.subprocess.Process]:
+async def _start_oauth_mcp_server(
+    cimd_supported: bool = False,
+) -> tuple[str, asyncio.subprocess.Process]:
     process = await asyncio.create_subprocess_exec(
         "node",
         TEST_MCP_OAUTH_SERVER,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        env={**os.environ, "EXPECTED_TOKEN": EXPECTED_TOKEN},
+        env={
+            **os.environ,
+            "EXPECTED_TOKEN": EXPECTED_TOKEN,
+            "CIMD_SUPPORTED": "true" if cimd_supported else "false",
+        },
     )
     assert process.stdout is not None
 
@@ -100,6 +106,32 @@ async def _wait_for_mcp_server_status(
 
 
 class TestMcpOAuth:
+    async def test_uses_cimd_url_instead_of_dynamic_registration(self, ctx: E2ETestContext):
+        url, process = await _start_oauth_mcp_server(cimd_supported=True)
+        server_name = "oauth-cimd-mcp"
+        try:
+            session = await ctx.client.create_session(
+                on_permission_request=PermissionHandler.approve_all,
+                auth_client_id_metadata_url=CIMD_URL,
+                mcp_servers={
+                    server_name: MCPHTTPServerConfig(
+                        type="http",
+                        url=f"{url}/mcp",
+                        tools=["*"],
+                    )
+                },
+            )
+            await _wait_for_mcp_server_status(session, server_name, McpServerStatus.NEEDS_AUTH)
+            result = await session.rpc.mcp.oauth.login(
+                MCPOauthLoginRequest(server_name=server_name)
+            )
+            assert result.authorization_url is not None
+            assert parse_qs(urlparse(result.authorization_url).query)["client_id"] == [CIMD_URL]
+            assert not any(request.get("path") == "/register" for request in await _requests(url))
+            await session.disconnect()
+        finally:
+            await _stop_process(process)
+
     async def test_should_satisfy_mcp_oauth_using_host_provided_token(self, ctx: E2ETestContext):
         url, process = await _start_oauth_mcp_server()
         server_name = "oauth-protected-mcp"
@@ -128,6 +160,7 @@ class TestMcpOAuth:
                 on_mcp_auth_request=on_mcp_auth_request,
                 mcp_servers=mcp_servers,
             ) as session:
+                await session.rpc.mcp.reload()
                 await _wait_for_mcp_server_status(session, server_name)
 
                 tools = await session.rpc.mcp.list_tools(
@@ -159,75 +192,6 @@ class TestMcpOAuth:
         finally:
             await _stop_process(process)
 
-    async def test_should_resolve_pending_mcp_oauth_request_with_direct_rpc(
-        self, ctx: E2ETestContext
-    ):
-        url, process = await _start_oauth_mcp_server()
-        server_name = "oauth-direct-rpc-mcp"
-        loop = asyncio.get_running_loop()
-        observed_request = loop.create_future()
-        release_handler = asyncio.Event()
-
-        async def on_mcp_auth_request(request, _invocation):
-            if not observed_request.done():
-                observed_request.set_result(request)
-            await release_handler.wait()
-            return {"kind": "token", "accessToken": EXPECTED_TOKEN}
-
-        try:
-            mcp_servers: dict[str, MCPServerConfig] = {
-                server_name: {
-                    "type": "http",
-                    "url": f"{url}/mcp",
-                    "tools": ["*"],
-                    "oauthClientId": "sdk-e2e-client",
-                    "oauthPublicClient": True,
-                }
-            }
-            async with await ctx.client.create_session(
-                on_permission_request=PermissionHandler.approve_all,
-                on_mcp_auth_request=on_mcp_auth_request,
-                mcp_servers=mcp_servers,
-                enable_mcp_apps=True,
-            ) as session:
-                connected = asyncio.create_task(_wait_for_mcp_server_status(session, server_name))
-                try:
-                    request = await asyncio.wait_for(observed_request, timeout=30.0)
-                    assert request["serverName"] == server_name
-                    assert request["serverUrl"] == f"{url}/mcp"
-                    assert request["reason"] == "initial"
-                    assert request["wwwAuthenticateParams"] == {
-                        "resourceMetadataUrl": f"{url}/.well-known/oauth-protected-resource",
-                        "scope": "mcp.read",
-                        "error": "invalid_token",
-                    }
-
-                    handled = await session.rpc.mcp.oauth.handle_pending_request(
-                        MCPOauthHandlePendingRequest(
-                            request_id=request["requestId"],
-                            result=MCPOauthPendingRequestResponse(
-                                kind=MCPOauthPendingRequestResponseKind.TOKEN,
-                                access_token=EXPECTED_TOKEN,
-                                token_type="Bearer",
-                                expires_in=3600,
-                            ),
-                        )
-                    )
-                    assert handled.success is True
-
-                    connected_result = await asyncio.wait_for(connected, timeout=60.0)
-                    assert connected_result is None
-                    tools = await session.rpc.mcp.list_tools(
-                        MCPListToolsRequest(server_name=server_name)
-                    )
-                    assert [tool.name for tool in tools.tools] == ["whoami"]
-                finally:
-                    release_handler.set()
-                    if not connected.done():
-                        connected.cancel()
-        finally:
-            await _stop_process(process)
-
     async def test_should_request_replacement_tokens_across_mcp_oauth_lifecycle(
         self, ctx: E2ETestContext
     ):
@@ -248,7 +212,7 @@ class TestMcpOAuth:
             if request["reason"] == "upscope":
                 assert request["wwwAuthenticateParams"] == {
                     "resourceMetadataUrl": f"{url}/.well-known/oauth-protected-resource",
-                    "scope": "mcp.write",
+                    "scope": "mcp.read mcp.write",
                     "error": "insufficient_scope",
                 }
                 return {"kind": "token", "accessToken": UPSCOPE_TOKEN}
@@ -270,7 +234,11 @@ class TestMcpOAuth:
                 mcp_servers=mcp_servers,
                 enable_mcp_apps=True,
             ) as session:
+                # Re-run startup after OAuth event interest is registered to avoid
+                # racing the initial challenge emitted during session.create.
+                await session.rpc.mcp.reload()
                 await _wait_for_mcp_server_status(session, server_name)
+                refresh_count = 0
 
                 for scenario in ("refresh", "upscope", "reauth"):
                     result = await session.rpc.mcp.apps.call_tool(
@@ -283,8 +251,9 @@ class TestMcpOAuth:
                     )
                     assert result["content"] == [{"type": "text", "text": "oauth-test-user"}]
 
-            assert [request["reason"] for request in observed_requests] == [
-                "initial",
+            assert [
+                request["reason"] for request in observed_requests if request["reason"] != "initial"
+            ] == [
                 "refresh",
                 "upscope",
                 "refresh",
@@ -304,11 +273,11 @@ class TestMcpOAuth:
     async def test_should_cancel_pending_mcp_oauth_request(self, ctx: E2ETestContext):
         url, process = await _start_oauth_mcp_server()
         server_name = "oauth-cancelled-mcp"
-        observed_request = None
+        observed_request = asyncio.get_running_loop().create_future()
 
         def on_mcp_auth_request(request, _invocation):
-            nonlocal observed_request
-            observed_request = request
+            if not observed_request.done():
+                observed_request.set_result(request)
             return {"kind": "cancelled"}
 
         try:
@@ -324,24 +293,20 @@ class TestMcpOAuth:
                 on_mcp_auth_request=on_mcp_auth_request,
                 mcp_servers=mcp_servers,
             ) as session:
+                await session.rpc.mcp.reload()
                 await _wait_for_mcp_server_status(session, server_name, McpServerStatus.NEEDS_AUTH)
 
                 # The MCP connection is kicked off by session.create, but the SDK only registers
                 # its `mcp.oauth_required` event interest once create returns. If the server's
                 # initial 401 wins that race, the runtime records `needs-auth` WITHOUT invoking
-                # the host callback, so `observed_request` is briefly None even after `needs-auth`
+                # the host callback, so the request may not have arrived even after `needs-auth`
                 # is observed. A later auth retry (now that interest is registered) invokes the
                 # callback with the same `initial` reason. Wait for the callback rather than
                 # sampling it the instant `needs-auth` first appears, which made this test flaky.
-                await wait_for_condition(
-                    lambda: observed_request is not None,
-                    timeout=60.0,
-                    poll_interval=0.2,
-                    timeout_message=f"{server_name} OAuth request did not reach the host callback",
-                )
+                request = await asyncio.wait_for(observed_request, timeout=60.0)
 
-            assert observed_request is not None
-            assert observed_request["serverName"] == server_name
-            assert observed_request["reason"] == "initial"
+            assert request is not None
+            assert request["serverName"] == server_name
+            assert request["reason"] == "initial"
         finally:
             await _stop_process(process)

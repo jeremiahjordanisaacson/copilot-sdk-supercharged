@@ -15,20 +15,17 @@ import pytest
 from copilot import CopilotClient, RuntimeConnection
 
 from .testharness import E2ETestContext
-from .testharness.context import get_cli_path_for_tests
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 
 class TestInProcessFfi:
+    @pytest.mark.parametrize("shutdown_method", ["stop", "force_stop"])
     async def test_should_start_and_connect_over_in_process_ffi(
-        self, ctx: E2ETestContext, monkeypatch: pytest.MonkeyPatch
+        self, ctx: E2ETestContext, shutdown_method: str
     ):
-        # In-process hosting loads the runtime cdylib next to the resolved CLI
-        # entrypoint and lets the native host spawn the worker. ``ping`` is a
-        # purely local RPC round-trip, so no auth or replay proxy is involved.
-        # If the native library is unavailable, start() raises and the test fails.
-        monkeypatch.setenv("COPILOT_CLI_PATH", get_cli_path_for_tests())
+        # In-process hosting loads runtime.node directly. ``ping`` is a purely local
+        # RPC round-trip, so no auth or replay proxy is involved.
         client = CopilotClient(connection=RuntimeConnection.for_inprocess())
         await client.start()
 
@@ -37,4 +34,4 @@ class TestInProcessFfi:
             assert pong.message == "pong: ffi message"
             assert pong.timestamp is not None
         finally:
-            await client.stop()
+            await getattr(client, shutdown_method)()

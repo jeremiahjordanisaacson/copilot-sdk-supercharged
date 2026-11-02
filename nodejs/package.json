@@ -5,6 +5,7 @@
         "url": "https://github.com/jeremiahjordanisaacson/copilot-sdk-supercharged.git"
     },
     "version": "2.5.3",
+    "copilotCliVersion": "1.0.106-3",
     "description": "GitHub Copilot SDK Supercharged - TypeScript SDK for programmatic control of GitHub Copilot CLI via JSON-RPC. Supports 40 languages.",
     "main": "./dist/cjs/index.js",
     "types": "./dist/index.d.ts",
@@ -34,17 +35,8 @@
     "scripts": {
         "clean": "rimraf --glob dist *.tgz",
         "build": "tsx esbuild-copilotsdk-nodejs.ts",
-        "test": "vitest run",
-        "test:watch": "vitest",
-        "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" --ignore-path .prettierignore",
-        "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" --ignore-path .prettierignore",
-        "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
-        "lint:fix": "eslint --fix \"src/**/*.ts\" \"test/**/*.ts\"",
-        "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-        "generate": "cd ../scripts/codegen && npm run generate",
-        "update:protocol-version": "tsx scripts/update-protocol-version.ts",
-        "prepublishOnly": "npm run build",
-        "package": "npm run clean && npm run build && node scripts/set-version.js && npm pack && npm version 0.0.0-dev --no-git-tag-version --allow-same-version"
+        "typecheck": "tsc --noEmit",
+        "prepublishOnly": "npm run build"
     },
     "keywords": [
         "github",
@@ -61,35 +53,34 @@
     "license": "MIT",
     "dependencies": {
         "@github/copilot": "^1.0.80",
-        "koffi": "^3.1.0",
-        "vscode-jsonrpc": "^8.2.1",
-        "zod": "^4.4.1"
+        "koffi": "3.3.3",
+        "vscode-jsonrpc": "10.0.0",
+        "zod": "4.6.7"
+    },
+    "optionalDependencies": {
+        "@github/copilot-sdk-darwin-arm64": "1.0.29-preview.2",
+        "@github/copilot-sdk-darwin-x64": "1.0.29-preview.2",
+        "@github/copilot-sdk-linux-arm64": "1.0.29-preview.2",
+        "@github/copilot-sdk-linux-x64": "1.0.29-preview.2",
+        "@github/copilot-sdk-linuxmusl-arm64": "1.0.29-preview.2",
+        "@github/copilot-sdk-linuxmusl-x64": "1.0.29-preview.2",
+        "@github/copilot-sdk-win32-arm64": "1.0.29-preview.2",
+        "@github/copilot-sdk-win32-x64": "1.0.29-preview.2"
     },
     "devDependencies": {
-        "@platformatic/vfs": "^0.4.0",
         "@types/node": "^25.6.0",
-        "@types/ws": "^8.18.1",
-        "@typescript-eslint/eslint-plugin": "^8.59.1",
-        "@typescript-eslint/parser": "^8.54.0",
-        "esbuild": "^0.28.0",
-        "eslint": "^10.2.1",
+        "esbuild": "^0.28.1",
         "glob": "^13.0.1",
-        "json-schema": "^0.4.0",
-        "json-schema-to-typescript": "^15.0.4",
-        "prettier": "^3.8.3",
-        "quicktype-core": "^23.2.6",
         "rimraf": "^6.1.2",
-        "semver": "^7.7.4",
         "tsx": "^4.20.6",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.5",
-        "ws": "^8.21.0"
+        "typescript": "^6.0.3"
     },
     "engines": {
         "node": "^20.19.0 || >=22.12.0"
     },
     "files": [
         "dist/**/*",
+        "!dist/tsconfig.tsbuildinfo",
         "docs/**/*",
         "README.md"
     ]

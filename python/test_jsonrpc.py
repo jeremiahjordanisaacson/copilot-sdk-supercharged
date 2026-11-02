@@ -5,15 +5,48 @@ Tests for the JSON-RPC client implementation, focusing on proper handling
 of large payloads and short reads from pipes.
 """
 
+import asyncio
 import io
 import json
 import os
+import subprocess
+import sys
 import threading
 import time
 
 import pytest
 
-from copilot._jsonrpc import JsonRpcClient
+import copilot
+from copilot._jsonrpc import JsonRpcClient, ProcessExitedError
+
+
+@pytest.mark.asyncio
+async def test_public_rpc_error_preserves_transport_data(monkeypatch):
+    assert "JsonRpcError" in copilot.__all__
+    public_error = copilot.JsonRpcError
+    process = MockProcess()
+    client = JsonRpcClient(process)
+    client._loop = asyncio.get_running_loop()
+    data = {"policyHelperFailure": {"category": "timeout", "message": "Helper timed out"}}
+
+    async def respond(message):
+        assert message["method"] == "session.managedSettings.recheckPolicyHelper"
+        client._handle_message(
+            {
+                "jsonrpc": "2.0",
+                "id": message["id"],
+                "error": {"code": -32000, "message": "operation failed", "data": data},
+            }
+        )
+
+    monkeypatch.setattr(client, "_send_message", respond)
+    with pytest.raises(public_error) as caught:
+        await client.request("session.managedSettings.recheckPolicyHelper")
+    assert caught.value.code == -32000
+    assert caught.value.message == "operation failed"
+    assert caught.value.data == data
+    assert str(caught.value) == "JSON-RPC Error -32000: operation failed"
+    assert client.pending_requests == {}
 
 
 class MockProcess:
@@ -26,6 +59,270 @@ class MockProcess:
 
     def poll(self):
         return self.returncode
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", ["not an object", 42, [], None, {"message": "readable"}])
+async def test_unreadable_error_fails_request_and_keeps_reading(error, monkeypatch):
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd, "rb") as stdout, os.fdopen(write_fd, "wb") as writer:
+        process = MockProcess()
+        process.stdout = stdout
+        client = JsonRpcClient(process)
+        callback_results = []
+
+        async def respond(message):
+            payload = (
+                {"error": error} if message["method"] == "bad" else {"result": {"recovered": True}}
+            )
+            body = json.dumps({"jsonrpc": "2.0", "id": message["id"], **payload}).encode()
+            writer.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+            writer.flush()
+
+        monkeypatch.setattr(client, "_send_message", respond)
+        client.start()
+        try:
+            expected = copilot.JsonRpcError if isinstance(error, dict) else ValueError
+            match = "readable" if isinstance(error, dict) else "Invalid JSON-RPC error response"
+            with pytest.raises(expected, match=match):
+                await asyncio.wait_for(
+                    client.request("bad", on_response_inline=callback_results.append), timeout=5
+                )
+            assert callback_results == []
+            assert await asyncio.wait_for(client.request("next"), timeout=5) == {"recovered": True}
+            assert client.pending_requests == {}
+        finally:
+            writer.close()
+            await client.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["during-write", "after-write", "blocked-cancellation"])
+async def test_completion_cancellation_preserves_frame_order_without_blocking_caller(
+    phase, monkeypatch
+):
+    loop = asyncio.get_running_loop()
+    entered = asyncio.Event()
+    sent = asyncio.Event()
+    cancellation_written = asyncio.Event()
+    release = threading.Event()
+
+    class Output(io.BytesIO):
+        def __init__(self):
+            super().__init__()
+            self.frames = 0
+
+        def flush(self):
+            super().flush()
+            self.frames += 1
+            if self.frames == 1:
+                loop.call_soon_threadsafe(entered.set)
+                if phase == "during-write":
+                    assert release.wait(5), "request writer was not released"
+            else:
+                if phase == "blocked-cancellation":
+                    assert release.wait(5), "cancellation writer was not released"
+                loop.call_soon_threadsafe(cancellation_written.set)
+
+    process = MockProcess()
+    process.stdin = Output()
+    client = JsonRpcClient(process)
+    client._loop = loop
+    original_send = client._send_message
+
+    async def send(message, **kwargs):
+        await original_send(message, **kwargs)
+        if message.get("method") == "session.sendAndWait":
+            sent.set()
+
+    monkeypatch.setattr(client, "_send_message", send)
+    request = asyncio.create_task(client.request("session.sendAndWait", {"sessionId": "session"}))
+    try:
+        await asyncio.wait_for((entered if phase == "during-write" else sent).wait(), 5)
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(request, 1)
+        release.set()
+        await asyncio.wait_for(cancellation_written.wait(), 5)
+        stream = io.BytesIO(process.stdin.getvalue())
+        frames = []
+        while header := stream.readline():
+            length = int(header.split(b":", 1)[1])
+            assert stream.readline() == b"\r\n"
+            frames.append(json.loads(stream.read(length)))
+        assert frames[0]["method"] == "session.sendAndWait"
+        assert all(frame["method"] == "$/cancelRequest" for frame in frames[1:])
+        assert all(frame["params"]["id"] == frames[0]["id"] for frame in frames[1:])
+        assert client.pending_requests == {}
+    finally:
+        release.set()
+        request.cancel()
+        await asyncio.gather(request, return_exceptions=True)
+        await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_send_message_supports_streams_without_process_poll():
+    class StreamProcess:
+        def __init__(self):
+            self.stdin = io.BytesIO()
+            self.stdout = io.BytesIO()
+            self.stderr = None
+
+    process = StreamProcess()
+    client = JsonRpcClient(process)
+
+    await client._send_message({"jsonrpc": "2.0", "method": "ping"})
+
+    assert process.stdin.getvalue() == (
+        b'Content-Length: 33\r\n\r\n{"jsonrpc":"2.0","method":"ping"}'
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["request", "notify"])
+@pytest.mark.parametrize("eof", ["before-request", "after-request"])
+async def test_rejects_messages_after_stdout_eof_while_process_is_alive(operation, eof):
+    with subprocess.Popen(
+        [
+            # Windows' venv launcher retains stdout while waiting for the interpreter.
+            sys._base_executable,
+            "-c",
+            """
+import os
+import sys
+if sys.argv[1] == "after-request":
+    header = sys.stdin.buffer.readline()
+    sys.stdin.buffer.readline()
+    sys.stdin.buffer.read(int(header.split(b":")[1]))
+os.close(sys.stdout.fileno())
+sys.stdin.buffer.read()
+""",
+            eof,
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    ) as process:
+        client = JsonRpcClient(process)
+        loop = asyncio.get_running_loop()
+        closed = asyncio.Event()
+
+        def on_close():
+            loop.call_soon_threadsafe(closed.set)
+
+        client.on_close = on_close
+        client.start()
+        try:
+            if eof == "after-request":
+                with pytest.raises(ProcessExitedError):
+                    await asyncio.wait_for(client.request("initial"), timeout=5)
+            await asyncio.wait_for(closed.wait(), timeout=5)
+            assert process.poll() is None
+
+            with pytest.raises(ProcessExitedError):
+                await asyncio.wait_for(getattr(client, operation)("ping"), timeout=5)
+
+            assert client.pending_requests == {}
+        finally:
+            if process.poll() is None:
+                process.kill()
+            await asyncio.to_thread(process.wait, timeout=5)
+            await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_terminal_error_includes_stderr_when_stdout_closes_during_start(monkeypatch):
+    process = MockProcess()
+    process.returncode = 1
+    process.stdout = io.BytesIO()
+    process.stderr = io.BytesIO(b"startup diagnostic\n")
+    client = JsonRpcClient(process)
+    original_start = threading.Thread.start
+
+    def start_thread(thread):
+        original_start(thread)
+        if thread is client._read_thread:
+            thread.join(timeout=5)
+            assert not thread.is_alive(), "EOF reader did not finish"
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(threading.Thread, "start", start_thread)
+            client.start()
+
+        with pytest.raises(ProcessExitedError, match="stderr: startup diagnostic"):
+            await client.request("connect")
+    finally:
+        await client.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["request", "notify"])
+@pytest.mark.parametrize("phase", ["collecting-diagnostics", "queued-write"])
+async def test_eof_rejects_writes_across_diagnostic_and_executor_windows(
+    monkeypatch, operation, phase
+):
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd, "rb") as stdout, os.fdopen(write_fd, "wb") as stdout_writer:
+        process = MockProcess()
+        process.stdout = stdout
+        client = JsonRpcClient(process)
+        loop = asyncio.get_running_loop()
+        diagnostics_started = asyncio.Event()
+        writer_started = asyncio.Event()
+        closed = asyncio.Event()
+        release = threading.Event()
+        original_error = client._get_process_exit_error
+        task = None
+
+        def collect_error():
+            if (
+                threading.current_thread() is client._read_thread
+                and phase == "collecting-diagnostics"
+            ):
+                loop.call_soon_threadsafe(diagnostics_started.set)
+                assert release.wait(timeout=5), "diagnostics barrier was not released"
+            return original_error()
+
+        def poll():
+            if threading.current_thread() is not client._read_thread:
+                loop.call_soon_threadsafe(writer_started.set)
+                if phase == "queued-write":
+                    assert release.wait(timeout=5), "writer barrier was not released"
+            return None
+
+        def on_close():
+            loop.call_soon_threadsafe(closed.set)
+
+        monkeypatch.setattr(client, "_get_process_exit_error", collect_error)
+        monkeypatch.setattr(process, "poll", poll)
+        client.on_close = on_close
+        client.start()
+        try:
+            if phase == "collecting-diagnostics":
+                stdout_writer.close()
+                await asyncio.wait_for(diagnostics_started.wait(), timeout=5)
+            task = asyncio.create_task(getattr(client, operation)("ping"))
+            await asyncio.wait_for(writer_started.wait(), timeout=5)
+            if phase == "queued-write":
+                stdout_writer.close()
+                await asyncio.wait_for(closed.wait(), timeout=5)
+            release.set()
+
+            with pytest.raises(ProcessExitedError):
+                await asyncio.wait_for(task, timeout=5)
+            assert process.stdin.getvalue() == b""
+            assert client.pending_requests == {}
+        finally:
+            release.set()
+            stdout_writer.close()
+            if task is not None:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            await client.stop()
 
 
 class ShortReadStream:
@@ -160,6 +457,28 @@ class TestReadExact:
 
         with pytest.raises(EOFError, match="Unexpected end of stream"):
             client._read_exact(100)
+
+
+@pytest.mark.asyncio
+async def test_process_exit_waits_for_stderr_reader():
+    process = MockProcess()
+    process.returncode = 1
+    client = JsonRpcClient(process)
+    future = asyncio.get_running_loop().create_future()
+    client.pending_requests["request-id"] = future
+
+    def capture_stderr():
+        time.sleep(0.01)
+        with client._stderr_lock:
+            client._stderr_output.append("unsupported argument\n")
+
+    client._stderr_thread = threading.Thread(target=capture_stderr)
+    client._stderr_thread.start()
+
+    client._fail_pending_requests()
+
+    with pytest.raises(ProcessExitedError, match=r"stderr: unsupported argument"):
+        await asyncio.wait_for(future, timeout=1)
 
 
 class TestReadMessageWithLargePayloads:

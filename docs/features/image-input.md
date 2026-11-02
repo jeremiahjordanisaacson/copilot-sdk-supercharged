@@ -40,6 +40,7 @@ Attach an image file to any message using the file attachment type. The path mus
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
+<!-- docs-validate: strict -->
 ```typescript
 import { CopilotClient } from "@github/copilot-sdk";
 
@@ -68,7 +69,8 @@ await session.send({
 <summary><strong>Python</strong></summary>
 
 ```python
-from copilot import CopilotClient, PermissionDecisionApproveOnce
+from copilot import CopilotClient
+from copilot.session import PermissionDecisionApproveOnce
 
 client = CopilotClient()
 await client.start()
@@ -256,6 +258,7 @@ When you already have image data in memory (e.g., a screenshot captured by your 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
+<!-- docs-validate: strict -->
 ```typescript
 import { CopilotClient } from "@github/copilot-sdk";
 
@@ -287,7 +290,8 @@ await session.send({
 <summary><strong>Python</strong></summary>
 
 ```python
-from copilot import CopilotClient, PermissionDecisionApproveOnce
+from copilot import CopilotClient
+from copilot.session import PermissionDecisionApproveOnce
 
 client = CopilotClient()
 await client.start()
@@ -463,7 +467,7 @@ try (var client = new CopilotClient()) {
 
 ## Supported formats
 
-Supported image formats include JPG, PNG, GIF, and other common image types. For file attachments, the runtime reads the image from disk and converts it as needed. For blob attachments, you provide the base64 data and MIME type directly. Use PNG or JPEG for best results, as these are the most widely supported formats.
+The runtime sends PNG, JPEG, WebP, and GIF images to the model. An image in any other format, such as BMP or TIFF, is not sent: the model receives a short note that the image was omitted instead. For file attachments, the runtime reads the image from disk and converts it as needed. For blob attachments, you provide the base64 data and MIME type directly. Use PNG or JPEG for best results, as these are the most widely supported formats.
 
 The model's `capabilities.limits.vision.supported_media_types` field lists the exact MIME types it accepts.
 
@@ -493,6 +497,7 @@ Not all models support vision. Check the model's capabilities before sending ima
 ### Vision limits type
 
 <!-- docs-validate: hidden -->
+<!-- docs-validate: strict -->
 ```typescript
 interface VisionCapabilities {
     vision?: {

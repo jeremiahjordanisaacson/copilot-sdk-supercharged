@@ -28,6 +28,7 @@ namespace GitHub.Copilot;
 internal sealed partial class JsonRpc : IDisposable
 {
     private const int ErrorCodeMethodNotFound = -32601;
+    private const int ErrorCodeRequestCancelled = -32800;
     private const int ErrorCodeInternalError = -32603;
     private const int InitialReadBufferSize = 256;
     private const int MaximumRetainedReadBufferSize = 1024 * 1024;
@@ -37,12 +38,15 @@ internal sealed partial class JsonRpc : IDisposable
     private readonly JsonSerializerOptions _serializerOptions;
     private readonly ILogger _logger;
     private readonly ConcurrentDictionary<long, PendingRequest> _pendingRequests = new();
+    private readonly ConcurrentDictionary<long, IncomingRequestCancellation> _incomingRequestCancellations = new();
     private readonly ConcurrentDictionary<string, MethodRegistration> _methods = new();
     private readonly TaskCompletionSource _completionSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly CancellationTokenSource _disposeCts = new();
+    private readonly CancellationTokenSource _connectionClosedCts = new();
     private long _nextId;
-    private bool _disposed;
+    private int _disposeStarted;
+    private Exception? _terminalError;
 
     /// <summary>
     /// Initializes a new <see cref="JsonRpc"/>.
@@ -63,6 +67,11 @@ internal sealed partial class JsonRpc : IDisposable
     /// A <see cref="Task"/> that completes when the connection is closed or faulted.
     /// </summary>
     public Task Completion => _completionSource.Task;
+
+    /// <summary>
+    /// Cancels when this JSON-RPC connection is disposed or the peer closes the transport.
+    /// </summary>
+    internal CancellationToken ConnectionClosedToken => _connectionClosedCts.Token;
 
     /// <summary>
     /// Begins reading messages from the receive stream. Call once after registering all method handlers.
@@ -96,6 +105,11 @@ internal sealed partial class JsonRpc : IDisposable
         CancellationTokenRegistration cancelRegistration = default;
         try
         {
+            if (Volatile.Read(ref _terminalError) is { } terminalError)
+            {
+                throw terminalError;
+            }
+
             if (cancellationToken.CanBeCanceled)
             {
                 cancelRegistration = cancellationToken.Register(static state =>
@@ -136,6 +150,11 @@ internal sealed partial class JsonRpc : IDisposable
             LogInvokeTiming(LogLevel.Debug, ex, method, id, "Canceled", timingTimestamp);
             throw;
         }
+        catch (ObjectDisposedException ex) when (Volatile.Read(ref _terminalError) is ConnectionLostException)
+        {
+            LogInvokeTiming(LogLevel.Warning, ex, method, id, "Failed", timingTimestamp);
+            throw new ConnectionLostException();
+        }
         catch (Exception ex)
         {
             LogInvokeTiming(LogLevel.Warning, ex, method, id, "Failed", timingTimestamp);
@@ -146,6 +165,90 @@ internal sealed partial class JsonRpc : IDisposable
             _pendingRequests.TryRemove(id, out _);
             await cancelRegistration.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    private void HandleCancelRequest(JsonElement message)
+    {
+        if (!message.TryGetProperty("params", out var paramsProp) ||
+            paramsProp.ValueKind != JsonValueKind.Object ||
+            !paramsProp.TryGetProperty("id", out var idProp) ||
+            !TryGetNumericRequestId(idProp, out var id))
+        {
+            return;
+        }
+
+        if (_incomingRequestCancellations.TryGetValue(id, out var requestCancellation))
+        {
+            requestCancellation.Cancel();
+        }
+    }
+
+    private void CancelConnectionClosed()
+    {
+        try
+        {
+            _connectionClosedCts.Cancel();
+        }
+        catch (AggregateException ex)
+        {
+            _logger.LogDebug(ex, "JSON-RPC connection-closed cancellation callback failed");
+        }
+    }
+
+    private IncomingRequestCancellation? CreateIncomingRequestCancellation(JsonElement? requestId)
+    {
+        if (!requestId.HasValue || !TryGetNumericRequestId(requestId.Value, out var numericRequestId))
+        {
+            return null;
+        }
+
+        var requestCancellation = new IncomingRequestCancellation(numericRequestId, _connectionClosedCts.Token);
+        if (_incomingRequestCancellations.TryAdd(numericRequestId, requestCancellation))
+        {
+            return requestCancellation;
+        }
+
+        requestCancellation.Dispose();
+        return null;
+    }
+
+    private void RetireIncomingRequestCancellation(
+        IncomingRequestCancellation requestCancellation,
+        Task? handlerTask = null)
+    {
+        if (_incomingRequestCancellations.TryGetValue(requestCancellation.Id, out var current) &&
+            ReferenceEquals(current, requestCancellation))
+        {
+            _incomingRequestCancellations.TryRemove(requestCancellation.Id, out _);
+        }
+
+        if (handlerTask is not null && !handlerTask.IsCompleted)
+        {
+            _ = handlerTask.ContinueWith(
+                static (task, state) =>
+                {
+                    _ = task.Exception;
+                    ((IncomingRequestCancellation)state!).Dispose();
+                },
+                requestCancellation,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            return;
+        }
+
+        requestCancellation.Dispose();
+    }
+
+    private static bool TryGetNumericRequestId(JsonElement idProp, out long id)
+    {
+        if (idProp.ValueKind == JsonValueKind.Number && idProp.TryGetInt64(out id))
+        {
+            return true;
+        }
+
+        id = default;
+        return false;
     }
 
     private void LogInvokeTiming(
@@ -183,27 +286,26 @@ internal sealed partial class JsonRpc : IDisposable
     }
 
     /// <inheritdoc />
-    public void Dispose()
+    public void Dispose() => Dispose(new ObjectDisposedException(nameof(JsonRpc)));
+
+    internal void Dispose(Exception reason)
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
         {
             return;
         }
 
-        _disposed = true;
-        _disposeCts.Cancel();
-
-        // Fail all pending requests
-        foreach (var kvp in _pendingRequests)
+        FailPendingRequests(reason);
+        CancelConnectionClosed();
+        try
         {
-            if (_pendingRequests.TryRemove(kvp.Key, out var pending))
-            {
-                pending.TrySetException(new ObjectDisposedException(nameof(JsonRpc)));
-            }
+            _disposeCts.Cancel();
         }
-
-        _completionSource.TrySetResult();
-        _writeLock.Dispose();
+        finally
+        {
+            _completionSource.TrySetResult();
+            _writeLock.Dispose();
+        }
     }
 
     private async Task SendMessageAsync<T>(T message, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken)
@@ -280,11 +382,22 @@ internal sealed partial class JsonRpc : IDisposable
 
                 // Parse the raw JSON. Body is at buffer[0..contentLength], carried bytes
                 // for the next message are at buffer[contentLength..contentLength+carried].
-                JsonElement? message = null;
                 try
                 {
                     using var doc = JsonDocument.Parse(buffer.AsMemory(0, contentLength));
-                    message = doc.RootElement.Clone();
+                    var parsed = doc.RootElement;
+
+                    // Route while the document is alive. Incoming method arguments are
+                    // materialized synchronously before dispatch can become asynchronous.
+                    if (parsed.TryGetProperty("id", out var idProp) && !parsed.TryGetProperty("method", out _))
+                    {
+                        // It's a response to one of our requests.
+                        HandleResponse(parsed, idProp);
+                    }
+                    else if (parsed.TryGetProperty("method", out var methodProp) && methodProp.GetString() is string methodName)
+                    {
+                        _ = HandleIncomingMethodAsync(methodName, parsed, cancellationToken);
+                    }
                 }
                 catch (JsonException ex)
                 {
@@ -311,21 +424,6 @@ internal sealed partial class JsonRpc : IDisposable
                     buffer = retainedBuffer;
                 }
 
-                if (message is not { } parsed)
-                {
-                    continue;
-                }
-
-                // Route the message
-                if (parsed.TryGetProperty("id", out var idProp) && !parsed.TryGetProperty("method", out _))
-                {
-                    // It's a response to one of our requests
-                    HandleResponse(parsed, idProp);
-                }
-                else if (parsed.TryGetProperty("method", out var methodProp) && methodProp.GetString() is string methodName)
-                {
-                    _ = HandleIncomingMethodAsync(methodName, parsed, cancellationToken);
-                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -338,16 +436,21 @@ internal sealed partial class JsonRpc : IDisposable
         }
         finally
         {
-            // Fail all pending requests
-            foreach (var kvp in _pendingRequests)
-            {
-                if (_pendingRequests.TryRemove(kvp.Key, out var pending))
-                {
-                    pending.TrySetException(new ConnectionLostException());
-                }
-            }
-
+            FailPendingRequests(new ConnectionLostException());
+            CancelConnectionClosed();
             _completionSource.TrySetResult();
+        }
+    }
+
+    private void FailPendingRequests(Exception reason)
+    {
+        var terminalError = Interlocked.CompareExchange(ref _terminalError, reason, null) ?? reason;
+        foreach (var kvp in _pendingRequests)
+        {
+            if (_pendingRequests.TryRemove(kvp.Key, out var pending))
+            {
+                pending.TrySetException(terminalError);
+            }
         }
     }
 
@@ -469,7 +572,7 @@ internal sealed partial class JsonRpc : IDisposable
 
     private void HandleResponse(JsonElement message, JsonElement idProp)
     {
-        if (!idProp.TryGetInt64(out long id))
+        if (idProp.ValueKind != JsonValueKind.Number || !idProp.TryGetInt64(out long id))
         {
             return;
         }
@@ -481,16 +584,31 @@ internal sealed partial class JsonRpc : IDisposable
 
         if (message.TryGetProperty("error", out var errorProp))
         {
-            var errorMessage = errorProp.TryGetProperty("message", out var msgProp)
-                ? msgProp.GetString() ?? "Unknown error"
-                : "Unknown error";
-            var errorCode = errorProp.TryGetProperty("code", out var codeProp) && codeProp.ValueKind == JsonValueKind.Number
-                ? codeProp.GetInt32()
-                : 0;
-            var errorData = errorProp.TryGetProperty("data", out var dataProp)
-                ? dataProp
-                : (JsonElement?)null;
-            pending.TrySetException(new RemoteRpcException(errorMessage, errorCode, errorData));
+            RemoteRpcException remoteError;
+            try
+            {
+                var errorMessage = errorProp.TryGetProperty("message", out var msgProp)
+                    ? msgProp.GetString() ?? "Unknown error"
+                    : "Unknown error";
+                var errorCode = errorProp.TryGetProperty("code", out var codeProp) && codeProp.ValueKind == JsonValueKind.Number
+                    ? codeProp.GetInt32()
+                    : 0;
+                var errorData = errorProp.TryGetProperty("data", out var dataProp)
+                    ? dataProp
+                    : (JsonElement?)null;
+                remoteError = new RemoteRpcException(errorMessage, errorCode, errorData);
+            }
+            catch (Exception ex)
+            {
+                // The request has already left the pending table, so nothing else can complete it.
+                // An error object this method cannot read (a non-object error, a message that is
+                // not a string or holds an unpaired surrogate escape, a code beyond Int32) fails
+                // the request with that exception, and the read loop goes on to the next message.
+                pending.TrySetException(ex);
+                return;
+            }
+
+            pending.TrySetException(remoteError);
         }
         else if (message.TryGetProperty("result", out var resultProp))
         {
@@ -525,10 +643,17 @@ internal sealed partial class JsonRpc : IDisposable
     {
         try
         {
+            if (string.Equals(methodName, "$/cancelRequest", StringComparison.Ordinal))
+            {
+                HandleCancelRequest(message);
+                return;
+            }
+
             JsonElement? requestId = null;
             if (message.TryGetProperty("id", out var idProp))
             {
-                requestId = idProp;
+                // Requests may outlive the parsed message while an asynchronous handler runs.
+                requestId = idProp.Clone();
             }
 
             if (!_methods.TryGetValue(methodName, out var registration))
@@ -541,15 +666,62 @@ internal sealed partial class JsonRpc : IDisposable
             }
 
             message.TryGetProperty("params", out var paramsProp);
+            var requestCancellation = CreateIncomingRequestCancellation(requestId);
+            var requestCancellationRetired = false;
 
             try
             {
-                var result = await InvokeHandlerAsync(registration, paramsProp, cancellationToken).ConfigureAwait(false);
+                // Materialize arguments before the first possible suspension so none of
+                // them borrow from the JsonDocument owned by the read loop.
+                var requestCancellationToken = requestCancellation?.Token ?? _connectionClosedCts.Token;
+                var invokeArgs = DeserializeHandlerArguments(registration, paramsProp, requestCancellationToken);
+                var handlerTask = InvokeHandlerAsync(registration, invokeArgs).AsTask();
+
+                if (requestId.HasValue && requestCancellation is not null)
+                {
+                    var completed = await Task.WhenAny(handlerTask, requestCancellation.RequestCancelled).ConfigureAwait(false);
+                    if (ReferenceEquals(completed, requestCancellation.RequestCancelled))
+                    {
+                        await SendErrorResponseAsync(
+                            requestId.Value,
+                            ErrorCodeRequestCancelled,
+                            "Request cancelled",
+                            cancellationToken).ConfigureAwait(false);
+                        RetireIncomingRequestCancellation(requestCancellation, handlerTask);
+                        requestCancellationRetired = true;
+                        return;
+                    }
+                }
+
+                var result = await handlerTask.ConfigureAwait(false);
 
                 if (requestId.HasValue)
                 {
-                    await SendResultResponseAsync(requestId.Value, result, cancellationToken).ConfigureAwait(false);
+                    if (requestCancellation?.IsRequestCancellationRequested == true)
+                    {
+                        await SendErrorResponseAsync(
+                            requestId.Value,
+                            ErrorCodeRequestCancelled,
+                            "Request cancelled",
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await SendResultResponseAsync(
+                            requestId.Value,
+                            result,
+                            registration.ResultType,
+                            cancellationToken).ConfigureAwait(false);
+                    }
                 }
+            }
+            catch (OperationCanceledException) when (requestCancellation?.IsRequestCancellationRequested == true)
+            {
+                await SendErrorResponseAsync(
+                    requestId.GetValueOrDefault(),
+                    ErrorCodeRequestCancelled,
+                    "Request cancelled",
+                    cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -577,6 +749,13 @@ internal sealed partial class JsonRpc : IDisposable
                     }
                 }
             }
+            finally
+            {
+                if (requestCancellation is not null && !requestCancellationRetired)
+                {
+                    RetireIncomingRequestCancellation(requestCancellation);
+                }
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -595,11 +774,13 @@ internal sealed partial class JsonRpc : IDisposable
         }
     }
 
-    private async ValueTask<object?> InvokeHandlerAsync(MethodRegistration registration, JsonElement paramsProp, CancellationToken cancellationToken)
+    private object?[] DeserializeHandlerArguments(
+        MethodRegistration registration,
+        JsonElement paramsProp,
+        CancellationToken cancellationToken)
     {
         var parameters = registration.Parameters;
 
-        // Build argument list
         var invokeArgs = new object?[parameters.Length];
 
         if (registration.SingleObjectParam)
@@ -677,15 +858,28 @@ internal sealed partial class JsonRpc : IDisposable
                 $"Unsupported JSON-RPC params shape '{paramsProp.ValueKind}' for handler with positional parameters.");
         }
 
-        // Invoke
+        return invokeArgs;
+    }
+
+    private static async ValueTask<object?> InvokeHandlerAsync(
+        MethodRegistration registration,
+        object?[] invokeArgs)
+    {
         var result = registration.Handler.DynamicInvoke(invokeArgs);
 
-        // Handlers return one of: a synchronous value, Task (void async), or ValueTask<T>.
+        // Handlers return a synchronous value, Task, ValueTask, or ValueTask<T>.
         if (result is Task task)
         {
             // Task<T> handlers are not supported — use ValueTask<T> for results.
-            Debug.Assert(!task.GetType().IsGenericType, "Task<T> handlers are not supported; use ValueTask<T>.");
+            // An async Task method can return a generic runtime state-machine box.
+            Debug.Assert(registration.Handler.Method.ReturnType == typeof(Task), "Task<T> handlers are not supported; use ValueTask<T>.");
             await task.ConfigureAwait(false);
+            return null;
+        }
+
+        if (result is ValueTask valueTask)
+        {
+            await valueTask.ConfigureAwait(false);
             return null;
         }
 
@@ -772,18 +966,20 @@ internal sealed partial class JsonRpc : IDisposable
         return doc.RootElement.Clone();
     }
 
-    private async Task SendResultResponseAsync(JsonElement id, object? result, CancellationToken cancellationToken)
+    private async Task SendResultResponseAsync(
+        JsonElement id,
+        object? result,
+        Type? declaredResultType,
+        CancellationToken cancellationToken)
     {
         try
         {
-            // Convert the result to a JsonElement using the runtime type, looked up via
-            // the merged resolver. Source-gen serialization of an `object`-typed property
-            // would otherwise have no way to find metadata for the actual response type
-            // (e.g. SystemMessageTransformRpcResponse, SessionFsReadFileResult, ...).
+            // Prefer the handler's declared result type so polymorphic base types emit
+            // their discriminator. Fall back to the runtime type for untyped handlers.
             JsonElement? resultElement = null;
             if (result is not null)
             {
-                var typeInfo = _serializerOptions.GetTypeInfo(result.GetType());
+                var typeInfo = _serializerOptions.GetTypeInfo(declaredResultType ?? result.GetType());
                 resultElement = JsonSerializer.SerializeToElement(result, typeInfo);
             }
 
@@ -848,6 +1044,52 @@ internal sealed partial class JsonRpc : IDisposable
         public Action<JsonElement>? OnResultInline { get; } = onResultInline;
     }
 
+    private sealed class IncomingRequestCancellation : IDisposable
+    {
+        private readonly CancellationTokenSource _requestSource = new();
+        private readonly CancellationTokenSource _combinedSource;
+        private readonly TaskCompletionSource _requestCancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly CancellationTokenRegistration _registration;
+
+        public IncomingRequestCancellation(long id, CancellationToken connectionClosedToken)
+        {
+            Id = id;
+            _registration = _requestSource.Token.Register(static state =>
+            {
+                ((TaskCompletionSource)state!).TrySetResult();
+            }, _requestCancelled);
+            // Cancellation callbacks run in reverse registration order: propagate to handlers before replying.
+            _combinedSource = CancellationTokenSource.CreateLinkedTokenSource(_requestSource.Token, connectionClosedToken);
+        }
+
+        public long Id { get; }
+
+        public CancellationToken Token => _combinedSource.Token;
+
+        public Task RequestCancelled => _requestCancelled.Task;
+
+        public bool IsRequestCancellationRequested => _requestSource.IsCancellationRequested;
+
+        public void Cancel()
+        {
+            try
+            {
+                _requestSource.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                Debug.WriteLine("JSON-RPC incoming request cancellation raced with request disposal.");
+            }
+        }
+
+        public void Dispose()
+        {
+            _registration.Dispose();
+            _combinedSource.Dispose();
+            _requestSource.Dispose();
+        }
+    }
+
     private static readonly MethodInfo s_taskGetResult = typeof(Task<>).GetProperty(nameof(Task<int>.Result), BindingFlags.Instance | BindingFlags.Public)!.GetMethod!;
     private static readonly MethodInfo s_valueTaskAsTask = typeof(ValueTask<>).GetMethod(nameof(ValueTask<int>.AsTask), BindingFlags.Instance | BindingFlags.Public)!;
 
@@ -863,6 +1105,11 @@ internal sealed partial class JsonRpc : IDisposable
             {
                 ValueTaskAsTaskMethod = GetMethodFromGenericMethodDefinition(returnType, s_valueTaskAsTask);
                 TaskResultGetter = GetMethodFromGenericMethodDefinition(ValueTaskAsTaskMethod.ReturnType, s_taskGetResult);
+                ResultType = returnType.GetGenericArguments()[0];
+            }
+            else if (returnType != typeof(void) && returnType != typeof(Task) && returnType != typeof(ValueTask))
+            {
+                ResultType = returnType;
             }
         }
 
@@ -871,6 +1118,7 @@ internal sealed partial class JsonRpc : IDisposable
         public ParameterInfo[] Parameters { get; }
         public MethodInfo? ValueTaskAsTaskMethod { get; }
         public MethodInfo? TaskResultGetter { get; }
+        public Type? ResultType { get; }
     }
 
     private static MethodInfo GetMethodFromGenericMethodDefinition(Type specializedType, MethodInfo genericMethodDefinition)
@@ -988,13 +1236,32 @@ internal sealed class ConnectionLostException() : IOException("The JSON-RPC conn
 /// <summary>
 /// Thrown when the remote side returns a JSON-RPC error response.
 /// </summary>
-internal sealed class RemoteRpcException(string message, int errorCode, JsonElement? errorData = null, Exception? innerException = null) : Exception(message, innerException)
+/// <remarks>
+/// Client RPC calls wrap this exception in an <see cref="IOException"/>.
+/// Inspect its <see cref="Exception.InnerException"/> to access the remote error.
+/// </remarks>
+/// <param name="message">The remote error message.</param>
+/// <param name="errorCode">The numeric JSON-RPC error code.</param>
+/// <param name="errorData">The optional valid JSON error data, cloned to retain its lifetime. Pass <see langword="null"/> when absent, not a default <see cref="JsonElement"/>.</param>
+/// <param name="innerException">The exception that caused this error, if any.</param>
+/// <exception cref="InvalidOperationException"><paramref name="errorData"/> has <see cref="JsonValueKind.Undefined"/> value kind.</exception>
+/// <exception cref="ObjectDisposedException">The document owning <paramref name="errorData"/> has already been disposed.</exception>
+public sealed class RemoteRpcException(string message, int errorCode, JsonElement? errorData = null, Exception? innerException = null) : Exception(message, innerException)
 {
     /// <summary>JSON-RPC 2.0 reserved error code: requested method does not exist.</summary>
-    public const int MethodNotFoundErrorCode = -32601;
+    internal const int MethodNotFoundErrorCode = -32601;
 
+    /// <summary>Gets the numeric code from the JSON-RPC error response.</summary>
     public int ErrorCode { get; } = errorCode;
 
+    /// <summary>Gets the unmodified JSON data from the remote error, if provided.</summary>
+    /// <remarks>
+    /// A missing <c>data</c> member produces a nullable value with no value.
+    /// An explicit JSON <c>null</c> produces a present element whose
+    /// <see cref="JsonElement.ValueKind"/> is <see cref="JsonValueKind.Null"/>.
+    /// All valid JSON value kinds are preserved. The element is cloned and remains
+    /// valid after the response document and client are disposed.
+    /// </remarks>
     public JsonElement? ErrorData { get; } = errorData.HasValue ? errorData.Value.Clone() : null;
 }
 

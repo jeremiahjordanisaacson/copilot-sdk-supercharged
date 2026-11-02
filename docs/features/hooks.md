@@ -22,18 +22,93 @@ flowchart LR
 
 | Hook                                                                | When it fires                       | What you can do                            |
 | ------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------ |
-| [`onSessionStart`](../hooks/session-lifecycle.md#session-start)     | Session begins (new or resumed)     | Inject context, load preferences           |
+| [`onSessionStart`](../hooks/session-lifecycle.md#session-start-hook)     | Session begins (new or resumed)     | Inject context, load preferences           |
 | [`onUserPromptSubmitted`](../hooks/user-prompt-submitted.md)        | User sends a message                | Rewrite prompts, add context, filter input |
 | [`onUserPromptTransformed`](../hooks/user-prompt-transformed.md)    | Runtime builds the model prompt     | Inspect or replace model-facing content    |
 | [`onPreToolUse`](../hooks/pre-tool-use.md)                          | Before a tool executes              | Allow / deny / modify the call             |
 | [`onPostToolUse`](../hooks/post-tool-use.md)                        | After a tool returns (success only) | Transform results, redact secrets, audit   |
 | [`onPostToolUseFailure`](../hooks/post-tool-use.md#failure-variant) | After a tool returns a failure      | Inject retry guidance, log failures        |
-| [`onSessionEnd`](../hooks/session-lifecycle.md#session-end)         | Session ends                        | Clean up, record metrics                   |
+| [`onSessionEnd`](../hooks/session-lifecycle.md#session-end-hook)         | Session ends                        | Clean up, record metrics                   |
 | [`onErrorOccurred`](../hooks/error-handling.md)                     | An error is raised                  | Custom logging, retry logic, alerts        |
 
 All hooks are **optional**—register only the ones you need. Returning `null` (or the language equivalent) from any hook tells the SDK to continue with default behavior.
 
+Repository hooks and settings require workspace trust. Ambient user hooks require `enableConfigDiscovery: true` (default: false), but not workspace trust.
+
+## Repository hooks from additional directories
+
+Repository filesystem hooks are separate from the SDK callbacks described in
+this guide. To load them from additional directories during local session
+creation or cold resume, supply `additionalDirectories`; CLI `--add-dir` also participates by default.
+`DISABLE_ADDITIONAL_DIRECTORY_HOOKS=true` restores primary-only scope;
+`enableFileHooks` can enable or disable repository hooks through `session.rpc.options.update`; explicit SDK hook directories and callbacks are independent.
+
+Discovery uses each accepted directory's containing Git root, or the directory
+itself when it is outside a Git repository. For example, supplying
+`B\packages\core` inside repository `B` admits `B\.github\hooks` and B's repository
+hook settings, not just configuration inside `B\packages\core`.
+
+> [!WARNING]
+> Supply only trusted startup directories. This authorizes hook commands
+> and hook-provided prompts from all eligible startup directories without
+> additional per-directory or per-hook approval. Later file-access grants
+> do not authorize hooks. Existing managed policy, hook-disable controls, and
+> sandbox rules still apply; they do not make malicious hook content safe.
+
+Later directory grants do not add hook sources. A cold resume must resupply the
+directories; later grants or escape-hatch updates cannot change retained
+authorization.
+
 ## Registering hooks
+
+Callback `hooks` remain separate from file-backed `hookDirectories`. For packaged hook configurations and adjacent resources, see [customization discovery locations](./customization-locations.md).
+
+### Agent-scoped declarative hooks
+
+Custom agents can declare a `hooks` event map in `.agent.md` frontmatter or in
+the SDK's custom-agent configuration. These are declarative command or HTTP
+actions, not SDK callback functions. They run only while that agent is selected,
+in addition to applicable session, user, repository, plugin, and managed-policy
+hooks. Changing or clearing the selected agent changes the scoped hooks for the
+next invocation without changing other sessions or concurrent subagents.
+
+```yaml
+---
+name: formatter
+description: Formats changed files
+hooks:
+  PostToolUse:
+    - type: command
+      command: ./scripts/format-changed-files.sh
+      windows: ./scripts/format-changed-files.ps1
+---
+Format the files you change.
+```
+
+Both runtime event names such as `postToolUse` and supported VS Code aliases
+such as `PostToolUse` are accepted. `command` supplies the fallback shell command;
+`windows`, `linux`, and `osx` override it on the corresponding platform. Hook
+commands are relative to the executing session's repository root, unless they
+set an explicit working directory. Hook payloads and decisions follow the
+runtime's existing hook contracts.
+
+When a local agent runs as a subagent, its scoped `Stop` (`agentStop`) actions
+run at `SubagentStop` instead of ordinary turn stop. An explicit `SubagentStop`
+action on that agent still observes its own children. Stop callbacks receive
+`stop_hook_active: true` after a prior block. After eight consecutive scoped
+Stop continuations, the runtime ignores further scoped blocks and accepts the
+child's final response unless a parent lifecycle hook still blocks completion.
+
+Repository and inherited-agent hooks require workspace admission. Agent
+discovery or selection does not itself grant trust. Existing hook-disable
+settings, enterprise restrictions, sandbox permissions, and timeouts also apply
+to scoped actions. SDK-provided agents cannot claim managed-plugin privileges.
+Remote or organization-hosted agent definitions do not execute scoped hooks,
+and scoped Stop dispatch is supported for local runtime subagents, not external
+AHP participants.
+
+Unsupported event names are reported before event selection. Action preparation
+errors affect only their declared event; shared and managed-policy hooks still run.
 
 Pass a `hooks` object when you create (or resume) a session. Every example below follows this pattern.
 
@@ -69,7 +144,19 @@ const session = await client.createSession({
 <summary><strong>Python</strong></summary>
 
 ```python
-from copilot import CopilotClient, PermissionDecisionApproveOnce
+from copilot import CopilotClient
+from copilot.session import PermissionDecisionApproveOnce
+
+async def on_session_start(input_data, invocation):
+    print(f"Session {invocation['session_id']} started")
+    return None
+
+async def on_pre_tool_use(input_data, invocation):
+    return {"permissionDecision": "allow"}
+
+async def on_post_tool_use(input_data, invocation):
+    print(f"Tool finished: {input_data['toolName']}")
+    return None
 
 client = CopilotClient()
 await client.start()
@@ -274,9 +361,12 @@ const session = await client.createSession({
 <summary><strong>Python</strong></summary>
 
 ```python
-from copilot import PermissionDecisionApproveOnce
+from copilot import CopilotClient
+from copilot.session import PermissionDecisionApproveOnce
 
 READ_ONLY_TOOLS = ["read_file", "glob", "grep", "view"]
+
+client = CopilotClient()
 
 async def on_pre_tool_use(input_data, invocation):
     if input_data["toolName"] not in READ_ONLY_TOOLS:
@@ -597,7 +687,7 @@ const session = await client.createSession({
 
 ```python
 import json, aiofiles
-from copilot import PermissionDecisionApproveOnce
+from copilot.session import PermissionDecisionApproveOnce
 
 audit_log = []
 
@@ -728,7 +818,10 @@ const session = await client.createSession({
 
 ```python
 import subprocess
-from copilot import PermissionDecisionApproveOnce
+from copilot import CopilotClient
+from copilot.session import PermissionDecisionApproveOnce
+
+client = CopilotClient()
 
 async def on_session_end(input_data, invocation):
     sid = invocation["session_id"][:8]
@@ -955,9 +1048,12 @@ const session = await client.createSession({
 <summary><strong>Python</strong></summary>
 
 ```python
-from copilot import PermissionDecisionApproveOnce
+from copilot import CopilotClient
+from copilot.session import PermissionDecisionApproveOnce
 
 session_metrics = {}
+
+client = CopilotClient()
 
 async def on_session_start(input_data, invocation):
     session_metrics[invocation["session_id"]] = {

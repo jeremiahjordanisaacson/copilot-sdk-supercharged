@@ -22,9 +22,21 @@ The table below maps each signal to the API that exposes it.
 | Accumulated AI credit and token totals | `session.usage.getMetrics` | Session | RPC |
 | Per-model AI credit pricing | `models.list` | Server | RPC |
 | Account quota and premium interactions | `account.getQuota` | Server | RPC |
+| Session-owned provider quota observations | `session.quota.get` and `session.quota.refresh` | Session | RPC |
+| Provider admission-state updates | `session.quota_observation` | Session | Event |
+
+`session.quota.get` reads local runtime state; `session.quota.refresh` refreshes the provider catalogs and quota sources. Both return `providerQuotas`, keyed by provider identity, quota ID, and observation kind. The runtime keeps one observation store. The legacy `snapshots` field is a derived compatibility view of authoritative budgets, not a second source of quota state.
+
+Provider cardinality is an emergent property of actual usage and observations supplied to the seam. This API neither knows nor enforces how many providers a user may use: it records and projects zero, one, or many entries identically. Producers supply stable provider/account-scoped references; usage adds model identity, and quota adds quota identity and observation kind. `get()` returns the full known collection, so callers can select an exact key, a subset, or all entries without provider-specific methods. Acquisition uses the sources supplied by the upstream account/model layer; it does not manufacture a union or impose a selected-provider filter on reads.
+
+Check `observationKind`, `quantityKind`, and `acquisitionStatus` before interpreting a reading. An `authoritative_budget` can supply progress and reset metadata. An `advisory_balance` reports independent signed 64-bit quantities without promising a percentage, reset window, or post-call balance. An `admission_state` reports permission/capacity at request admission and carries no quantities; it does not replace an account balance. Preserve missing values and explicit nulls rather than converting them to zero. A failed or unavailable acquisition is not quota exhaustion.
+
+For Microsoft 365 Copilot, access and capacity are service verdicts, while quantities are advisory. For example, `allowed`/`available` with both quantities explicitly zero means **0 / 0 AIC reported**, not 100% consumed or inconsistent state. A missing entitlement is different from a zero entitlement. The `-1` entitlement sentinel means unlimited entitlement without changing the reported capacity state. Inference headers can reflect cached admission state; neither those headers nor an on-demand quota refresh establish the charge for the preceding call.
+
+Usage totals belong to a session, not the active account. In the CLI, switching away from a non-empty Microsoft 365 Copilot session requires starting a new session. The previous session retains its usage and history for resume; the new session starts its own totals.
 
 > [!NOTE]
-> `session.usage.getMetrics`, `session.metadata.contextInfo`, and `session.metadata.recomputeContextTokens` are marked experimental in the generated RPC surface. In .NET they raise the `GHCP001` experimental diagnostic, which you suppress with `#pragma warning disable GHCP001` or a project-level `<NoWarn>GHCP001</NoWarn>`. Pin both the SDK and the Copilot CLI runtime if your application depends on them.
+> `session.quota`, `session.usage.getMetrics`, `session.metadata.contextInfo`, and `session.metadata.recomputeContextTokens` are marked experimental in the generated RPC surface. In .NET they raise the `GHCP001` experimental diagnostic, which you suppress with `#pragma warning disable GHCP001` or a project-level `<NoWarn>GHCP001</NoWarn>`. Pin both the SDK and the Copilot CLI runtime if your application depends on them.
 
 The field tables below list only the fields used in the examples on this page. The complete, always-current field reference is the generated SDK types plus [Streaming events](./streaming-events.md), which is regenerated from the CLI schema on every dependency bump. Treat those as the source of truth and this page as a task-oriented guide.
 
@@ -32,14 +44,18 @@ The field tables below list only the fields used in the examples on this page. T
 
 The `assistant.usage` event is emitted once for every model API call in a turn (including calls made by sub-agents). It carries the token counts and the billing multiplier for that single call.
 
-The example below uses these fields. See [Streaming events](./streaming-events.md#assistantusage) for the full list, including cache, reasoning, latency, and tracing fields.
+The example below uses `model`, `inputTokens`, `outputTokens` and `cost`; the cache counts are listed because they explain `inputTokens`. See [Streaming events](./streaming-events.md#assistantusage) for the full list, including reasoning, latency, and tracing fields.
 
 | Field | Type | Description |
 |---|---|---|
 | `model` | `string` | Model identifier for this call |
-| `inputTokens` | `number` | Input tokens consumed |
+| `inputTokens` | `number` | Total input tokens for this call, including the cache tokens below |
 | `outputTokens` | `number` | Output tokens produced |
+| `cacheReadTokens` | `number` | Input tokens read from the prompt cache; already counted in `inputTokens` |
+| `cacheWriteTokens` | `number` | Input tokens written to the prompt cache; already counted in `inputTokens` |
 | `cost` | `number` | Premium request multiplier applied to this call |
+
+`inputTokens` already includes `cacheReadTokens` and `cacheWriteTokens`, so do not add them to it. The uncached part of the input is `inputTokens - cacheReadTokens - cacheWriteTokens`. Models price these three classes differently, so compute cost from the separate counts rather than from `inputTokens` alone.
 
 > [!TIP]
 > `assistant.usage` is ephemeral, so it is delivered live but not replayed when you resume a session. To read accumulated totals after the fact, call `session.usage.getMetrics` (see [Accumulated AI credit and token totals](#accumulated-ai-credit-and-token-totals)).
@@ -636,7 +652,7 @@ let result = session
     .context_info(MetadataContextInfoRequest {
         prompt_token_limit: 0,
         output_token_limit: 0,
-        selected_model: None,
+        ..Default::default()
     })
     .await?;
 
@@ -660,7 +676,7 @@ The example uses the fields below. The generated `UsageGetMetricsResult` type is
 |---|---|---|
 | `totalNanoAiu` | `number` | Session-wide AI credit cost, in nano-AI units |
 | `totalPremiumRequestCost` | `number` | Premium request cost across all models, after multipliers |
-| `modelMetrics` | `Record<string, ModelMetric>` | Per-model breakdown; each entry has `usage.inputTokens`, `usage.outputTokens`, and `totalNanoAiu` |
+| `modelMetrics` | `Record<string, ModelMetric>` | Per-model breakdown; each entry has `usage.inputTokens` (which includes `usage.cacheReadTokens` and `usage.cacheWriteTokens`), `usage.outputTokens`, and `totalNanoAiu` |
 
 > [!NOTE]
 > Cost is reported in **nano-AI units** (the field is named `totalNanoAiu`). The exact conversion to AI credits and the precise meaning of premium request accounting are defined by GitHub Copilot billing, not by the SDK—treat [GitHub's Copilot billing documentation](https://docs.github.com/en/copilot/managing-copilot/understanding-and-managing-copilot-usage) as the source of truth and verify before surfacing currency-like values to users. The examples divide by `1e9` as a convenience, following the SI `nano` prefix; confirm this matches current billing before relying on it. The `modelMetrics` and `tokenDetails` maps are keyed by runtime strings (model IDs and token-type names) that the SDK type system does not validate.

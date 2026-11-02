@@ -132,7 +132,7 @@ For the Go SDK, [install the CLI manually](https://github.com/features/copilot/c
 
 ## Architecture
 
-All SDKs communicate with the Copilot CLI server via JSON-RPC:
+All SDKs drive the Copilot agent runtime over JSON-RPC. By default the runtime is hosted by the Copilot CLI running as a child process in server mode:
 
 ```
 Your Application
@@ -143,6 +143,44 @@ Your Application
 ```
 
 The SDK manages the CLI process lifecycle automatically. You can also connect to an external CLI server. See the [Getting Started Guide](./docs/getting-started.md#connecting-to-an-external-cli-server) for details on running the CLI in server mode.
+
+Every SDK also offers an experimental in-process transport. It loads the native Copilot runtime into your application through a C ABI and carries the same JSON-RPC messages over an in-memory connection, so no CLI process is started:
+
+```
+Your Application
+       ↓
+  SDK Client
+       ↓ JSON-RPC (in memory, C ABI)
+  Native Copilot runtime
+```
+
+See [Run the Copilot runtime in process](./docs/setup/in-process-runtime.md) for the connection option in each language and its requirements.
+
+### Portable elicitation schemas
+
+For form elicitation callbacks, the portable schema contract is an object form
+with modeled `properties` and optional `required` fields (`type: "object"` on
+the wire; an SDK may represent the object type implicitly). Applications that
+support multiple SDK languages must use the modeled property definitions and
+must not depend on additional schema metadata (such as a top-level `title`) or
+on the insertion order of `properties`.
+
+Node.js and Rust pass through the wire schema, including additional metadata
+and property order. Python, Go, .NET, and Java reconstruct the callback schema
+from the modeled fields and do not offer that same preservation guarantee.
+Treat wire-schema preservation as a language-specific capability, not a
+cross-language requirement.
+
+### Agent Finder Skill installation APIs
+
+Runtimes that grant `skill-confirmed-installation` expose
+`skills.planInstall`, `skills.applyInstall`, `skills.planUninstall`,
+`skills.applyUninstall`, `skills.installations.list/recover/status/cancel`,
+and `skills.installations.setEnabled`. Skill install reviews include the full
+verified `SKILL.md` content up to 256 KiB, catalogue identity, file manifest,
+and non-absolute personal target location. Summaries report `ownershipState`,
+`configuredEnabled`, `sessionState`, retained catalogue identity and
+`installedAt`.
 
 ## FAQ
 
@@ -222,10 +260,6 @@ Please use the [GitHub Issues](https://github.com/jeremiahjordanisaacson/copilot
 - **[More Resources](https://github.com/github/awesome-copilot/blob/main/collections/copilot-sdk.md)** – Additional examples, tutorials, and community resources
 - **[Contributing](./CONTRIBUTING.md)** – How to contribute (new languages welcome!)
 - **[Website](https://jeremiahjordanisaacson.github.io/copilot-sdk-supercharged/)** – Landing page with examples in every language
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines.
 
 ## License
 

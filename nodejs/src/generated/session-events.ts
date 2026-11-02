@@ -10,20 +10,27 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
  * Union of all session event variants emitted by the Copilot CLI runtime.
  */
 export type SessionEvent =
+  | JournalLinkEvent
   | StartEvent
   | ResumeEvent
   | RemoteSteerableChangedEvent
   | ErrorEvent
   | IdleEvent
+  | AutopilotStoppedEvent
   | TitleChangedEvent
   | ScheduleCreatedEvent
   | ScheduleCancelledEvent
   | ScheduleRearmedEvent
   | AutopilotObjectiveChangedEvent
   | InfoEvent
+  | IndexedSearchEvent
   | WarningEvent
   | ModelChangeEvent
+  | ModelDeselectedEvent
+  | AutoTierRecommendationEvent
+  | AutoTierSwitchFailedEvent
   | ModeChangedEvent
+  | ModeNoticeDeliveredEvent
   | SessionLimitsChangedEvent
   | PermissionsChangedEvent
   | PlanChangedEvent
@@ -34,16 +41,27 @@ export type SessionEvent =
   | SnapshotRewindEvent
   | ShutdownEvent
   | UsageCheckpointEvent
+  | ProviderQuotaObservationEvent
   | ContextChangedEvent
   | UsageInfoEvent
   | ContextClearedEvent
   | CompactionStartEvent
   | CompactionCompleteEvent
   | TaskCompleteEvent
+  | CompletionReceiptEvent
+  | FusionRouteStartedEvent
+  | FusionRouteFailedEvent
+  | FusionResolvedEvent
+  | FusionCompletedEvent
+  | PermissionRecoveryEvent
   | UserMessageEvent
   | PendingMessagesModifiedEvent
   | AssistantTurnStartEvent
   | AssistantIntentEvent
+  | AssistantFusionPhaseStartedEvent
+  | AssistantFusionPhaseActivityEvent
+  | AssistantFusionPhaseCompletedEvent
+  | AssistantFusionPhaseFailedEvent
   | AssistantServerToolProgressEvent
   | AssistantReasoningEvent
   | AssistantReasoningDeltaEvent
@@ -56,15 +74,18 @@ export type SessionEvent =
   | AssistantIdleEvent
   | AssistantUsageEvent
   | ModelCallFailureEvent
+  | ModelCallFinishedEvent
   | AbortEvent
   | ToolUserRequestedEvent
   | ToolExecutionStartEvent
   | ToolExecutionPartialResultEvent
+  | ToolShellOutputEvent
   | ToolExecutionProgressEvent
   | ToolExecutionCompleteEvent
   | ToolSearchActivatedEvent
   | SkillInvokedEvent
   | SubagentStartedEvent
+  | SubagentConfiguredEvent
   | SubagentCompletedEvent
   | SubagentFailedEvent
   | SubagentSelectedEvent
@@ -74,9 +95,16 @@ export type SessionEvent =
   | HookProgressEvent
   | BinaryAssetEvent
   | SystemMessageEvent
+  | InstructionUpdateEvent
   | SystemNotificationEvent
   | PermissionRequestedEvent
   | PermissionCompletedEvent
+  | PermissionCarriedForwardEvent
+  | PermissionMessageAuthorizationEvent
+  | PermissionMessageAuthorizationReadEvent
+  | PermissionMessageAuthorizationDegradedEvent
+  | PermissionAssentDetectedEvent
+  | PermissionContextualAuthorizationEvent
   | UserInputRequestedEvent
   | UserInputCompletedEvent
   | ElicitationRequestedEvent
@@ -85,6 +113,7 @@ export type SessionEvent =
   | SamplingCompletedEvent
   | McpOauthRequiredEvent
   | McpOauthCompletedEvent
+  | McpOauthRecoveryCompletedEvent
   | McpHeadersRefreshRequiredEvent
   | McpHeadersRefreshCompletedEvent
   | CustomNotificationEvent
@@ -99,21 +128,26 @@ export type SessionEvent =
   | SessionLimitsExhaustedRequestedEvent
   | SessionLimitsExhaustedCompletedEvent
   | AutoModeResolvedEvent
+  | ManagedPluginProgressEvent
   | ManagedSettingsResolvedEvent
   | ManagedSettingsEnforcedEvent
   | CommandsChangedEvent
   | CapabilitiesChangedEvent
   | ExitPlanModeRequestedEvent
   | ExitPlanModeCompletedEvent
+  | HumanResponseRecordedEvent
   | ToolsUpdatedEvent
   | BackgroundTasksChangedEvent
-  | FactoryRunUpdatedEvent
-  | FactoryRunStartedEvent
-  | FactoryRunSettledEvent
+  | WorkflowRunUpdatedEvent
+  | WorkflowRunStartedEvent
+  | WorkflowRunSettledEvent
   | SkillsLoadedEvent
   | CustomAgentsUpdatedEvent
   | McpServersLoadedEvent
   | McpServerStatusChangedEvent
+  | McpServerToolsLoadedEvent
+  | McpServerRemovedEvent
+  | McpServerNeedsReconnectEvent
   | McpToolsListChangedEvent
   | McpResourcesListChangedEvent
   | McpPromptsListChangedEvent
@@ -126,6 +160,19 @@ export type SessionEvent =
   | CanvasRemovedEvent
   | ExtensionsAttachmentsPushedEvent
   | McpAppToolCallCompleteEvent;
+/**
+ * Extensible routing preference for the virtual `auto` model. New identifiers must be advertised and enabled by the provider. `fast` is an integrator-only latency preset.
+ */
+export type AutoTier =
+  /** Optimize for efficiency. */
+  | "efficiency"
+  /** Balance efficiency and intelligence. */
+  | "balance"
+  /** Optimize for intelligence. */
+  | "intelligence"
+  /** Integrator-only preset that optimizes for latency. */
+  | "fast"
+  | (string & {});
 /**
  * Hosting platform type of the repository (github or ado)
  */
@@ -163,6 +210,32 @@ export type Verbosity =
   /** A more detailed response was requested. */
   | "high";
 /**
+ * What the user must do to recover from a failure, named as an action rather than as one client's affordance. The runtime cannot know which affordance a client offers — a slash command, a settings pane, a link — so the accompanying message stays host-agnostic and each client renders its own copy from this value. Absent when the runtime knows of no action the user can take.
+ */
+export type RemediationAction =
+  /** Authenticate again with the Copilot backend. The current credential is absent, expired, or rejected. */
+  | "sign_in"
+  /** Authenticate as a different account. The current account exists but lacks access to the requested resource. */
+  | "switch_account"
+  /** Inspect which account is currently authenticated before deciding what to change. */
+  | "show_account"
+  /** Review or widen the sandbox policy. The blocked path or host is named by the accompanying message or by the tool result the action arrived with. */
+  | "review_sandbox_policy"
+  /** Permit outbound network access in the sandbox policy. */
+  | "allow_sandbox_outbound"
+  /** Discard conversation history back through the blocked request before continuing. */
+  | "rewind_conversation";
+/**
+ * The session mode the agent is operating in
+ */
+export type SessionMode =
+  /** The agent is responding interactively to the user. */
+  | "interactive"
+  /** The agent is preparing a plan before making changes. */
+  | "plan"
+  /** The agent is working autonomously toward task completion. */
+  | "autopilot";
+/**
  * Who created the schedule: `user` (an explicit user action such as `/every` or `/after`) or `model` (the agent via the `manage_schedule` tool). Gates whether a scheduled skill that opted out of model invocation may fire: only user-created schedules may.
  */
 export type ScheduleOrigin =
@@ -193,6 +266,184 @@ export type AutopilotObjectiveChangedStatus =
   /** Objective was completed by the agent. */
   | "completed";
 /**
+ * Transient indexed-search status and diagnostics from the live runtime service. Never persisted or used to infer activation from session history.
+ */
+export type IndexedSearchData =
+  | {
+      /**
+       * Indexed-search event variant discriminator.
+       */
+      kind: "status";
+      /**
+       * Current indexed-search state for this session activation.
+       */
+      state: IndexedSearchState;
+    }
+  | {
+      /**
+       * Why indexed search was disabled, when applicable.
+       */
+      disabledReason?: IndexedSearchDisabledReason;
+      /**
+       * Whether the repository meets the automatic indexing file-count threshold, when known.
+       */
+      eligible?: boolean;
+      /**
+       * Startup failure details. May contain sensitive user data; restricted telemetry only.
+       */
+      errorMessage?: string;
+      /**
+       * Number of text files counted in the repository.
+       */
+      fileCount?: number;
+      /**
+       * Whether indexed search was explicitly enabled through the environment.
+       */
+      forcedByEnv: boolean;
+      /**
+       * Indexed-search event variant discriminator.
+       */
+      kind: "startup";
+      /**
+       * Outcome of this startup attempt.
+       */
+      outcome: IndexedSearchOutcome;
+      /**
+       * Wall-clock duration of startup in milliseconds.
+       */
+      startupDurationMs: number;
+      /**
+       * Whether waiting for index readiness was requested, including skipped attempts.
+       */
+      warmStart: boolean;
+    }
+  | {
+      /**
+       * Server failure details. May contain sensitive user data; restricted telemetry only.
+       */
+      errorMessage?: string;
+      /**
+       * Category of the server failure.
+       */
+      errorType: IndexedSearchErrorType;
+      /**
+       * Process exit code, when available.
+       */
+      exitCode?: number;
+      /**
+       * Indexed-search event variant discriminator.
+       */
+      kind: "server_error";
+    }
+  | {
+      /**
+       * Number of added files.
+       */
+      addedFileCount?: number;
+      /**
+       * Number of modified files.
+       */
+      changedFileCount?: number;
+      /**
+       * Number of deleted files.
+       */
+      deletedFileCount?: number;
+      /**
+       * Indexed-search event variant discriminator.
+       */
+      kind: "incremental";
+      /**
+       * Phase of the incremental index update.
+       */
+      phase: IndexedSearchIncrementalPhase;
+      /**
+       * Total number of detected changes.
+       */
+      totalChangeCount?: number;
+      /**
+       * Total incremental indexing duration in milliseconds.
+       */
+      totalDurationMs?: number;
+      /**
+       * Index update duration in milliseconds.
+       */
+      updateDurationMs?: number;
+      /**
+       * Workspace scan duration in milliseconds.
+       */
+      walkDurationMs?: number;
+    };
+/**
+ * Live indexed-search state for this session activation, never inferred from persisted history.
+ */
+export type IndexedSearchState =
+  /** Indexed search is not active for this session. */
+  | "disabled"
+  /** Indexed-search startup is in progress. */
+  | "starting"
+  /** The indexed-search server started successfully; its index may still be warming. */
+  | "enabled"
+  /** The indexed-search server and its index are ready. */
+  | "ready"
+  /** Indexed-search startup or the active server failed. */
+  | "failed";
+/**
+ * Configuration, policy, or workspace condition that disabled indexed search.
+ */
+export type IndexedSearchDisabledReason =
+  /** Indexed search was explicitly disabled by the environment. */
+  | "use_tgrep_false"
+  /** Search uses the external ripgrep binary instead of bundled search. */
+  | "use_builtin_ripgrep_false"
+  /** Organization policy disables indexed search. */
+  | "organization"
+  /** Authentication has not resolved organization policy. */
+  | "organization_policy_auth_pending"
+  /** Organization policy could not be determined. */
+  | "organization_policy_unknown"
+  /** The workspace uses a virtualized or network filesystem. */
+  | "virtual_filesystem"
+  /** The workspace is inside a Windows cloud-sync root. */
+  | "cloud_sync_root"
+  /** The Windows cloud-sync safety check failed. */
+  | "cloud_sync_detection_failed"
+  /** The workspace is not available on the runtime's local filesystem. */
+  | "workspace_not_local";
+/**
+ * Result of an indexed-search startup attempt.
+ */
+export type IndexedSearchOutcome =
+  /** A new indexed-search server was started. */
+  | "started"
+  /** The repository has too few files for automatic indexing. */
+  | "skipped_below_threshold"
+  /** No Git repository was found and indexing was not forced. */
+  | "skipped_no_gitroot"
+  /** Configuration, policy, or workspace safety disabled indexing. */
+  | "skipped_disabled"
+  /** An existing indexed-search server was reused. */
+  | "reused_existing"
+  /** The startup attempt failed. */
+  | "failed";
+/**
+ * Category of an indexed-search server failure.
+ */
+export type IndexedSearchErrorType =
+  /** The indexed-search server could not be spawned. */
+  | "spawn_error"
+  /** The indexed-search server exited unexpectedly. */
+  | "unexpected_exit"
+  /** The indexed-search server was terminated by a signal. */
+  | "killed_by_signal";
+/**
+ * Phase of an incremental indexed-search update.
+ */
+export type IndexedSearchIncrementalPhase =
+  /** A workspace scan found changes to index. */
+  | "changes_detected"
+  /** The incremental index update completed. */
+  | "updated";
+/**
  * Origin of an effective session model change.
  */
 export type ModelChangeSource =
@@ -216,18 +467,41 @@ export type ModelChangeSource =
   | "plan_mode"
   /** The runtime selected the model automatically, such as rate-limit recovery or refusal fallback. */
   | "automatic"
+  /** The user selected the promoted model from the changeboarding card or its keyboard shortcut. */
+  | "changeboarding_shortcut"
   /** An SDK or RPC caller selected the model. */
-  | "sdk";
+  | "sdk"
+  /** The user accepted a CAPI-issued Auto tier recommendation. */
+  | "auto_tier_recommendation";
 /**
- * The session mode the agent is operating in
+ * Why the session no longer has an explicitly selected model.
  */
-export type SessionMode =
-  /** The agent is responding interactively to the user. */
-  | "interactive"
-  /** The agent is preparing a plan before making changes. */
-  | "plan"
-  /** The agent is working autonomously toward task completion. */
-  | "autopilot";
+export type ModelDeselectedReason =
+  /** A host-managed provider snapshot no longer publishes the selected model. */
+  "provider_withdrawn";
+/**
+ * Enabled Auto preferences that Copilot API can recommend.
+ */
+export type RecommendedAutoTier =
+  /** Optimize for efficiency. */
+  | "efficiency"
+  /** Balance efficiency and intelligence. */
+  | "balance"
+  /** Optimize for intelligence. */
+  | "intelligence"
+  | (string & {});
+/**
+ * Terminal reason an Auto preference activation failed.
+ */
+export type AutoTierSwitchFailureReason =
+  /** The candidate model was rejected by model policy. */
+  | "policy_rejected"
+  /** The Auto routing request failed or returned an unusable response. */
+  | "request_failed"
+  /** The runtime could not prepare the Auto routing request. */
+  | "setup_failed"
+  /** The provider does not support Auto routing. */
+  | "unsupported";
 /**
  * Permission mode for the session.
  */
@@ -266,6 +540,25 @@ export type HandoffSourceType =
   /** The handoff originated from a local session. */
   | "local";
 /**
+ * Whether the accumulated numeric AI-credit subtotal covers the observed calls.
+ */
+export type AiCreditsStatus =
+  /** Every observed call supplied an AI-credit amount, including an explicit zero. */
+  | "complete"
+  /** Some calls supplied amounts and some did not; the numeric value is only a reported subtotal. */
+  | "partial"
+  /** No AI-credit amount was reported for the observed calls. Numeric zero is not a zero-cost claim. */
+  | "unavailable";
+/**
+ * The neutral kind of a model provider — the model analog of `AccountKind`. A model provider is the live, entitled source a model came from; central code never branches on this beyond a single dispatch.
+ */
+/** @experimental */
+export type ModelProviderKind =
+  /** GitHub Copilot / CAPI models, spawned by a github-resolving account that holds a Copilot seat. */
+  | "copilot"
+  /** Microsoft 365 Copilot (Loki) inference models, spawned by a resolvable Entra-derived Loki account. */
+  | "loki";
+/**
  * Whether the session ended normally ("routine") or due to a crash/fatal error ("error")
  */
 export type ShutdownType =
@@ -273,6 +566,98 @@ export type ShutdownType =
   | "routine"
   /** The session ended because of a crash or fatal error. */
   | "error";
+/**
+ * Access policy reported by the quota service.
+ */
+export type ProviderQuotaAccessState =
+  /** Access is allowed. */
+  | "allowed"
+  /** Access is denied. */
+  | "denied"
+  /** Quota is not required for this access. */
+  | "not_required"
+  /** The service did not supply a recognized access state. */
+  | "unknown"
+  /** Client-only compatibility placeholder when acquisitionStatus is unavailable or failed; not an observed service verdict. */
+  | "unavailable";
+/**
+ * Acquisition state, independent of the service's business access/capacity verdict.
+ */
+export type ProviderQuotaAcquisitionStatus =
+  /** A service quota observation was received. */
+  | "succeeded"
+  /** No service snapshot is available for this caller or surface. */
+  | "unavailable"
+  /** Acquisition failed; inspect httpStatus/acquisitionError without inferring a business verdict. */
+  | "failed";
+/**
+ * Capacity is independent of whether a numeric balance was supplied.
+ */
+export type ProviderQuotaCapacityState =
+  /** Capacity is available. */
+  | "available"
+  /** The service explicitly reports exhaustion. */
+  | "exhausted"
+  /** The reported entitlement is unlimited. */
+  | "unlimited"
+  /** No billable quota is required. */
+  | "not_required"
+  /** The service reports that capacity is not applicable. */
+  | "not_applicable"
+  /** No recognized capacity state was supplied. */
+  | "unknown"
+  /** Client-only compatibility placeholder when acquisitionStatus is unavailable or failed; not an observed service verdict. */
+  | "unavailable";
+/**
+ * Identity scope of a monthly usage reading.
+ */
+export type ProviderMonthlyUsageScope =
+  /** Consumption of the authenticated user within the parent observation's service and returned cycle. */
+  | "user"
+  /** The service did not establish a recognized usage scope. */
+  | "unknown";
+/**
+ * Availability of a service's monthly consumption reading.
+ */
+export type ProviderMonthlyUsageState =
+  /** The service reported a usable consumption reading, including an explicit zero. */
+  | "available"
+  /** The service found no usage policy; no consumption amount is known. */
+  | "no_policy"
+  /** The read failed or its data could not be used; consumption is unknown. */
+  | "unavailable"
+  /** The service reported an unrecognized usage state. */
+  | "unknown";
+/**
+ * Units explicitly reported by a quota provider.
+ */
+export type ProviderQuotaUnit =
+  /** AI credits, not tokens or currency. */
+  | "ai_credits"
+  /** Requests charged against an entitlement. */
+  | "requests"
+  /** Model tokens. */
+  | "tokens"
+  /** The observation does not establish a quantity unit. */
+  | "unknown";
+/**
+ * Timing and purpose of a provider quota observation.
+ */
+export type ProviderQuotaObservationKind =
+  /** An explicit account read; consumption may still be subject to service aggregation delay. */
+  | "account_snapshot"
+  /** A verdict attached before an inference response. May be cached; never a post-charge balance. */
+  | "admission_state";
+/**
+ * Interpretation permitted for independently reported quantities.
+ */
+export type ProviderQuotaQuantityKind =
+  /** Quantities form an authoritative available-of-entitled budget suitable for percentage presentation. */
+  | "authoritative_budget"
+  /** Raw advisory quantities; do not infer permission, usage percentage, reset cadence, or post-charge balance. */
+  | "advisory_balance"
+  /** No quantity measurement, as with admission-only response headers. */
+  | "none";
 /**
  * What initiated a conversation compaction
  */
@@ -285,8 +670,116 @@ export type CompactionTrigger =
   | "manual"
   /** Emergency compaction triggered by high process memory usage. */
   | "memory_pressure"
-  /** Compaction requested while switching to a model with a smaller context window. */
+  /** Compaction requested while switching to a model with a smaller context window, including a HydraFusion turn's routed root model. */
   | "model_switch";
+/**
+ * Controlled reason for a permission-recovery episode transition
+ */
+export type PermissionRecoveryReason =
+  /** An action required permission that Assisted Permissions could not grant. */
+  | "permission_required"
+  /** The agent repeated an equivalent permission request instead of making progress. */
+  | "repeated_attempt"
+  /** The bounded number of distinct permission attempts was exhausted. */
+  | "attempts_exhausted"
+  /** A responder approved the escalated permission request. */
+  | "permission_approved"
+  /** A responder denied the escalated permission request. */
+  | "permission_denied"
+  /** The response-capable client became unavailable while escalation was pending. */
+  | "responder_unavailable"
+  /** A later tool call succeeded without requiring the blocked permission. */
+  | "equivalent_alternative_succeeded";
+/**
+ * Category of structured task blocker
+ */
+export type TaskBlockerKind =
+  /** Autopilot permission recovery requires intervention or has no safe autonomous path. */
+  "permission_recovery";
+/**
+ * Runtime handling applied to a recovery attempt
+ */
+export type PermissionRecoveryAttemptDisposition =
+  /** The request was denied without prompting so the agent could try an alternative. */
+  | "deferred"
+  /** The request was surfaced to an interactive responder. */
+  | "prompted"
+  /** The interactive responder approved the request. */
+  | "approved"
+  /** The interactive responder denied the request or became unavailable. */
+  | "denied"
+  /** The request exhausted unattended recovery and produced a blocked outcome. */
+  | "blocked"
+  /** A tool call succeeded as an equivalent alternative. */
+  | "succeeded";
+/**
+ * Controlled reason for an individual attempt disposition
+ */
+export type PermissionRecoveryAttemptReason =
+  /** The attempt required permission that Assisted Permissions could not grant. */
+  | "permission_required"
+  /** The request repeated an earlier attempt. */
+  | "repeated_attempt"
+  /** The request exceeded the bounded number of distinct attempts. */
+  | "attempts_exhausted"
+  /** The interactive responder approved the request. */
+  | "permission_approved"
+  /** The interactive responder denied the request. */
+  | "permission_denied"
+  /** The interactive responder became unavailable. */
+  | "responder_unavailable"
+  /** The tool call succeeded without the blocked permission. */
+  | "equivalent_alternative_succeeded";
+/**
+ * Relationship of an attempt to earlier permission requests
+ */
+export type PermissionRecoveryAttemptRelation =
+  /** The first denied permission request in the episode. */
+  | "initial"
+  /** A request equivalent to an earlier attempt. */
+  | "retry"
+  /** A distinct request or a successful alternative tool call. */
+  | "alternative";
+/**
+ * Action selected when autonomous recovery cannot continue
+ */
+export type PermissionRecoveryOnBlocked =
+  /** Surface the existing permission prompt to a response-capable client. */
+  | "ask"
+  /** Return a structured unsuccessful blocked outcome because no responder is available. */
+  | "fail";
+/**
+ * Lifecycle state of a permission-recovery episode
+ */
+export type PermissionRecoveryStatus =
+  /** Autopilot may try a bounded equivalent alternative. */
+  | "recovering"
+  /** An interactive permission response is required. */
+  | "awaiting_approval"
+  /** The episode ended through approval or a successful equivalent alternative. */
+  | "resolved"
+  /** No autonomous path remains and the task requires intervention. */
+  | "blocked";
+/**
+ * Controlled reason that a task is blocked by permission recovery
+ */
+export type TaskBlockerReason =
+  /** A required action is waiting on or could not obtain permission. */
+  | "permission_required"
+  /** The agent repeated an equivalent denied permission request. */
+  | "repeated_attempt"
+  /** The bounded autonomous attempts for one permission-recovery episode were exhausted. */
+  | "attempts_exhausted"
+  /** Historical compatibility value for a recovery resolved by permission approval; new task blockers do not emit it. */
+  | "permission_approved"
+  /** A responder denied the escalated permission request. */
+  | "permission_denied"
+  /** No response-capable client remained available for the permission request. */
+  | "responder_unavailable"
+  /** Historical compatibility value for a recovery resolved by an equivalent permitted alternative; new task blockers do not emit it. */
+  | "equivalent_alternative_succeeded"
+  /** The epoch-wide consecutive-block or total-denial limit was reached. */
+  | "permission_recovery_run_limit";
 /**
  * Semantic result of evaluating a task completion request
  */
@@ -297,6 +790,87 @@ export type TaskCompletionOutcome =
   | "continue"
   /** Completion cannot proceed without intervention; the active objective is paused when one is identified. */
   | "blocked";
+/**
+ * Structured terminal status from a tool completion event.
+ */
+export type CompletionReceiptToolStatus =
+  /** The tool completed successfully. */
+  | "success"
+  /** The tool failed without a more specific structured status. */
+  | "failure"
+  /** The tool exceeded its time budget. */
+  | "timeout"
+  /** The user rejected the tool call. */
+  | "rejected"
+  /** The permissions service denied the tool call. */
+  | "denied";
+/**
+ * Runtime reason the completion decision was accepted.
+ */
+export type CompletionReceiptStopReason =
+  /** The model reached a natural terminal response. */
+  | "natural"
+  /** A terminal tool ended the interaction. */
+  | "terminal_tool"
+  /** The configured agentStop continuation limit was reached. */
+  | "agent_stop_block_limit";
+/**
+ * Kind of turn for which HydraFusion routing is running.
+ */
+/** @experimental */
+export type FusionTurnKind =
+  /** A user-message turn. */
+  | "user"
+  /** A conversation-compaction turn. */
+  | "compaction";
+/**
+ * Server-recommended routing behavior for a later HydraFusion turn.
+ */
+/** @experimental */
+export type FusionFollowUpAction =
+  /** Reuse the durable primary model without routing. */
+  | "reuse_primary"
+  /** Request a new routing decision. */
+  | "reroute";
+/**
+ * Validated HydraFusion execution pattern.
+ */
+/** @experimental */
+export type FusionPattern =
+  /** Run one primary solver phase. */
+  | "single"
+  /** Run a primary phase, a judge, and an optional repair. */
+  | "cascade"
+  /** Run a primary draft, a read-only critique, and a revision. */
+  | "critique";
+/**
+ * HydraFusion phase kind.
+ */
+/** @experimental */
+export type FusionPhaseKind =
+  /** Primary solver phase. */
+  | "primary"
+  /** Read-only cascade judge phase. */
+  | "judge"
+  /** Cascade repair phase. */
+  | "repair"
+  /** Initial critique-pattern draft phase. */
+  | "draft"
+  /** Read-only critique phase. */
+  | "critic"
+  /** Critique-pattern revision phase. */
+  | "revision"
+  /** Follow-up phase continuing from the resolved model. */
+  | "follow_up";
+/**
+ * Conversation scope in which a HydraFusion phase executes.
+ */
+/** @experimental */
+export type FusionConversationScope =
+  /** Canonical root conversation history. */
+  | "root"
+  /** Isolated read-only review history that does not enter the root conversation. */
+  | "review";
 /**
  * The agent mode that was active when this message was sent
  */
@@ -327,7 +901,8 @@ export type Attachment =
   | AttachmentGitHubFile
   | AttachmentGitHubSnippet
   | AttachmentBlob
-  | AttachmentExtensionContext;
+  | AttachmentExtensionContext
+  | AttachmentSessionReference;
 /**
  * Why the binary data is absent: it exceeded the inline size limit, or its asset was unavailable
  */
@@ -357,6 +932,40 @@ export type UserMessageDelivery =
   /** Enqueued while the agent was busy; processed as its own run afterward. */
   | "queued";
 /**
+ * Content-safe activity observed while a HydraFusion phase is running.
+ */
+/** @experimental */
+export type FusionPhaseActivityKind =
+  /** The provider produced additional private output bytes. */
+  | "model_output"
+  /** A tool began executing inside the phase. */
+  | "tool_started"
+  /** A tool finished executing inside the phase. */
+  | "tool_completed";
+/**
+ * How a durable phase checkpoint contributes its exact message to canonical root history.
+ */
+/** @experimental */
+/** @internal */
+export type FusionProjectionMode =
+  /** Append the exact root message immediately. */
+  | "append"
+  /** Hold a terminal message outside canonical history until the final commit selects it. */
+  | "staged"
+  /** Do not project the checkpoint into root history. */
+  | "none";
+/**
+ * Durable outcome status of a HydraFusion phase.
+ */
+/** @experimental */
+export type FusionPhaseStatus =
+  /** The phase completed successfully. */
+  | "succeeded"
+  /** The phase failed. */
+  | "failed"
+  /** The phase was cancelled. */
+  | "cancelled";
+/**
  * Tool call type: "function" for standard tool calls, "custom" for grammar-based tool calls. Defaults to "function" when absent.
  */
 export type AssistantMessageToolRequestType =
@@ -381,6 +990,10 @@ export type CitationProvider =
 /** @experimental */
 export type CitationLocation = CitationLocationChar | CitationLocationPage | CitationLocationBlock;
 /**
+ * Hosted program caller type
+ */
+export type AssistantMessageToolRequestCallerType = "program";
+/**
  * API endpoint used for this model call, matching CAPI supported_endpoints vocabulary
  */
 export type AssistantUsageApiEndpoint =
@@ -393,6 +1006,24 @@ export type AssistantUsageApiEndpoint =
   /** WebSocket Responses API endpoint. */
   | "ws:/responses";
 /**
+ * How the runtime fell back to an uncompressed request body after a compressed body was rejected
+ */
+export type ModelCallRequestBodyCompressionFallback =
+  /** A compressed body was rejected with HTTP 400 or 415 and this outcome comes from the single uncompressed resend. */
+  | "retried"
+  /** Request body compression was already turned off for the session by an earlier rejection, so the body was sent uncompressed. */
+  | "disabled";
+/**
+ * Content-Encoding applied to the request body sent on the wire
+ */
+export type ModelCallRequestBodyEncoding =
+  /** The request body was sent uncompressed (including every WebSocket request). */
+  | "identity"
+  /** The request body was sent gzip-compressed. */
+  | "gzip"
+  /** The request body was sent zstd-compressed. */
+  | "zstd";
+/**
  * Transport used for a successful model call
  */
 export type AssistantUsageTransport =
@@ -400,6 +1031,48 @@ export type AssistantUsageTransport =
   | "http"
   /** WebSocket transport. */
   | "websocket";
+/**
+ * Normalized cause of the WebSocket failure that triggered the HTTP fallback
+ */
+export type ModelCallWebSocketFallbackErrorKind =
+  /** DNS resolution of the WebSocket host failed. */
+  | "dns"
+  /** The TLS handshake or a TLS record failed. */
+  | "tls"
+  /** A WebSocket connect or read timed out. */
+  | "timeout"
+  /** The peer refused the TCP connection. */
+  | "connection_refused"
+  /** The connection was reset, aborted, or ended mid-stream without a close. */
+  | "connection_reset"
+  /** The peer closed the WebSocket. */
+  | "closed_by_peer"
+  /** The runtime closed the WebSocket itself. */
+  | "closed_locally"
+  /** The socket was already closed before it was used. */
+  | "not_connected"
+  /** The upgrade or request was rejected with an HTTP status. */
+  | "http_status"
+  /** A WebSocket protocol violation or an undecodable frame. */
+  | "protocol"
+  /** The WebSocket request could not be built. */
+  | "configuration"
+  /** A failure that maps onto none of the other kinds. */
+  | "other";
+/**
+ * Why a WebSocket-capable model call was carried by the HTTP fallback
+ */
+export type ModelCallWebSocketFallbackReason =
+  /** The WebSocket connection could not be established. */
+  | "connect_failed"
+  /** No usable WebSocket connection was available for the request. */
+  | "connection_unavailable"
+  /** Sending the request over the WebSocket failed. */
+  | "send_failed"
+  /** The WebSocket returned a retryable API error. */
+  | "api_error"
+  /** The WebSocket transport failed before any output reached the consumer. */
+  | "transport_failed";
 /**
  * For HTTP 400 failures only: whether the response carried a structured CAPI error envelope (structured_error, a deterministic validation failure) or no error body (bodyless, the transient gateway/proxy signature). Absent for non-400 failures.
  */
@@ -416,6 +1089,13 @@ export type ModelCallFailureKind =
   | "api"
   /** The request transport failed before a usable API response completed. */
   | "transport";
+/**
+ * Bounded product-state failure classified before telemetry projection.
+ */
+/** @internal */
+export type ModelCallProductStateError =
+  /** A Responses input item belongs to a different transport connection. */
+  "input_item_connection_mismatch";
 /**
  * Where the failed model call originated
  */
@@ -435,6 +1115,18 @@ export type ModelCallFailureTransport =
   /** WebSocket transport. */
   | "websocket";
 /**
+ * Final outcome of one logical model dispatch after response acceptance processing
+ */
+export type ModelCallFinishedOutcome =
+  /** The provider response was accepted for continued agent processing. */
+  | "success"
+  /** The dispatch ended with a provider or transport error. */
+  | "error"
+  /** The dispatch was cancelled before an accepted response was produced. */
+  | "cancelled"
+  /** The provider response was rejected during post-response acceptance processing. */
+  | "rejected";
+/**
  * Finite reason code describing why the current turn was aborted
  */
 export type AbortReason =
@@ -447,6 +1139,34 @@ export type AbortReason =
   /** Autopilot stopped the run because the active objective reached its user-set --max-ai-credits limit. */
   | "autopilot_credit_limit";
 /**
+ * Configuration source: user, workspace, plugin, builtin, managed, or account
+ */
+export type McpServerSource =
+  /** Server configured in the user's global MCP configuration. */
+  | "user"
+  /** Server configured by the current workspace. */
+  | "workspace"
+  /** Server contributed by an installed plugin. */
+  | "plugin"
+  /** Server bundled with the runtime. */
+  | "builtin"
+  /** Server supplied by a trusted host-managed catalog. */
+  | "managed"
+  /** Server contributed by a signed-in account; enablement and organization policy still apply. */
+  | "account";
+/**
+ * Transport mechanism: stdio, http, sse (deprecated), or memory (in-process MCP server)
+ */
+export type McpServerTransport =
+  /** Server communicates over stdio with a local child process. */
+  | "stdio"
+  /** Server communicates over streamable HTTP. */
+  | "http"
+  /** Server communicates over Server-Sent Events (deprecated). */
+  | "sse"
+  /** Server is backed by an in-memory runtime implementation. */
+  | "memory";
+/**
  * Allowed values for the `ToolExecutionStartToolDescriptionMetaUIVisibility` enumeration.
  */
 export type ToolExecutionStartToolDescriptionMetaUIVisibility =
@@ -454,6 +1174,28 @@ export type ToolExecutionStartToolDescriptionMetaUIVisibility =
   | "model"
   /** Tool is callable by the MCP App view (iframe) via session.mcp.apps.callTool */
   | "app";
+/**
+ * Shell output source. Terminal output has no separate stdout/stderr attribution.
+ */
+export type ToolShellOutputStream =
+  /** Output from the shell command's standard output stream. This is the default when stream is omitted. */
+  | "stdout"
+  /** Output from the shell command's standard error stream. */
+  | "stderr"
+  /** Inherently merged output that cannot be attributed separately to stdout or stderr. */
+  | "terminal";
+/**
+ * Kind of file mutation committed by a built-in editing tool.
+ */
+/** @experimental */
+export type ToolExecutionCompleteFileEditKind =
+  /** A file was created. */
+  | "create"
+  /** A file was written by an edit operation. */
+  | "edit"
+  /** A file was deleted. */
+  | "delete"
+  | (string & {});
 /**
  * A model-facing binary result as persisted: full inline data, a size-omitted marker, or a deduplicated asset reference
  */
@@ -525,6 +1267,36 @@ export type SkillInvokedTrigger =
   /** Skill content loaded as part of another context, such as a configured custom agent or subagent. */
   | "context-load";
 /**
+ * Authority or runtime mechanism responsible for sub-agent model selection.
+ */
+export type SubagentModelSelectionSource =
+  /** Explicit model supplied by the parent agent on the task call and selected for dispatch. */
+  | "explicit_override"
+  /** Required model policy configured for the sub-agent. */
+  | "configured_required"
+  /** Non-required model preference configured for the sub-agent. */
+  | "configured_preference"
+  /** Complementary-model default selected for the sub-agent. */
+  | "complementary_default"
+  /** Model inherited from the parent session. */
+  | "session_inheritance"
+  /** Default model declared by the agent definition. */
+  | "agent_definition_default"
+  /** Runtime policy, Auto mode, or an experiment selected the model. */
+  | "runtime_policy";
+/**
+ * Where the model input for a task-tool sub-agent came from.
+ */
+export type SubagentTaskModelSource =
+  /** The spawning agent supplied the task tool's model argument. */
+  | "task_argument"
+  /** The task omitted a model and the per-sub-agent settings entry supplied a concrete one. */
+  | "subagent_configuration"
+  /** The task omitted a model and the user-defined custom agent's definition supplied one. */
+  | "custom_agent_definition"
+  /** Neither the task call, the per-sub-agent settings entry, nor a custom agent definition supplied a model. */
+  | "unset";
+/**
  * Binary asset type discriminator. Use "image" for images and "resource" otherwise.
  */
 export type BinaryAssetType =
@@ -541,6 +1313,40 @@ export type SystemMessageRole =
   /** Developer instruction message. */
   | "developer";
 /**
+ * Authority responsible for an instruction update
+ */
+export type InstructionUpdateAuthority =
+  /** The runtime generated the instruction. */
+  | "runtime"
+  /** The SDK host supplied the instruction. */
+  | "host"
+  /** Managed policy supplied the instruction. */
+  | "managedPolicy";
+/**
+ * Earliest legal insertion boundary for an instruction update
+ */
+export type InstructionUpdateBoundary =
+  /** Insert after the current tool-result run and before the next model request. */
+  | "afterToolResults"
+  /** Insert immediately before the next model request at a provider-legal boundary. */
+  | "nextModelRequest";
+/**
+ * Deterministic behavior when the active provider cannot represent the requested update
+ */
+export type InstructionUpdateFallback =
+  /** Rebuild the leading system prompt rather than silently dropping the update. */
+  | "rebuildSystemPrompt"
+  /** Reject the update without changing authoritative instructions. */
+  | "reject";
+/**
+ * How long an instruction update remains authoritative
+ */
+export type InstructionUpdateLifetime =
+  /** Persists in event order across replay, resume, rewind, fork, and compaction. */
+  | "persistent"
+  /** Applies only to the current turn and is not restored from durable history. */
+  | "turn";
+/**
  * Structured metadata identifying what triggered this notification
  */
 export type SystemNotification =
@@ -550,7 +1356,7 @@ export type SystemNotification =
   | SystemNotificationShellCompleted
   | SystemNotificationShellDetachedCompleted
   | SystemNotificationInstructionDiscovered
-  | SystemNotificationFactoryCompleted
+  | SystemNotificationWorkflowCompleted
   | SystemNotificationUnclassified;
 /**
  * Whether the agent completed successfully or failed
@@ -561,17 +1367,103 @@ export type SystemNotificationAgentCompletedStatus =
   /** The agent failed. */
   | "failed";
 /**
- * Terminal status reached by a factory execution attempt.
+ * Durable metadata describing who initiated a workflow pause.
  */
-export type SystemNotificationFactoryCompletedStatus =
-  /** The factory completed successfully. */
+export type SystemNotificationWorkflowPauseInfo =
+  | {
+      /**
+       * Workflow pause initiator discriminator.
+       */
+      type: "user";
+    }
+  | {
+      /**
+       * Stable author-defined checkpoint key that initiated the pause.
+       */
+      key: string;
+      /**
+       * Workflow pause initiator discriminator.
+       */
+      type: "checkpoint";
+    };
+/**
+ * Terminal status reached by a workflow execution attempt.
+ */
+export type SystemNotificationWorkflowCompletedStatus =
+  /** The workflow completed successfully. */
   | "completed"
-  /** The factory was halted. */
+  /** The workflow was halted. */
   | "halted"
-  /** The factory was cancelled. */
+  /** The workflow attempt paused intentionally. */
+  | "paused"
+  /** The workflow was cancelled. */
   | "cancelled"
-  /** The factory failed. */
+  /** The workflow failed. */
   | "error";
+/**
+ * Canonical runtime-owned Assisted Permissions assessment for one permission request. This assessment is advisory; `permission.completed` remains the authoritative final permission decision.
+ */
+/** @experimental */
+export type AssistedApprovalAssessment =
+  | {
+      /**
+       * Assisted Permissions assessment outcome discriminator.
+       */
+      status: "unavailable";
+    }
+  | {
+      /**
+       * Machine-readable reason. Current runtimes emit `inactive` or `not-reached`; consumers must tolerate future strings.
+       */
+      reason: string;
+      /**
+       * Assisted Permissions assessment outcome discriminator.
+       */
+      status: "not-run";
+    }
+  | {
+      /**
+       * Machine-readable exclusion reason. Current runtimes emit `managed-approval-required`, `sandbox-bypass`, `extension-permission-access`, `action-too-long`, `authorization-history-incomplete`, `path-not-authorized`, or `content-excluded`; consumers must tolerate future strings.
+       */
+      reason: string;
+      /**
+       * Assisted Permissions assessment outcome discriminator.
+       */
+      status: "excluded";
+    }
+  | {
+      /**
+       * Judge-authored human-readable rationale. A bare ALLOW or DENY verdict legitimately leaves this absent.
+       */
+      rationale?: string;
+      /**
+       * Judge verdict for this request.
+       */
+      recommendation: AssistedApprovalCompletedRecommendation;
+      /**
+       * Assisted Permissions assessment outcome discriminator.
+       */
+      status: "completed";
+    }
+  | {
+      /**
+       * Machine-readable failure reason. Current runtimes emit `timeout`, `abort`, `empty_response`, `model_error`, `parse_error`, or `context_too_large`; consumers must tolerate future strings.
+       */
+      reason: string;
+      /**
+       * Assisted Permissions assessment outcome discriminator.
+       */
+      status: "failed";
+    };
+/**
+ * Usable verdict returned by the Assisted Permissions judge.
+ */
+/** @experimental */
+export type AssistedApprovalCompletedRecommendation =
+  /** The judge recommends automatic approval. */
+  | "approve"
+  /** The judge requires an explicit permission decision. */
+  | "requireApproval";
 /**
  * Details of the permission being requested
  */
@@ -585,9 +1477,17 @@ export type PermissionRequest =
   | PermissionRequestCustomTool
   | PermissionRequestHook
   | PermissionRequestExtensionManagement
-  | PermissionRequestFactory
+  | PermissionRequestWorkflow
   | PermissionRequestExtensionPermissionAccess
   | PermissionRequestExtensionEnvAccess;
+/**
+ * Access a sandbox path grant confers
+ */
+export type PermissionSandboxPathGrantAccess =
+  /** Read access: the path is added to readonlyPaths. */
+  | "read"
+  /** Read and write access: the path is added to readwritePaths. */
+  | "readWrite";
 /**
  * Advisory recommendation the runtime attaches to a permission request whose origin it can vouch for by construction. Unlike the auto-approval judge this does not depend on auto mode and does not evaluate what the tool call does; its absence simply means the runtime has no opinion and the request follows the host's normal approval flow.
  */
@@ -648,12 +1548,12 @@ export type PermissionRequestMemoryScope =
   /** Store the memory for the current user. */
   | "user";
 /**
- * Operation gated by a factory permission request.
+ * Operation gated by a workflow permission request.
  */
-export type FactoryPermissionOperation =
-  /** Running a registered factory, which spends subagents, active time, and AI credits under the approved limits. */
+export type WorkflowPermissionOperation =
+  /** Running a registered workflow, which spends subagents, active time, and AI credits under the approved limits. */
   | "run"
-  /** Authoring a factory, which writes JavaScript into a session-scoped extension and loads it. */
+  /** Authoring a workflow, which writes JavaScript into a session-scoped extension and loads it. */
   | "author";
 /**
  * Derived user-facing permission prompt details for UI consumers
@@ -669,7 +1569,7 @@ export type PermissionPromptRequest =
   | PermissionPromptRequestPath
   | PermissionPromptRequestHook
   | PermissionPromptRequestExtensionManagement
-  | PermissionPromptRequestFactory
+  | PermissionPromptRequestWorkflow
   | PermissionPromptRequestExtensionPermissionAccess
   | PermissionPromptRequestExtensionEnvAccess;
 /**
@@ -683,10 +1583,25 @@ export type PermissionPromptRequestPathAccessKind =
   /** Write access to a filesystem path. */
   | "write";
 /**
+ * Controlled reason or actor responsible for a permission response.
+ */
+export type PermissionDecisionSource =
+  /** The response followed the assisted-approval judge recommendation. */
+  | "assisted_approval"
+  /** A human supplied the response through an interactive prompt. */
+  | "human_response"
+  /** The host applied a standing policy or override rather than a judge recommendation or human decision. */
+  | "host_policy"
+  /** The host denied the request because no interactive user response was available. */
+  | "unattended_fallback"
+  /** Historical compatibility value for sessions created while authorization carry-forward was executable. Current runtimes do not produce this source. */
+  | "authorization_carry_forward";
+/**
  * The result of the permission request
  */
 export type PermissionResult =
   | PermissionApproved
+  | PermissionApprovedReadOnlyForSession
   | PermissionApprovedForSession
   | PermissionApprovedForLocation
   | PermissionCancelled
@@ -706,9 +1621,18 @@ export type UserToolSessionApproval =
   | UserToolSessionApprovalMemory
   | UserToolSessionApprovalCustomTool
   | UserToolSessionApprovalExtensionManagement
-  | UserToolSessionApprovalFactory
+  | UserToolSessionApprovalWorkflow
   | UserToolSessionApprovalExtensionPermissionAccess
   | UserToolSessionApprovalExtensionEnvAccess;
+/**
+ * Direction stored in a historical extractor claim. Current runtimes do not apply it.
+ */
+/** @experimental */
+export type PermissionMessageAuthorizationPolarity =
+  /** Historical claim recorded as a grant. */
+  | "grant"
+  /** Historical claim recorded as a denial. */
+  | "denial";
 /**
  * Elicitation mode; "form" for structured input, "url" for browser-based. Defaults to "form" when absent.
  */
@@ -730,7 +1654,7 @@ export type ElicitationCompletedAction =
 /**
  * Opaque JSON value submitted for one field in accepted `elicitation.completed` form content.
  */
-export type ElicitationCompletedContent = JsonValue | undefined;
+export type ElicitationCompletedContent = JsonValue;
 /**
  * Reason the runtime is requesting host-provided MCP OAuth credentials
  */
@@ -752,6 +1676,16 @@ export type McpOauthCompletionOutcome =
   /** The request completed without an OAuth provider. */
   | "cancelled";
 /**
+ * Terminal outcome of the original authorization reservation, including reconnect
+ */
+export type McpOauthRecoveryCompletedOutcome =
+  /** Credentials were renewed and the server reconnected. */
+  | "succeeded"
+  /** The recovery was cancelled before it completed. */
+  | "cancelled"
+  /** Credential renewal or reconnect failed, or the server was dropped. */
+  | "failed";
+/**
  * Why dynamic headers are being requested.
  */
 export type McpHeadersRefreshRequiredReason =
@@ -769,6 +1703,8 @@ export type McpHeadersRefreshCompletedOutcome =
   | "headers"
   /** The host responded with no dynamic headers. */
   | "none"
+  /** The host credential broker rejected or failed the refresh. */
+  | "error"
   /** No response arrived within the bounded window. */
   | "timeout";
 /**
@@ -823,6 +1759,19 @@ export type AutoModeResolvedReasoningBucket =
   /** The request looks high-reasoning; a stronger model is appropriate. */
   | "high";
 /**
+ * Current phase of organization-required plugin preparation.
+ */
+/** @experimental */
+export type ManagedPluginProgressPhase =
+  /** Managed settings are still resolving before plugin preparation can be planned. */
+  | "initializing"
+  /** Required plugin content is being installed. */
+  | "installing"
+  /** Installed required plugin content is being updated. */
+  | "updating"
+  /** Managed plugin preparation has completed. */
+  | "complete";
+/**
  * Summary of which managed-settings channels contributed to the effective session policy. Use the per-channel booleans for exact provenance.
  */
 export type ManagedSettingsResolvedSource =
@@ -832,7 +1781,9 @@ export type ManagedSettingsResolvedSource =
   | "device"
   /** Only session-local SDK-host injection contributed. */
   | "client"
-  /** More than one channel contributed. Ordinary keys resolve device over server per key, while permissions compose restrictively across all present layers. */
+  /** A policy helper registered by device or server policy contributed. Device registration takes priority when present. */
+  | "policyHelper"
+  /** More than one channel contributed. Ordinary keys resolve device over server over policy helper per key, while permissions compose restrictively across all present layers. */
   | "mixed"
   /** No managed policy is in force (no channel contributed). */
   | "none";
@@ -840,22 +1791,24 @@ export type ManagedSettingsResolvedSource =
  * The category of runtime action that enterprise managed settings governed (blocked or capped)
  */
 export type ManagedSettingsEnforcedAction =
-  /** An attempt to turn on a bypass-permissions ("yolo") escalation was refused or capped because policy disables bypass-permissions mode. */
+  /** An attempt to enter a permission mode governed by managed policy was refused or capped. The `setting` and `escalation` fields identify whether this was bypass permissions or Assisted Permissions. */
   "bypass_permissions_blocked";
 /**
- * For a `bypass_permissions_blocked` action, which permission-escalation primitive was refused
+ * For a `bypass_permissions_blocked` action, which permission-mode or escalation primitive was refused
  */
 export type ManagedSettingsEnforcedEscalation =
   /** Full allow-all permissions — automatically approving tools, paths, and URLs. */
   | "allow_all"
   /** Automatic approval of all tool permission requests. */
   | "approve_all"
-  /** Assisted mode — keeps normal prompt paths and adds an LLM recommendation, distinct from allow-all. */
+  /** Assisted Permissions — uses an LLM review to reduce prompts, distinct from allow-all and not a hard security boundary. */
   | "assisted_approval"
   /** Unrestricted filesystem access outside the session's allowed directories. */
   | "unrestricted_paths"
   /** Unrestricted URL fetch access. */
-  | "unrestricted_urls";
+  | "unrestricted_urls"
+  /** A server-wide MCP "Always Allow" (or `--allow-tool <server>`) blanket that would auto-approve every tool from an MCP server. Capped to per-tool approval; each tool still prompts. */
+  | "server_wide_mcp_approval";
 /**
  * Exit plan mode action
  */
@@ -869,19 +1822,119 @@ export type ExitPlanModeAction =
   /** Exit plan mode and continue with parallel autonomous workers. */
   | "autopilot_fleet";
 /**
- * Terminal status a factory run committed. A settled run is never `pending` or `running`, so those two members of the run-status domain are deliberately absent.
+ * Controlled provenance for a typed runtime response. Only `human_response`, minted by a trusted direct-interaction ingress, is human authorization evidence.
  */
-export type FactoryRunSettledStatus =
-  /** The factory body resolved and its result was committed. */
+export type HumanResponseActor =
+  /** A built-in trusted client submitted the response after direct human interaction. */
+  | "human_response"
+  /** A host or SDK automation submitted the response without direct human interaction. */
+  | "host_automation"
+  /** The response came through a legacy or otherwise unattributed ingress. */
+  | "unknown";
+/**
+ * Exact runtime-owned question or reviewed plan paired with the typed response that settled it.
+ */
+export type HumanResponseRecordedResponse =
+  | {
+      /**
+       * Exact answer content accepted from the user.
+       */
+      content: {
+        [k: string]: ElicitationCompletedContent | undefined;
+      };
+      /**
+       * Exact question displayed to the user.
+       */
+      message: string;
+      /**
+       * Exact response schema displayed to the user.
+       */
+      requestedSchema: ElicitationRequestedSchema;
+      /**
+       * Runtime-owned response kind discriminator.
+       */
+      responseKind: "ask_user";
+    }
+  | {
+      /**
+       * Whether the displayed request allowed a free-form answer.
+       */
+      allowFreeform?: boolean;
+      /**
+       * Exact selected or free-form answer submitted by the user.
+       */
+      answer: string;
+      /**
+       * Exact choices displayed to the user, when the request offered choices.
+       */
+      choices?: string[];
+      /**
+       * Exact question displayed to the user.
+       */
+      question: string;
+      /**
+       * Runtime-owned response kind discriminator.
+       */
+      responseKind: "user_input";
+      /**
+       * Whether the answer was typed as free-form text rather than selected from the displayed choices.
+       */
+      wasFreeform: boolean;
+    }
+  | {
+      /**
+       * Actions offered by the plan review UI.
+       */
+      actions: ExitPlanModeAction[];
+      /**
+       * Whether the user approved the reviewed plan.
+       */
+      approved: boolean;
+      /**
+       * Whether the selected response requested edit auto-approval.
+       */
+      autoApproveEdits?: boolean;
+      /**
+       * Exact feedback submitted with the plan decision, when present.
+       */
+      feedback?: string;
+      /**
+       * Exact full plan content available from the review UI.
+       */
+      planContent: string;
+      /**
+       * Action the plan review UI recommended.
+       */
+      recommendedAction: ExitPlanModeAction;
+      /**
+       * Runtime-owned response kind discriminator.
+       */
+      responseKind: "exit_plan_mode";
+      /**
+       * Action selected by the user, when applicable.
+       */
+      selectedAction?: ExitPlanModeAction;
+      /**
+       * Exact plan summary displayed to the user.
+       */
+      summary: string;
+    };
+/**
+ * Terminal status a workflow run committed. A settled run is never `pending` or `running`, so those two members of the run-status domain are deliberately absent.
+ */
+export type WorkflowRunSettledStatus =
+  /** The workflow body resolved and its result was committed. */
   | "completed"
   /** The run was stopped by a limit, an approval refusal or another policy decision. */
   | "halted"
+  /** The attempt paused intentionally while preserving resumable run state. */
+  | "paused"
   /** The run was cancelled by its caller or by session disposal. */
   | "cancelled"
   /** The run failed, with `failureType` carrying the class when it has one. */
   | "error";
 /**
- * Source location type (e.g., project, personal-copilot, plugin, builtin)
+ * Source location type (e.g., project, personal-copilot, plugin, builtin, sdk, mcp)
  */
 export type SkillSource =
   /** Skill defined in the current project's skill directories. */
@@ -897,19 +1950,19 @@ export type SkillSource =
   /** Skill loaded from a configured custom skill directory. */
   | "custom"
   /** Skill bundled with the runtime. */
-  | "builtin";
+  | "builtin"
+  /** Pathless skill supplied lazily by an SDK skill provider. */
+  | "sdk"
+  /** Pathless skill discovered from an MCP server through the skills extension. */
+  | "mcp";
 /**
- * Configuration source: user, workspace, plugin, or builtin
+ * Whether configured models are advisory preferences or required constraints
  */
-export type McpServerSource =
-  /** Server configured in the user's global MCP configuration. */
-  | "user"
-  /** Server configured by the current workspace. */
-  | "workspace"
-  /** Server contributed by an installed plugin. */
-  | "plugin"
-  /** Server bundled with the runtime. */
-  | "builtin";
+export type AgentModelPolicy =
+  /** Treat the authored models as advisory preferences that callers may override. */
+  | "preferred"
+  /** Require subagent execution to use one of the authored models. */
+  | "required";
 /**
  * Connection status: connected, failed, needs-auth, pending, disabled, stopped, or not_configured
  */
@@ -924,22 +1977,10 @@ export type McpServerStatus =
   | "pending"
   /** The server is configured but disabled. */
   | "disabled"
-  /** The server was intentionally stopped and can be restarted on demand when policy permits; a server quarantined by restrictive managed policy stays stopped and cannot be restarted until the policy allows it. */
+  /** The server is not running: it may not have started yet, may have been explicitly stopped, or may be quarantined by restrictive managed policy. It can be restarted on demand when policy permits. */
   | "stopped"
   /** The server is not configured for this session. */
   | "not_configured";
-/**
- * Transport mechanism: stdio, http, sse (deprecated), or memory (in-process MCP server)
- */
-export type McpServerTransport =
-  /** Server communicates over stdio with a local child process. */
-  | "stdio"
-  /** Server communicates over streamable HTTP. */
-  | "http"
-  /** Server communicates over Server-Sent Events (deprecated). */
-  | "sse"
-  /** Server is backed by an in-memory runtime implementation. */
-  | "memory";
 /**
  * Discovery source
  */
@@ -966,6 +2007,60 @@ export type ExtensionsLoadedExtensionStatus =
   | "starting";
 
 /**
+ * Session event "session.journal_link". Links a standalone replay head to its complete preceding numbered journal archive.
+ */
+export interface JournalLinkEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Links a standalone replay head to its complete preceding numbered journal archive.
+   */
+  data: JournalLinkData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.journal_link".
+   */
+  type: "session.journal_link";
+}
+/**
+ * Links a standalone replay head to its complete preceding numbered journal archive.
+ */
+export interface JournalLinkData {
+  /**
+   * Numbered predecessor filename in the same session directory.
+   */
+  previousFile: string;
+  /**
+   * Session owning this journal chain.
+   */
+  sessionId: string;
+  /**
+   * Journal checkpoint format version.
+   */
+  version: number;
+}
+/**
  * Session event "session.start". Session initialization metadata including context and configuration
  */
 export interface StartEvent {
@@ -973,6 +2068,13 @@ export interface StartEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Session initialization metadata including context and configuration
+   */
   data: StartData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1003,11 +2105,26 @@ export interface StartData {
    * Whether the session was already in use by another client at start time
    */
   alreadyInUse?: boolean;
+  /**
+   * Auto routing preference selected at session creation time
+   */
+  autoTier?: AutoTier;
+  /**
+   * True when autoTier is a managed-policy default. Omitted for user-authored and legacy values.
+   */
+  autoTierManaged?: boolean;
+  /**
+   * Working directory and git context at session start
+   */
   context?: WorkingDirectoryContext;
   /**
    * Context tier selected at session creation time for models with tiered context pricing; null when no tier is selected (e.g., non-tiered model)
    */
   contextTier?: ContextTier | null;
+  /**
+   * True when contextTier is a managed-policy default. Omitted for user-authored and legacy values.
+   */
+  contextTierManaged?: boolean;
   /**
    * Version string of the Copilot application
    */
@@ -1016,15 +2133,33 @@ export interface StartData {
    * When set, identifies a parent session whose context this session continues — e.g., a detached headless rem-agent run launched on the parent's interactive shutdown. Telemetry from this session is reported under the parent's session_id.
    */
   detachedFromSpawningParentSessionId?: string;
+  /**
+   * Per-session GitHub MCP override persisted for cold resume
+   */
   githubMcpToolConfig?: GitHubMcpToolConfig;
   /**
    * Identifier of the software producing the events (e.g., "copilot-agent")
    */
   producer: string;
   /**
+   * Provider of selectedModel at creation time, when explicitly selected.
+   */
+  providerId?: string;
+  /**
    * Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
    */
   reasoningEffort?: string;
+  /**
+   * True when the reasoning effort is a managed-policy default bound to reasoningEffortModel. Omitted for agent-authored, user-authored, independent, and legacy effort.
+   */
+  reasoningEffortManaged?: boolean;
+  /**
+   * Model that owns effort embedded in an authored model selection. Omitted for independent reasoning-effort overrides and legacy events.
+   */
+  reasoningEffortModel?: string;
+  /**
+   * Reasoning summary mode used for model calls, if applicable (e.g. "none", "concise", "detailed")
+   */
   reasoningSummary?: ReasoningSummary;
   /**
    * Whether this session supports remote steering via GitHub
@@ -1038,11 +2173,17 @@ export interface StartData {
    * Unique identifier for the session
    */
   sessionId: string;
+  /**
+   * Session limits configured at session creation time, if any
+   */
   sessionLimits?: SessionLimitsConfig;
   /**
    * ISO 8601 timestamp when the session was created
    */
   startTime: string;
+  /**
+   * Output verbosity level used for model calls, if applicable (e.g. "low", "medium", "high")
+   */
   verbosity?: Verbosity;
   /**
    * Schema version number for the session event format
@@ -1073,6 +2214,9 @@ export interface WorkingDirectoryContext {
    * Head commit of current git branch at session start time
    */
   headCommit?: string;
+  /**
+   * Hosting platform type of the repository (github or ado)
+   */
   hostType?: WorkingDirectoryContextHostType;
   /**
    * Set on the immediate preliminary event of a working-directory change, before the git context is resolved. A settled follow-up event (enriched with git context, or cwd-only for a non-repository) is always emitted afterward, so observers may defer to it. Absent on standalone/final events (e.g. relay context changes).
@@ -1125,6 +2269,13 @@ export interface ResumeEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Session resume metadata including current context and event count
+   */
   data: ResumeData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1155,11 +2306,26 @@ export interface ResumeData {
    * Whether the session was already in use by another client at resume time
    */
   alreadyInUse?: boolean;
+  /**
+   * Auto routing preference active at resume time
+   */
+  autoTier?: AutoTier;
+  /**
+   * True when autoTier is a managed-policy default. Omitted for user-authored and legacy values.
+   */
+  autoTierManaged?: boolean;
+  /**
+   * Updated working directory and git context at resume time
+   */
   context?: WorkingDirectoryContext;
   /**
    * Context tier currently selected at resume time; null when no tier is active
    */
   contextTier?: ContextTier | null;
+  /**
+   * True when contextTier is a managed-policy default. Omitted for user-authored and legacy values.
+   */
+  contextTierManaged?: boolean;
   /**
    * When true, tool calls and permission requests left in flight by the previous session lifetime remain pending after resume and the agentic loop awaits their results. User sends are queued behind the pending work until all such requests reach a terminal state. When false or omitted, pending work is normally marked as interrupted unless the resume passively joined live work owned by another client; sessionWasActive distinguishes that case.
    */
@@ -1173,9 +2339,24 @@ export interface ResumeData {
    */
   eventsFileSizeBytes?: number;
   /**
+   * Provider of selectedModel at resume time, when explicitly selected.
+   */
+  providerId?: string;
+  /**
    * Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
    */
   reasoningEffort?: string;
+  /**
+   * True when the reasoning effort is a managed-policy default bound to reasoningEffortModel. Omitted for agent-authored, user-authored, independent, and legacy effort.
+   */
+  reasoningEffortManaged?: boolean;
+  /**
+   * Model that owns effort embedded in an authored model selection. Omitted for independent reasoning-effort overrides and legacy events.
+   */
+  reasoningEffortModel?: string;
+  /**
+   * Reasoning summary mode used for model calls, if applicable (e.g. "none", "concise", "detailed")
+   */
   reasoningSummary?: ReasoningSummary;
   /**
    * Whether this session supports remote steering via GitHub
@@ -1197,6 +2378,9 @@ export interface ResumeData {
    * True when this resume passively joined a session that already had live work running in the runtime - an agent turn, a native queue run, a queued resume continuation, or an in-flight send (for example, an extension joining a session another client was actively driving). False (or omitted) when the session had no live work or when the resume explicitly abandoned pending work, including cold resumes and suspended sessions that remain resident in memory.
    */
   sessionWasActive?: boolean;
+  /**
+   * Output verbosity level used for model calls, if applicable (e.g. "low", "medium", "high")
+   */
   verbosity?: Verbosity;
 }
 /**
@@ -1207,6 +2391,13 @@ export interface RemoteSteerableChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Notifies that the session's remote steering capability has changed
+   */
   data: RemoteSteerableChangedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1246,6 +2437,13 @@ export interface ErrorEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Error details for timeline display including message and optional diagnostic information
+   */
   data: ErrorData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1281,7 +2479,7 @@ export interface ErrorData {
    */
   errorCode?: string;
   /**
-   * Category of error (e.g., "authentication", "authorization", "quota", "rate_limit", "context_limit", "query")
+   * Category of error (e.g., "authentication", "authorization", "policy", "quota", "rate_limit", "context_limit", "query")
    */
   errorType: string;
   /**
@@ -1289,9 +2487,25 @@ export interface ErrorData {
    */
   message: string;
   /**
+   * Original root user-message ID of the failed request, including failures before user.message is emitted. Absent for session-wide errors or legacy hosts.
+   */
+  originatingMessageId?: string;
+  /**
    * GitHub request tracing ID (x-github-request-id header) for correlating with server-side logs
    */
   providerCallId?: string;
+  /**
+   * Sanitized provider-defined error parameter preserved from a structured upstream error envelope, when available.
+   */
+  providerErrorParam?: string;
+  /**
+   * Provider-defined error type preserved from a structured upstream error envelope, when available (for example, `invalid_request_error`).
+   */
+  providerErrorType?: string;
+  /**
+   * What the user must do to recover, when the runtime knows of an action. The `message` never names a client affordance, so a client that offers one — a slash command, a settings pane, a link — renders it from this value.
+   */
+  remediation?: RemediationAction;
   /**
    * Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
    */
@@ -1317,6 +2531,13 @@ export interface IdleEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload indicating the session is idle with no background agents or attached shell commands in flight
+   */
   data: IdleData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -1347,6 +2568,60 @@ export interface IdleData {
    * True when the preceding agentic loop was cancelled via abort signal
    */
   aborted?: boolean;
+  /**
+   * The session mode the agent was operating in when it went idle, when the mode is known. Lets turn-scoped consumers distinguish an autopilot continuation boundary (where the agent keeps working after this idle) from a genuine turn completion.
+   */
+  mode?: SessionMode;
+}
+/**
+ * Session event "session.autopilot_stopped". The runtime has stopped continuing one Autopilot request. Attached background work may remain active; this is not session-wide idle.
+ */
+export interface AutopilotStoppedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * The runtime has stopped continuing one Autopilot request. Attached background work may remain active; this is not session-wide idle.
+   */
+  data: AutopilotStoppedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.autopilot_stopped".
+   */
+  type: "session.autopilot_stopped";
+}
+/**
+ * The runtime has stopped continuing one Autopilot request. Attached background work may remain active; this is not session-wide idle.
+ */
+export interface AutopilotStoppedData {
+  /**
+   * The terminal policy reason, such as task_complete, aborted, error, or background_timeout.
+   */
+  reason: string;
+  /**
+   * Original root user message ID for this request, absent when no root request is available.
+   */
+  requestId?: string;
 }
 /**
  * Session event "session.title_changed". Session title change payload containing the new display title
@@ -1356,6 +2631,13 @@ export interface TitleChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Session title change payload containing the new display title
+   */
   data: TitleChangedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -1395,6 +2677,13 @@ export interface ScheduleCreatedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Scheduled prompt registered via /every or /after
+   */
   data: ScheduleCreatedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1441,6 +2730,9 @@ export interface ScheduleCreatedData {
    * Interval between ticks in milliseconds (relative-interval schedules)
    */
   intervalMs?: number;
+  /**
+   * Who created the schedule (`user` or `model`). Persisted so a resumed session keeps gating non-user schedules from firing skills that opted out of model invocation. Absent on entries created before this field existed; a missing origin fails closed (treated the same as a non-user origin), so such a schedule may not resolve a `disable-model-invocation` skill.
+   */
   origin?: ScheduleOrigin;
   /**
    * Prompt text that gets enqueued on every tick
@@ -1467,6 +2759,13 @@ export interface ScheduleCancelledEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Scheduled prompt cancelled from the schedule manager dialog
+   */
   data: ScheduleCancelledData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1506,6 +2805,13 @@ export interface ScheduleRearmedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Self-paced schedule re-armed for its next run
+   */
   data: ScheduleRearmedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1549,6 +2855,13 @@ export interface AutopilotObjectiveChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Autopilot objective state file operation details indicating what changed
+   */
   data: AutopilotObjectiveChangedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1579,7 +2892,13 @@ export interface AutopilotObjectiveChangedData {
    * Current autopilot objective id, if one exists
    */
   id?: number;
+  /**
+   * The type of operation performed on the autopilot objective state file
+   */
   operation: AutopilotObjectiveChangedOperation;
+  /**
+   * Current autopilot objective status, if one exists
+   */
   status?: AutopilotObjectiveChangedStatus;
 }
 /**
@@ -1590,6 +2909,13 @@ export interface InfoEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Informational message for timeline display with categorization
+   */
   data: InfoData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1634,6 +2960,43 @@ export interface InfoData {
   url?: string;
 }
 /**
+ * Session event "session.indexed_search". Transient indexed-search status and diagnostics from the live runtime service. Never persisted or used to infer activation from session history.
+ */
+export interface IndexedSearchEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Transient indexed-search status and diagnostics from the live runtime service. Never persisted or used to infer activation from session history.
+   */
+  data: IndexedSearchData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.indexed_search".
+   */
+  type: "session.indexed_search";
+}
+/**
  * Session event "session.warning". Warning message for timeline display with categorization
  */
 export interface WarningEvent {
@@ -1641,6 +3004,13 @@ export interface WarningEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Warning message for timeline display with categorization
+   */
   data: WarningData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1672,6 +3042,14 @@ export interface WarningData {
    */
   message: string;
   /**
+   * Logical ID returned by session.send for the request this warning concerns. Set for policy-blocked prompts, which do not emit a user.message event.
+   */
+  originatingMessageId?: string;
+  /**
+   * What the user must do to recover, when the runtime knows of an action. The `message` never names a client affordance, so a client that offers one — a slash command, a settings pane, a link — renders it from this value.
+   */
+  remediation?: RemediationAction;
+  /**
    * Optional URL associated with this warning that the user can open in a browser
    */
   url?: string;
@@ -1688,6 +3066,13 @@ export interface ModelChangeEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Model change details including previous and new model identifiers
+   */
   data: ModelChangeData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1715,6 +3100,14 @@ export interface ModelChangeEvent {
  */
 export interface ModelChangeData {
   /**
+   * Committed Auto preference after the model configuration change, when applicable.
+   */
+  autoTier?: AutoTier | null;
+  /**
+   * True when autoTier is a managed-policy default. Omitted for user-authored and legacy values.
+   */
+  autoTierManaged?: boolean;
+  /**
    * Reason the change happened, when not user-initiated. `"rate_limit_auto_switch"` for changes triggered by the auto-mode-switch rate-limit recovery path, or `"refusal_fallback"` when the active model declined a request (content refusal) and the runtime switched to the configured refusal-fallback model. UI clients can use this to render contextual copy.
    */
   cause?: string;
@@ -1723,26 +3116,221 @@ export interface ModelChangeData {
    */
   contextTier?: ContextTier | null;
   /**
+   * True when contextTier is a managed-policy default. Omitted for user-authored and legacy values.
+   */
+  contextTierManaged?: boolean;
+  /**
    * Newly selected model identifier
    */
   newModel: string;
+  /**
+   * Previously committed Auto preference, when one was explicitly selected.
+   */
+  previousAutoTier?: AutoTier;
   /**
    * Model that was previously selected, if any
    */
   previousModel?: string;
   /**
+   * Provider of previousModel, when known. A provider-only change is a model selection change even when the model identifiers are equal.
+   */
+  previousProviderId?: string;
+  /**
    * Reasoning effort level before the model change, if applicable
    */
   previousReasoningEffort?: string;
+  /**
+   * Reasoning summary mode before the model change, if applicable
+   */
   previousReasoningSummary?: ReasoningSummary;
+  /**
+   * Output verbosity level before the model change, if applicable
+   */
   previousVerbosity?: Verbosity;
+  /**
+   * Provider selected for newModel. Omitted for legacy or unattributed selections; never inferred from a later selection.
+   */
+  providerId?: string;
   /**
    * Reasoning effort level after the model change, if applicable
    */
   reasoningEffort?: string | null;
+  /**
+   * True when the reasoning effort is a managed-policy default bound to reasoningEffortModel. Omitted for agent-authored, user-authored, independent, and legacy effort.
+   */
+  reasoningEffortManaged?: boolean;
+  /**
+   * Model that owns effort embedded in an authored model selection. Omitted for independent reasoning-effort overrides and legacy events.
+   */
+  reasoningEffortModel?: string;
+  /**
+   * True when prior reasoning is incompatible with the selected provider routing even though model and provider identifiers are unchanged. Omitted for compatible or legacy selections.
+   */
+  reasoningInvalidated?: boolean;
+  /**
+   * Reasoning summary mode after the model change, if applicable
+   */
   reasoningSummary?: ReasoningSummary;
+  /**
+   * Origin of the effective model change, when known.
+   */
   source?: ModelChangeSource;
+  /**
+   * Output verbosity level after the model change, if applicable
+   */
   verbosity?: Verbosity;
+}
+/**
+ * Session event "session.model_deselected". The model the user had explicitly selected is no longer available, because the host that published it withdrew it, so the session no longer has an explicit selection. The next turn resolves a default as though the user had never chosen a model. Clients should stop presenting the previous model as selected. This event is durable because resume rebuilds the selected model from the event log; without it a resumed session would restore a model its provider no longer serves. Reasoning effort, verbosity, and other session-level preferences are deliberately unchanged, because they belong to the session rather than to the model.
+ */
+export interface ModelDeselectedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * The model the user had explicitly selected is no longer available, because the host that published it withdrew it, so the session no longer has an explicit selection. The next turn resolves a default as though the user had never chosen a model. Clients should stop presenting the previous model as selected. This event is durable because resume rebuilds the selected model from the event log; without it a resumed session would restore a model its provider no longer serves. Reasoning effort, verbosity, and other session-level preferences are deliberately unchanged, because they belong to the session rather than to the model.
+   */
+  data: ModelDeselectedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.model_deselected".
+   */
+  type: "session.model_deselected";
+}
+/**
+ * The model the user had explicitly selected is no longer available, because the host that published it withdrew it, so the session no longer has an explicit selection. The next turn resolves a default as though the user had never chosen a model. Clients should stop presenting the previous model as selected. This event is durable because resume rebuilds the selected model from the event log; without it a resumed session would restore a model its provider no longer serves. Reasoning effort, verbosity, and other session-level preferences are deliberately unchanged, because they belong to the session rather than to the model.
+ */
+export interface ModelDeselectedData {
+  /**
+   * Model that was selected before the host withdrew it.
+   */
+  previousModel: string;
+  /**
+   * Low-cardinality reason the selection was cleared.
+   */
+  reason: ModelDeselectedReason;
+}
+/**
+ * Session event "session.auto_tier_recommendation". Live-only Auto preference recommendation from Copilot API after a successful Auto model call.
+ */
+/** @experimental */
+export interface AutoTierRecommendationEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Live-only Auto preference recommendation from Copilot API after a successful Auto model call.
+   */
+  data: AutoTierRecommendationData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.auto_tier_recommendation".
+   */
+  type: "session.auto_tier_recommendation";
+}
+/**
+ * Live-only Auto preference recommendation from Copilot API after a successful Auto model call.
+ */
+/** @experimental */
+export interface AutoTierRecommendationData {
+  /**
+   * Recommended Auto preference.
+   */
+  recommendedAutoTier: RecommendedAutoTier;
+}
+/**
+ * Session event "session.auto_tier_switch_failed". A transient Auto preference failure emitted when the runtime cannot mint or accept a usable model and token pair. The previously effective preference remains active, so SDK clients can surface a non-blocking failure without changing their committed-tier state. This event is ephemeral and is not persisted or replayed on resume.
+ */
+export interface AutoTierSwitchFailedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * A transient Auto preference failure emitted when the runtime cannot mint or accept a usable model and token pair. The previously effective preference remains active, so SDK clients can surface a non-blocking failure without changing their committed-tier state. This event is ephemeral and is not persisted or replayed on resume.
+   */
+  data: AutoTierSwitchFailedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.auto_tier_switch_failed".
+   */
+  type: "session.auto_tier_switch_failed";
+}
+/**
+ * A transient Auto preference failure emitted when the runtime cannot mint or accept a usable model and token pair. The previously effective preference remains active, so SDK clients can surface a non-blocking failure without changing their committed-tier state. This event is ephemeral and is not persisted or replayed on resume.
+ */
+export interface AutoTierSwitchFailedData {
+  /**
+   * Auto preference that remains effective after the failed request.
+   */
+  effectiveAutoTier?: AutoTier;
+  /**
+   * Low-cardinality failure outcome reported by Auto resolution.
+   */
+  reason: AutoTierSwitchFailureReason;
+  /**
+   * Auto preference that failed to activate, or null when returning to provider-default routing failed.
+   */
+  requestedAutoTier: AutoTier | null;
 }
 /**
  * Session event "session.mode_changed". Agent mode change details including previous and new modes
@@ -1752,6 +3340,13 @@ export interface ModeChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Agent mode change details including previous and new modes
+   */
   data: ModeChangedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1778,8 +3373,68 @@ export interface ModeChangedEvent {
  * Agent mode change details including previous and new modes
  */
 export interface ModeChangedData {
+  /**
+   * The session mode the agent is operating in
+   */
   newMode: SessionMode;
+  /**
+   * The session mode the agent is operating in
+   */
   previousMode: SessionMode;
+}
+/**
+ * Session event "session.mode_notice_delivered". Records that a mode transition notice reached the model so cache-stable mode tools can remain offered across resume.
+ */
+export interface ModeNoticeDeliveredEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Records that a mode transition notice reached the model so cache-stable mode tools can remain offered across resume.
+   */
+  data: ModeNoticeDeliveredData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.mode_notice_delivered".
+   */
+  type: "session.mode_notice_delivered";
+}
+/**
+ * Records that a mode transition notice reached the model so cache-stable mode tools can remain offered across resume.
+ */
+export interface ModeNoticeDeliveredData {
+  /**
+   * Model-visible transition notice persisted for a mid-turn delivery
+   */
+  content?: string;
+  /**
+   * Whether the model-visible transition notice was persisted separately as an instruction.update event
+   */
+  instructionUpdatePersisted?: boolean;
+  /**
+   * Mode established by the delivered transition notice
+   */
+  mode: SessionMode;
 }
 /**
  * Session event "session.session_limits_changed". Session limits update details. Null clears the limits.
@@ -1789,6 +3444,13 @@ export interface SessionLimitsChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Session limits update details. Null clears the limits.
+   */
   data: SessionLimitsChangedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1829,6 +3491,13 @@ export interface PermissionsChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Permission-mode transition details.
+   */
   data: PermissionsChangedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1867,13 +3536,13 @@ export interface PermissionsChangedData {
    *
    * @experimental
    */
-  mode: PermissionMode;
+  mode?: PermissionMode;
   /**
    * Permission mode before the change
    *
    * @experimental
    */
-  previousMode: PermissionMode;
+  previousMode?: PermissionMode;
 }
 /**
  * Session event "session.plan_changed". Plan file operation details indicating what changed
@@ -1883,6 +3552,13 @@ export interface PlanChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Plan file operation details indicating what changed
+   */
   data: PlanChangedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1909,6 +3585,9 @@ export interface PlanChangedEvent {
  * Plan file operation details indicating what changed
  */
 export interface PlanChangedData {
+  /**
+   * The type of operation performed on the plan file
+   */
   operation: PlanChangedOperation;
 }
 /**
@@ -1919,6 +3598,13 @@ export interface TodosChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Signal-only event: the agent's todos or todo_deps table was written to. No payload — clients should call session.plan.readSqlTodosWithDependencies() to fetch the current state. Events arrive in order; clients can debounce on arrival if needed.
+   */
   data: TodosChangedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -1953,6 +3639,13 @@ export interface WorkspaceFileChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Workspace file change details including path and operation type
+   */
   data: WorkspaceFileChangedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -1979,6 +3672,9 @@ export interface WorkspaceFileChangedEvent {
  * Workspace file change details including path and operation type
  */
 export interface WorkspaceFileChangedData {
+  /**
+   * Whether the file was newly created or updated
+   */
   operation: WorkspaceFileChangedOperation;
   /**
    * Relative path within the session workspace files directory
@@ -1993,6 +3689,13 @@ export interface HandoffEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Session handoff metadata including source, context, and repository information
+   */
   data: HandoffData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -2035,7 +3738,13 @@ export interface HandoffData {
    * Session ID of the remote session being handed off
    */
   remoteSessionId?: string;
+  /**
+   * Repository context for the handed-off session
+   */
   repository?: HandoffRepository;
+  /**
+   * Origin type of the session being handed off
+   */
   sourceType: HandoffSourceType;
   /**
    * Summary of the work done in the source session
@@ -2067,6 +3776,13 @@ export interface TruncationEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Conversation truncation statistics including token counts and removed content metrics
+   */
   data: TruncationData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -2093,6 +3809,10 @@ export interface TruncationEvent {
  * Conversation truncation statistics including token counts and removed content metrics
  */
 export interface TruncationData {
+  /**
+   * Identifier of the automatic compaction applied just before this truncation, when one was
+   */
+  compactionAttemptId?: string;
   /**
    * Number of messages removed by truncation
    */
@@ -2134,6 +3854,13 @@ export interface SnapshotRewindEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Session rewind details including target event and count of removed events
+   */
   data: SnapshotRewindData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -2161,11 +3888,15 @@ export interface SnapshotRewindEvent {
  */
 export interface SnapshotRewindData {
   /**
+   * The removed events, starting with `upToEventId`. Later events not listed were kept, such as a background agent's events that interleaved with a withdrawn turn
+   */
+  eventIds?: string[];
+  /**
    * Number of events that were removed by the rewind
    */
   eventsRemoved: number;
   /**
-   * Event ID that was rewound to; this event and all after it were removed
+   * First removed event. Without `eventIds`, it and every event after it were removed
    */
   upToEventId: string;
 }
@@ -2177,6 +3908,13 @@ export interface ShutdownEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Session termination metrics including usage statistics, code changes, and shutdown reason
+   */
   data: ShutdownData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -2204,11 +3942,20 @@ export interface ShutdownEvent {
  */
 export interface ShutdownData {
   /**
+   * Complete accounting state captured atomically with receipt watermarks.
+   *
+   * @internal
+   */
+  accountingSnapshot?: UsageGetMetricsResult;
+  /**
    * Per-agent usage breakdown, keyed by agent instance identifier. The main conversation uses the stable key `main`.
    */
   agentMetrics?: {
     [k: string]: ShutdownAgentMetric | undefined;
   };
+  /**
+   * Aggregate code change metrics for the session
+   */
   codeChanges: ShutdownCodeChanges;
   /**
    * Non-system message token count at shutdown
@@ -2237,9 +3984,16 @@ export interface ShutdownData {
     [k: string]: ShutdownModelMetric | undefined;
   };
   /**
+   * Provider/model accounting preserved for replay without consulting current provider selection.
+   */
+  providerModelMetrics?: UsageMetricsProviderModelMetric[];
+  /**
    * Unix timestamp (milliseconds) when the session started
    */
   sessionStartTime: number;
+  /**
+   * Whether the session ended normally ("routine") or due to a crash/fatal error ("error")
+   */
   shutdownType: ShutdownType;
   /**
    * System message token count at shutdown
@@ -2256,6 +4010,12 @@ export interface ShutdownData {
    */
   toolDefinitionsTokens?: number;
   /**
+   * Runtime tool-operation identities already included in the final accounting snapshot.
+   *
+   * @internal
+   */
+  toolUsageRequestIds?: string[];
+  /**
    * Cumulative time spent in API calls during the session, in milliseconds
    */
   totalApiDurationMs: number;
@@ -2271,6 +4031,254 @@ export interface ShutdownData {
    * @internal
    */
   totalPremiumRequests?: number;
+  /**
+   * Per-source accounting sequence watermarks subsuming preceding usage receipts.
+   */
+  usageAccountingWatermarks?: {
+    [k: string]: number | undefined;
+  };
+}
+/**
+ * Accumulated session usage metrics, including premium request cost, token counts, model breakdown, and code-change totals.
+ */
+export interface UsageGetMetricsResult {
+  /**
+   * Per-agent usage metrics, keyed by agent instance identifier. The main conversation uses the stable key `main`.
+   */
+  agentMetrics?: {
+    [k: string]: UsageMetricsAgentMetric | undefined;
+  };
+  /**
+   * Completeness of totalNanoAiu. Numeric totals remain the reported subtotal; zero is not a claim of free usage when unavailable.
+   */
+  aiCreditsStatus?: AiCreditsStatus;
+  /**
+   * Aggregated code change metrics
+   */
+  codeChanges: UsageMetricsCodeChanges;
+  /**
+   * Currently active model identifier
+   */
+  currentModel?: string;
+  /**
+   * Input tokens from the most recent main-agent API call
+   */
+  lastCallInputTokens: number;
+  /**
+   * Output tokens from the most recent main-agent API call
+   */
+  lastCallOutputTokens: number;
+  /**
+   * Per-model token and request metrics, keyed by model identifier
+   */
+  modelMetrics: {
+    [k: string]: UsageMetricsModelMetric | undefined;
+  };
+  /**
+   * Provider-attributed model metrics, ordered by first observed provider and model.
+   * Null attribution preserves historical usage whose provider or model was not recorded.
+   */
+  providerModelMetrics?: UsageMetricsProviderModelMetric[];
+  /**
+   * ISO 8601 timestamp when the session started
+   */
+  sessionStartTime: string;
+  /**
+   * Session-wide per-token-type accumulated token counts
+   */
+  tokenDetails?: {
+    [k: string]: UsageMetricsTokenDetail | undefined;
+  };
+  /**
+   * Total time spent in model API calls (milliseconds)
+   */
+  totalApiDurationMs: number;
+  /**
+   * Session-wide accumulated nano-AI units cost
+   */
+  totalNanoAiu?: number;
+  /**
+   * Total user-initiated premium request cost across all models (may be fractional due to multipliers)
+   */
+  totalPremiumRequestCost: number;
+  /**
+   * Raw count of user-initiated API requests
+   */
+  totalUserRequests: number;
+}
+/**
+ * Usage attributed to one agent instance, including its identity, API duration, AI units, and per-model breakdown.
+ */
+export interface UsageMetricsAgentMetric {
+  /**
+   * Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.
+   */
+  agentDisplayName?: string;
+  /**
+   * Configured agent name, when this is a subagent
+   */
+  agentName?: string;
+  /**
+   * Per-model usage for this agent, keyed by model identifier
+   */
+  modelMetrics: {
+    [k: string]: UsageMetricsModelMetric | undefined;
+  };
+  /**
+   * Time spent in model API calls by this agent, in milliseconds
+   */
+  totalApiDurationMs: number;
+  /**
+   * Accumulated nano-AI units cost for this agent
+   */
+  totalNanoAiu: number;
+}
+/**
+ * Per-model usage metrics, including request counts/costs, token usage, nano-AI units, and per-token-type details.
+ */
+export interface UsageMetricsModelMetric {
+  /**
+   * Completeness of this model's reported AI-credit subtotal. Explicitly reported zero is complete, not unavailable.
+   */
+  aiCreditsStatus?: AiCreditsStatus;
+  /**
+   * Latest known prompt-cache expiration for this model. A timestamp in the past indicates that the observed cache has expired.
+   */
+  cacheExpiresAt?: string;
+  /**
+   * Request count and cost metrics for this model
+   */
+  requests: UsageMetricsModelMetricRequests;
+  /**
+   * Token count details per type
+   */
+  tokenDetails?: {
+    [k: string]: UsageMetricsModelMetricTokenDetail | undefined;
+  };
+  /**
+   * Accumulated nano-AI units cost for this model
+   */
+  totalNanoAiu?: number;
+  /**
+   * Token usage metrics for this model
+   */
+  usage: UsageMetricsModelMetricUsage;
+}
+/**
+ * Request count and cost metrics for this model
+ */
+export interface UsageMetricsModelMetricRequests {
+  /**
+   * User-initiated premium request cost (with multiplier applied)
+   */
+  cost: number;
+  /**
+   * Number of API requests made with this model
+   */
+  count: number;
+}
+/**
+ * Per-model token-detail entry containing the accumulated token count for one token type.
+ */
+export interface UsageMetricsModelMetricTokenDetail {
+  /**
+   * Accumulated token count for this token type
+   */
+  tokenCount: number;
+}
+/**
+ * Token usage metrics for this model
+ */
+export interface UsageMetricsModelMetricUsage {
+  /**
+   * Total tokens read from prompt cache
+   */
+  cacheReadTokens: number;
+  /**
+   * Total tokens written to prompt cache
+   */
+  cacheWriteTokens: number;
+  /**
+   * Total input tokens consumed
+   */
+  inputTokens: number;
+  /**
+   * Total output tokens produced
+   */
+  outputTokens: number;
+  /**
+   * Total output tokens used for reasoning
+   */
+  reasoningTokens?: number;
+}
+/**
+ * Aggregated code change metrics
+ */
+export interface UsageMetricsCodeChanges {
+  /**
+   * Distinct file paths modified during the session
+   */
+  filesModified: string[];
+  /**
+   * Number of distinct files modified
+   */
+  filesModifiedCount: number;
+  /**
+   * Total lines of code added
+   */
+  linesAdded: number;
+  /**
+   * Total lines of code removed
+   */
+  linesRemoved: number;
+}
+/**
+ * Usage for one recorded provider and model, without merging identical model IDs across providers.
+ */
+export interface UsageMetricsProviderModelMetric {
+  /**
+   * Request, token, and cost totals for this provider/model.
+   */
+  metrics: UsageMetricsModelMetric;
+  /**
+   * Model display name captured at call time, when known.
+   */
+  modelDisplayName?: string;
+  /**
+   * Model identity, or null for legacy aggregate-only usage.
+   */
+  modelId: string | null;
+  /**
+   * Provider identity and product label captured when the call was dispatched; null when unknown.
+   */
+  provider: ModelProviderRef | null;
+}
+/**
+ * A neutral reference to the model provider that produced a model: an opaque id, a human-readable label, and the provider kind. Carried on each enumerated Model so consumers can group by provider without reaching into a provider-shaped internal type.
+ */
+/** @experimental */
+export interface ModelProviderRef {
+  /**
+   * Opaque, stable id of the provider that produced this model. Matches the enumerated `ModelProviderDescriptor.id`.
+   */
+  id: string;
+  /**
+   * The provider kind.
+   */
+  kind: ModelProviderKind;
+  /**
+   * Human-readable provider label, owned by the runtime so every consumer renders identical text.
+   */
+  label: string;
+}
+/**
+ * Session-wide token-detail entry containing the accumulated token count for one token type.
+ */
+export interface UsageMetricsTokenDetail {
+  /**
+   * Accumulated token count for this token type
+   */
+  tokenCount: number;
 }
 /**
  * Usage attributed to one agent instance at session shutdown.
@@ -2303,6 +4311,9 @@ export interface ShutdownAgentMetric {
  * Per-model shutdown metrics with request counts, token usage, nano-AI units, and token details.
  */
 export interface ShutdownModelMetric {
+  /**
+   * Request count and cost metrics
+   */
   requests: ShutdownModelMetricRequests;
   /**
    * Token count details per type
@@ -2316,6 +4327,9 @@ export interface ShutdownModelMetric {
    * @experimental
    */
   totalNanoAiu?: number;
+  /**
+   * Token usage breakdown
+   */
   usage: ShutdownModelMetricUsage;
 }
 /**
@@ -2403,6 +4417,13 @@ export interface UsageCheckpointEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Durable session usage checkpoint for reconstructing aggregate accounting on resume
+   */
   data: UsageCheckpointData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -2430,6 +4451,12 @@ export interface UsageCheckpointEvent {
  */
 export interface UsageCheckpointData {
   /**
+   * Complete accounting state captured atomically with the receipt watermarks.
+   *
+   * @internal
+   */
+  accountingSnapshot?: UsageGetMetricsResult;
+  /**
    * Internal per-model prompt-cache state used to restore expiration tracking on resume
    *
    * @internal
@@ -2442,6 +4469,16 @@ export interface UsageCheckpointData {
    */
   promptCacheBreakState?: JsonValue[];
   /**
+   * Provider/model accounting snapshot that subsumes preceding usage receipts.
+   */
+  providerModelMetrics?: UsageMetricsProviderModelMetric[];
+  /**
+   * Runtime tool-operation identities already included in this checkpoint. Prevents duplicate charges when an operation is delivered again with a newer sequence.
+   *
+   * @internal
+   */
+  toolUsageRequestIds?: string[];
+  /**
    * Session-wide accumulated nano-AI units cost at checkpoint time
    */
   totalNanoAiu: number;
@@ -2451,6 +4488,12 @@ export interface UsageCheckpointData {
    * @internal
    */
   totalPremiumRequests?: number;
+  /**
+   * Highest accounted sequence per source session; no per-call deduplication history is retained.
+   */
+  usageAccountingWatermarks?: {
+    [k: string]: number | undefined;
+  };
 }
 /**
  * Internal prompt-cache expiration state for one model
@@ -2473,6 +4516,223 @@ export interface UsageCheckpointModelCacheState {
   modelId: string;
 }
 /**
+ * Session event "session.quota_observation". A provider-owned quota observation, distinct from per-call usage and charge accounting.
+ */
+/** @experimental */
+export interface ProviderQuotaObservationEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * A provider-owned quota observation, distinct from per-call usage and charge accounting.
+   */
+  data: ProviderQuotaObservationData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.quota_observation".
+   */
+  type: "session.quota_observation";
+}
+/**
+ * A provider-owned quota observation, distinct from per-call usage and charge accounting.
+ */
+/** @experimental */
+export interface ProviderQuotaObservationData {
+  /**
+   * The admitted provider's state observation. Admission balances and percentages remain absent; separate monthly usage may report its own amount and cycle.
+   */
+  observation: ProviderQuotaState;
+}
+/**
+ * An account quota reading. Absence of a quantity is unknown, never zero.
+ */
+/** @experimental */
+export interface ProviderQuotaState {
+  /**
+   * Whether the service permits access, independently of balance.
+   */
+  accessState: ProviderQuotaAccessState;
+  /**
+   * Service error code or client acquisition category, separate from the business-state reason.
+   */
+  acquisitionError?: string;
+  /**
+   * Acquisition outcome. Unavailable/failed readings have no service verdict; access/capacity unavailable are compatibility placeholders only.
+   */
+  acquisitionStatus?: ProviderQuotaAcquisitionStatus;
+  /**
+   * Independently reported signed 64-bit available quantity. Zero does not override the service access/capacity verdict; omission and null are preserved.
+   */
+  availableQuantity?: number | null;
+  /**
+   * Optional metadata for an authoritative budget. Advisory balances and admission-only observations do not populate this.
+   */
+  budgetMetadata?: ProviderQuotaBudgetMetadata;
+  /**
+   * Service capacity state; missing quantities do not imply exhaustion.
+   */
+  capacityState: ProviderQuotaCapacityState;
+  /**
+   * Key for the backwards-compatible snapshots projection, when the authoritative budget supports that contract.
+   */
+  compatibilityKey?: string;
+  /**
+   * Independently reported signed 64-bit entitlement. -1 is an unlimited sentinel, not a capacity-state rewrite; omission and null are preserved.
+   */
+  entitledQuantity?: number | null;
+  /**
+   * Explicit service admission flag, when reported.
+   */
+  hasQuota?: boolean | null;
+  /**
+   * HTTP status from acquisition, when available.
+   */
+  httpStatus?: number;
+  /**
+   * Service-reported monthly consumption, independent of quota balances and per-call or session cost. Omitted when the service does not report monthly usage.
+   */
+  monthlyUsage?: ProviderMonthlyUsage;
+  /**
+   * Whether this is a GET account reading or a pre-response admission observation. Observations are never merged across kinds.
+   */
+  observationKind?: ProviderQuotaObservationKind;
+  /**
+   * When the runtime observed this reading, not a charge timestamp or guarantee that consumption has settled.
+   */
+  observedAt?: string;
+  /**
+   * Provider/account whose service reported this state.
+   */
+  provider: ModelProviderRef;
+  /**
+   * Whether quantities are authoritative budget measurements, advisory balances, or absent. Only authoritative budgets support percentage presentation.
+   */
+  quantityKind?: ProviderQuotaQuantityKind;
+  /**
+   * Service-owned quota identifier within this provider.
+   */
+  quotaId: string;
+  /**
+   * Service-reported explanation for the state.
+   */
+  reason?: string | null;
+  /**
+   * Service name owning this reading.
+   */
+  service?: string | null;
+  /**
+   * Service-reported quota source.
+   */
+  source?: string | null;
+  /**
+   * Unit of entitledQuantity and availableQuantity.
+   */
+  unit: ProviderQuotaUnit;
+}
+/**
+ * Authoritative budget measurements and policy metadata, independent of provider.
+ */
+export interface ProviderQuotaBudgetMetadata {
+  /**
+   * Exact measured consumption in the budget's unit.
+   */
+  consumed: number;
+  /**
+   * Exact budget entitlement, retaining incumbent fractional-unit compatibility.
+   */
+  entitlement: number;
+  /**
+   * Usage beyond entitlement, in the budget's unit.
+   */
+  overage: number;
+  /**
+   * Whether additional usage is allowed when the budget is exhausted.
+   */
+  overageAllowedWhenExhausted: boolean;
+  /**
+   * Optional additional-usage budget cap.
+   */
+  overageLimit?: number;
+  /**
+   * Service-reported remaining percentage for authoritative budget presentation.
+   */
+  remainingPercentage: number;
+  /**
+   * Reset instant in epoch milliseconds when this budget actually defines a window.
+   */
+  resetAtEpochMs?: number;
+  /**
+   * Whether the reset instant is an estimate.
+   */
+  resetEstimated?: boolean;
+  /**
+   * Whether this budget uses token-based billing.
+   */
+  tokenBasedBilling?: boolean;
+  /**
+   * Whether the budget has unlimited entitlement.
+   */
+  unlimited: boolean;
+  /**
+   * Whether service policy allows continued usage after exhaustion.
+   */
+  usageAllowedWhenExhausted: boolean;
+}
+/**
+ * An authoritative monthly usage reading for the observation's provider, account, and service.
+ */
+/** @experimental */
+export interface ProviderMonthlyUsage {
+  /**
+   * Nonnegative finite consumption reported by the service, preserving zero and fractions. Present only when state is available; never computed from tokens or balance differences.
+   */
+  consumedQuantity?: number;
+  /**
+   * Start of the service-reported monthly billing cycle, in UTC RFC 3339.
+   */
+  cycleStart?: string;
+  /**
+   * Service read time in UTC RFC 3339, not a ledger reconciliation watermark or confirmation of the latest inference charge.
+   */
+  queriedAt?: string;
+  /**
+   * End of the service-reported monthly billing cycle, in UTC RFC 3339.
+   */
+  resetOn?: string;
+  /**
+   * Identity scope of the reading within its provider and service.
+   */
+  scope: ProviderMonthlyUsageScope;
+  /**
+   * Availability of monthly consumption. Missing or unavailable usage must never be interpreted as zero.
+   */
+  state: ProviderMonthlyUsageState;
+  /**
+   * Unit of consumedQuantity; independent of the parent observation's balance unit.
+   */
+  unit: ProviderQuotaUnit;
+}
+/**
  * Session event "session.context_changed". Updated working directory and git context after the change
  */
 export interface ContextChangedEvent {
@@ -2480,6 +4740,13 @@ export interface ContextChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Updated working directory and git context after the change
+   */
   data: WorkingDirectoryContext;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -2510,6 +4777,13 @@ export interface UsageInfoEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Current context window usage statistics including token and message counts
+   */
   data: UsageInfoData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -2573,6 +4847,13 @@ export interface ContextClearedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Context-cleared details emitted when the host clears the conversation (the session.history.clearContext RPC / Session.clearContextMessages)
+   */
   data: ContextClearedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -2616,6 +4897,13 @@ export interface CompactionStartEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Context window breakdown at the start of LLM-powered conversation compaction
+   */
   data: CompactionStartData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -2643,6 +4931,10 @@ export interface CompactionStartEvent {
  */
 export interface CompactionStartData {
   /**
+   * Identifier shared with the matching compaction completion event
+   */
+  compactionAttemptId?: string;
+  /**
    * Token count from non-system messages (user, assistant, tool) at compaction start
    */
   conversationTokens?: number;
@@ -2651,13 +4943,27 @@ export interface CompactionStartData {
    */
   currentTokens?: number;
   /**
+   * How the compaction ran relative to the conversation: "background" (alongside the turn), "turn_blocking" (the turn waited for it), "pre_prompt" (a non-interactive run waited before recording its prompt), or "direct" (an explicit compaction request). Open set; readers must tolerate other values.
+   *
+   * @internal
+   */
+  execution?: string;
+  /**
    * Model identifier used for compaction, when known
    */
   model?: string;
   /**
+   * Destination model for a model-switch compaction when it differs from the compacting model; for a HydraFusion turn, the routed root model
+   */
+  switchTargetModel?: string;
+  /**
    * Token count from system message(s) at compaction start
    */
   systemTokens?: number;
+  /**
+   * Destination prompt-token budget when it differs from the effective compaction token limit
+   */
+  targetPromptTokenLimit?: number;
   /**
    * Model context window token limit the compaction is targeting, when known
    */
@@ -2666,6 +4972,9 @@ export interface CompactionStartData {
    * Token count from tool definitions at compaction start
    */
   toolDefinitionsTokens?: number;
+  /**
+   * What initiated this compaction, when known
+   */
   trigger?: CompactionTrigger;
 }
 /**
@@ -2676,6 +4985,13 @@ export interface CompactionCompleteEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Conversation compaction results including success status, metrics, and optional error details
+   */
   data: CompactionCompleteData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -2703,6 +5019,22 @@ export interface CompactionCompleteEvent {
  */
 export interface CompactionCompleteData {
   /**
+   * Authoritative active-workflow reminder appended to the compacted context
+   *
+   * @internal
+   */
+  activeWorkflowSummary?: string;
+  /**
+   * How long the compaction attempt took end to end, how long it blocked the user, and the configuration it ran under
+   *
+   * @internal
+   */
+  attemptMetrics?: CompactionCompleteAttemptMetrics;
+  /**
+   * Canonical model identifier used for model-specific behavior when replaying compaction
+   */
+  behaviorModelId?: string;
+  /**
    * Checkpoint snapshot number created for recovery
    */
   checkpointNumber?: number;
@@ -2710,6 +5042,19 @@ export interface CompactionCompleteData {
    * File path where the checkpoint was stored
    */
   checkpointPath?: string;
+  /**
+   * Client-generated request ID (X-Request-Id header) the runtime sent with the latest compaction LLM request. Present even when the request failed before any response arrived.
+   *
+   * @internal
+   */
+  clientRequestId?: string;
+  /**
+   * Identifier shared with the matching compaction start event
+   */
+  compactionAttemptId?: string;
+  /**
+   * Token usage breakdown for the compaction LLM call (aligned with assistant.usage format)
+   */
   compactionTokensUsed?: CompactionCompleteCompactionTokensUsed;
   /**
    * Token count from non-system messages (user, assistant, tool) after compaction
@@ -2724,9 +5069,41 @@ export interface CompactionCompleteData {
    */
   error?: string;
   /**
+   * How the compaction ran relative to the conversation: "background" (alongside the turn), "turn_blocking" (the turn waited for it), "pre_prompt" (a non-interactive run waited before recording its prompt), or "direct" (an explicit compaction request). Open set; readers must tolerate other values.
+   *
+   * @internal
+   */
+  execution?: string;
+  /**
+   * Evidence about the summarizer's latest model call for a failed compaction, so a failure its reason alone does not explain can be diagnosed
+   *
+   * @internal
+   */
+  failureDiagnostics?: CompactionCompleteFailureDiagnostics;
+  /**
+   * Bounded reason for a typed failed outcome. Unknown future values are preserved.
+   */
+  failureReason?: string;
+  /**
+   * Model identifier at admission when routing later changed to the reported compaction model
+   */
+  initialModel?: string;
+  /**
    * Number of messages removed during compaction
    */
   messagesRemoved?: number;
+  /**
+   * Model identifier used for compaction when provider usage does not already supply it
+   */
+  model?: string;
+  /**
+   * Typed terminal outcome for this observed compaction completion. Unknown future values are preserved.
+   */
+  outcome?: string;
+  /**
+   * Bounded reason for an expected non-application outcome such as cancellation or no applicable history. Unknown future values are preserved.
+   */
+  outcomeReason?: string;
   /**
    * Total tokens in conversation after compaction
    */
@@ -2740,9 +5117,17 @@ export interface CompactionCompleteData {
    */
   preCompactionTokens?: number;
   /**
+   * Reasoning effort level the compaction summarizer request used, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
+   */
+  reasoningEffort?: string;
+  /**
    * GitHub request tracing ID (x-github-request-id header) for the compaction LLM call
    */
   requestId?: string;
+  /**
+   * Reasoning baseline on the replacement summary, preserved when replay skips the compacted history
+   */
+  responsesReasoning?: ResponsesReasoning;
   /**
    * Copilot service request ID (x-copilot-service-request-id header) for the compaction LLM call
    */
@@ -2756,13 +5141,31 @@ export interface CompactionCompleteData {
    */
   success: boolean;
   /**
+   * How far the summarizer model calls had progressed when the outcome was decided, so a stalled summarizer can be told from a slow one
+   *
+   * @internal
+   */
+  summarizerProgress?: CompactionCompleteSummarizerProgress;
+  /**
    * LLM-generated summary of the compacted conversation history
    */
   summaryContent?: string;
   /**
+   * Destination model for a model-switch compaction when it differs from the compacting model; for a HydraFusion turn, the routed root model
+   */
+  switchTargetModel?: string;
+  /**
    * Token count from system message(s) after compaction
    */
   systemTokens?: number;
+  /**
+   * Destination prompt-token budget when it differs from the effective compaction token limit
+   */
+  targetPromptTokenLimit?: number;
+  /**
+   * Open accounting-basis identifier for trustworthy paired pre/post token measurements. The current runtime emits local_full_context_estimate.
+   */
+  tokenAccountingBasis?: string;
   /**
    * Model context window token limit the compaction was targeting, when known
    */
@@ -2775,12 +5178,139 @@ export interface CompactionCompleteData {
    * Token count from tool definitions after compaction
    */
   toolDefinitionsTokens?: number;
+  /**
+   * What initiated this compaction, when known
+   */
   trigger?: CompactionTrigger;
+}
+/**
+ * End-to-end timing of a compaction attempt and the configuration it ran under, measured from the start of the compaction to its terminal event.
+ */
+/** @internal */
+export interface CompactionCompleteAttemptMetrics {
+  /**
+   * Time from the decision of the compaction's outcome to this event, in milliseconds. Absent when no outcome was decided.
+   *
+   * @internal
+   */
+  applyDelayMs?: number;
+  /**
+   * Time a turn, or a prompt-mode run's prompt, spent blocked waiting for this compaction, in milliseconds. Absent for compactions that block nothing.
+   *
+   * @internal
+   */
+  blockingWaitMs?: number;
+  /**
+   * Summarizer requests cancelled while in flight, one per model call cancellation reported for this compaction. Not counted in failedRequestCount. Absent when none was cancelled.
+   *
+   * @internal
+   */
+  cancelledRequestCount?: number;
+  /**
+   * The deadline limit that ended the compaction, in milliseconds. Absent unless a deadline fired.
+   *
+   * @internal
+   */
+  deadlineLimitMs?: number;
+  /**
+   * How long after its limit the deadline was observed to fire, in milliseconds. Absent unless a deadline fired.
+   *
+   * @internal
+   */
+  deadlineOvershootMs?: number;
+  /**
+   * Deadline policy bounding the summarizer, such as "fixed" or "progress_aware"
+   *
+   * @internal
+   */
+  deadlinePolicy?: string;
+  /**
+   * Time from the start of the compaction to this event, in milliseconds, whatever the outcome
+   *
+   * @internal
+   */
+  durationMs: number;
+  /**
+   * Summarizer requests that failed with a provider or transport error. Absent when none failed.
+   *
+   * @internal
+   */
+  failedRequestCount?: number;
+  /**
+   * Sum of the sampled input token estimates of the summarizer requests that failed, whose usage the provider never reported. Absent when none failed.
+   *
+   * @internal
+   */
+  failedRequestInputTokensEstimate?: number;
+  /**
+   * Step whose failure ended the compaction before or after its summarizer request: "session_read", "auth_hydration", "model_resolution", "context_breakdown", "token_limit", "start_publication", "pre_compact_hook", "output_hydration", "auth_missing", "agent_context_missing", "summarizer_setup", "summary_parse", "plan_read", "history_write" or "background_apply". Absent when the summarizer request itself failed, or nothing failed.
+   *
+   * @internal
+   */
+  failureOperation?: string;
+  /**
+   * Retry-After of the latest failed summarizer request, in milliseconds. Absent when that request sent none.
+   *
+   * @internal
+   */
+  lastRetryAfterMs?: number;
+  /**
+   * Output token limit of the latest summarizer request. Absent when no request was sent.
+   *
+   * @internal
+   */
+  maxOutputTokens?: number;
+  /**
+   * Reasoning effort the summarizer would have used before any compaction-specific reduction
+   *
+   * @internal
+   */
+  requestedReasoningEffort?: string;
+  /**
+   * Total time from a failed summarizer request settling to the next one starting, which includes the retry backoff, in milliseconds. Absent when no request was retried.
+   *
+   * @internal
+   */
+  retryWaitMs?: number;
+  /**
+   * Historical attachments removed from the summarizer input when it was shrunk. Absent unless the input was shrunk.
+   *
+   * @internal
+   */
+  shrinkRemovedAttachments?: number;
+  /**
+   * Historical reasoning items stripped from the summarizer input when it was shrunk. Absent unless the input was shrunk.
+   *
+   * @internal
+   */
+  shrinkStrippedReasoning?: number;
+  /**
+   * Reasoning effort the summarizer requests were sent with
+   *
+   * @internal
+   */
+  summarizerReasoningEffort?: string;
+  /**
+   * Estimated time the machine spent suspended or asleep during the compaction, in milliseconds
+   *
+   * @internal
+   */
+  suspendedMs?: number;
+  /**
+   * Context utilization threshold, as a fraction of the token limit, whose crossing started this compaction. Absent for compactions not started by a threshold.
+   *
+   * @internal
+   */
+  triggerThreshold?: number;
 }
 /**
  * Token usage breakdown for the compaction LLM call (aligned with assistant.usage format)
  */
 export interface CompactionCompleteCompactionTokensUsed {
+  /**
+   * Whether the compaction's credit amount was reported for all, some, or none of its calls.
+   */
+  aiCreditsStatus?: AiCreditsStatus;
   /**
    * Cached input tokens reused in the compaction LLM call
    */
@@ -2808,15 +5338,33 @@ export interface CompactionCompleteCompactionTokensUsed {
    */
   model?: string;
   /**
+   * Model display name captured for the compaction call.
+   */
+  modelDisplayName?: string;
+  /**
    * Output tokens produced by the compaction LLM call
    */
   outputTokens?: number;
+  /**
+   * Provider captured for the compaction call; absent when attribution is unknown.
+   */
+  provider?: ModelProviderRef;
+  /**
+   * Number of model requests represented by this aggregated compaction usage
+   */
+  requestCount?: number;
 }
 /**
  * Per-request cost and usage data from the CAPI copilot_usage response field
  */
 /** @internal */
 export interface CompactionCompleteCompactionTokensUsedCopilotUsage {
+  /**
+   * Default billing model for token details that do not identify their own model
+   *
+   * @internal
+   */
+  model?: string;
   /**
    * Itemized token usage breakdown
    *
@@ -2841,6 +5389,10 @@ export interface CompactionCompleteCompactionTokensUsedCopilotUsageTokenDetail {
    */
   costPerBatch: number;
   /**
+   * Model responsible for this billing entry
+   */
+  model?: string;
+  /**
    * Total token count for this entry
    */
   tokenCount: number;
@@ -2850,6 +5402,167 @@ export interface CompactionCompleteCompactionTokensUsedCopilotUsageTokenDetail {
   tokenType: string;
 }
 /**
+ * Evidence about the summarizer's latest model call when a compaction failed. Every value is a string so that new values stay readable by older runtimes.
+ */
+/** @internal */
+export interface CompactionCompleteFailureDiagnostics {
+  /**
+   * Finish reason of the summarizer's latest successful response, such as stop, length, or content_filter
+   *
+   * @internal
+   */
+  finishReason?: string;
+  /**
+   * Failure reason of the summarizer's latest failed model call, kept when a later attempt or the compaction deadline ended the compaction. Uses the failureReason values.
+   *
+   * @internal
+   */
+  lastAttemptFailureReason?: string;
+  /**
+   * Error code the provider returned for that call, or its error type when it gave no code
+   *
+   * @internal
+   */
+  providerErrorCode?: string;
+  /**
+   * Bounded kind of that call's transport failure, such as dns, tls, proxy, connection_refused, connection_reset, connect_timeout, or timeout
+   *
+   * @internal
+   */
+  transportErrorKind?: string;
+}
+/**
+ * Original request-level and effective conversation reasoning effort for a provider history boundary; the historical type name is retained for compatibility
+ */
+export interface ResponsesReasoning {
+  /**
+   * Effective effort selected before this message, independent of the response-level reasoning field
+   */
+  effort: string;
+  /**
+   * Original request-level effort, retained while replaying this conversation prefix
+   */
+  initialEffort: string;
+  /**
+   * Provider model whose reasoning settings this boundary records
+   */
+  model: string;
+}
+/**
+ * How far the compaction's summarizer model calls had progressed when the compaction's outcome was decided. Stream statistics describe the latest model request; durationMs and attemptCount cover every request.
+ */
+/** @internal */
+export interface CompactionCompleteSummarizerProgress {
+  /**
+   * Characters of reply text the latest request streamed, counted as received, so it measures output even when the request was cut off before reporting usage. Tool-call arguments and reasoning are not counted. Absent when no request was dispatched.
+   *
+   * @internal
+   */
+  answerChars?: number;
+  /**
+   * Time since the latest request was dispatched, whether or not it had finished, in milliseconds. Absent when no request was dispatched.
+   *
+   * @internal
+   */
+  attemptAgeMs?: number;
+  /**
+   * Number of summarizer model requests dispatched, including retries
+   *
+   * @internal
+   */
+  attemptCount: number;
+  /**
+   * Whether the latest request had already returned a response or an error. False when it was still in flight, such as when the compaction deadline cut it off; absent when no request was dispatched.
+   *
+   * @internal
+   */
+  attemptSettled?: boolean;
+  /**
+   * Time from the start of the compaction to the decision of its outcome, in milliseconds
+   *
+   * @internal
+   */
+  durationMs: number;
+  /**
+   * Time since the latest request's last stream event, or since its dispatch if none arrived, in milliseconds. Absent when no request was dispatched.
+   *
+   * @internal
+   */
+  idleMs?: number;
+  /**
+   * Whether historical attachments and reasoning were dropped from the compaction's input because the session's previous compaction ran out of time.
+   *
+   * @internal
+   */
+  inputShrunk?: boolean;
+  /**
+   * Sampled estimate of the input tokens the latest request sent, taken at dispatch, so it is known even when the request was cut off before reporting usage. Absent when no request was dispatched.
+   *
+   * @internal
+   */
+  inputTokensEstimate?: number;
+  /**
+   * Longest gap between two consecutive outputs of the latest request after its first reply text or tool-call output, in milliseconds. Excludes the still-open gap reported as sinceLastOutputMs; absent without such a gap.
+   *
+   * @internal
+   */
+  maxOutputGapAfterAnswerMs?: number;
+  /**
+   * Longest gap between two consecutive outputs of the latest request up to its first reply text or tool-call output, including the gap that ends there, in milliseconds. Excludes the still-open gap reported as sinceLastOutputMs; absent without such a gap.
+   *
+   * @internal
+   */
+  maxOutputGapBeforeAnswerMs?: number;
+  /**
+   * Longest gap between two consecutive stream events of the latest request, in milliseconds. Excludes the still-open gap reported as idleMs; absent with fewer than two events.
+   *
+   * @internal
+   */
+  maxStreamEventGapMs?: number;
+  /**
+   * Stream events of the latest request that carried observable output
+   *
+   * @internal
+   */
+  outputEventCount: number;
+  /**
+   * Characters of reasoning text, summarized or raw, the latest request streamed, counted as received. Encrypted reasoning is not counted. Absent when no request was dispatched.
+   *
+   * @internal
+   */
+  reasoningChars?: number;
+  /**
+   * Time since the latest request's last observable output, in milliseconds. Unlike idleMs, keepalive deltas do not reset it. Absent when no output arrived.
+   *
+   * @internal
+   */
+  sinceLastOutputMs?: number;
+  /**
+   * Token-bearing stream events the latest request received, keepalive deltas included
+   *
+   * @internal
+   */
+  streamEventCount: number;
+  /**
+   * Time from dispatching the latest request to its first reply text or tool-call output, in milliseconds. Reasoning does not count. Absent when no such output arrived.
+   *
+   * @internal
+   */
+  timeToFirstAnswerOutputMs?: number;
+  /**
+   * Time from dispatching the latest request to its first observable text, reasoning, or tool-call output, in milliseconds. Absent when no output arrived.
+   *
+   * @internal
+   */
+  timeToFirstOutputMs?: number;
+  /**
+   * Time from dispatching the latest request to its first token-bearing stream event, in milliseconds. Absent when no stream event arrived.
+   *
+   * @internal
+   */
+  timeToFirstTokenMs?: number;
+}
+/**
  * Session event "session.task_complete". Task completion notification with summary from the agent
  */
 export interface TaskCompleteEvent {
@@ -2857,6 +5570,13 @@ export interface TaskCompleteEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Task completion notification with summary from the agent
+   */
   data: TaskCompleteData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -2884,9 +5604,20 @@ export interface TaskCompleteEvent {
  */
 export interface TaskCompleteData {
   /**
+   * Permission-protected actions that remained blocked for this genuine-user-message epoch. Present on successful completion when the objective was completed without them and on blocked completion when one or more were required.
+   */
+  blockedActions?: BlockedPermissionAction[];
+  /**
+   * Structured blocker details when outcome is blocked
+   */
+  blocker?: TaskBlocker;
+  /**
    * Active autopilot objective ID evaluated by the completion reviewer
    */
   objectiveId?: number;
+  /**
+   * Semantic completion decision. Absent on legacy events and invalid tool calls
+   */
   outcome?: TaskCompletionOutcome;
   /**
    * Label-safe runtime rationale for the completion decision (e.g. a cancellation or pause/resume downgrade), when one applies. Reviewer-authored rationale is intentionally omitted here because this event has no IFC label channel; the reviewer's findings remain available through its own labeled sub-agent events
@@ -2902,6 +5633,791 @@ export interface TaskCompleteData {
   summary?: string;
 }
 /**
+ * Privacy-safe reference to a permission-protected action that remains blocked for the current Autopilot epoch
+ */
+/** @experimental */
+export interface BlockedPermissionAction {
+  /**
+   * Permission-recovery episode that owns this blocked action
+   */
+  episodeId: string;
+  /**
+   * Controlled permission request kind for the blocked action
+   */
+  permissionKind: string;
+  /**
+   * Recovery transition that made the action binding for the epoch
+   */
+  recoveryReason: PermissionRecoveryReason;
+  /**
+   * Tool call that produced the final blocked permission request. Consumers can join this identifier to labeled permission and tool events for user-facing details.
+   */
+  toolCallId?: string;
+}
+/**
+ * Structured reason that the task cannot continue without intervention
+ */
+/** @experimental */
+export interface TaskBlocker {
+  /**
+   * Category of intervention that blocked the task
+   */
+  kind: TaskBlockerKind;
+  /**
+   * Permission-recovery episode that produced this blocker
+   */
+  permissionRecovery: PermissionRecoveryData;
+  /**
+   * Controlled reason for the current blocked state
+   */
+  reason: TaskBlockerReason;
+  /**
+   * Whether a later user response or steering message can resume the task
+   */
+  resumable: boolean;
+}
+/**
+ * Authoritative snapshot of an Autopilot permission-recovery episode
+ */
+export interface PermissionRecoveryData {
+  /**
+   * Ordered privacy-safe record of permission attempts and the successful alternative, when any
+   */
+  attempts: PermissionRecoveryAttempt[];
+  /**
+   * Stable identifier shared by every transition in this recovery episode
+   */
+  episodeId: string;
+  /**
+   * Maximum number of distinct autonomous permission attempts allowed before escalation
+   */
+  maxAttempts: number;
+  /**
+   * Policy selected from the current client's response capability; mode or client changes may update it during recovery
+   */
+  onBlocked: PermissionRecoveryOnBlocked;
+  /**
+   * Subagent identifier that owns this recovery episode when the request was delegated through a parent permission service
+   */
+  ownerAgentId?: string;
+  /**
+   * Root or child execution-session identifier that owns this recovery episode; omitted for legacy snapshots
+   */
+  ownerSessionId?: string;
+  /**
+   * Controlled reason for the latest episode transition
+   */
+  reason: PermissionRecoveryReason;
+  /**
+   * Optional replay checkpoint for the epoch-scoped permission-recovery breaker. New runtimes persist it on state-changing recovery snapshots; older runtimes ignore it.
+   */
+  runState?: PermissionRecoveryRunState;
+  /**
+   * Current lifecycle state of the recovery episode
+   */
+  status: PermissionRecoveryStatus;
+}
+export interface PermissionRecoveryAttempt {
+  /**
+   * Unique identifier for this attempt record
+   */
+  attemptId: string;
+  /**
+   * How the runtime handled this attempt
+   */
+  disposition: PermissionRecoveryAttemptDisposition;
+  /**
+   * One-based position of this attempt in the episode
+   */
+  ordinal: number;
+  /**
+   * Controlled permission request kind, such as shell, path, URL, or tool
+   */
+  permissionKind: string;
+  /**
+   * Controlled reason for the attempt disposition
+   */
+  reason: PermissionRecoveryAttemptReason;
+  /**
+   * Relationship between this attempt and earlier attempts in the episode
+   */
+  relation: PermissionRecoveryAttemptRelation;
+  /**
+   * SHA-256 fingerprint of normalized request data; raw permission arguments are not included
+   */
+  requestFingerprint: string;
+  /**
+   * Tool-call identifier associated with this attempt, when available
+   */
+  toolCallId?: string;
+}
+/**
+ * Replay-safe epoch counters for Autopilot Assisted Permissions recovery
+ */
+/** @experimental */
+export interface PermissionRecoveryRunState {
+  /**
+   * Number of blocked recovery episodes since the latest successful permitted effectful tool call
+   */
+  consecutiveBlockedEpisodes: number;
+  /**
+   * Whether the claimed epoch terminal is an authoritative permission-recovery block that remains latched until the next genuine root user message
+   */
+  permissionRecoveryTerminalClaimed?: boolean;
+  /**
+   * Whether a permission-recovery terminal completion has already been claimed for the epoch
+   */
+  terminalOutcomeClaimed: boolean;
+  /**
+   * Total deferred, denied, or blocked attempt transitions in the current genuine-user-message epoch
+   */
+  totalDenialDispositions: number;
+}
+/**
+ * Session event "session.completion_receipt". Behavior-neutral record of structured runtime facts present when an agent completion decision is accepted.
+ */
+/** @experimental */
+export interface CompletionReceiptEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Behavior-neutral record of structured runtime facts present when an agent completion decision is accepted.
+   */
+  data: CompletionReceiptData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.completion_receipt".
+   */
+  type: "session.completion_receipt";
+}
+/**
+ * Behavior-neutral record of structured runtime facts present when an agent completion decision is accepted.
+ */
+/** @experimental */
+export interface CompletionReceiptData {
+  /**
+   * One-based accepted completion receipt ordinal in the durable session history.
+   */
+  attempt: number;
+  /**
+   * Inclusive durable event range summarized by this receipt.
+   */
+  eventRange: CompletionReceiptEventRange;
+  /**
+   * Number of failed structured tool completions in the covered range.
+   */
+  failedToolCount: number;
+  /**
+   * Final structured tool completion in the covered range, when one exists.
+   */
+  finalTool?: CompletionReceiptFinalTool;
+  /**
+   * Version of the completion receipt payload.
+   */
+  schemaVersion: number;
+  /**
+   * Identifier of the assistant turn-end event that supplied the accepted completion boundary. This is the receipt's idempotency key, and always equals eventRange.endEventId.
+   */
+  sourceEventId: string;
+  /**
+   * Runtime reason the completion decision was accepted.
+   */
+  stopReason: CompletionReceiptStopReason;
+  /**
+   * Number of successful structured tool completions in the covered range.
+   */
+  successfulToolCount: number;
+}
+/**
+ * Inclusive durable event range summarized by a completion receipt.
+ */
+export interface CompletionReceiptEventRange {
+  /**
+   * Identifier of the assistant turn-end event that ends the covered exchange. Always equals the receipt's sourceEventId, so either field is a valid join key.
+   */
+  endEventId: string;
+  /**
+   * Identifier of the user message that starts the covered exchange.
+   */
+  startEventId: string;
+}
+/**
+ * Final structured tool completion in the covered event range.
+ */
+export interface CompletionReceiptFinalTool {
+  /**
+   * Process exit code from a structured shell result, when available.
+   */
+  exitCode?: number;
+  /**
+   * Structured success or failure status from the tool completion event.
+   */
+  status: CompletionReceiptToolStatus;
+  /**
+   * Unique identifier of the completed tool call.
+   */
+  toolCallId: string;
+  /**
+   * Tool name from the matching tool execution start event, when available.
+   */
+  toolName?: string;
+}
+/**
+ * Session event "session.fusion_route_started". Experimental transient signal that HydraFusion routing has started for an eligible turn.
+ */
+/** @experimental */
+export interface FusionRouteStartedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Experimental transient signal that HydraFusion routing has started for an eligible turn.
+   */
+  data: FusionRouteStartedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.fusion_route_started".
+   */
+  type: "session.fusion_route_started";
+}
+/**
+ * Experimental transient signal that HydraFusion routing has started for an eligible turn.
+ */
+/** @experimental */
+export interface FusionRouteStartedData {
+  /**
+   * Identifier for this routing attempt before a durable Fusion turn exists.
+   */
+  attemptId: string;
+  /**
+   * HydraFusion routing policy requested for the turn.
+   */
+  policy?: string;
+  /**
+   * Synthetic HydraFusion model selected for the session.
+   */
+  syntheticModel?: string;
+  /**
+   * Kind of turn being routed.
+   */
+  turnKind: FusionTurnKind;
+}
+/**
+ * Session event "session.fusion_route_failed". Experimental durable HydraFusion routing failure and the deterministic concrete fallback selected for the turn.
+ */
+/** @experimental */
+export interface FusionRouteFailedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Experimental durable HydraFusion routing failure and the deterministic concrete fallback selected for the turn.
+   */
+  data: FusionRouteFailedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.fusion_route_failed".
+   */
+  type: "session.fusion_route_failed";
+}
+/**
+ * Experimental durable HydraFusion routing failure and the deterministic concrete fallback selected for the turn.
+ */
+/** @experimental */
+export interface FusionRouteFailedData {
+  /**
+   * Identifier of the routing attempt that failed.
+   */
+  attemptId: string;
+  /**
+   * Provider or validation error detail, when available.
+   */
+  errorMessage?: string;
+  /**
+   * Concrete model selected as the deterministic fallback.
+   */
+  fallbackModel: string;
+  /**
+   * Identifier of the HydraFusion turn whose routing failed; its fallback phase runs under the same id. Absent on events written before it was recorded.
+   */
+  fusionId?: string;
+  /**
+   * HydraFusion routing policy requested for the turn.
+   */
+  policy: string;
+  /**
+   * Stable machine-readable reason for the routing failure.
+   */
+  reason: string;
+  /**
+   * Elapsed routing time in milliseconds before the failure.
+   */
+  routingLatencyMs?: number;
+  /**
+   * Synthetic HydraFusion model selected for the session.
+   */
+  syntheticModel: string;
+}
+/**
+ * Session event "session.fusion_resolved". Experimental durable validated HydraFusion route and turn policy.
+ */
+/** @experimental */
+export interface FusionResolvedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Experimental durable validated HydraFusion route and turn policy.
+   */
+  data: FusionResolvedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.fusion_resolved".
+   */
+  type: "session.fusion_resolved";
+}
+/**
+ * Experimental durable validated HydraFusion route and turn policy.
+ */
+/** @experimental */
+export interface FusionResolvedData {
+  /**
+   * Version of the validated HydraFusion event contract.
+   */
+  contractVersion: number;
+  /**
+   * Planned Critique phase identities, including independent critics with repeated model IDs. May be absent in older events; consumers then use secondaryModel for the legacy critic.
+   *
+   * @experimental
+   */
+  critics?: FusionCritic[];
+  /**
+   * Concrete model used when the planned primary model cannot execute.
+   */
+  fallbackModel: string;
+  /**
+   * Router recommendation controlling reuse or rerouting on later turns.
+   */
+  followUp?: FusionFollowUpRecommendation;
+  /**
+   * Concrete model recommended for eligible follow-up turns.
+   */
+  followUpModel: string;
+  /**
+   * Stable identifier for the resolved HydraFusion turn.
+   */
+  fusionId: string;
+  /**
+   * Short human-readable summary of the selected workflow, suitable for immediate client display after routing. May be absent in older durable events; omit the explanation or derive one from pattern and phasePlan. Display text, not a stable machine-readable value.
+   *
+   * @experimental
+   */
+  hint?: string;
+  /**
+   * Concrete model selected for Cascade escalation-gate calls, when required.
+   *
+   * @experimental
+   */
+  judgeModel?: string;
+  /**
+   * Version of the executable model universe used for selection.
+   */
+  modelUniverseVersion?: string;
+  /**
+   * Validated orchestration pattern selected for the turn.
+   */
+  pattern: FusionPattern;
+  /**
+   * Presentation-neutral phase plan for clients that render workflow progress.
+   *
+   * @experimental
+   */
+  phasePlan?: FusionPhasePlanStep[];
+  /**
+   * Version of the validated execution-plan format.
+   */
+  planVersion?: string;
+  /**
+   * HydraFusion routing policy used to resolve the plan.
+   */
+  policy: string;
+  /**
+   * Version of the local routing policy.
+   */
+  policyVersion?: string;
+  /**
+   * Concrete model selected for the primary solver phase.
+   */
+  primaryModel: string;
+  /**
+   * Concrete model selected for Cascade repair, when required.
+   *
+   * @experimental
+   */
+  repairModel?: string;
+  /**
+   * Router implementation that supplied the plan.
+   */
+  routeSource?: string;
+  /**
+   * Elapsed time in milliseconds required to resolve and validate the route.
+   */
+  routingLatencyMs?: number;
+  /**
+   * Identifier of the local policy rule that matched.
+   */
+  ruleId?: string;
+  /**
+   * Zero-based index of the local policy rule that matched.
+   */
+  ruleIndex?: number;
+  /**
+   * Human-readable name of the local policy rule that matched.
+   */
+  ruleName?: string;
+  /**
+   * Validated capability scores used to select the route.
+   */
+  scores?: FusionScores;
+  /**
+   * Concrete model selected for Critique review, or the legacy Cascade judge/repair model when role-specific fields are absent.
+   */
+  secondaryModel: string | null;
+  /**
+   * Identifier of the server policy rule whose workflow the plan's steps describe, when CAPI's sticky root routing replaced the workflow of `ruleId`'s rule to keep the previous turn's root model. Absent when no substitution occurred.
+   *
+   * @experimental
+   */
+  selectedRuleId?: string;
+  /**
+   * Synthetic HydraFusion model selected for the session.
+   */
+  syntheticModel: string;
+  /**
+   * Identifier of the session turn associated with the route.
+   */
+  turnId: string;
+}
+/** @experimental */
+export interface FusionCritic {
+  /**
+   * Concrete model selected for this critic.
+   *
+   * @experimental
+   */
+  model: string;
+  /**
+   * Unique execution phase identifier for this critic.
+   *
+   * @experimental
+   */
+  phaseId: string;
+  /**
+   * Explicit reasoning effort selected for this critic, if supplied.
+   *
+   * @experimental
+   */
+  reasoningEffort?: string;
+}
+/**
+ * Durable server recommendation for subsequent HydraFusion turns.
+ */
+/** @experimental */
+export interface FusionFollowUpRecommendation {
+  /**
+   * Recommended routing action for the next compaction turn.
+   */
+  compactionTurn: FusionFollowUpAction;
+  /**
+   * Recommended routing action for the next user-message turn.
+   */
+  userTurn: FusionFollowUpAction;
+}
+/**
+ * Presentation-neutral phase planned for a HydraFusion turn.
+ */
+/** @experimental */
+export interface FusionPhasePlanStep {
+  /**
+   * Whether the phase executes only when an earlier phase requests it.
+   */
+  conditional: boolean;
+  /**
+   * Kind of phase that may execute.
+   */
+  kind: FusionPhaseKind;
+  /**
+   * Semantic role assigned to the phase.
+   */
+  role: string;
+  /**
+   * Conversation scope in which the phase executes.
+   */
+  scope: FusionConversationScope;
+}
+/**
+ * Validated HydraFusion routing capability scores.
+ */
+/** @experimental */
+export interface FusionScores {
+  /**
+   * Code-generation capability score returned by the authenticated router.
+   */
+  codeGen: number;
+  /**
+   * Debugging capability score returned by the authenticated router.
+   */
+  debugging: number;
+  /**
+   * Reasoning capability score returned by the authenticated router.
+   */
+  reasoning: number;
+  /**
+   * Tool-use capability score returned by the authenticated router.
+   */
+  toolUse: number;
+}
+/**
+ * Session event "session.fusion_completed". Experimental durable aggregate outcome of a HydraFusion turn.
+ */
+/** @experimental */
+export interface FusionCompletedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Experimental durable aggregate outcome of a HydraFusion turn.
+   */
+  data: FusionCompletedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.fusion_completed".
+   */
+  type: "session.fusion_completed";
+}
+/**
+ * Experimental durable aggregate outcome of a HydraFusion turn.
+ */
+/** @experimental */
+export interface FusionCompletedData {
+  /**
+   * True when the committed first pass ended with background work outstanding, so that work's completion notifications continue the conversation; absent otherwise.
+   *
+   * @experimental
+   */
+  awaitingBackgroundWork?: boolean;
+  /**
+   * Total cached input tokens reported across all phases.
+   */
+  cachedTokens: number;
+  /**
+   * Total tokens written to prompt cache across all phases.
+   */
+  cacheWriteTokens?: number;
+  /**
+   * Idempotency identifier for the authoritative final commit.
+   */
+  commitId: string;
+  /**
+   * Reason the turn used a degraded route, when applicable.
+   */
+  degradedReason: string | null;
+  /**
+   * Total elapsed execution time for the HydraFusion turn in milliseconds.
+   */
+  durationMs: number;
+  /**
+   * Concrete model that supplied the authoritative final content.
+   */
+  finalSourceModel: string | null;
+  /**
+   * Phase whose output supplied the authoritative final content.
+   */
+  finalSourcePhaseId: string | null;
+  /**
+   * Concrete model recommended for eligible follow-up turns.
+   */
+  followUpModel: string;
+  /**
+   * Stable identifier for the completed HydraFusion turn.
+   */
+  fusionId: string;
+  /**
+   * Total input tokens consumed across all phases.
+   */
+  inputTokens: number;
+  /**
+   * Stable aggregate outcome of the HydraFusion turn.
+   */
+  outcome: string;
+  /**
+   * Total output tokens produced across all phases.
+   */
+  outputTokens: number;
+  /**
+   * HydraFusion orchestration pattern executed for the turn.
+   */
+  pattern: FusionPattern;
+  /**
+   * Number of concrete phases attempted by the turn.
+   */
+  phaseCount: number;
+  /**
+   * Total concrete model requests made across all phases.
+   */
+  requestCount: number;
+  /**
+   * Synthetic HydraFusion model selected for the session.
+   */
+  syntheticModel: string;
+  /**
+   * Total normalized AI-unit cost reported across all phases, in nano-AIU.
+   */
+  totalNanoAiu: number;
+  /**
+   * Identifier of the session turn associated with the completion.
+   */
+  turnId: string;
+}
+/**
+ * Session event "session.permission_recovery". Authoritative snapshot of an Autopilot permission-recovery episode
+ */
+export interface PermissionRecoveryEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Authoritative snapshot of an Autopilot permission-recovery episode
+   */
+  data: PermissionRecoveryData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.permission_recovery".
+   */
+  type: "session.permission_recovery";
+}
+/**
  * Session event "user.message". Payload of `user.message` with displayed and model-transformed content, attachments, source/delivery metadata, mode, and telemetry IDs.
  */
 export interface UserMessageEvent {
@@ -2909,6 +6425,13 @@ export interface UserMessageEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `user.message` with displayed and model-transformed content, attachments, source/delivery metadata, mode, and telemetry IDs.
+   */
   data: UserMessageData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -2935,6 +6458,9 @@ export interface UserMessageEvent {
  * Payload of `user.message` with displayed and model-transformed content, attachments, source/delivery metadata, mode, and telemetry IDs.
  */
 export interface UserMessageData {
+  /**
+   * The agent mode that was active when this message was sent
+   */
   agentMode?: UserMessageAgentMode;
   /**
    * Files, selections, or GitHub references attached to the message
@@ -2944,6 +6470,9 @@ export interface UserMessageData {
    * The user's message text as displayed in the timeline
    */
   content: string;
+  /**
+   * How this message was delivered to the agentic loop relative to loop state (idle-start vs. steering/queued while busy). The timing axis; combine with `source` (origin) for the full picture. Used for telemetry attribution.
+   */
   delivery?: UserMessageDelivery;
   /**
    * CAPI interaction ID for correlating this user message with its turn
@@ -2954,6 +6483,10 @@ export interface UserMessageData {
    */
   isAutopilotContinuation?: boolean;
   /**
+   * Stable identity of the logical user message, matching the ID returned by send and retained by pending queue snapshots
+   */
+  messageId?: string;
+  /**
    * Path-backed native document attachments that stayed on the tagged_files path flow because native upload could not read them or would exceed the request size limit
    */
   nativeDocumentPathFallbackPaths?: string[];
@@ -2961,6 +6494,10 @@ export interface UserMessageData {
    * Parent agent task ID for background telemetry correlated to this user turn
    */
   parentAgentTaskId?: string;
+  /**
+   * Provider reasoning settings anchored before this model-facing message for cache-stable replay; the historical responsesReasoning name is retained for compatibility
+   */
+  responsesReasoning?: ResponsesReasoning;
   /**
    * Origin of this message, used for timeline filtering and attribution (e.g., `skill-pdf` for hidden skill injection or `agent-<agent-id>` for an inter-agent prompt)
    */
@@ -2994,11 +6531,17 @@ export interface AttachmentFile {
    * User-facing display name for the attachment
    */
   displayName: string;
+  /**
+   * Optional line range to scope the attachment to a specific section of the file
+   */
   lineRange?: AttachmentFileLineRange;
   /**
    * Internal: MIME type of the file's model-facing bytes (post-resize for images). Set when the file's bytes are interned to an asset. Absent externally.
    */
   mimeType?: string;
+  /**
+   * Internal: why model-facing bytes are absent from persistence. Absent externally.
+   */
   omittedReason?: OmittedBinaryOmittedReason;
   /**
    * Absolute file path
@@ -3059,6 +6602,9 @@ export interface AttachmentSelection {
    * Absolute path to the file containing the selection
    */
   filePath: string;
+  /**
+   * Position range of the selection within the file
+   */
   selection: AttachmentSelectionDetails;
   /**
    * The selected text content
@@ -3073,7 +6619,13 @@ export interface AttachmentSelection {
  * Position range of the selection within the file
  */
 export interface AttachmentSelectionDetails {
+  /**
+   * End position of the selection
+   */
   end: AttachmentSelectionDetailsEnd;
+  /**
+   * Start position of the selection
+   */
   start: AttachmentSelectionDetailsStart;
 }
 /**
@@ -3110,6 +6662,9 @@ export interface AttachmentGitHubReference {
    * Issue, pull request, or discussion number
    */
   number: number;
+  /**
+   * Type of GitHub reference
+   */
   referenceType: AttachmentGitHubReferenceType;
   /**
    * Current state of the referenced item (e.g., open, closed, merged)
@@ -3140,6 +6695,9 @@ export interface AttachmentGitHubCommit {
    * Full commit SHA
    */
   oid: string;
+  /**
+   * Repository the commit belongs to
+   */
   repo: GitHubRepoRef;
   /**
    * Attachment type discriminator
@@ -3175,6 +6733,9 @@ export interface AttachmentGitHubRelease {
    * Human-readable release name
    */
   name: string;
+  /**
+   * Repository the release belongs to
+   */
   repo: GitHubRepoRef;
   /**
    * Git tag the release is anchored to
@@ -3205,6 +6766,9 @@ export interface AttachmentGitHubActionsJob {
    * Display name of the job
    */
   jobName: string;
+  /**
+   * Repository the workflow run belongs to
+   */
   repo: GitHubRepoRef;
   /**
    * Attachment type discriminator
@@ -3231,6 +6795,9 @@ export interface AttachmentGitHubRepository {
    * Git ref this attachment is anchored at (branch, tag, or commit). When absent the default branch is implied.
    */
   ref?: string;
+  /**
+   * Repository pointer
+   */
   repo: GitHubRepoRef;
   /**
    * Attachment type discriminator
@@ -3245,7 +6812,13 @@ export interface AttachmentGitHubRepository {
  * Pointer to a single-file diff. At least one of `head` and `base` must be present.
  */
 export interface AttachmentGitHubFileDiff {
+  /**
+   * File location on the base side of the diff. Absent for additions.
+   */
   base?: AttachmentGitHubFileDiffSide;
+  /**
+   * File location on the head side of the diff. Absent for deletions.
+   */
   head?: AttachmentGitHubFileDiffSide;
   /**
    * Attachment type discriminator
@@ -3268,13 +6841,22 @@ export interface AttachmentGitHubFileDiffSide {
    * Git ref (branch, tag, or commit SHA) the file is read at
    */
   ref: string;
+  /**
+   * Repository the file lives in
+   */
   repo: GitHubRepoRef;
 }
 /**
  * Pointer to a comparison between two git revisions.
  */
 export interface AttachmentGitHubTreeComparison {
+  /**
+   * Base side of the comparison
+   */
   base: AttachmentGitHubTreeComparisonSide;
+  /**
+   * Head side of the comparison
+   */
   head: AttachmentGitHubTreeComparisonSide;
   /**
    * Attachment type discriminator
@@ -3289,6 +6871,9 @@ export interface AttachmentGitHubTreeComparison {
  * One side of a tree comparison (head or base)
  */
 export interface AttachmentGitHubTreeComparisonSide {
+  /**
+   * Repository the revision belongs to
+   */
   repo: GitHubRepoRef;
   /**
    * Git revision (branch, tag, or commit SHA)
@@ -3320,6 +6905,9 @@ export interface AttachmentGitHubFile {
    * Git ref the file is read at (branch, tag, or commit SHA)
    */
   ref: string;
+  /**
+   * Repository the file lives in
+   */
   repo: GitHubRepoRef;
   /**
    * Attachment type discriminator
@@ -3334,6 +6922,9 @@ export interface AttachmentGitHubFile {
  * Pointer to a line range inside a file in a GitHub repository.
  */
 export interface AttachmentGitHubSnippet {
+  /**
+   * Line range the snippet covers
+   */
   lineRange: AttachmentFileLineRange;
   /**
    * Repository-relative path to the file
@@ -3343,6 +6934,9 @@ export interface AttachmentGitHubSnippet {
    * Git ref the file is read at (branch, tag, or commit SHA)
    */
   ref: string;
+  /**
+   * Repository the file lives in
+   */
   repo: GitHubRepoRef;
   /**
    * Attachment type discriminator
@@ -3377,6 +6971,9 @@ export interface AttachmentBlob {
    * MIME type of the inline data
    */
   mimeType: string;
+  /**
+   * Internal: why model-facing bytes are absent from persistence. Absent externally.
+   */
   omittedReason?: OmittedBinaryOmittedReason;
   /**
    * Attachment type discriminator
@@ -3417,6 +7014,28 @@ export interface AttachmentExtensionContext {
   type: "extension_context";
 }
 /**
+ * An ID-bound reference to an eligible live session. Supplies identity context only, without sending a message, reading history, or granting permission.
+ */
+/** @experimental */
+export interface AttachmentSessionReference {
+  /**
+   * User-visible mention label captured when the reference was selected.
+   */
+  displayName?: string;
+  /**
+   * Character offset of the selected mention in the displayed prompt.
+   */
+  mentionIndex?: number;
+  /**
+   * Stable identity of the selected session, never resolved from its title.
+   */
+  sessionId: string;
+  /**
+   * Attachment type discriminator.
+   */
+  type: "session_reference";
+}
+/**
  * Session event "pending_messages.modified". Empty payload; the event signals that the pending message queue has changed
  */
 export interface PendingMessagesModifiedEvent {
@@ -3424,6 +7043,13 @@ export interface PendingMessagesModifiedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Empty payload; the event signals that the pending message queue has changed
+   */
   data: PendingMessagesModifiedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -3458,6 +7084,13 @@ export interface AssistantTurnStartEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Turn initialization metadata including identifier and interaction tracking
+   */
   data: AssistantTurnStartData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -3485,6 +7118,10 @@ export interface AssistantTurnStartEvent {
  */
 export interface AssistantTurnStartData {
   /**
+   * Agent mode whose tools this turn's run was offered. Absent on historical events and sub-agent turns.
+   */
+  agentMode?: SessionMode;
+  /**
    * CAPI interaction ID for correlating this turn with upstream telemetry
    */
   interactionId?: string;
@@ -3492,6 +7129,10 @@ export interface AssistantTurnStartData {
    * Model identifier used for this turn, when known
    */
   model?: string;
+  /**
+   * Parent task tool call ID when this turn belongs to a sub-agent
+   */
+  parentToolCallId?: string;
   /**
    * Identifier for this turn within the agentic loop, typically a stringified turn number
    */
@@ -3505,6 +7146,13 @@ export interface AssistantIntentEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Agent intent description for current activity or plan
+   */
   data: AssistantIntentData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -3537,6 +7185,422 @@ export interface AssistantIntentData {
   intent: string;
 }
 /**
+ * Session event "assistant.fusion_phase_started". Experimental transient HydraFusion phase/model/role signal.
+ */
+/** @experimental */
+export interface AssistantFusionPhaseStartedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Experimental transient HydraFusion phase/model/role signal.
+   */
+  data: FusionPhaseStartedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.fusion_phase_started".
+   */
+  type: "assistant.fusion_phase_started";
+}
+/**
+ * Experimental transient HydraFusion phase/model/role signal.
+ */
+/** @experimental */
+export interface FusionPhaseStartedData {
+  /**
+   * Conversation scope in which the phase executes.
+   */
+  conversationScope: FusionConversationScope;
+  /**
+   * Identifier of the HydraFusion turn containing the phase.
+   */
+  fusionId: string;
+  /**
+   * Concrete model executing the phase.
+   */
+  model: string;
+  /**
+   * HydraFusion orchestration pattern containing the phase.
+   */
+  pattern: FusionPattern;
+  /**
+   * Stable identifier for the concrete phase.
+   */
+  phaseId: string;
+  /**
+   * Kind of phase being executed.
+   */
+  phaseKind: FusionPhaseKind;
+  /**
+   * Explicit reasoning effort selected for this phase, if supplied.
+   *
+   * @experimental
+   */
+  reasoningEffort?: string;
+  /**
+   * Semantic role assigned to the phase.
+   */
+  role: string;
+}
+/**
+ * Session event "assistant.fusion_phase_activity". Experimental content-safe activity signal for a running HydraFusion phase.
+ */
+/** @experimental */
+export interface AssistantFusionPhaseActivityEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Experimental content-safe activity signal for a running HydraFusion phase.
+   */
+  data: FusionPhaseActivityData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.fusion_phase_activity".
+   */
+  type: "assistant.fusion_phase_activity";
+}
+/**
+ * Experimental content-safe activity signal for a running HydraFusion phase.
+ */
+/** @experimental */
+export interface FusionPhaseActivityData {
+  /**
+   * Kind of real activity observed.
+   */
+  activity: FusionPhaseActivityKind;
+  /**
+   * Conversation scope in which the phase executes.
+   */
+  conversationScope: FusionConversationScope;
+  /**
+   * Identifier of the HydraFusion turn containing the phase.
+   */
+  fusionId: string;
+  /**
+   * HydraFusion orchestration pattern containing the phase.
+   */
+  pattern: FusionPattern;
+  /**
+   * Stable identifier for the concrete phase.
+   */
+  phaseId: string;
+  /**
+   * Kind of phase currently executing.
+   */
+  phaseKind: FusionPhaseKind;
+  /**
+   * Semantic role assigned to the phase.
+   */
+  role: string;
+  /**
+   * Opaque hashed correlation token for matching tool-started and tool-completed activity within this Fusion activity stream. It is not the tool call identifier exposed by tool lifecycle events.
+   */
+  toolCallId?: string;
+  /**
+   * Cumulative private response bytes observed for this model call. The event never includes response text.
+   */
+  totalResponseSizeBytes?: number;
+}
+/**
+ * Session event "assistant.fusion_phase_completed". Experimental durable HydraFusion phase output and lossless replay checkpoint.
+ */
+/** @experimental */
+export interface AssistantFusionPhaseCompletedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Experimental durable HydraFusion phase output and lossless replay checkpoint.
+   */
+  data: FusionPhaseCompletedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.fusion_phase_completed".
+   */
+  type: "assistant.fusion_phase_completed";
+}
+/**
+ * Experimental durable HydraFusion phase output and lossless replay checkpoint.
+ */
+/** @experimental */
+export interface FusionPhaseCompletedData {
+  /**
+   * Provider-normalized textual output produced by the phase.
+   */
+  content: string;
+  /**
+   * Conversation scope in which the phase executed.
+   */
+  conversationScope: FusionConversationScope;
+  /**
+   * Elapsed execution time for the phase in milliseconds.
+   */
+  durationMs: number;
+  /**
+   * True when a first pass (Cascade primary or Critique draft) ended with background work outstanding, whether or not the turn then committed it without review; absent otherwise.
+   *
+   * @experimental
+   */
+  endedWithBackgroundWork?: boolean;
+  /**
+   * Identifier of the HydraFusion turn containing the phase.
+   */
+  fusionId: string;
+  /**
+   * Concrete model that executed the phase.
+   */
+  model: string;
+  /**
+   * Stable identifier for the completed phase.
+   */
+  phaseId: string;
+  /**
+   * Kind of phase that completed.
+   */
+  phaseKind: FusionPhaseKind;
+  /**
+   * Exact provider-normalized message used to reconstruct canonical model history.
+   *
+   * @internal
+   */
+  projectionMessage?: JsonValue;
+  /**
+   * Projection action for the exact internal message.
+   *
+   * @internal
+   */
+  projectionMode?: FusionProjectionMode;
+  /**
+   * Explicit reasoning effort selected for this phase, if supplied.
+   *
+   * @experimental
+   */
+  reasoningEffort?: string;
+  /**
+   * Semantic role assigned to the completed phase.
+   */
+  role: string;
+  /**
+   * Terminal request held outside canonical state until selected by the final commit.
+   *
+   * @internal
+   */
+  stagedTerminal?: FusionStagedTerminal;
+  /**
+   * Durable outcome status of the phase.
+   */
+  status: FusionPhaseStatus;
+  /**
+   * Aggregate concrete-model usage consumed by the phase.
+   */
+  usage: FusionPhaseUsage;
+  /**
+   * Structured judge or critic verdict, when the phase produces one.
+   */
+  verdict: string | null;
+}
+/**
+ * Internal durable terminal request staged by a HydraFusion phase until an idempotent final commit selects it.
+ */
+/** @experimental */
+/** @internal */
+export interface FusionStagedTerminal {
+  arguments: string;
+  assistantMessage: JsonValue;
+  phaseId: string;
+  toolCallId: string;
+  toolName: string;
+}
+/**
+ * Aggregate concrete-model usage for one HydraFusion phase.
+ */
+/** @experimental */
+export interface FusionPhaseUsage {
+  /**
+   * Total cached input tokens reported for the phase.
+   */
+  cachedTokens: number;
+  /**
+   * Total tokens written to prompt cache during the phase.
+   */
+  cacheWriteTokens?: number;
+  /**
+   * Total input tokens consumed by the phase.
+   */
+  inputTokens: number;
+  /**
+   * Total output tokens produced by the phase.
+   */
+  outputTokens: number;
+  /**
+   * Number of concrete model requests made by the phase.
+   */
+  requestCount: number;
+  /**
+   * Total normalized AI-unit cost reported for the phase, in nano-AIU.
+   */
+  totalNanoAiu: number;
+}
+/**
+ * Session event "assistant.fusion_phase_failed". Experimental durable typed HydraFusion phase failure and degradation transition.
+ */
+/** @experimental */
+export interface AssistantFusionPhaseFailedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Experimental durable typed HydraFusion phase failure and degradation transition.
+   */
+  data: FusionPhaseFailedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.fusion_phase_failed".
+   */
+  type: "assistant.fusion_phase_failed";
+}
+/**
+ * Experimental durable typed HydraFusion phase failure and degradation transition.
+ */
+/** @experimental */
+export interface FusionPhaseFailedData {
+  /**
+   * Conversation scope in which the phase executed.
+   */
+  conversationScope: FusionConversationScope;
+  /**
+   * Identifier of the fallback phase used to continue the turn after degradation.
+   */
+  degradedToPhaseId?: string;
+  /**
+   * Elapsed execution time before the phase failed, in milliseconds.
+   */
+  durationMs: number;
+  /**
+   * Provider or execution error detail, when available.
+   */
+  errorMessage?: string;
+  /**
+   * Identifier of the HydraFusion turn containing the phase.
+   */
+  fusionId: string;
+  /**
+   * Concrete model that attempted the phase.
+   */
+  model: string;
+  /**
+   * Stable identifier for the failed phase.
+   */
+  phaseId: string;
+  /**
+   * Kind of phase that failed.
+   */
+  phaseKind: FusionPhaseKind;
+  /**
+   * Stable machine-readable reason for the phase failure.
+   */
+  reason: string;
+  /**
+   * Explicit reasoning effort selected for this phase, if supplied.
+   *
+   * @experimental
+   */
+  reasoningEffort?: string;
+  /**
+   * Semantic role assigned to the failed phase.
+   */
+  role: string;
+  /**
+   * Durable outcome status of the phase.
+   */
+  status: FusionPhaseStatus;
+  /**
+   * Aggregate concrete-model usage consumed before the failure.
+   */
+  usage: FusionPhaseUsage;
+}
+/**
  * Session event "assistant.server_tool_progress". Live progress signal for a provider-hosted server tool (e.g. hosted web search) while it runs, before the finalized serverTools envelope lands on the terminal assistant.message
  */
 export interface AssistantServerToolProgressEvent {
@@ -3544,6 +7608,13 @@ export interface AssistantServerToolProgressEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Live progress signal for a provider-hosted server tool (e.g. hosted web search) while it runs, before the finalized serverTools envelope lands on the terminal assistant.message
+   */
   data: AssistantServerToolProgressData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -3591,6 +7662,13 @@ export interface AssistantReasoningEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Assistant reasoning content for timeline display with complete thinking text
+   */
   data: AssistantReasoningData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -3618,9 +7696,21 @@ export interface AssistantReasoningEvent {
  */
 export interface AssistantReasoningData {
   /**
+   * Provider's completion / response identifier of the model call that produced this reasoning, matching the apiCallId of that call's assistant.message
+   */
+  apiCallId?: string;
+  /**
    * The complete extended thinking text from the model
    */
   content: string;
+  /**
+   * Whether the model call that produced this reasoning used a user-managed provider or an on-device model
+   */
+  isByok?: boolean;
+  /**
+   * Model that produced this reasoning, if known
+   */
+  model?: string;
   /**
    * Unique identifier for this reasoning block
    */
@@ -3629,6 +7719,10 @@ export interface AssistantReasoningData {
    * Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
    */
   rte?: boolean;
+  /**
+   * Identifier for the agent loop turn that produced this reasoning, matching the corresponding assistant.turn_start event
+   */
+  turnId?: string;
 }
 /**
  * Session event "assistant.reasoning_delta". Streaming reasoning delta for incremental extended thinking updates
@@ -3638,6 +7732,13 @@ export interface AssistantReasoningDeltaEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Streaming reasoning delta for incremental extended thinking updates
+   */
   data: AssistantReasoningDeltaData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -3681,6 +7782,13 @@ export interface AssistantToolCallDeltaEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Streaming tool-call input delta for incremental tool-call updates
+   */
   data: AssistantToolCallDeltaData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -3719,6 +7827,9 @@ export interface AssistantToolCallDeltaData {
    * Name of the tool being invoked, when known from the stream
    */
   toolName?: string;
+  /**
+   * Tool call type, when known from the stream
+   */
   toolType?: AssistantMessageToolRequestType;
 }
 /**
@@ -3729,6 +7840,13 @@ export interface AssistantStreamingDeltaEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Streaming response progress with cumulative byte count
+   */
   data: AssistantStreamingDeltaData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -3768,6 +7886,13 @@ export interface AssistantMessageEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Assistant response containing text content, optional tool requests, and interaction metadata
+   */
   data: AssistantMessageData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -3825,6 +7950,12 @@ export interface AssistantMessageData {
    */
   encryptedContent?: string;
   /**
+   * Experimental HydraFusion source attribution for this ordinary authoritative assistant message.
+   *
+   * @experimental
+   */
+  fusion?: FusionAttribution;
+  /**
    * CAPI interaction ID for correlating this message with upstream telemetry
    */
   interactionId?: string;
@@ -3836,6 +7967,10 @@ export interface AssistantMessageData {
    * Model that produced this assistant message, if known
    */
   model?: string;
+  /**
+   * Logical ID of the primary user message that initiated this run, matching the messageId returned by session.send (or the last messageId of session.sendMessages). Stable across model/tool iterations, steering messages, and stop-hook corrections. Subagent runs use their own initiating message ID, not the parent's. Absent for runs without an associated initiating message, such as empty batches.
+   */
+  originatingMessageId?: string;
   /**
    * Actual output token count from the API response (completion_tokens), used for accurate token accounting
    */
@@ -3849,6 +7984,14 @@ export interface AssistantMessageData {
    * Generation phase for phased-output models (e.g., thinking vs. response phases)
    */
   phase?: string;
+  /**
+   * Opaque origin provider identity captured at dispatch. Only an exact match with the target provider permits replay of reasoningOpaque, encryptedContent, reasoningBlocks, serverTools, and provider response/item identifiers. Matching model ids or wire protocols is insufficient. Omitted for legacy or unattributed messages; the runtime excludes unproven opaque state when projecting to a known provider. Text content and client tool requests/results remain portable semantic history.
+   */
+  providerId?: string;
+  /**
+   * Neutral provider-tagged reasoning content blocks preserved verbatim for round-tripping. `reasoningText` and `reasoningOpaque` are a lossy derived view of these blocks, retained for display.
+   */
+  reasoningBlocks?: AssistantMessageReasoningBlocks;
   /**
    * Opaque/encrypted extended thinking data from Anthropic models. Session-bound and stripped on resume.
    */
@@ -3869,6 +8012,9 @@ export interface AssistantMessageData {
    * Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
    */
   rte?: boolean;
+  /**
+   * Neutral provider-tagged server-side tool-use payload (tool search, advisor) for verbatim round-tripping
+   */
   serverTools?: AssistantMessageServerTools;
   /**
    * Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
@@ -3910,6 +8056,9 @@ export interface CitationSource {
    * File path relative to the agent's workspace root, when the source is a file.
    */
   path?: string;
+  /**
+   * The system that produced this citation.
+   */
   provider: CitationProvider;
   /**
    * Human-readable title of the source.
@@ -3947,6 +8096,9 @@ export interface CitationReference {
    * The exact text from the source that supports the cited span, when provided by the model.
    */
   citedText?: string;
+  /**
+   * Location within the source that supports the cited span, when the provider reports one.
+   */
   location?: CitationLocation;
   /**
    * Provider-native citation correlation data (e.g. Anthropic search_result_index / document_index), passed through opaquely for debugging and forward compatibility.
@@ -4012,6 +8164,78 @@ export interface CitationLocationBlock {
   type: "block";
 }
 /**
+ * Experimental attribution linking an ordinary event to the HydraFusion turn, phase, and concrete source that produced it.
+ */
+/** @experimental */
+export interface FusionAttribution {
+  /**
+   * Idempotency identifier for the authoritative commit, when the event belongs to the selected output.
+   */
+  commitId?: string;
+  /**
+   * Conversation scope in which the concrete phase executed.
+   */
+  conversationScope?: string;
+  /**
+   * Stable identifier for the HydraFusion turn that produced the event.
+   */
+  fusionId: string;
+  /**
+   * Whether this model request consumed a user steering message rather than only internal Fusion work.
+   */
+  hasUserSteering?: boolean;
+  /**
+   * HydraFusion orchestration pattern selected for the turn.
+   */
+  pattern: string;
+  /**
+   * Identifier of the concrete phase that produced the event.
+   */
+  phaseId?: string;
+  /**
+   * Kind of concrete phase that produced the event.
+   */
+  phaseKind?: string;
+  /**
+   * HydraFusion routing policy used for the turn.
+   */
+  policy: string;
+  /**
+   * Semantic role assigned to the concrete phase.
+   */
+  role?: string;
+  /**
+   * Concrete model that produced the attributed event.
+   */
+  sourceModel?: string;
+  /**
+   * Phase whose output supplied the authoritative content, when different from the executing phase.
+   */
+  sourcePhaseId?: string;
+  /**
+   * Synthetic HydraFusion model selected for the session.
+   */
+  syntheticModel: string;
+}
+/**
+ * Neutral provider-tagged reasoning content blocks preserved verbatim for round-tripping
+ */
+/** @experimental */
+export interface AssistantMessageReasoningBlocks {
+  /**
+   * Provider-native reasoning items or content blocks preserved verbatim, in order. A single response can carry several, and provider signatures or identifiers may depend on their exact content and ordering.
+   */
+  blocks?: JsonValue[];
+  /**
+   * Anthropic Messages assistant block ordering preserved when the legacy reasoning-only representation cannot reproduce it exactly. Thinking and text blocks remain verbatim; tool-use entries retain identity and a payload fingerprint when later signed reasoning depends on them, and are hydrated from the message's tool requests during replay.
+   */
+  orderedBlocks?: JsonValue[];
+  /**
+   * Model provider that produced these reasoning blocks.
+   */
+  provider: string;
+}
+/**
  * Neutral provider-tagged server-side tool-use payload (tool search, advisor) for verbatim round-tripping
  */
 /** @experimental */
@@ -4048,11 +8272,19 @@ export interface AssistantMessageToolRequest {
    */
   arguments?: JsonValue;
   /**
+   * Hosted program that requested this client tool call
+   */
+  caller?: AssistantMessageToolRequestCaller;
+  /**
    * Resolved intention summary describing what this specific call does
    */
   intentionSummary?: string | null;
   /**
-   * Name of the MCP server hosting this tool, when the tool is an MCP tool
+   * Explicitly configured MCP server display name.
+   */
+  mcpServerDisplayName?: string;
+  /**
+   * Configured key of the MCP server hosting this tool. Legacy events may contain the display name instead.
    */
   mcpServerName?: string;
   /**
@@ -4071,7 +8303,23 @@ export interface AssistantMessageToolRequest {
    * Human-readable display title for the tool
    */
   toolTitle?: string;
+  /**
+   * Tool call type: "function" for standard tool calls, "custom" for grammar-based tool calls. Defaults to "function" when absent.
+   */
   type?: AssistantMessageToolRequestType;
+}
+/**
+ * Hosted program that requested this client tool call
+ */
+export interface AssistantMessageToolRequestCaller {
+  /**
+   * Provider-assigned identifier for the hosted caller.
+   */
+  callerId: string;
+  /**
+   * Kind of hosted caller that requested the client tool call.
+   */
+  type: AssistantMessageToolRequestCallerType;
 }
 /**
  * Session event "assistant.message_start". Streaming assistant message start metadata
@@ -4081,6 +8329,13 @@ export interface AssistantMessageStartEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Streaming assistant message start metadata
+   */
   data: AssistantMessageStartData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -4124,6 +8379,13 @@ export interface AssistantMessageDeltaEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Streaming assistant message delta for incremental response updates
+   */
   data: AssistantMessageDeltaData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -4172,6 +8434,13 @@ export interface AssistantTurnEndEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Turn completion metadata including the turn identifier
+   */
   data: AssistantTurnEndData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -4203,6 +8472,10 @@ export interface AssistantTurnEndData {
    */
   model?: string;
   /**
+   * Parent task tool call ID when this turn belongs to a sub-agent
+   */
+  parentToolCallId?: string;
+  /**
    * Identifier of the turn that has ended, matching the corresponding assistant.turn_start event
    */
   turnId: string;
@@ -4215,6 +8488,13 @@ export interface AssistantIdleEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload emitted whenever the main agent's processing loop goes idle, including while related background work (running agents or in-flight attached shell commands) is still pending and the session-level idle event is therefore deferred
+   */
   data: AssistantIdleData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -4254,6 +8534,13 @@ export interface AssistantUsageEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * LLM API call usage metrics including tokens, costs, quotas, and billing information
+   */
   data: AssistantUsageData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -4285,9 +8572,20 @@ export interface AssistantUsageData {
    */
   acceptedPredictionTokens?: number;
   /**
+   * Runtime-owned identity shared with the durable accounting receipt.
+   */
+  accounting?: UsageAccountingIdentity;
+  /**
+   * Availability of this call's reported AI-credit amount. Missing billing is unavailable, not a zero charge.
+   */
+  aiCreditsStatus?: AiCreditsStatus;
+  /**
    * Completion ID from the model provider (e.g., chatcmpl-abc123)
    */
   apiCallId?: string;
+  /**
+   * API endpoint used for this model call, matching CAPI supported_endpoints vocabulary
+   */
   apiEndpoint?: AssistantUsageApiEndpoint;
   /**
    * Number of tools available to the model for this call
@@ -4295,6 +8593,10 @@ export interface AssistantUsageData {
    * @internal
    */
   availableToolCount?: number;
+  /**
+   * Where the bring-your-own-key model runs and who manages it: "local_managed" (on the device, managed by Copilot), "local_user" (on the device, managed by the user), or "remote_user" (off the device, managed by the user). Absent for Copilot-served models.
+   */
+  byokKind?: string;
   /**
    * Whether the provider reported prompt-cache usage details for this call
    *
@@ -4305,6 +8607,12 @@ export interface AssistantUsageData {
    * Updated prompt-cache expiration for this model call. Present only when the call establishes or refreshes known cache state.
    */
   cacheExpiresAt?: string;
+  /**
+   * Request-scoped prompt-cache policy lifetime in seconds; the shortest lifetime for mixed known policies. Does not establish or refresh cache state. Omitted when the policy is unknown.
+   *
+   * @internal
+   */
+  cachePolicyTtlSeconds?: number;
   /**
    * Number of tokens read from prompt cache
    */
@@ -4323,6 +8631,9 @@ export interface AssistantUsageData {
    * Whether the model response was blocked or truncated by content filtering (finish_reason === 'content_filter'). For Anthropic models this corresponds to a 'refusal' stop reason.
    */
   contentFilterTriggered?: boolean;
+  /**
+   * Per-request cost and usage data from the CAPI copilot_usage response field
+   */
   copilotUsage?: AssistantUsageCopilotUsage;
   /**
    * Model multiplier cost for billing purposes
@@ -4330,6 +8641,12 @@ export interface AssistantUsageData {
    * @experimental
    */
   cost?: number;
+  /**
+   * Free-form custom tool calls in the request history before request shaping, counted apart from named function calls
+   *
+   * @internal
+   */
+  customToolCallCount?: number;
   /**
    * Duration of the API call in milliseconds
    */
@@ -4345,6 +8662,16 @@ export interface AssistantUsageData {
    */
   frontierSource?: string;
   /**
+   * Experimental HydraFusion attribution for this concrete model call's usage.
+   *
+   * @experimental
+   */
+  fusion?: FusionAttribution;
+  /**
+   * Whether this dispatched request selected the managed inference gateway. Absent for older producers or when no request was dispatched; not proof of gateway receipt.
+   */
+  inferenceGateway?: boolean;
+  /**
    * What initiated this API call (e.g., "sub-agent", "mcp-sampling"); absent for user-initiated calls
    */
   initiator?: string;
@@ -4352,6 +8679,18 @@ export interface AssistantUsageData {
    * Number of input tokens consumed
    */
   inputTokens?: number;
+  /**
+   * Internal correlation identifier for the qualifying instruction-update delivery consumed by this model request.
+   *
+   * @internal
+   */
+  instructionUpdateDeliveryId?: string;
+  /**
+   * Event identifier of the latest canonical instruction update included in this model request.
+   *
+   * @internal
+   */
+  instructionUpdateLatestEventId?: string;
   /**
    * Coarse classification of the interaction that produced this call, mirroring the session's per-request agent context (e.g. `conversation-agent`, `conversation-subagent`, `conversation-sampling`, `conversation-background`, `conversation-compaction`, `conversation-user`). Non-billing; lets consumers attribute a model call to a call class (e.g. sub-agent/sidekick) independently of the billing initiator. Absent when the runtime did not classify the request.
    */
@@ -4381,24 +8720,64 @@ export interface AssistantUsageData {
    */
   model: string;
   /**
+   * Model display name captured for this call, not derived from the current selection.
+   */
+  modelDisplayName?: string;
+  /**
+   * Fixed-set provider family serving the bring-your-own-key model (for example "openai", "anthropic", "azure_openai", "ollama", "llama_cpp", or "other"). Never the caller-supplied provider name. Absent for Copilot-served models.
+   */
+  modelProvider?: string;
+  /**
    * Number of tool calls returned by the model
    *
    * @internal
    */
   numToolCalls?: number;
   /**
+   * Tool calls in the request history before request shaping that no later tool result answers
+   *
+   * @internal
+   */
+  orphanToolCallCount?: number;
+  /**
    * Number of output tokens produced
    */
   outputTokens?: number;
+  /**
+   * Time to first observable model output in milliseconds. Includes text, reasoning, and tool-call output; only available for streaming requests that produce observable output.
+   */
+  outputTtftMs?: number;
   /**
    * @deprecated
    * Parent tool call ID when this usage originates from a sub-agent
    */
   parentToolCallId?: string;
   /**
+   * Bucket of AI credits the session had billed before this call, for the adaptive Anthropic prompt-cache policy. Omitted outside the adaptive TTL experiment.
+   *
+   * @internal
+   */
+  promptCacheCreditsBucket?: string;
+  /**
+   * Why the adaptive Anthropic prompt-cache policy chose this call's TTL: warmup, l1_first, l1_lapsed, l1_hot, g_guard, or ineligible. Omitted outside the adaptive TTL experiment.
+   *
+   * @internal
+   */
+  promptCacheTtlReason?: string;
+  /**
+   * Provider identity and product label captured by the actual call's dispatch path.
+   */
+  provider?: ModelProviderRef;
+  /**
    * GitHub request tracing ID (x-github-request-id header) for server-side log correlation
    */
   providerCallId?: string;
+  /**
+   * Fixed-set configured provider type of the bring-your-own-key model: "openai", "azure", "anthropic", "local_model" (a user-configured local model), "winml" (a Copilot-managed Windows ML model), or "other". Never the caller-supplied provider name. Absent for Copilot-served models.
+   *
+   * @internal
+   */
+  providerType?: string;
   /**
    * Per-quota resource usage snapshots, keyed by quota identifier
    *
@@ -4411,6 +8790,9 @@ export interface AssistantUsageData {
    * Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
    */
   reasoningEffort?: string;
+  /**
+   * Reasoning summary mode used for this model call, if applicable
+   */
   reasoningSummary?: ReasoningSummary;
   /**
    * Number of output tokens used for reasoning (e.g., chain-of-thought)
@@ -4421,6 +8803,34 @@ export interface AssistantUsageData {
    */
   rejectedPredictionTokens?: number;
   /**
+   * Serialized (uncompressed) byte length of the request body, before any Content-Encoding. A content-free size signal.
+   */
+  requestBodyBytes?: number;
+  /**
+   * Uncompressed fallback that produced this outcome; absent when the body was sent with the requested encoding
+   */
+  requestBodyCompressionFallback?: ModelCallRequestBodyCompressionFallback;
+  /**
+   * Content-Encoding the request asked for before the uncompressed fallback; present only with requestBodyCompressionFallback
+   */
+  requestBodyCompressionFallbackFrom?: ModelCallRequestBodyEncoding;
+  /**
+   * HTTP status that rejected the compressed body before the uncompressed resend; present only when requestBodyCompressionFallback is retried
+   */
+  requestBodyCompressionRejectedStatus?: number;
+  /**
+   * Content-Encoding applied to the request body of the attempt that produced this outcome; identity when uncompressed
+   */
+  requestBodyEncoding?: ModelCallRequestBodyEncoding;
+  /**
+   * Byte length of the request body actually sent on the wire for the attempt that produced this outcome, after any Content-Encoding. Equals requestBodyBytes when the body was not compressed.
+   */
+  requestBodyWireBytes?: number;
+  /**
+   * Model identifier returned by the provider, absent when the response does not identify it.
+   */
+  responseModel?: string;
+  /**
    * Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
    */
   rte?: boolean;
@@ -4428,6 +8838,18 @@ export interface AssistantUsageData {
    * Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
    */
   serviceRequestId?: string;
+  /**
+   * Number of prior thinking blocks the provider dropped while transforming the request
+   *
+   * @internal
+   */
+  thinkingDroppedBlocks?: number;
+  /**
+   * Recognized provider-reported reasons for dropped thinking blocks, in response order
+   *
+   * @internal
+   */
+  thinkingDroppedReasons?: string[];
   /**
    * Time to first token in milliseconds. Only available for streaming requests
    */
@@ -4446,12 +8868,70 @@ export interface AssistantUsageData {
    * @internal
    */
   toolTokenCount?: number;
+  /**
+   * Transport used for this model call (http or websocket)
+   */
   transport?: AssistantUsageTransport;
+  /**
+   * Tool results in the request history before request shaping that answer no earlier unanswered tool call
+   *
+   * @internal
+   */
+  unmatchedToolResultCount?: number;
+  /**
+   * Milliseconds spent on the WebSocket attempt before falling back to HTTP
+   */
+  websocketFallbackAfterMs?: number;
+  /**
+   * WebSocket close code received before the HTTP fallback
+   */
+  websocketFallbackCloseCode?: number;
+  /**
+   * Normalized cause of the WebSocket failure that triggered the HTTP fallback; absent when no fallback occurred or the cause is unknown
+   */
+  websocketFallbackErrorKind?: ModelCallWebSocketFallbackErrorKind;
+  /**
+   * Why the call was carried by the HTTP fallback of a WebSocket-capable dispatcher; absent when no fallback occurred
+   */
+  websocketFallbackReason?: ModelCallWebSocketFallbackReason;
+  /**
+   * Whether a WebSocket reconnect was attempted before falling back to HTTP
+   */
+  websocketFallbackReconnectAttempted?: boolean;
+  /**
+   * Whether the HTTP fallback started during this model call, rather than being inherited from an earlier call
+   */
+  websocketFallbackStartedThisCall?: boolean;
+  /**
+   * HTTP status of the WebSocket upgrade rejection or WebSocket API error that triggered the HTTP fallback
+   */
+  websocketFallbackStatusCode?: number;
+}
+/**
+ * Ordered accounting identity assigned under the source session's emission lock.
+ */
+export interface UsageAccountingIdentity {
+  /**
+   * Monotonically increasing sequence within the source session.
+   */
+  sequence: number;
+  /**
+   * Session that assigned this accounting sequence.
+   */
+  sourceSessionId: string;
+  /**
+   * Existing API call identifier, or a runtime-generated identity when none was supplied.
+   */
+  usageId: string;
 }
 /**
  * Per-request cost and usage data from the CAPI copilot_usage response field
  */
 export interface AssistantUsageCopilotUsage {
+  /**
+   * Default billing model for token details that do not identify their own model
+   */
+  model?: string;
   /**
    * Itemized token usage breakdown
    *
@@ -4475,6 +8955,10 @@ export interface AssistantUsageCopilotUsageTokenDetail {
    * Cost per batch of tokens
    */
   costPerBatch: number;
+  /**
+   * Model responsible for this billing entry
+   */
+  model?: string;
   /**
    * Total token count for this entry
    */
@@ -4564,6 +9048,13 @@ export interface ModelCallFailureEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Failed LLM API call metadata for telemetry
+   */
   data: ModelCallFailureData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -4594,14 +9085,24 @@ export interface ModelCallFailureData {
    * Completion ID from the model provider (e.g., chatcmpl-abc123)
    */
   apiCallId?: string;
+  /**
+   * API endpoint used for this model call, matching CAPI supported_endpoints vocabulary
+   */
   apiEndpoint?: AssistantUsageApiEndpoint;
+  /**
+   * For HTTP 400 failures only: whether the response carried a structured CAPI error envelope (structured_error, a deterministic validation failure) or no error body (bodyless, the transient gateway/proxy signature). Absent for non-400 failures.
+   */
   badRequestKind?: ModelCallFailureBadRequestKind;
+  /**
+   * Where the bring-your-own-key model for the failed call runs and who manages it: "local_managed" (on the device, managed by Copilot), "local_user" (on the device, managed by the user), or "remote_user" (off the device, managed by the user). Absent for Copilot-served models.
+   */
+  byokKind?: string;
   /**
    * Duration of the failed API call in milliseconds
    */
   durationMs?: number;
   /**
-   * For HTTP 400 failures only: the `code` from the CAPI error envelope (e.g. 'model_max_prompt_tokens_exceeded') identifying which deterministic validation failure occurred. Raw server-controlled string, emitted only through restricted telemetry. Absent for bodyless or non-400 failures.
+   * The `code` from the CAPI error envelope of an HTTP failure of any status (e.g. 'model_max_prompt_tokens_exceeded' on a 400, 'model_overloaded' on a 5xx) identifying which upstream failure occurred. Raw server-controlled string, emitted only through restricted telemetry. Absent when the response carried no error envelope.
    */
   errorCode?: string;
   /**
@@ -4609,14 +9110,43 @@ export interface ModelCallFailureData {
    */
   errorMessage?: string;
   /**
-   * For HTTP 400 failures only: the `type` from the CAPI error envelope (e.g. 'websocket_error'), a coarser companion to errorCode for envelopes that carry no code. Raw server-controlled string, emitted only through restricted telemetry. Absent for bodyless or non-400 failures.
+   * The `type` from the CAPI error envelope of an HTTP failure of any status (e.g. 'websocket_error'), a coarser companion to errorCode for envelopes that carry no code. Raw server-controlled string, emitted only through restricted telemetry. Absent when the response carried no error envelope.
    */
   errorType?: string;
+  /**
+   * Whether the failure originated from an API response or the request transport
+   */
   failureKind?: ModelCallFailureKind;
+  /**
+   * Experimental HydraFusion attribution for this failed concrete model call.
+   *
+   * @experimental
+   */
+  fusion?: FusionAttribution;
+  /**
+   * Why a chat-completions stream that the server ended could not be assembled into a response, as a fixed snake_case reason such as `missing_finish_reason`, `missing_tool_call_id` or `no_chunks`; absent for other failures. New reasons may be added
+   */
+  incompleteStreamReason?: string;
+  /**
+   * Whether this failed dispatched request selected the managed inference gateway. Absent for older producers or when no request was dispatched; not proof of gateway receipt.
+   */
+  inferenceGateway?: boolean;
   /**
    * What initiated this API call (e.g., "sub-agent", "mcp-sampling"); absent for user-initiated calls
    */
   initiator?: string;
+  /**
+   * Internal correlation identifier for the qualifying instruction-update delivery consumed by this failed model request.
+   *
+   * @internal
+   */
+  instructionUpdateDeliveryId?: string;
+  /**
+   * Event identifier of the latest canonical instruction update included in this failed model request.
+   *
+   * @internal
+   */
+  instructionUpdateLatestEventId?: string;
   /**
    * Authoritative interaction classification for the failed call, matching `assistant.usage.interactionType` (for example `conversation-agent`, `conversation-subagent`, or `conversation-sampling`). Absent when the producer cannot classify the interaction.
    */
@@ -4642,9 +9172,29 @@ export interface ModelCallFailureData {
    */
   model?: string;
   /**
+   * Fixed-set provider family serving the bring-your-own-key model for the failed call (for example "openai", "anthropic", "azure_openai", "ollama", "llama_cpp", or "other"). Never the caller-supplied provider name. Absent for Copilot-served models.
+   */
+  modelProvider?: string;
+  /**
+   * Parent task tool call ID when this failed model call belongs to a sub-agent
+   */
+  parentToolCallId?: string;
+  /**
+   * Bounded product-state failure classified before telemetry projection.
+   *
+   * @internal
+   */
+  productStateError?: ModelCallProductStateError;
+  /**
    * GitHub request tracing ID (x-github-request-id header) for server-side log correlation
    */
   providerCallId?: string;
+  /**
+   * Fixed-set configured provider type of the bring-your-own-key model for the failed call: "openai", "azure", "anthropic", "local_model" (a user-configured local model), "winml" (a Copilot-managed Windows ML model), or "other". Never the caller-supplied provider name. Absent for Copilot-served models.
+   *
+   * @internal
+   */
+  providerType?: string;
   /**
    * Per-quota usage snapshots parsed from the failed response's quota headers, keyed by quota identifier. Present when the error response carried quota headers (e.g. a 402 once the additional spend limit is reached) so the UI can refresh the quota display on failure.
    *
@@ -4657,7 +9207,38 @@ export interface ModelCallFailureData {
    * Reasoning effort level used for the failed model call, if applicable
    */
   reasoningEffort?: string;
+  /**
+   * Serialized (uncompressed) byte length of the failed request body, before any Content-Encoding. A content-free size signal.
+   */
+  requestBodyBytes?: number;
+  /**
+   * Uncompressed fallback that produced this outcome; absent when the body was sent with the requested encoding
+   */
+  requestBodyCompressionFallback?: ModelCallRequestBodyCompressionFallback;
+  /**
+   * Content-Encoding the request asked for before the uncompressed fallback; present only with requestBodyCompressionFallback
+   */
+  requestBodyCompressionFallbackFrom?: ModelCallRequestBodyEncoding;
+  /**
+   * HTTP status that rejected the compressed body before the uncompressed resend; present only when requestBodyCompressionFallback is retried
+   */
+  requestBodyCompressionRejectedStatus?: number;
+  /**
+   * Content-Encoding applied to the failed request body; identity when uncompressed
+   */
+  requestBodyEncoding?: ModelCallRequestBodyEncoding;
+  /**
+   * Byte length of the failed request body actually sent on the wire, after any Content-Encoding. Equals requestBodyBytes when the body was not compressed.
+   */
+  requestBodyWireBytes?: number;
+  /**
+   * Content-free structural summary of the failing request. Contains only counts and shape flags (no prompt content), so it is safe for unrestricted telemetry. Populated only for client-error (4xx) failures.
+   */
   requestFingerprint?: ModelCallFailureRequestFingerprint;
+  /**
+   * Zero-based orchestrator retry index of the failed attempt
+   */
+  retryAttempt?: number;
   /**
    * Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
    */
@@ -4666,17 +9247,67 @@ export interface ModelCallFailureData {
    * Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
    */
   serviceRequestId?: string;
+  /**
+   * Where the failed model call originated
+   */
   source: ModelCallFailureSource;
   /**
    * HTTP status code from the failed request
    */
   statusCode?: number;
+  /**
+   * Whether the incomplete stream ended with the `[DONE]` sentinel; present only with incompleteStreamReason
+   */
+  streamDoneReceived?: boolean;
+  /**
+   * Transport used for the failed model call (http or websocket)
+   */
   transport?: ModelCallFailureTransport;
+  /**
+   * Milliseconds spent on the WebSocket attempt before falling back to HTTP
+   */
+  websocketFallbackAfterMs?: number;
+  /**
+   * WebSocket close code received before the HTTP fallback
+   */
+  websocketFallbackCloseCode?: number;
+  /**
+   * Normalized cause of the WebSocket failure that triggered the HTTP fallback; absent when no fallback occurred or the cause is unknown
+   */
+  websocketFallbackErrorKind?: ModelCallWebSocketFallbackErrorKind;
+  /**
+   * Why the failed call was carried by the HTTP fallback of a WebSocket-capable dispatcher; absent when no fallback occurred
+   */
+  websocketFallbackReason?: ModelCallWebSocketFallbackReason;
+  /**
+   * Whether a WebSocket reconnect was attempted before falling back to HTTP
+   */
+  websocketFallbackReconnectAttempted?: boolean;
+  /**
+   * Whether the HTTP fallback started during this model call, rather than being inherited from an earlier call
+   */
+  websocketFallbackStartedThisCall?: boolean;
+  /**
+   * HTTP status of the WebSocket upgrade rejection or WebSocket API error that triggered the HTTP fallback
+   */
+  websocketFallbackStatusCode?: number;
 }
 /**
  * Content-free structural summary of the failing request for diagnosing malformed 4xx calls
  */
 export interface ModelCallFailureRequestFingerprint {
+  /**
+   * Free-form custom tool calls in the request history before request shaping, counted apart from named function calls (rejected by strict providers)
+   */
+  customToolCallCount?: number;
+  /**
+   * Summed byte length of opaque or encrypted reasoning payloads
+   */
+  encryptedContentBytes?: number;
+  /**
+   * Summed byte length of inline image payloads (data URLs and base64 sources)
+   */
+  imageBytes?: number;
   /**
    * Total number of image content parts
    */
@@ -4698,6 +9329,14 @@ export interface ModelCallFailureRequestFingerprint {
    */
   namelessToolCallCount: number;
   /**
+   * Tool calls in the request history before request shaping that no later tool result message answers
+   */
+  orphanToolCallCount?: number;
+  /**
+   * Number of messages carrying opaque or encrypted reasoning
+   */
+  reasoningItemCount?: number;
+  /**
    * Total number of tool calls across assistant messages
    */
   toolCallCount: number;
@@ -4705,6 +9344,76 @@ export interface ModelCallFailureRequestFingerprint {
    * Number of "tool" result messages in the request
    */
   toolResultMessageCount: number;
+  /**
+   * Tool result messages in the request history before request shaping that answer no earlier unanswered tool call
+   */
+  unmatchedToolResultCount?: number;
+}
+/**
+ * Session event "model.call_finished". Final lifecycle outcome for one logical model dispatch. A logical dispatch may include internal reconnect or fallback work, so event count is not provider HTTP-request count.
+ */
+export interface ModelCallFinishedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Final lifecycle outcome for one logical model dispatch. A logical dispatch may include internal reconnect or fallback work, so event count is not provider HTTP-request count.
+   */
+  data: ModelCallFinishedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "model.call_finished".
+   */
+  type: "model.call_finished";
+}
+/**
+ * Final lifecycle outcome for one logical model dispatch. A logical dispatch may include internal reconnect or fallback work, so event count is not provider HTTP-request count.
+ */
+export interface ModelCallFinishedData {
+  /**
+   * Whether an accepted successful response requested the exact name and command semantics of a built-in file edit tool, including an external tool explicitly replacing that built-in name. Absent when the logical dispatch did not produce an accepted response.
+   */
+  containsBuiltInFileEditRequest?: boolean;
+  /**
+   * Monotonic elapsed time spent in the logical model dispatch, including any internal transport reconnect or fallback and excluding orchestrator retry backoff, tool execution, confirmations, and post-response processing
+   */
+  dispatchDurationMs: number;
+  /**
+   * Version of the built-in file-edit semantic classifier used for this event
+   */
+  editClassifierVersion: number;
+  /**
+   * Identifier of the user interaction that owns the model dispatch, matching assistant.turn_start.interactionId when available
+   */
+  interactionId?: string;
+  /**
+   * Final outcome after post-response acceptance processing
+   */
+  outcome: ModelCallFinishedOutcome;
+  /**
+   * Agent-loop iteration within the interaction that initiated the model dispatch
+   */
+  turnId: string;
 }
 /**
  * Session event "abort". Turn abort information including the reason for termination
@@ -4714,6 +9423,13 @@ export interface AbortEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Turn abort information including the reason for termination
+   */
   data: AbortData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -4740,6 +9456,9 @@ export interface AbortEvent {
  * Turn abort information including the reason for termination
  */
 export interface AbortData {
+  /**
+   * Finite reason code describing why the current turn was aborted
+   */
   reason: AbortReason;
 }
 /**
@@ -4750,6 +9469,13 @@ export interface ToolUserRequestedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * User-initiated tool invocation request with tool name and arguments
+   */
   data: ToolUserRequestedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -4797,6 +9523,13 @@ export interface ToolExecutionStartEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Tool execution startup details including MCP server information when applicable
+   */
   data: ToolExecutionStartData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -4832,13 +9565,35 @@ export interface ToolExecutionStartData {
    */
   displayVerbatim?: boolean;
   /**
-   * Name of the MCP server hosting this tool, when the tool is an MCP tool
+   * Experimental HydraFusion attribution for this tool execution.
+   *
+   * @experimental
+   */
+  fusion?: FusionAttribution;
+  /**
+   * Configured MCP server key, retained for compatibility. New events write the same value as mcpServerName; on legacy events this field distinguishes the configured key from the display name in mcpServerName. Unrestricted provenance telemetry hashes this key to join with mcp_server_setup.
+   */
+  mcpConfigServerName?: string;
+  /**
+   * Where the MCP server's configuration came from (`user`, `workspace`, `plugin`, or `builtin`), when the tool is an MCP tool and the server is configured
+   */
+  mcpConfigSource?: McpServerSource;
+  /**
+   * Explicitly configured MCP server display name.
+   */
+  mcpServerDisplayName?: string;
+  /**
+   * Configured key of the MCP server hosting this tool. Legacy events may contain the display name instead; prefer mcpConfigServerName for their identity when available.
    */
   mcpServerName?: string;
   /**
    * Original tool name on the MCP server, when the tool is an MCP tool
    */
   mcpToolName?: string;
+  /**
+   * Transport the MCP server hosting this tool is connected over, when the tool is an MCP tool and the server is configured
+   */
+  mcpTransport?: McpServerTransport;
   /**
    * Model identifier that generated this tool call
    */
@@ -4849,19 +9604,33 @@ export interface ToolExecutionStartData {
    */
   parentToolCallId?: string;
   /**
+   * Whether the selected tool descriptor explicitly classifies this call as read-only.
+   */
+  readOnly?: boolean;
+  /**
    * Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
    */
   rte?: boolean;
+  /**
+   * Shell-tool path hints derived from the command at start time for shell tools (bash/powershell/local_shell). Produced by the same shell-aware extractor as PermissionRequestShell.possiblePaths, so it is present even when the command is auto-approved and no permission request fires. Absent for non-shell tools.
+   */
   shellToolInfo?: ToolExecutionStartShellToolInfo;
   /**
    * Unique identifier for this tool call
    */
   toolCallId: string;
+  /**
+   * Tool definition metadata, present for MCP tools with MCP Apps support
+   */
   toolDescription?: ToolExecutionStartToolDescription;
   /**
    * Name of the tool being executed
    */
   toolName: string;
+  /**
+   * Human-readable display title for the tool, when the selected tool descriptor has a non-empty title.
+   */
+  toolTitle?: string;
   /**
    * Identifier for the agent loop turn this tool was invoked in, matching the corresponding assistant.turn_start event
    */
@@ -4890,6 +9659,9 @@ export interface ToolExecutionStartShellToolInfo {
  * Tool definition metadata, present for MCP tools with MCP Apps support
  */
 export interface ToolExecutionStartToolDescription {
+  /**
+   * MCP Apps metadata for UI resource association
+   */
   _meta?: ToolExecutionStartToolDescriptionMeta;
   /**
    * Tool description
@@ -4904,6 +9676,9 @@ export interface ToolExecutionStartToolDescription {
  * MCP Apps metadata for UI resource association
  */
 export interface ToolExecutionStartToolDescriptionMeta {
+  /**
+   * MCP Apps tool `_meta.ui` resource URI and visibility captured on `tool.execution_start`.
+   */
   ui?: ToolExecutionStartToolDescriptionMetaUI;
 }
 /**
@@ -4920,13 +9695,21 @@ export interface ToolExecutionStartToolDescriptionMetaUI {
   visibility?: ToolExecutionStartToolDescriptionMetaUIVisibility[];
 }
 /**
- * Session event "tool.execution_partial_result". Streaming tool execution output for incremental result display
+ * @deprecated
+ * Session event "tool.execution_partial_result". Deprecated merged replacement snapshot of shell output. Use tool.shell_output for append-only, stream-tagged output instead.
  */
 export interface ToolExecutionPartialResultEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Deprecated merged replacement snapshot of shell output. Use tool.shell_output for append-only, stream-tagged output instead.
+   */
   data: ToolExecutionPartialData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -4950,15 +9733,80 @@ export interface ToolExecutionPartialResultEvent {
   type: "tool.execution_partial_result";
 }
 /**
- * Streaming tool execution output for incremental result display
+ * @deprecated
+ * Deprecated merged replacement snapshot of shell output. Use tool.shell_output for append-only, stream-tagged output instead.
  */
 export interface ToolExecutionPartialData {
   /**
-   * Incremental output chunk from the running tool
+   * Merged replacement snapshot from the running shell, not an append-only chunk
    */
   partialOutput: string;
   /**
    * Tool call ID this partial result belongs to
+   */
+  toolCallId: string;
+}
+/**
+ * Session event "tool.shell_output". Live, append-only shell output. Not persisted or replayed to late subscribers. Text is decoded and redacted per chunk; chunks need not contain complete lines.
+ */
+export interface ToolShellOutputEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Live, append-only shell output. Not persisted or replayed to late subscribers. Text is decoded and redacted per chunk; chunks need not contain complete lines.
+   */
+  data: ToolShellOutputData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "tool.shell_output".
+   */
+  type: "tool.shell_output";
+}
+/**
+ * Live, append-only shell output. Not persisted or replayed to late subscribers. Text is decoded and redacted per chunk; chunks need not contain complete lines.
+ */
+export interface ToolShellOutputData {
+  /**
+   * Experimental HydraFusion attribution of the staged phase whose tool call produced this output. Absent outside a staged phase.
+   *
+   * @experimental
+   */
+  fusion?: FusionAttribution;
+  /**
+   * Zero-based publication sequence across all output streams for this tool call. Not a byte offset or an OS write-order guarantee.
+   */
+  sequence: number;
+  /**
+   * Output source. Omission means stdout. Terminal output has no separate stdout/stderr attribution.
+   */
+  stream?: ToolShellOutputStream;
+  /**
+   * New output to append, without synthetic shell-result markers or stream-switch separators
+   */
+  text: string;
+  /**
+   * Tool call ID that owns this shell output
    */
   toolCallId: string;
 }
@@ -4970,6 +9818,13 @@ export interface ToolExecutionProgressEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Tool execution progress notification with status message
+   */
   data: ToolExecutionProgressData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -5001,6 +9856,12 @@ export interface ToolExecutionProgressData {
    */
   progressMessage: string;
   /**
+   * Client-only structured progress metadata. Not model-facing tool output.
+   *
+   * @experimental
+   */
+  structuredContent?: JsonValue;
+  /**
    * Tool call ID this progress notification belongs to
    */
   toolCallId: string;
@@ -5013,6 +9874,13 @@ export interface ToolExecutionCompleteEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Tool execution completion results including success status, detailed output, and error information
+   */
   data: ToolExecutionCompleteData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -5039,7 +9907,22 @@ export interface ToolExecutionCompleteEvent {
  * Tool execution completion results including success status, detailed output, and error information
  */
 export interface ToolExecutionCompleteData {
+  /**
+   * Error details when the tool execution failed
+   */
   error?: ToolExecutionCompleteError;
+  /**
+   * Experimental. File mutations actually committed by a built-in file editing tool, in execution order. Present on successful edits and on partial failures when earlier mutations were committed. Paths are absolute in the session filesystem namespace.
+   *
+   * @experimental
+   */
+  fileEdits?: ToolExecutionCompleteFileEdit[];
+  /**
+   * Experimental HydraFusion attribution for this tool completion.
+   *
+   * @experimental
+   */
+  fusion?: FusionAttribution;
   /**
    * CAPI interaction ID for correlating this tool execution with upstream telemetry
    */
@@ -5063,6 +9946,9 @@ export interface ToolExecutionCompleteData {
    * Tool call ID of the parent tool invocation when this event originates from a sub-agent
    */
   parentToolCallId?: string;
+  /**
+   * Tool execution result on success
+   */
   result?: ToolExecutionCompleteResult;
   /**
    * Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
@@ -5073,6 +9959,12 @@ export interface ToolExecutionCompleteData {
    */
   sandboxed?: boolean;
   /**
+   * Experimental shell completion facts captured before the persisted result contents are stripped.
+   *
+   * @experimental
+   */
+  shellExecution?: ToolExecutionCompleteShellExecution;
+  /**
    * Whether the tool execution completed successfully
    */
   success: boolean;
@@ -5080,6 +9972,9 @@ export interface ToolExecutionCompleteData {
    * Unique identifier for the completed tool call
    */
   toolCallId: string;
+  /**
+   * Tool definition metadata, present for MCP tools with MCP Apps support
+   */
   toolDescription?: ToolExecutionCompleteToolDescription;
   /**
    * Tool-specific telemetry data (e.g., CodeQL check counts, grep match counts)
@@ -5087,6 +9982,12 @@ export interface ToolExecutionCompleteData {
   toolTelemetry?: {
     [k: string]: JsonValue | undefined;
   };
+  /**
+   * Provider-reported usage of a separately metered runtime-owned tool operation, independent of the conversation model. Present on success or failure when usage is known. Experimental.
+   *
+   * @experimental
+   */
+  toolUsage?: ToolExecutionUsage;
   /**
    * Identifier for the agent loop turn this tool was invoked in, matching the corresponding assistant.turn_start event
    */
@@ -5104,6 +10005,24 @@ export interface ToolExecutionCompleteError {
    * Human-readable error message
    */
   message: string;
+  /**
+   * What the user must do to recover, when the runtime knows of an action. Set on sandbox policy denials, where `message` names the rule that blocked the call but never the client affordance that relaxes it.
+   */
+  remediation?: RemediationAction;
+}
+/**
+ * A file mutation that was actually committed by a built-in file editing tool.
+ */
+/** @experimental */
+export interface ToolExecutionCompleteFileEdit {
+  /**
+   * Kind of mutation committed at this path.
+   */
+  kind: ToolExecutionCompleteFileEditKind;
+  /**
+   * Absolute path in the session filesystem namespace.
+   */
+  path: string;
 }
 /**
  * Tool execution result on success
@@ -5130,7 +10049,7 @@ export interface ToolExecutionCompleteResult {
    */
   contents?: ToolExecutionCompleteContent[];
   /**
-   * Full detailed tool result for UI/timeline display, preserving complete content such as diffs. Falls back to content when absent.
+   * Detailed tool result for UI/timeline display, preserving complete content such as diffs for most tools. Successful skill invocations intentionally use the concise model-facing content here; the authoritative skill body is carried by the corresponding skill invocation event. Falls back to content when absent.
    */
   detailedContent?: string;
   /**
@@ -5140,9 +10059,20 @@ export interface ToolExecutionCompleteResult {
    */
   mcpMeta?: JsonValue;
   /**
+   * MCP `CallToolResult._meta` returned verbatim by an MCP Apps tool, for delivery to the app UI only; never sent to the model. Experimental.
+   *
+   * @experimental
+   */
+  mcpResultMeta?: {
+    [k: string]: JsonValue | undefined;
+  };
+  /**
    * Structured content (arbitrary JSON) returned verbatim by the MCP tool
    */
   structuredContent?: JsonValue;
+  /**
+   * MCP Apps UI resource content for rendering in a sandboxed iframe
+   */
   uiResource?: ToolExecutionCompleteUIResource;
 }
 /**
@@ -5167,6 +10097,9 @@ export interface PersistedBinaryImage {
    * MIME type of the binary data
    */
   mimeType: string;
+  /**
+   * Binary result type discriminator. Use "image" for images and "resource" for other binary data.
+   */
   type: PersistedBinaryImageType;
 }
 /**
@@ -5192,7 +10125,13 @@ export interface OmittedBinaryResult {
    * MIME type of the omitted binary data
    */
   mimeType: string;
+  /**
+   * Why the binary data is absent: it exceeded the inline size limit, or its asset was unavailable
+   */
   omittedReason: OmittedBinaryOmittedReason;
+  /**
+   * Binary result type discriminator. Use "image" for images and "resource" for other binary data.
+   */
   type: OmittedBinaryType;
 }
 /**
@@ -5222,6 +10161,9 @@ export interface BinaryAssetReference {
    * MIME type of the referenced binary data
    */
   mimeType: string;
+  /**
+   * Binary result type discriminator. Use "image" for images and "resource" for other binary data.
+   */
   type: BinaryAssetReferenceType;
 }
 /**
@@ -5297,6 +10239,10 @@ export interface ToolExecutionCompleteContentShellExit {
    * Exit code from the completed shell command
    */
   exitCode: number;
+  /**
+   * Path reported in the shell session's filesystem namespace when shell output exceeded the configured large-output threshold.
+   */
+  outputFilePath?: string;
   /**
    * Output associated with this shell command, if available. May be partial, truncated, or a preview; not guaranteed to be full output.
    */
@@ -5401,12 +10347,18 @@ export interface ToolExecutionCompleteContentResourceLinkIcon {
    * URL or path to the icon image
    */
   src: string;
+  /**
+   * Theme variant this icon is intended for
+   */
   theme?: ToolExecutionCompleteContentResourceLinkIconTheme;
 }
 /**
  * Embedded resource content block with inline text or binary data
  */
 export interface ToolExecutionCompleteContentResource {
+  /**
+   * The embedded resource contents, either text or base64-encoded binary
+   */
   resource: ToolExecutionCompleteContentResourceDetails;
   /**
    * Content block type discriminator
@@ -5451,6 +10403,9 @@ export interface EmbeddedBlobResourceContents {
  * MCP Apps UI resource content for rendering in a sandboxed iframe
  */
 export interface ToolExecutionCompleteUIResource {
+  /**
+   * Resource-level UI metadata (CSP, permissions, visual preferences)
+   */
   _meta?: ToolExecutionCompleteUIResourceMeta;
   /**
    * Base64-encoded HTML content
@@ -5473,17 +10428,26 @@ export interface ToolExecutionCompleteUIResource {
  * Resource-level UI metadata (CSP, permissions, visual preferences)
  */
 export interface ToolExecutionCompleteUIResourceMeta {
+  /**
+   * MCP Apps UI resource metadata for a completed tool result, including CSP, permissions, domain, and border preference.
+   */
   ui?: ToolExecutionCompleteUIResourceMetaUI;
 }
 /**
  * MCP Apps UI resource metadata for a completed tool result, including CSP, permissions, domain, and border preference.
  */
 export interface ToolExecutionCompleteUIResourceMetaUI {
+  /**
+   * CSP domain allowlists for an MCP Apps UI resource, including connect, resource, frame, and base URI domains.
+   */
   csp?: ToolExecutionCompleteUIResourceMetaUICsp;
   /**
    * Optional dedicated origin for the rendered MCP Apps UI resource.
    */
   domain?: string;
+  /**
+   * Browser permission metadata for an MCP Apps UI resource, including camera, microphone, geolocation, and clipboard-write.
+   */
   permissions?: ToolExecutionCompleteUIResourceMetaUIPermissions;
   /**
    * Whether the host should render a border around the MCP Apps UI resource.
@@ -5515,9 +10479,21 @@ export interface ToolExecutionCompleteUIResourceMetaUICsp {
  * Browser permission metadata for an MCP Apps UI resource, including camera, microphone, geolocation, and clipboard-write.
  */
 export interface ToolExecutionCompleteUIResourceMetaUIPermissions {
+  /**
+   * Marker object for camera permission on an MCP Apps UI resource.
+   */
   camera?: ToolExecutionCompleteUIResourceMetaUIPermissionsCamera;
+  /**
+   * Marker object for clipboard-write permission on an MCP Apps UI resource.
+   */
   clipboardWrite?: ToolExecutionCompleteUIResourceMetaUIPermissionsClipboardWrite;
+  /**
+   * Marker object for geolocation permission on an MCP Apps UI resource.
+   */
   geolocation?: ToolExecutionCompleteUIResourceMetaUIPermissionsGeolocation;
+  /**
+   * Marker object for microphone permission on an MCP Apps UI resource.
+   */
   microphone?: ToolExecutionCompleteUIResourceMetaUIPermissionsMicrophone;
 }
 /**
@@ -5537,9 +10513,22 @@ export interface ToolExecutionCompleteUIResourceMetaUIPermissionsGeolocation {}
  */
 export interface ToolExecutionCompleteUIResourceMetaUIPermissionsMicrophone {}
 /**
+ * Experimental shell completion facts retained independently of the full tool result.
+ */
+/** @experimental */
+export interface ToolExecutionCompleteShellExecution {
+  /**
+   * Process exit code reported by the shell driver.
+   */
+  exitCode: number;
+}
+/**
  * Tool definition metadata, present for MCP tools with MCP Apps support
  */
 export interface ToolExecutionCompleteToolDescription {
+  /**
+   * MCP Apps metadata for UI resource association
+   */
   _meta?: ToolExecutionCompleteToolDescriptionMeta;
   /**
    * Tool description
@@ -5554,6 +10543,9 @@ export interface ToolExecutionCompleteToolDescription {
  * MCP Apps metadata for UI resource association
  */
 export interface ToolExecutionCompleteToolDescriptionMeta {
+  /**
+   * MCP Apps tool `_meta.ui` resource URI and visibility captured on `tool.execution_complete`.
+   */
   ui?: ToolExecutionCompleteToolDescriptionMetaUI;
 }
 /**
@@ -5570,6 +10562,73 @@ export interface ToolExecutionCompleteToolDescriptionMetaUI {
   visibility?: ToolExecutionCompleteToolDescriptionMetaUIVisibility[];
 }
 /**
+ * Authoritative usage reported by a separately metered runtime-owned tool operation. May be present on a failed tool when the service reported usage before local result processing failed. Missing token counts or billing mean unavailable, not zero.
+ */
+/** @experimental */
+export interface ToolExecutionUsage {
+  /**
+   * Runtime-owned accounting order, preserved across session checkpoints and replay.
+   */
+  accounting?: UsageAccountingIdentity;
+  /**
+   * Server-reported charge. Divide totalNanoAiu by 1,000,000,000 for AI credits; do not calculate customer cost from token prices.
+   */
+  copilotUsage?: AssistantUsageCopilotUsage;
+  /**
+   * Total provider-reported input tokens across all modalities.
+   */
+  inputTokens?: number;
+  /**
+   * Optional input modality breakdown; these counts are already included in inputTokens.
+   */
+  inputTokensDetails?: ToolExecutionUsageTokenDetails;
+  /**
+   * Requested model for the tool operation, independent of the conversation model. Not a provider-confirmed serving model.
+   */
+  model: string;
+  /**
+   * Total provider-reported output tokens across all modalities.
+   */
+  outputTokens?: number;
+  /**
+   * Optional output modality breakdown; these counts are already included in outputTokens.
+   */
+  outputTokensDetails?: ToolExecutionUsageTokenDetails;
+  /**
+   * Provider responsible for the tool operation, captured independently of the conversation provider.
+   */
+  provider?: ModelProviderRef;
+  /**
+   * Account quota snapshots, not per-operation cost deltas.
+   *
+   * @internal
+   */
+  quotaSnapshots?: {
+    [k: string]: JsonValue | undefined;
+  };
+  /**
+   * Runtime-generated identifier for this metered operation. Deduplicates repeated delivery or replay; not an upstream billing identifier.
+   */
+  requestId: string;
+  /**
+   * Provider-reported sum of input and output tokens.
+   */
+  totalTokens?: number;
+}
+/**
+ * Provider-reported image and text token counts, which are subsets of the corresponding total rather than additional tokens.
+ */
+export interface ToolExecutionUsageTokenDetails {
+  /**
+   * Image tokens included in the corresponding input or output total.
+   */
+  imageTokens: number;
+  /**
+   * Text tokens included in the corresponding input or output total.
+   */
+  textTokens: number;
+}
+/**
  * Session event "tool_search.activated". Persisted generic client-side tool activations restored when a session resumes.
  */
 export interface ToolSearchActivatedEvent {
@@ -5577,6 +10636,13 @@ export interface ToolSearchActivatedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Persisted generic client-side tool activations restored when a session resumes.
+   */
   data: ToolSearchActivatedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -5620,6 +10686,13 @@ export interface SkillInvokedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Skill invocation details including content, allowed tools, and plugin metadata
+   */
   data: SkillInvokedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -5651,6 +10724,10 @@ export interface SkillInvokedData {
    */
   allowedTools?: string[];
   /**
+   * Exact invocation arguments when recorded, retained separately from the reusable skill body
+   */
+  arguments?: string;
+  /**
    * Full content of the skill file, injected into the conversation for the model
    */
   content: string;
@@ -5658,6 +10735,22 @@ export interface SkillInvokedData {
    * Description of the skill from its SKILL.md frontmatter
    */
   description?: string;
+  /**
+   * Whether model invocation is disabled for this skill
+   */
+  disableModelInvocation?: boolean;
+  /**
+   * Projected chat-message count when the skill was invoked. New writers persist this so replay does not need to reconstruct superseded history; readers derive it for legacy events when absent.
+   */
+  invokedAtTurn?: number;
+  /**
+   * MCP resource metadata associated with the verified skill content.
+   */
+  mcpMeta?: JsonValue;
+  /**
+   * Held MCP skill origin and manifest. Remote execution restrictions survive replay while this provenance remains in the session.
+   */
+  mcpOrigin?: JsonValue;
   /**
    * Model identifier active when the skill was invoked, when known
    */
@@ -5667,7 +10760,7 @@ export interface SkillInvokedData {
    */
   name: string;
   /**
-   * File path to the SKILL.md definition
+   * File path to the SKILL.md definition, or an empty string for an SDK-provided skill without a filesystem identity
    */
   path: string;
   /**
@@ -5679,9 +10772,12 @@ export interface SkillInvokedData {
    */
   pluginVersion?: string;
   /**
-   * Source identifier for where the skill was discovered. Known values include: project (workspace skill), inherited (parent-directory skill), personal-copilot (~/.copilot/skills), personal-agents (~/.agents/skills), custom (configured directory), plugin (installed plugin), builtin (bundled runtime skill), and remote (org/enterprise skill)
+   * Source identifier for where the skill was discovered. Known values include: project (workspace skill), inherited (parent-directory skill), personal-copilot (~/.copilot/skills), personal-agents (~/.agents/skills), custom (configured directory), plugin (installed plugin), builtin (bundled runtime skill), remote (org/enterprise skill), and sdk (SDK-provided skill)
    */
   source?: string;
+  /**
+   * What triggered the skill invocation: `user-invoked` (explicit user action, such as via a slash command or UI affordance), `agent-invoked` (agent requested the skill), or `context-load` (loaded as part of another context, such as preloading skills configured on a custom agent or subagent)
+   */
   trigger?: SkillInvokedTrigger;
 }
 /**
@@ -5692,6 +10788,13 @@ export interface SubagentStartedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Sub-agent startup details including parent tool call and agent information
+   */
   data: SubagentStartedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -5731,17 +10834,99 @@ export interface SubagentStartedData {
    */
   agentName: string;
   /**
-   * Root id of the factory run that spawned this sub-agent, when it was spawned by one.
+   * Type of the sub-agent selected at spawn time.
    */
-  factoryRunId?: string;
+  agentType?: string;
+  /**
+   * Whether the sub-agent runs synchronously or in the background.
+   */
+  executionMode?: string;
   /**
    * Model the sub-agent will run with, when known at start.
    */
   model?: string;
   /**
+   * Authority or runtime mechanism responsible for sub-agent model selection, when known at start.
+   */
+  modelSelectionSource?: SubagentModelSelectionSource;
+  /**
+   * Task-registry ID of the spawning sub-agent. Absent when the root session spawned this child.
+   */
+  parentId?: string;
+  /**
+   * Whether this sub-agent can be resumed. Currently always false.
+   */
+  resumable?: boolean;
+  /**
+   * Where the model input for this sub-agent came from. Present when the task planner resolved the launch (the task tool and workflow agents); absent for sub-agents created through other runtime paths.
+   */
+  taskModelSource?: SubagentTaskModelSource;
+  /**
    * Tool call ID of the parent tool invocation that spawned this sub-agent
    */
   toolCallId: string;
+  /**
+   * Root id of the workflow run that spawned this sub-agent, when it was spawned by one.
+   */
+  workflowRunId?: string;
+}
+/**
+ * Session event "subagent.configured". Resolved runtime configuration for a configured sub-agent
+ */
+export interface SubagentConfiguredEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Resolved runtime configuration for a configured sub-agent
+   */
+  data: SubagentConfiguredData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "subagent.configured".
+   */
+  type: "subagent.configured";
+}
+/**
+ * Resolved runtime configuration for a configured sub-agent
+ */
+export interface SubagentConfiguredData {
+  /**
+   * Resolved context tier, when configured for the model
+   */
+  contextTier?: string;
+  /**
+   * Resolved model the sub-agent will run with
+   */
+  model: string;
+  /**
+   * Whether the sub-agent accepts follow-up turns
+   */
+  multiTurn: boolean;
+  /**
+   * Resolved reasoning effort, when configured for the model
+   */
+  reasoningEffort?: string;
 }
 /**
  * Session event "subagent.completed". Sub-agent completion details for successful execution
@@ -5751,6 +10936,13 @@ export interface SubagentCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Sub-agent completion details for successful execution
+   */
   data: SubagentCompletedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -5790,13 +10982,41 @@ export interface SubagentCompletedData {
    */
   cancelled?: boolean;
   /**
+   * Whether the first model actually dispatched matched the user's configured preference
+   */
+  configuredModelMatchesActual?: boolean;
+  /**
+   * Concrete model the user configured for this sub-agent via `/subagents`, when present
+   */
+  configuredModelPreference?: string;
+  /**
    * Wall-clock duration of the sub-agent execution in milliseconds
    */
   durationMs?: number;
   /**
+   * Whether the explicit task-call model matched the user's configured preference
+   */
+  explicitModelMatchesPreference?: boolean;
+  /**
+   * Explicit model supplied by the parent agent on the task call, when present
+   */
+  explicitModelOverride?: string;
+  /**
+   * First model for which the sub-agent started an inference request, when one was dispatched
+   */
+  firstDispatchedModel?: string;
+  /**
    * Model used by the sub-agent
    */
   model?: string;
+  /**
+   * Why an explicit task-call model did not become the effective model
+   */
+  modelOverrideReason?: string;
+  /**
+   * Authority or runtime mechanism responsible for sub-agent model selection
+   */
+  modelSelectionSource?: SubagentModelSelectionSource;
   /**
    * Tool call ID of the parent tool invocation that spawned this sub-agent
    */
@@ -5818,6 +11038,13 @@ export interface SubagentFailedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Sub-agent failure details including error message and agent information
+   */
   data: SubagentFailedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -5853,6 +11080,14 @@ export interface SubagentFailedData {
    */
   agentName: string;
   /**
+   * Whether the first model actually dispatched matched the user's configured preference
+   */
+  configuredModelMatchesActual?: boolean;
+  /**
+   * Concrete model the user configured for this sub-agent via `/subagents`, when present
+   */
+  configuredModelPreference?: string;
+  /**
    * Wall-clock duration of the sub-agent execution in milliseconds
    */
   durationMs?: number;
@@ -5861,9 +11096,29 @@ export interface SubagentFailedData {
    */
   error: string;
   /**
+   * Whether the explicit task-call model matched the user's configured preference
+   */
+  explicitModelMatchesPreference?: boolean;
+  /**
+   * Explicit model supplied by the parent agent on the task call, when present
+   */
+  explicitModelOverride?: string;
+  /**
+   * First model for which the sub-agent started an inference request, when one was dispatched
+   */
+  firstDispatchedModel?: string;
+  /**
    * Model selected for the sub-agent, when known
    */
   model?: string;
+  /**
+   * Why an explicit task-call model did not become the effective model
+   */
+  modelOverrideReason?: string;
+  /**
+   * Authority or runtime mechanism responsible for sub-agent model selection
+   */
+  modelSelectionSource?: SubagentModelSelectionSource;
   /**
    * Tool call ID of the parent tool invocation that spawned this sub-agent
    */
@@ -5885,6 +11140,13 @@ export interface SubagentSelectedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Custom agent selection details including name and available tools
+   */
   data: SubagentSelectedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -5932,6 +11194,13 @@ export interface SubagentDeselectedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Empty payload; the event signals that the custom agent was deselected, returning to the default agent
+   */
   data: SubagentDeselectedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -5966,6 +11235,13 @@ export interface HookStartEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Hook invocation start details including type and input data
+   */
   data: HookStartData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -6001,9 +11277,13 @@ export interface HookStartData {
    */
   hookType: string;
   /**
-   * Input data passed to the hook
+   * Input data passed to the hook. For postToolUse hooks the retained copy served by session.eventLog.read (and by a resumed session) drops the tool result's inline `contents`/`uiResource`/`skillInvocation` and replaces duplicated text result fields with a `[copilot:elided ...]` marker; the live subscription stream still delivers the full value. Canonical tool output remains in the adjacent tool.execution_complete event, while an invoked skill's authoritative body remains in its skill invocation event.
    */
   input?: JsonValue;
+  /**
+   * Tool call ID of the parent tool invocation when this event originates from a sub-agent
+   */
+  parentToolCallId?: string;
 }
 /**
  * Session event "hook.end". Hook invocation completion details including output, success status, and error information
@@ -6013,6 +11293,13 @@ export interface HookEndEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Hook invocation completion details including output, success status, and error information
+   */
   data: HookEndData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -6039,6 +11326,9 @@ export interface HookEndEvent {
  * Hook invocation completion details including output, success status, and error information
  */
 export interface HookEndData {
+  /**
+   * Error details when the hook failed
+   */
   error?: HookEndError;
   /**
    * Identifier matching the corresponding hook.start event
@@ -6049,9 +11339,13 @@ export interface HookEndData {
    */
   hookType: string;
   /**
-   * Output data produced by the hook
+   * Output data produced by the hook. Durable and resumed postToolUse receipts may omit messages owned by a successful skill invocation and replace an unchanged skill sessionLog copy with an elision marker; hook-modified or re-sourced values are preserved, and the authoritative body remains in the skill invocation event.
    */
   output?: JsonValue;
+  /**
+   * Tool call ID of the parent tool invocation when this event originates from a sub-agent
+   */
+  parentToolCallId?: string;
   /**
    * Whether the hook completed successfully
    */
@@ -6082,6 +11376,13 @@ export interface HookProgressEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Ephemeral progress update from a running hook process
+   */
   data: HookProgressData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -6126,6 +11427,13 @@ export interface BinaryAssetEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Canonical bytes for a content-addressed binary asset shared by reference across events
+   */
   data: BinaryAssetData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -6178,6 +11486,9 @@ export interface BinaryAssetData {
    * MIME type of the binary asset
    */
   mimeType: string;
+  /**
+   * Binary asset type discriminator. Use "image" for images and "resource" otherwise.
+   */
   type: BinaryAssetType;
 }
 /**
@@ -6188,6 +11499,13 @@ export interface SystemMessageEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * System/developer instruction content with role and optional template metadata
+   */
   data: SystemMessageData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -6219,22 +11537,49 @@ export interface SystemMessageData {
    */
   content: string;
   /**
+   * Optional ordered structured blocks corresponding to content, retained for prompt-cache layout restoration.
+   */
+  contentBlocks?: SystemMessageContentBlock[];
+  /**
    * Logical interaction identifier for the model run receiving this prompt
    */
   interactionId?: string;
+  /**
+   * Metadata about the prompt template and its construction
+   */
   metadata?: SystemMessageMetadata;
   /**
    * Optional name identifier for the message source
    */
   name?: string;
+  /**
+   * Message role: "system" for system prompts, "developer" for developer-injected instructions
+   */
   role: SystemMessageRole;
+}
+/**
+ * One persisted structured system-message block and its cache intent
+ */
+export interface SystemMessageContentBlock {
+  /**
+   * Explicit prompt-cache intent. True places a breakpoint after this block, false suppresses one, and absence preserves the provider's legacy default.
+   */
+  cacheBreakpoint?: boolean;
+  /**
+   * Text content for this system-message block.
+   */
+  content: string;
+  /**
+   * Diagnostic classification indicating whether the block is stable across equivalent sessions.
+   */
+  isStatic?: boolean;
 }
 /**
  * Metadata about the prompt template and its construction
  */
 export interface SystemMessageMetadata {
   /**
-   * Version identifier of the prompt template used
+   * Version identifier of the prompt template or structured prompt layout used
    */
   promptVersion?: string;
   /**
@@ -6245,6 +11590,78 @@ export interface SystemMessageMetadata {
   };
 }
 /**
+ * Session event "instruction.update". An authoritative developer-instruction update. Event order defines instruction order. Persistent updates are durable and restore across replay, resume, rewind, fork, and compaction; turn-scoped updates must be emitted with ephemeral=true and are never restored.
+ */
+export interface InstructionUpdateEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * An authoritative developer-instruction update. Event order defines instruction order. Persistent updates are durable and restore across replay, resume, rewind, fork, and compaction; turn-scoped updates must be emitted with ephemeral=true and are never restored.
+   */
+  data: InstructionUpdateData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "instruction.update".
+   */
+  type: "instruction.update";
+}
+/**
+ * An authoritative developer-instruction update. Event order defines instruction order. Persistent updates are durable and restore across replay, resume, rewind, fork, and compaction; turn-scoped updates must be emitted with ephemeral=true and are never restored.
+ */
+export interface InstructionUpdateData {
+  /**
+   * Authority responsible for the update.
+   */
+  authority: InstructionUpdateAuthority;
+  /**
+   * Earliest legal insertion boundary.
+   */
+  boundary: InstructionUpdateBoundary;
+  /**
+   * Authoritative instruction text. Empty or whitespace-only content is rejected.
+   */
+  content: string;
+  /**
+   * Deterministic behavior when the active provider cannot represent the update.
+   */
+  fallback: InstructionUpdateFallback;
+  /**
+   * Whether the update persists beyond the current turn.
+   */
+  lifetime: InstructionUpdateLifetime;
+  /**
+   * Optional stable source name for diagnostics and future host-authored updates.
+   */
+  name?: string;
+  /**
+   * Whether this update was recorded after the conversation's initial user message.
+   *
+   * @internal
+   */
+  postInitial?: boolean;
+}
+/**
  * Session event "system.notification". System-generated notification for runtime events like background task completion
  */
 export interface SystemNotificationEvent {
@@ -6252,6 +11669,13 @@ export interface SystemNotificationEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * System-generated notification for runtime events like background task completion
+   */
   data: SystemNotificationData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -6282,7 +11706,14 @@ export interface SystemNotificationData {
    * The notification text, typically wrapped in <system_notification> XML tags
    */
   content: string;
+  /**
+   * Structured metadata identifying what triggered this notification
+   */
   kind: SystemNotification;
+  /**
+   * Provider reasoning settings anchored before this model-facing message for cache-stable replay; the historical responsesReasoning name is retained for compatibility
+   */
+  responsesReasoning?: ResponsesReasoning;
 }
 /**
  * System notification metadata for a background agent that completed or failed, including agent ID, type, status, description, and prompt.
@@ -6308,6 +11739,9 @@ export interface SystemNotificationAgentCompleted {
    * The full prompt given to the background agent
    */
   prompt?: string;
+  /**
+   * Whether the agent completed successfully or failed
+   */
   status: SystemNotificationAgentCompletedStatus;
   /**
    * Type discriminator. Always "agent_completed".
@@ -6428,9 +11862,9 @@ export interface SystemNotificationInstructionDiscovered {
   type: "instruction_discovered";
 }
 /**
- * System notification metadata for a factory execution attempt that reached a terminal state.
+ * System notification metadata for a workflow execution attempt that reached a terminal state.
  */
-export interface SystemNotificationFactoryCompleted {
+export interface SystemNotificationWorkflowCompleted {
   /**
    * Execution attempt that reached this terminal state.
    */
@@ -6448,30 +11882,37 @@ export interface SystemNotificationFactoryCompleted {
    */
   elapsedMs: number;
   /**
-   * Persisted factory name.
-   */
-  factoryName: string;
-  /**
    * Machine-readable terminal failure details, when present.
    */
   failure?: JsonValue;
+  /**
+   * Pause initiator metadata when this attempt settled as paused.
+   */
+  pauseInfo?: SystemNotificationWorkflowPauseInfo;
   /**
    * Bounded prompt-safe preview of the completed result.
    */
   resultPreview?: string;
   /**
-   * Actionable run_factory resume guidance for a resource-limit failure.
+   * Actionable run_dynamic_workflow resume guidance for a resource-limit failure.
    */
   retryGuidance?: string;
   /**
-   * Factory run identifier.
+   * Workflow run identifier.
    */
   runId: string;
-  status: SystemNotificationFactoryCompletedStatus;
   /**
-   * Type discriminator. Always "factory_completed".
+   * Terminal status reached by this execution attempt.
    */
-  type: "factory_completed";
+  status: SystemNotificationWorkflowCompletedStatus;
+  /**
+   * Type discriminator. Always "workflow_completed".
+   */
+  type: "workflow_completed";
+  /**
+   * Persisted workflow name.
+   */
+  workflowName: string;
 }
 /**
  * System notification metadata from an external host that does not match a runtime-owned notification kind.
@@ -6494,6 +11935,13 @@ export interface PermissionRequestedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Permission request notification requiring client approval with request details
+   */
   data: PermissionRequestedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -6520,8 +11968,46 @@ export interface PermissionRequestedEvent {
  * Permission request notification requiring client approval with request details
  */
 export interface PermissionRequestedData {
+  /**
+   * Agent mode captured from the owning turn when permission evaluation began.
+   */
+  agentMode?: SessionMode;
+  /**
+   * Canonical runtime-owned Assisted Permissions assessment. New runtimes emit this for every permission request; absence means the event predates this field. Consumers must use `permission.completed` for the final permission result.
+   *
+   * @experimental
+   */
+  assistedApprovalAssessment?: AssistedApprovalAssessment;
+  /**
+   * Experimental HydraFusion attribution of the staged phase whose tool call raised this request. Absent outside a staged phase.
+   *
+   * @experimental
+   */
+  fusion?: FusionAttribution;
+  /**
+   * Delegated agent that owns permission recovery when the owner session multiplexes remote agents. Absent otherwise.
+   */
+  ownerAgentId?: string;
+  /**
+   * Execution session that owns permission recovery for this request. Absent on historical events.
+   */
+  ownerSessionId?: string;
+  /**
+   * Permission mode captured when evaluation began. Absent on historical events.
+   */
+  permissionMode?: PermissionMode;
+  /**
+   * Details of the permission being requested
+   */
   permissionRequest: PermissionRequest;
+  /**
+   * Derived user-facing permission prompt details for UI consumers
+   */
   promptRequest?: PermissionPromptRequest;
+  /**
+   * Permission-recovery episode that authorized this request to surface for interactive attention
+   */
+  recoveryEpisodeId?: string;
   /**
    * Unique identifier for this permission request; used to respond via session.respondToPermission()
    */
@@ -6580,13 +12066,37 @@ export interface PermissionRequestShell {
    */
   possibleUrls: PermissionRequestShellPossibleUrl[];
   /**
-   * True when the model has requested to run this command outside the sandbox (it set requestSandboxBypass: true and the host opted in via sandbox.allowBypass). This is a request, not a grant: the command runs unsandboxed only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
+   * True when the tool is asking to run this command outside the sandbox, either because the command detaches and cannot be sandboxed at all, or because a sandboxed run looked blocked (host opted in via sandbox.allowBypass). The model cannot ask for this; only the tool raises it. This is a request, not a grant: the command runs unsandboxed only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
    */
   requestSandboxBypass?: boolean;
   /**
-   * Model-provided justification for the sandbox-bypass request. Only meaningful when requestSandboxBypass is true.
+   * What the tool tells the user about the bypass on offer: which policy rule blocked the call, or why it cannot be sandboxed. Only meaningful when requestSandboxBypass is true.
    */
   requestSandboxBypassReason?: string;
+  /**
+   * True when the requested escalation is a permissive retry rather than a full bypass: the command re-runs inside the sandbox with its file and process restrictions recording instead of blocking, while the network policy stays enforced. Always accompanied by requestSandboxBypass, so hosts that do not recognize this field still treat the request as the escalation it is. Hosts that do recognize it must not describe the command as running outside the sandbox, which would overstate the privilege being granted.
+   */
+  requestSandboxPermissive?: boolean;
+  /**
+   * Runtime-resolved canonical object each possiblePaths entry names, keyed by the requested spelling, used for authorization identity checks. Internal and experimental; clients should continue to display possiblePaths.
+   *
+   * @experimental
+   */
+  resolvedPaths?: {
+    [k: string]: string | undefined;
+  };
+  /**
+   * Runtime-resolved canonical working directory the command runs in, used for authorization identity checks. Internal and experimental; clients should not display it.
+   *
+   * @experimental
+   */
+  resolvedWorkingDirectory?: string;
+  /**
+   * Sandbox policy edit that would let the command run inside the sandbox. Only present when requestSandboxBypass is true.
+   *
+   * @experimental
+   */
+  sandboxPathGrant?: PermissionSandboxPathGrant;
   /**
    * Tool call ID that triggered this permission request
    */
@@ -6632,6 +12142,28 @@ export interface PermissionRequestShellPossibleUrl {
   url: string;
 }
 /**
+ * A sandbox filesystem policy edit that would let a blocked operation run inside the sandbox instead of outside it. Offered only on a sandbox escalation request whose denial adding this path lifts, and only when managed policy permits the grant. A host accepts it with session.sandbox.grantPathForRequest, which adds the path to the session's sandbox policy and re-runs the operation sandboxed; a host that persists sandbox settings may also save the path there.
+ */
+/** @experimental */
+export interface PermissionSandboxPathGrant {
+  /**
+   * Which access the grant confers, and so which policy list the path is added to
+   */
+  access: PermissionSandboxPathGrantAccess;
+  /**
+   * The path the sandbox refused, present only when it differs from path. That happens when a write under a read-only folder moves the folder to the read-write paths, when a path that does not exist yet is granted through its nearest existing folder, because the OS sandbox cannot grant a path before it exists, and when either is spelled through a symlink, because a grant covers its path as written, so path is then the resolved location. Hosts should then name path in the offer, since the denial names this one.
+   */
+  deniedPath?: string;
+  /**
+   * Absolute path to add to the sandbox filesystem policy
+   */
+  path: string;
+  /**
+   * readonlyPaths entries the grant removes, exactly as written in the policy, because a read-only entry for the same location would otherwise keep the path read-only. A host that persists the path must remove these entries from its stored readonlyPaths too.
+   */
+  removedReadonlyPaths?: string[];
+}
+/**
  * File write permission request
  */
 export interface PermissionRequestWrite {
@@ -6643,6 +12175,12 @@ export interface PermissionRequestWrite {
    * Unified diff showing the proposed changes
    */
   diff: string;
+  /**
+   * Complete before/after text previews captured while planning this request. Omitted when a complete preview is unavailable, including pre-read sandbox requests and non-UTF-8 files. Missing sides mean creation or deletion, not unavailable content.
+   *
+   * @minItems 1
+   */
+  fileEdits?: [PermissionWriteFileEdit, ...PermissionWriteFileEdit[]];
   /**
    * Path of the file being written to
    */
@@ -6672,9 +12210,47 @@ export interface PermissionRequestWrite {
    */
   requestSandboxBypassReason?: string;
   /**
+   * Runtime-resolved canonical path used for authorization identity checks. Internal and experimental; clients should continue to display fileName.
+   *
+   * @experimental
+   */
+  resolvedPath?: string;
+  /**
+   * Sandbox policy edit that would let the write run inside the sandbox. Only present when requestSandboxBypass is true.
+   *
+   * @experimental
+   */
+  sandboxPathGrant?: PermissionSandboxPathGrant;
+  /**
    * Tool call ID that triggered this permission request
    */
   toolCallId?: string;
+}
+/**
+ * Complete text snapshots for one proposed file change. At least one side is present. Different before and after paths describe a move.
+ */
+export interface PermissionWriteFileEdit {
+  /**
+   * Complete file content the operation plans to write. Absent only when the file is being deleted.
+   */
+  after?: PermissionWriteFileContent;
+  /**
+   * File content read while planning the operation. Absent only when the file is being created.
+   */
+  before?: PermissionWriteFileContent;
+}
+/**
+ * A named, complete UTF-8 text snapshot for a pending file operation.
+ */
+export interface PermissionWriteFileContent {
+  /**
+   * Complete file contents, including an empty string for an empty file.
+   */
+  content: string;
+  /**
+   * Absolute path in the session filesystem namespace.
+   */
+  path: string;
 }
 /**
  * File or directory read permission request
@@ -6697,13 +12273,25 @@ export interface PermissionRequestRead {
    */
   path: string;
   /**
-   * True when the model has requested to run this search outside the sandbox (it set requestSandboxBypass: true and the host opted in via sandbox.allowBypass). This is a request, not a grant: the search runs unsandboxed only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
+   * True when the tool is asking to re-run this search outside the sandbox, after a sandboxed run looked blocked (host opted in via sandbox.allowBypass). The model cannot ask for this; only the tool raises it. This is a request, not a grant: the search runs unsandboxed only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
    */
   requestSandboxBypass?: boolean;
   /**
-   * Model-provided justification for the sandbox-bypass request. Only meaningful when requestSandboxBypass is true.
+   * What the tool tells the user about the bypass on offer: which policy rule blocked the call, or why it cannot be sandboxed. Only meaningful when requestSandboxBypass is true.
    */
   requestSandboxBypassReason?: string;
+  /**
+   * Runtime-resolved canonical path used for authorization identity checks. Internal and experimental; clients should continue to display path.
+   *
+   * @experimental
+   */
+  resolvedPath?: string;
+  /**
+   * Sandbox policy edit that would let the read run inside the sandbox. Only present when requestSandboxBypass is true.
+   *
+   * @experimental
+   */
+  sandboxPathGrant?: PermissionSandboxPathGrant;
   /**
    * Tool call ID that triggered this permission request
    */
@@ -6731,6 +12319,10 @@ export interface PermissionRequestMcp {
    * Whether this MCP tool is read-only (no side effects)
    */
   readOnly: boolean;
+  /**
+   * Display label for a Connector-owned MCP server, from the trusted Connector catalog; absent for other servers. `serverName` stays the identity for approvals and rules.
+   */
+  serverDisplayName?: string;
   /**
    * Name of the MCP server providing the tool
    */
@@ -6769,11 +12361,11 @@ export interface PermissionRequestUrl {
    */
   redirectedFrom?: string;
   /**
-   * True when this URL fetch is requesting to bypass the sandbox network policy: either the model set requestSandboxBypass: true, or the tool re-issued the request as an interactive bypass after the network policy denied the approved URL (host opted in via sandbox.allowBypass). This is a request, not a grant: the fetch runs only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
+   * True when the tool is asking to run this URL fetch outside the sandbox, after the network policy denied the approved URL or the sandbox proxy could not reach it (host opted in via sandbox.allowBypass). The model cannot ask for this; only the tool raises it. This is a request, not a grant: the fetch runs only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
    */
   requestSandboxBypass?: boolean;
   /**
-   * Model-provided justification for the sandbox-bypass request. Only meaningful when requestSandboxBypass is true.
+   * What the tool tells the user about the bypass on offer: which policy rule blocked the call, or why it cannot be sandboxed. Only meaningful when requestSandboxBypass is true.
    */
   requestSandboxBypassReason?: string;
   /**
@@ -6789,6 +12381,9 @@ export interface PermissionRequestUrl {
  * Memory operation permission request
  */
 export interface PermissionRequestMemory {
+  /**
+   * Whether this is a store or vote memory operation
+   */
   action?: PermissionRequestMemoryAction;
   /**
    * Assisted-approval judge information for this request; present only in assisted mode.
@@ -6800,6 +12395,9 @@ export interface PermissionRequestMemory {
    * Source references for the stored fact (store only)
    */
   citations?: string;
+  /**
+   * Vote direction (vote only)
+   */
   direction?: PermissionRequestMemoryDirection;
   /**
    * The fact being stored or voted on
@@ -6817,6 +12415,9 @@ export interface PermissionRequestMemory {
    * Repository name with owner associated with the stored memory (store only)
    */
   repoNwo?: string;
+  /**
+   * Scope of the stored memory (store only)
+   */
   scope?: PermissionRequestMemoryScope;
   /**
    * Topic or subject of the memory (store only)
@@ -6832,6 +12433,17 @@ export interface PermissionRequestMemory {
  */
 /** @experimental */
 export interface PermissionAssistedApproval {
+  /**
+   * Runtime reason and judge-call metadata. Absent on older events; missing metadata means unknown, not that the judge was skipped.
+   */
+  evaluation?: PermissionApprovalEvaluation;
+  /**
+   * Runtime-generated correlation ID for the original judge invocation. Cached recommendations retain it. Absent when review was skipped or the event predates correlation support; never part of the judge prompt.
+   */
+  evaluationId?: string;
+  /**
+   * Classified cause of an `error` recommendation. Absent for every other recommendation.
+   */
   failureReason?: AssistedApprovalJudgeFailureReason;
   /**
    * Model id that produced the recommendation, when the judge was consulted and reported one. Absent for `excluded` (the judge was not consulted) and for failures that occurred before a model was selected.
@@ -6841,7 +12453,120 @@ export interface PermissionAssistedApproval {
    * Human-readable reason for the judge's recommendation, when available.
    */
   reason?: string;
+  /**
+   * The assisted-approval safety judge's outcome for this request.
+   */
   recommendation: AssistedApprovalRecommendation;
+}
+/**
+ * Bounded runtime attribution, independent of free-text rationale. Telemetry revalidates this vocabulary before standard collection.
+ */
+export interface PermissionApprovalEvaluation {
+  /**
+   * Stage that produced this attribution.
+   */
+  evaluationStage: /** The attribution stage is unknown. */
+    | "unknown"
+    /** The request resolved before assisted-approval evaluation. */
+    | "not_reached"
+    /** A runtime gate skipped the judge. */
+    | "pre_judge"
+    /** The judge interface produced the evaluation. */
+    | "judge"
+    /** A cached recommendation or another request's outcome was reused. */
+    | "reuse";
+  /**
+   * Whether the request invoked the judge interface. A cached recommendation retains the original attempt fact. Omitted means unknown, including inherited outcomes.
+   */
+  judgeAttempted?: boolean;
+  /**
+   * Status of the local judge interface, not proof of a model network call.
+   */
+  judgeStatus: /** No authoritative attribution is available. */
+    | "unknown"
+    /** This evaluation did not invoke the judge interface. */
+    | "not_called"
+    /** The judge interface returned a usable verdict. */
+    | "completed"
+    /** The judge interface returned an error. */
+    | "failed"
+    /** This evaluation reused a cached recommendation. */
+    | "cached"
+    /** This request inherited another decision without local judge attribution. */
+    | "inherited";
+  /**
+   * Machine-readable runtime gate reason, never a command, path or human rationale.
+   */
+  reasonCode: /** Attribution is missing or outside the supported vocabulary. */
+    | "unknown"
+    /** The request resolved before assisted-approval evaluation. */
+    | "not-reached"
+    /** Assisted approval was inactive for this request. */
+    | "inactive"
+    /** The judge was skipped because authorization extraction could not safely establish a complete recent history. */
+    | "authorization-history-incomplete"
+    /** Managed policy required a human decision. */
+    | "managed-approval-required"
+    /** An extension capability grant required explicit user consent. */
+    | "extension-permission-access"
+    /** The request asked to bypass sandbox restrictions. */
+    | "sandbox-bypass"
+    /** An action field exceeded the judge input limit. */
+    | "action-too-long"
+    /** The script path was not authorized for inspection. */
+    | "path-not-authorized"
+    /** A code source was excluded from review by content exclusion policy. */
+    | "content-excluded"
+    /** The script working directory was invalid. */
+    | "invalid-working-directory"
+    /** The script snapshot could not be read. */
+    | "unreadable"
+    /** The script path was not a regular file. */
+    | "not-regular-file"
+    /** The script snapshot exceeded the size limit. */
+    | "too-large"
+    /** The script snapshot was not UTF-8. */
+    | "non-utf8"
+    /** The script interpreter could not be inspected. */
+    | "interpreter-unavailable"
+    /** The interpreter snapshot exceeded the size limit. */
+    | "interpreter-too-large"
+    /** The shell environment could not be reviewed. */
+    | "shell-environment-unreviewable"
+    /** A script path could not be represented for review. */
+    | "unrepresentable-path"
+    /** An interpreter wrapped a script that could not be reviewed. */
+    | "interpreter-wrapped-script"
+    /** The script invocation could not be reviewed. */
+    | "unreviewable-script-invocation"
+    /** The script argument binding could not be reviewed. */
+    | "argument-binding-unreviewable"
+    /** The shell command could not be analyzed for execution evidence. */
+    | "unsupported-command-shape"
+    /** The shell command used a code source that cannot be bound for review. */
+    | "unsupported-source"
+    /** The shell command used a code source computed at run time. */
+    | "dynamic-source"
+    /** The shell command referenced more code sources than can be reviewed. */
+    | "too-many-sources"
+    /** A code-bearing executable could not be inspected. */
+    | "executable-unavailable"
+    /** A code-bearing executable exceeded the binding size limit. */
+    | "executable-too-large"
+    /** The script review metadata was malformed. */
+    | "malformed-script-action-review"
+    /** The script snapshot manifest was malformed. */
+    | "malformed-script-action-manifest"
+    /** Script review was unavailable. */
+    | "unavailable"
+    /** The judge interface returned a usable verdict. */
+    | "judge-verdict"
+    /** The judge interface returned an error. */
+    | "judge-error"
+    /** The fully assembled judge request exceeded the selected model's input capacity after reserving output headroom. */
+    | "judge-context-too-large"
+    /** The request inherited an outcome from another decision. */
+    | "inherited";
 }
 /**
  * Custom tool invocation permission request
@@ -6919,41 +12644,45 @@ export interface PermissionRequestExtensionManagement {
   toolCallId?: string;
 }
 /**
- * Factory run or authoring permission request
+ * Workflow run or authoring permission request
  */
-export interface PermissionRequestFactory {
+export interface PermissionRequestWorkflow {
   /**
-   * Canonical key used for scoped factory approvals
+   * Canonical key used for scoped workflow approvals
    */
   approvalKey: string;
   /**
-   * Whether this factory is eligible for persistent approval
+   * Whether this workflow is eligible for persistent approval
    */
   canPersistApproval: boolean;
   /**
-   * Factory-declared AI-credit limit before any run/resume caller override is applied.
+   * Workflow-declared AI-credit limit before any run/resume caller override is applied.
    */
   declaredMaxAiCredits?: number;
   /**
-   * Factory-declared concurrent-subagent limit before any run/resume caller override is applied.
+   * Workflow-declared concurrent-subagent limit before any run/resume caller override is applied.
    */
   declaredMaxConcurrentSubagents?: number;
   /**
-   * Factory-declared total-subagent limit before any run/resume caller override is applied.
+   * Workflow-declared total-subagent limit before any run/resume caller override is applied.
    */
   declaredMaxTotalSubagents?: number;
   /**
-   * Factory-declared active-time limit in seconds before any run/resume caller override is applied.
+   * Workflow-declared active-time limit in seconds before any run/resume caller override is applied.
    */
   declaredTimeoutSeconds?: number;
   /**
-   * Factory description
+   * Workflow description
    */
   description: string;
   /**
    * Permission kind discriminator
    */
-  kind: "factory";
+  kind: "workflow";
+  /**
+   * Whether managed policy requires a human response and forbids host auto-approval
+   */
+  managedApprovalRequired?: boolean;
   /**
    * Effective AI-credit limit; omitted means unlimited
    */
@@ -6967,14 +12696,17 @@ export interface PermissionRequestFactory {
    */
   maxTotalSubagents?: number;
   /**
-   * Factory name
+   * Workflow name
    */
   name: string;
-  operation: FactoryPermissionOperation;
   /**
-   * Declared factory phases
+   * Workflow operation, either run or author
    */
-  phases: FactoryPermissionPhase[];
+  operation: WorkflowPermissionOperation;
+  /**
+   * Declared workflow phases
+   */
+  phases: WorkflowPermissionPhase[];
   /**
    * Effective active-time limit in seconds; omitted means unlimited
    */
@@ -6985,9 +12717,9 @@ export interface PermissionRequestFactory {
   toolCallId?: string;
 }
 /**
- * A declared phase shown in a factory permission prompt.
+ * A declared phase shown in a workflow permission prompt.
  */
-export interface FactoryPermissionPhase {
+export interface WorkflowPermissionPhase {
   /**
    * Optional phase detail
    */
@@ -7076,6 +12808,24 @@ export interface PermissionPromptRequestCommands {
    */
   managedApprovalRequired?: boolean;
   /**
+   * True when the shell command is requesting sandbox escalation. This is a request, not a grant.
+   */
+  requestSandboxBypass?: boolean;
+  /**
+   * Reason for the sandbox escalation request.
+   */
+  requestSandboxBypassReason?: string;
+  /**
+   * True when the escalation is a permissive retry that keeps the sandbox and network policy attached while recording file and process accesses instead of blocking them.
+   */
+  requestSandboxPermissive?: boolean;
+  /**
+   * Sandbox policy edit that would let the command run inside the sandbox. Only present when requestSandboxBypass is true.
+   *
+   * @experimental
+   */
+  sandboxPathGrant?: PermissionSandboxPathGrant;
+  /**
    * Tool call ID that triggered this permission request
    */
   toolCallId?: string;
@@ -7103,6 +12853,12 @@ export interface PermissionPromptRequestWrite {
    */
   diff: string;
   /**
+   * Complete before/after text previews captured while planning this request. Omitted when a complete preview is unavailable, including pre-read sandbox requests and non-UTF-8 files. Missing sides mean creation or deletion, not unavailable content.
+   *
+   * @minItems 1
+   */
+  fileEdits?: [PermissionWriteFileEdit, ...PermissionWriteFileEdit[]];
+  /**
    * Path of the file being written to
    */
   fileName: string;
@@ -7122,6 +12878,12 @@ export interface PermissionPromptRequestWrite {
    * Complete new file contents for newly created files
    */
   newFileContents?: string;
+  /**
+   * Runtime-resolved canonical path used for authorization identity checks. Internal and experimental; clients should continue to display fileName.
+   *
+   * @experimental
+   */
+  resolvedPath?: string;
   /**
    * Tool call ID that triggered this permission request
    */
@@ -7154,6 +12916,12 @@ export interface PermissionPromptRequestRead {
    */
   path: string;
   /**
+   * Runtime-resolved canonical path used for authorization identity checks. Internal and experimental; clients should continue to display path.
+   *
+   * @experimental
+   */
+  resolvedPath?: string;
+  /**
    * Tool call ID that triggered this permission request
    */
   toolCallId?: string;
@@ -7173,6 +12941,10 @@ export interface PermissionPromptRequestMcp {
    */
   assistedApproval?: PermissionAssistedApproval;
   /**
+   * Whether the host may offer a server-wide "approve all tools from this server" blanket. Absent is treated as true; the runtime sends false when managed policy disables bypass-permissions mode, which forbids the server-wide escalation while still allowing per-tool approval.
+   */
+  canOfferServerWideApproval?: boolean;
+  /**
    * Prompt kind discriminator
    */
   kind: "mcp";
@@ -7182,6 +12954,10 @@ export interface PermissionPromptRequestMcp {
    * @experimental
    */
   permissionRecommendation?: PermissionRecommendation;
+  /**
+   * Display label for a Connector-owned MCP server, from the trusted Connector catalog; absent for other servers. `serverName` stays the identity for approvals and rules.
+   */
+  serverDisplayName?: string;
   /**
    * Name of the MCP server providing the tool
    */
@@ -7226,11 +13002,11 @@ export interface PermissionPromptRequestUrl {
    */
   redirectedFrom?: string;
   /**
-   * True when this URL fetch is requesting to bypass the sandbox network policy: either the model set requestSandboxBypass: true, or the tool re-issued the request as an interactive bypass after the network policy denied the approved URL (host opted in via sandbox.allowBypass). This is a request, not a grant: the fetch runs only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
+   * True when the tool is asking to run this URL fetch outside the sandbox, after the network policy denied the approved URL or the sandbox proxy could not reach it (host opted in via sandbox.allowBypass). The model cannot ask for this; only the tool raises it. This is a request, not a grant: the fetch runs only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
    */
   requestSandboxBypass?: boolean;
   /**
-   * Model-provided justification for the sandbox-bypass request. Only meaningful when requestSandboxBypass is true.
+   * What the tool tells the user about the bypass on offer: which policy rule blocked the call, or why it cannot be sandboxed. Only meaningful when requestSandboxBypass is true.
    */
   requestSandboxBypassReason?: string;
   /**
@@ -7246,6 +13022,9 @@ export interface PermissionPromptRequestUrl {
  * Memory operation permission prompt
  */
 export interface PermissionPromptRequestMemory {
+  /**
+   * Whether this is a store or vote memory operation
+   */
   action?: PermissionRequestMemoryAction;
   /**
    * Assisted-approval judge information for this request; present only in assisted mode.
@@ -7257,6 +13036,9 @@ export interface PermissionPromptRequestMemory {
    * Source references for the stored fact (store only)
    */
   citations?: string;
+  /**
+   * Vote direction (vote only)
+   */
   direction?: PermissionRequestMemoryDirection;
   /**
    * The fact being stored or voted on
@@ -7314,6 +13096,9 @@ export interface PermissionPromptRequestCustomTool {
  * Path access permission prompt
  */
 export interface PermissionPromptRequestPath {
+  /**
+   * Underlying permission kind that needs path approval
+   */
   accessKind: PermissionPromptRequestPathAccessKind;
   /**
    * Assisted-approval judge information for this request; present only in assisted mode.
@@ -7329,6 +13114,12 @@ export interface PermissionPromptRequestPath {
    * File paths that require explicit approval
    */
   paths: string[];
+  /**
+   * Canonical directory candidates that can be granted for file-tool read access in this logical session. Present only for read path prompts.
+   *
+   * @experimental
+   */
+  readOnlyDirectories?: string[];
   /**
    * Tool call ID that triggered this permission request
    */
@@ -7393,11 +13184,11 @@ export interface PermissionPromptRequestExtensionManagement {
   toolCallId?: string;
 }
 /**
- * Factory run or authoring permission prompt
+ * Workflow run or authoring permission prompt
  */
-export interface PermissionPromptRequestFactory {
+export interface PermissionPromptRequestWorkflow {
   /**
-   * Canonical key used for scoped factory approvals
+   * Canonical key used for scoped workflow approvals
    */
   approvalKey: string;
   /**
@@ -7407,33 +13198,33 @@ export interface PermissionPromptRequestFactory {
    */
   assistedApproval?: PermissionAssistedApproval;
   /**
-   * Whether this factory is eligible for persistent approval
+   * Whether this workflow is eligible for persistent approval
    */
   canPersistApproval: boolean;
   /**
-   * Factory-declared AI-credit limit before any run/resume caller override is applied.
+   * Workflow-declared AI-credit limit before any run/resume caller override is applied.
    */
   declaredMaxAiCredits?: number;
   /**
-   * Factory-declared concurrent-subagent limit before any run/resume caller override is applied.
+   * Workflow-declared concurrent-subagent limit before any run/resume caller override is applied.
    */
   declaredMaxConcurrentSubagents?: number;
   /**
-   * Factory-declared total-subagent limit before any run/resume caller override is applied.
+   * Workflow-declared total-subagent limit before any run/resume caller override is applied.
    */
   declaredMaxTotalSubagents?: number;
   /**
-   * Factory-declared active-time limit in seconds before any run/resume caller override is applied.
+   * Workflow-declared active-time limit in seconds before any run/resume caller override is applied.
    */
   declaredTimeoutSeconds?: number;
   /**
-   * Factory description
+   * Workflow description
    */
   description: string;
   /**
    * Prompt kind discriminator
    */
-  kind: "factory";
+  kind: "workflow";
   /**
    * Whether managed policy requires a human response and forbids host auto-approval
    */
@@ -7451,14 +13242,17 @@ export interface PermissionPromptRequestFactory {
    */
   maxTotalSubagents?: number;
   /**
-   * Factory name
+   * Workflow name
    */
   name: string;
-  operation: FactoryPermissionOperation;
   /**
-   * Declared factory phases
+   * Workflow operation, either run or author
    */
-  phases: FactoryPermissionPhase[];
+  operation: WorkflowPermissionOperation;
+  /**
+   * Declared workflow phases
+   */
+  phases: WorkflowPermissionPhase[];
   /**
    * Effective active-time limit in seconds; omitted means unlimited
    */
@@ -7532,6 +13326,13 @@ export interface PermissionCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Permission request completion notification signaling UI dismissal
+   */
   data: PermissionCompletedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -7559,9 +13360,26 @@ export interface PermissionCompletedEvent {
  */
 export interface PermissionCompletedData {
   /**
+   * Atomic structured blocked outcome when this permission response ended an Autopilot recovery episode unsuccessfully
+   */
+  blocker?: TaskBlocker;
+  /**
+   * Who decided this permission request. Absent on completions recorded before this field existed, which consumers must treat as "not a human decision" rather than assuming one. Authorization records are minted only for `human_response`; an assisted-approval verdict, a host policy, an unattended fallback, and a hook resolution all produce the same `result` a person does, so this is the only field that distinguishes them.
+   *
+   * @experimental
+   */
+  decisionSource?: PermissionDecisionSource;
+  /**
+   * Permission-recovery episode settled by this response, when the request was escalated by Autopilot
+   */
+  recoveryEpisodeId?: string;
+  /**
    * Request ID of the resolved permission request; clients should dismiss any UI for this request
    */
   requestId: string;
+  /**
+   * The result of the permission request
+   */
   result: PermissionResult;
   /**
    * Optional tool call ID associated with this permission prompt; clients may use it to correlate UI created from tool-scoped prompts
@@ -7582,9 +13400,27 @@ export interface PermissionApproved {
   managedApprovalHandled?: boolean;
 }
 /**
+ * Permission response variant that approves a request and records file-tool read authority for specific directories in this logical session.
+ */
+export interface PermissionApprovedReadOnlyForSession {
+  /**
+   * Canonical directories covered by the session read-only grant
+   *
+   * @minItems 1
+   */
+  directories: [string, ...string[]];
+  /**
+   * Approved with read-only directory authority for this session
+   */
+  kind: "approved-read-only-for-session";
+}
+/**
  * Permission response variant that approves a request and remembers the provided approval for the rest of the session.
  */
 export interface PermissionApprovedForSession {
+  /**
+   * The approval to add as a session-scoped rule
+   */
   approval: UserToolSessionApproval;
   /**
    * Approved and remembered for the rest of the session
@@ -7679,17 +13515,17 @@ export interface UserToolSessionApprovalExtensionManagement {
   operation?: string;
 }
 /**
- * Session-scoped factory approval, optionally narrowed by approval key.
+ * Session-scoped workflow approval, optionally narrowed by approval key.
  */
-export interface UserToolSessionApprovalFactory {
+export interface UserToolSessionApprovalWorkflow {
   /**
-   * Optional factory operation name or canonical approval key
+   * Optional workflow operation name or canonical approval key
    */
   approvalKey?: string;
   /**
-   * Factory approval kind
+   * Workflow approval kind
    */
-  kind: "factory";
+  kind: "workflow";
 }
 /**
  * Session-scoped tool-approval rule for an extension's permission-gated capability access, keyed by extension name.
@@ -7727,6 +13563,9 @@ export interface UserToolSessionApprovalExtensionEnvAccess {
  * Permission response variant that approves a request and persists the provided approval to a project location key.
  */
 export interface PermissionApprovedForLocation {
+  /**
+   * The approval to persist for this location
+   */
   approval: UserToolSessionApproval;
   /**
    * Approved and persisted for this project location
@@ -7841,6 +13680,414 @@ export interface PermissionDeniedByPermissionRequestHook {
   message?: string;
 }
 /**
+ * Session event "permission.carriedForward". Historical decode-only receipt from the retired Assisted Permissions authorization extractor. Current runtimes ignore it for permission decisions.
+ */
+/** @experimental */
+export interface PermissionCarriedForwardEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Historical decode-only receipt from the retired Assisted Permissions authorization extractor. Current runtimes ignore it for permission decisions.
+   */
+  data: PermissionCarriedForwardData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "permission.carriedForward".
+   */
+  type: "permission.carriedForward";
+}
+/**
+ * Historical decode-only receipt from the retired Assisted Permissions authorization extractor. Current runtimes ignore it for permission decisions.
+ */
+/** @experimental */
+export interface PermissionCarriedForwardData {
+  /**
+   * Always `authorization_carry_forward`. Stated explicitly so a consumer reading this event cannot mistake it for a human, host-policy, or assisted-approval decision.
+   *
+   * @experimental
+   */
+  decisionSource: PermissionDecisionSource;
+  /**
+   * Identity of the prior authorization record that contained the proposal.
+   *
+   * @experimental
+   */
+  recordId: string;
+  /**
+   * Authorization edge minted for this admission. Not a prompt id: no prompt was raised, so no client should expect a request with this id.
+   *
+   * @experimental
+   */
+  requestId: string;
+  /**
+   * Tool call this admission authorizes. Its execution receipts the prior grant, which is how a single-effect approval is spent rather than carried forward again.
+   *
+   * @experimental
+   */
+  toolCallId: string;
+}
+/**
+ * Session event "permission.messageAuthorization". Historical decode-only claim from the retired Assisted Permissions authorization extractor. Current runtimes preserve the payload but do not establish authority from it.
+ */
+/** @experimental */
+export interface PermissionMessageAuthorizationEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Historical decode-only claim from the retired Assisted Permissions authorization extractor. Current runtimes preserve the payload but do not establish authority from it.
+   */
+  data: PermissionMessageAuthorizationData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "permission.messageAuthorization".
+   */
+  type: "permission.messageAuthorization";
+}
+/**
+ * Historical decode-only claim from the retired Assisted Permissions authorization extractor. Current runtimes preserve the payload but do not establish authority from it.
+ */
+/** @experimental */
+export interface PermissionMessageAuthorizationData {
+  /**
+   * The kind of effect authorized, as an action-class identifier.
+   *
+   * @experimental
+   */
+  actionClass: string;
+  /**
+   * Whether the claim granted or denied authority.
+   *
+   * @experimental
+   */
+  polarity: PermissionMessageAuthorizationPolarity;
+  /**
+   * Deterministic identity of the record, derived from the turn and span offsets so re-extracting the same span mints nothing new.
+   *
+   * @experimental
+   */
+  recordId: string;
+  /**
+   * End byte offset of the authorizing span within the turn.
+   *
+   * @experimental
+   */
+  spanEnd: number;
+  /**
+   * Start byte offset of the authorizing span within the turn.
+   *
+   * @experimental
+   */
+  spanStart: number;
+  /**
+   * Concrete named targets that appear verbatim inside the span.
+   *
+   * @experimental
+   */
+  targetMembers?: string[];
+  /**
+   * The task the permission is scoped to, when the human named one.
+   *
+   * @experimental
+   */
+  task?: string;
+  /**
+   * The human turn the quoted span was read from.
+   *
+   * @experimental
+   */
+  turnIndex: number;
+  /**
+   * The trusted version discriminator, when one exists. Exact shell-command grants carry the byte-identical commands grounded in the human span; world-derived classes carry a file object, remote tip, or runner only when that state was captured safely. An opaque object mirroring the runtime's adjacently-tagged resolution.
+   *
+   * @experimental
+   */
+  world?: JsonValue;
+}
+/**
+ * Session event "permission.messageAuthorizationRead". Historical decode-only extractor progress marker. Current runtimes do not run or resume extraction from it.
+ */
+/** @experimental */
+export interface PermissionMessageAuthorizationReadEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Historical decode-only extractor progress marker. Current runtimes do not run or resume extraction from it.
+   */
+  data: PermissionMessageAuthorizationReadData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "permission.messageAuthorizationRead".
+   */
+  type: "permission.messageAuthorizationRead";
+}
+/**
+ * Historical decode-only extractor progress marker. Current runtimes do not run or resume extraction from it.
+ */
+/** @experimental */
+export interface PermissionMessageAuthorizationReadData {
+  /**
+   * Whether this read activates ongoing message-backed extraction. False for a contextual-assent-only pass while auto-approval is off, so unrelated future messages remain outside extraction.
+   *
+   * @experimental
+   */
+  activatesExtraction?: boolean;
+  /**
+   * The human turn that was read by the proposer.
+   *
+   * @experimental
+   */
+  turnIndex: number;
+}
+/**
+ * Session event "permission.messageAuthorizationDegraded". Historical decode-only degradation marker from the retired extractor. Current runtimes ignore it for permission decisions.
+ */
+/** @experimental */
+export interface PermissionMessageAuthorizationDegradedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Historical decode-only degradation marker from the retired extractor. Current runtimes ignore it for permission decisions.
+   */
+  data: PermissionMessageAuthorizationDegradedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "permission.messageAuthorizationDegraded".
+   */
+  type: "permission.messageAuthorizationDegraded";
+}
+/**
+ * Historical decode-only degradation marker from the retired extractor. Current runtimes ignore it for permission decisions.
+ */
+/** @experimental */
+export interface PermissionMessageAuthorizationDegradedData {
+  /**
+   * The human turn that could not be represented safely.
+   *
+   * @experimental
+   */
+  turnIndex: number;
+}
+/**
+ * Session event "permission.assentDetected". Historical decode-only contextual-assent marker. Current runtimes do not project it into the conversation or permission flow.
+ */
+/** @experimental */
+export interface PermissionAssentDetectedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Historical decode-only contextual-assent marker. Current runtimes do not project it into the conversation or permission flow.
+   */
+  data: PermissionAssentDetectedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "permission.assentDetected".
+   */
+  type: "permission.assentDetected";
+}
+/**
+ * Historical decode-only contextual-assent marker. Current runtimes do not project it into the conversation or permission flow.
+ */
+/** @experimental */
+export interface PermissionAssentDetectedData {
+  /**
+   * Permission request the likely assent may refer to. The runtime derives this from the preceding durable blocker; the human message and extraction model do not choose it.
+   *
+   * @experimental
+   */
+  requestId: string;
+  /**
+   * Human turn whose text triggered the deterministic assent recognizer.
+   *
+   * @experimental
+   */
+  turnIndex: number;
+}
+/**
+ * Session event "permission.contextualAuthorization". Historical decode-only contextual authorization claim. Current runtimes preserve the payload but do not establish authority from it.
+ */
+/** @experimental */
+export interface PermissionContextualAuthorizationEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Historical decode-only contextual authorization claim. Current runtimes preserve the payload but do not establish authority from it.
+   */
+  data: PermissionContextualAuthorizationData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "permission.contextualAuthorization".
+   */
+  type: "permission.contextualAuthorization";
+}
+/**
+ * Historical decode-only contextual authorization claim. Current runtimes preserve the payload but do not establish authority from it.
+ */
+/** @experimental */
+export interface PermissionContextualAuthorizationData {
+  /**
+   * Whether the contextual human span granted or denied authority.
+   *
+   * @experimental
+   */
+  polarity: PermissionMessageAuthorizationPolarity;
+  /**
+   * Deterministic identity of the contextual message grant.
+   *
+   * @experimental
+   */
+  recordId: string;
+  /**
+   * Original blocked permission request selected by deterministic event ordering, never by the extraction model.
+   *
+   * @experimental
+   */
+  requestId: string;
+  /**
+   * End byte offset of the contextual decision span within the turn.
+   *
+   * @experimental
+   */
+  spanEnd: number;
+  /**
+   * Start byte offset of the contextual decision span within the turn.
+   *
+   * @experimental
+   */
+  spanStart: number;
+  /**
+   * Human turn containing the contextual decision.
+   *
+   * @experimental
+   */
+  turnIndex: number;
+}
+/**
  * Session event "user_input.requested". User input request notification with question and optional predefined choices
  */
 export interface UserInputRequestedEvent {
@@ -7848,6 +14095,13 @@ export interface UserInputRequestedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * User input request notification with question and optional predefined choices
+   */
   data: UserInputRequestedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -7903,6 +14157,13 @@ export interface UserInputCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * User input request completion with the user's response
+   */
   data: UserInputCompletedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -7950,6 +14211,13 @@ export interface ElicitationRequestedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Elicitation request; may be form-based (structured input) or URL-based (browser redirect)
+   */
   data: ElicitationRequestedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -7981,10 +14249,20 @@ export interface ElicitationRequestedData {
    */
   elicitationSource?: string;
   /**
+   * Display label for a Connector-owned MCP server that initiated the request, from the trusted Connector catalog; absent for other sources. `elicitationSource` stays the identity.
+   */
+  elicitationSourceDisplayName?: string;
+  /**
    * Message describing what information is needed from the user
    */
   message: string;
+  /**
+   * Elicitation mode; "form" for structured input, "url" for browser-based. Defaults to "form" when absent.
+   */
   mode?: ElicitationRequestedMode;
+  /**
+   * JSON Schema describing the form fields to present to the user (form mode only)
+   */
   requestedSchema?: ElicitationRequestedSchema;
   /**
    * Unique identifier for this elicitation request; used to respond via session.respondToElicitation()
@@ -8026,6 +14304,13 @@ export interface ElicitationCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Elicitation request completion with the user's response
+   */
   data: ElicitationCompletedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8052,6 +14337,9 @@ export interface ElicitationCompletedEvent {
  * Elicitation request completion with the user's response
  */
 export interface ElicitationCompletedData {
+  /**
+   * The user action: "accept" (submitted form), "decline" (explicitly refused), or "cancel" (dismissed)
+   */
   action?: ElicitationCompletedAction;
   /**
    * The submitted form data when action is 'accept'; keys match the requested schema fields
@@ -8072,6 +14360,13 @@ export interface SamplingRequestedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Sampling request from an MCP server; contains the server name and a requestId for correlation
+   */
   data: SamplingRequestedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8107,6 +14402,10 @@ export interface SamplingRequestedData {
    */
   requestId: string;
   /**
+   * Display label for a Connector-owned MCP server, from the trusted Connector catalog; absent for other servers. `serverName` stays the identity for request matching.
+   */
+  serverDisplayName?: string;
+  /**
    * Name of the MCP server that initiated the sampling request
    */
   serverName: string;
@@ -8119,6 +14418,13 @@ export interface SamplingCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Sampling request completion notification signaling UI dismissal
+   */
   data: SamplingCompletedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8158,6 +14464,13 @@ export interface McpOauthRequiredEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * OAuth authentication request for an MCP server
+   */
   data: McpOauthRequiredData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8184,7 +14497,13 @@ export interface McpOauthRequiredEvent {
  * OAuth authentication request for an MCP server
  */
 export interface McpOauthRequiredData {
+  /**
+   * Raw HTTP response details from the OAuth auth challenge, as observed by the runtime. Header order and casing are transport-dependent, and duplicate header names may appear multiple times.
+   */
   httpResponse?: McpOauthHttpResponse;
+  /**
+   * Why the runtime is requesting host-provided OAuth credentials.
+   */
   reason: McpOauthRequestReason;
   /**
    * Unique identifier for this OAuth request; used to respond via session.mcp.oauth.handlePendingRequest
@@ -8195,6 +14514,10 @@ export interface McpOauthRequiredData {
    */
   resourceMetadata?: string;
   /**
+   * Whether this Refresh request accepts kind runtimeRefresh to continue noninteractive grant renewal within its original authorization reservation. Missing or false means unsupported; the host must retain its legacy response behavior.
+   */
+  runtimeRefreshSupported?: boolean;
+  /**
    * Display name of the MCP server that requires OAuth
    */
   serverName: string;
@@ -8202,7 +14525,13 @@ export interface McpOauthRequiredData {
    * URL of the MCP server that requires OAuth
    */
   serverUrl: string;
+  /**
+   * Static OAuth client configuration, if the server specifies one
+   */
   staticClientConfig?: McpOauthRequiredStaticClientConfig;
+  /**
+   * OAuth WWW-Authenticate parameters parsed from the auth challenge, if available
+   */
   wwwAuthenticateParams?: McpOauthWWWAuthenticateParams;
 }
 /**
@@ -8255,6 +14584,10 @@ export interface McpOauthRequiredStaticClientConfig {
    * Whether this is a public OAuth client
    */
   publicClient?: boolean;
+  /**
+   * Configured OAuth scope string used when the server challenge omits scope or provides an empty scope
+   */
+  scope?: string;
 }
 /**
  * OAuth WWW-Authenticate parameters parsed from an MCP auth challenge
@@ -8281,6 +14614,13 @@ export interface McpOauthCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * MCP OAuth request completion notification
+   */
   data: McpOauthCompletedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8307,11 +14647,68 @@ export interface McpOauthCompletedEvent {
  * MCP OAuth request completion notification
  */
 export interface McpOauthCompletedData {
+  /**
+   * How the pending OAuth request was completed. An accepted runtimeRefresh handoff completes once at its authorization terminal: token when recovery succeeded, cancelled when it was cancelled or failed; see mcp.oauth_recovery_completed for the exact outcome.
+   */
   outcome: McpOauthCompletionOutcome;
   /**
    * Request ID of the resolved OAuth request
    */
   requestId: string;
+}
+/**
+ * Session event "mcp.oauth_recovery_completed". Terminal outcome of a runtime-owned MCP OAuth recovery accepted through a runtimeRefresh handoff
+ */
+export interface McpOauthRecoveryCompletedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Terminal outcome of a runtime-owned MCP OAuth recovery accepted through a runtimeRefresh handoff
+   */
+  data: McpOauthRecoveryCompletedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "mcp.oauth_recovery_completed".
+   */
+  type: "mcp.oauth_recovery_completed";
+}
+/**
+ * Terminal outcome of a runtime-owned MCP OAuth recovery accepted through a runtimeRefresh handoff
+ */
+export interface McpOauthRecoveryCompletedData {
+  /**
+   * Terminal outcome of the original authorization reservation, including reconnect
+   */
+  outcome: McpOauthRecoveryCompletedOutcome;
+  /**
+   * Request ID of the MCP OAuth request whose runtimeRefresh handoff was accepted
+   */
+  requestId: string;
+  /**
+   * Name of the MCP server whose authorization recovery completed
+   */
+  serverName: string;
 }
 /**
  * Session event "mcp.headers_refresh_required". Dynamic headers refresh request for a remote MCP server
@@ -8321,6 +14718,13 @@ export interface McpHeadersRefreshRequiredEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Dynamic headers refresh request for a remote MCP server
+   */
   data: McpHeadersRefreshRequiredData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8347,6 +14751,9 @@ export interface McpHeadersRefreshRequiredEvent {
  * Dynamic headers refresh request for a remote MCP server
  */
 export interface McpHeadersRefreshRequiredData {
+  /**
+   * Why dynamic headers are being requested.
+   */
   reason: McpHeadersRefreshRequiredReason;
   /**
    * Unique identifier for this headers refresh request; used to respond via session.mcp.headers.handlePendingHeadersRefreshRequest()
@@ -8369,6 +14776,13 @@ export interface McpHeadersRefreshCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * MCP headers refresh request completion notification
+   */
   data: McpHeadersRefreshCompletedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8395,6 +14809,9 @@ export interface McpHeadersRefreshCompletedEvent {
  * MCP headers refresh request completion notification
  */
 export interface McpHeadersRefreshCompletedData {
+  /**
+   * How the pending MCP headers refresh request resolved.
+   */
   outcome: McpHeadersRefreshCompletedOutcome;
   /**
    * Request ID of the resolved headers refresh request
@@ -8409,6 +14826,13 @@ export interface CustomNotificationEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Opaque custom notification data. Consumers may branch on source and name, but payload semantics are source-defined.
+   */
   data: CustomNotificationData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8439,11 +14863,17 @@ export interface CustomNotificationData {
    * Source-defined custom notification name
    */
   name: string;
+  /**
+   * Source-defined JSON payload for the custom notification
+   */
   payload: CustomNotificationPayload;
   /**
    * Namespace for the custom notification producer
    */
   source: string;
+  /**
+   * Optional source-defined string identifiers describing the payload subject
+   */
   subject?: CustomNotificationSubject;
   /**
    * Optional source-defined payload schema version
@@ -8465,6 +14895,13 @@ export interface UIEphemeralQueryEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Ordered output and terminal state for a transient query that does not modify conversation history.
+   */
   data: UIEphemeralQueryData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8504,6 +14941,9 @@ export interface UIEphemeralQueryData {
    * Model or transport failure message, present for the `failed` phase.
    */
   error?: string;
+  /**
+   * Current query lifecycle phase.
+   */
   phase: UIEphemeralQueryPhase;
   /**
    * Runtime-minted query identifier.
@@ -8518,6 +14958,13 @@ export interface ExternalToolRequestedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * External tool invocation request for client-side tool execution
+   */
   data: ExternalToolRequestedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -8589,6 +15036,13 @@ export interface ExternalToolCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * External tool completion notification signaling UI dismissal
+   */
   data: ExternalToolCompletedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8628,6 +15082,13 @@ export interface CommandQueuedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Queued slash command dispatch request for client execution
+   */
   data: CommandQueuedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8671,6 +15132,13 @@ export interface CommandExecuteEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Registered command dispatch request routed to the owning client
+   */
   data: CommandExecuteData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8722,6 +15190,13 @@ export interface CommandCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Queued command completion notification signaling UI dismissal
+   */
   data: CommandCompletedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8761,6 +15236,13 @@ export interface AutoModeSwitchRequestedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Auto mode switch request notification requiring user approval
+   */
   data: AutoModeSwitchRequestedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8808,6 +15290,13 @@ export interface AutoModeSwitchCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Auto mode switch completion notification
+   */
   data: AutoModeSwitchCompletedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8838,6 +15327,9 @@ export interface AutoModeSwitchCompletedData {
    * Request ID of the resolved request; clients should dismiss any UI for this request
    */
   requestId: string;
+  /**
+   * The user's auto-mode-switch choice
+   */
   response: AutoModeSwitchResponse;
 }
 /**
@@ -8848,6 +15340,13 @@ export interface SessionLimitsExhaustedRequestedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Session limit exhaustion notification requiring user action.
+   */
   data: SessionLimitsExhaustedRequestedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8895,6 +15394,13 @@ export interface SessionLimitsExhaustedCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Session limit exhaustion prompt completion notification.
+   */
   data: SessionLimitsExhaustedCompletedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -8925,12 +15431,18 @@ export interface SessionLimitsExhaustedCompletedData {
    * Request ID of the resolved request; clients should dismiss any UI for this request.
    */
   requestId: string;
+  /**
+   * The user's selected session-limit action.
+   */
   response: SessionLimitsExhaustedResponse;
 }
 /**
  * The user's selected action for an exhausted session limit.
  */
 export interface SessionLimitsExhaustedResponse {
+  /**
+   * Action selected by the user.
+   */
   action: SessionLimitsExhaustedResponseAction;
   /**
    * AI Credits to add to the current max when action is 'add'.
@@ -8942,7 +15454,7 @@ export interface SessionLimitsExhaustedResponse {
   maxAiCredits?: number;
 }
 /**
- * Session event "session.auto_mode_resolved". Auto Intent resolution: the concrete model the session settled on for the first prompt of an auto-mode session, and why. Lets SDK clients render the chosen model and the full reason it was picked. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.
+ * Session event "session.auto_mode_resolved". Auto Intent resolution: the concrete model an auto-mode session settled on, and why. Published when Auto settles on a model that differs from the one it last published in the current Auto selection, so a routing check that keeps the same model does not repeat it; selecting a model, switching Auto tiers, or returning to Auto starts a new selection. Lets SDK clients render the chosen model and the full reason it was picked. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.
  */
 /** @experimental */
 export interface AutoModeResolvedEvent {
@@ -8950,6 +15462,13 @@ export interface AutoModeResolvedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Auto Intent resolution: the concrete model an auto-mode session settled on, and why. Published when Auto settles on a model that differs from the one it last published in the current Auto selection, so a routing check that keeps the same model does not repeat it; selecting a model, switching Auto tiers, or returning to Auto starts a new selection. Lets SDK clients render the chosen model and the full reason it was picked. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.
+   */
   data: AutoModeResolvedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -8973,10 +15492,14 @@ export interface AutoModeResolvedEvent {
   type: "session.auto_mode_resolved";
 }
 /**
- * Auto Intent resolution: the concrete model the session settled on for the first prompt of an auto-mode session, and why. Lets SDK clients render the chosen model and the full reason it was picked. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.
+ * Auto Intent resolution: the concrete model an auto-mode session settled on, and why. Published when Auto settles on a model that differs from the one it last published in the current Auto selection, so a routing check that keeps the same model does not repeat it; selecting a model, switching Auto tiers, or returning to Auto starts a new selection. Lets SDK clients render the chosen model and the full reason it was picked. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.
  */
 /** @experimental */
 export interface AutoModeResolvedData {
+  /**
+   * The effective Auto routing preference at publication, including managed defaults. Recorded so resume can distinguish an unchanged preference from a tier switch. Absent when no preference is known or in older session histories.
+   */
+  autoTier?: AutoTier;
   /**
    * Models offered to the router for this resolution
    */
@@ -9023,6 +15546,9 @@ export interface AutoModeResolvedData {
    * The predicted classifier label (e.g. `needs_reasoning`), when available
    */
   predictedLabel?: string;
+  /**
+   * Coarse request-difficulty bucket, for explaining why a model was chosen ("picked X because this looks like high-reasoning work")
+   */
   reasoningBucket?: AutoModeResolvedReasoningBucket;
   /**
    * Server-reported router processing time in milliseconds
@@ -9033,12 +15559,68 @@ export interface AutoModeResolvedData {
    */
   routingMethod?: string;
   /**
+   * Short human-readable sentence from the routing service explaining why this model was chosen, for display alongside the model. Present only when the service supplied one: it is omitted for on-device selections, when the service did not provide an explanation, and when a replayed decision made no routing call. The text is display-only and drawn from a fixed catalogue; several distinct routing categories share identical wording, so it cannot be used to recover the category or keyed on programmatically.
+   */
+  selectionReason?: string;
+  /**
    * Whether a sticky model choice overrode the router result
    */
   stickyOverride?: boolean;
 }
 /**
- * Session event "session.managed_settings_resolved". Enterprise managed-settings resolution: the effective managed settings the session applied and which channels contributed, so SDK clients can show users what is enterprise-managed. Fires whenever managed policy is (re)applied — at session start, on resume, and on account switch. This is an ephemeral live snapshot (delivered to subscribers but not persisted to the session event log), because at session start it resolves before `session.start` is emitted. Device values take precedence over server values per ordinary key, while permissions compose restrictively across device, server, and SDK-client layers. The account-scoped `getManagedSettings()` API does not include session-local client injection. Marked experimental while the managed-settings surface stabilizes.
+ * Session event "session.managed_plugin_progress". Experimental transient presentation-neutral progress for organization-required plugin preparation. Clients should localize the phase copy and display plugin specs without translating them.
+ */
+/** @experimental */
+export interface ManagedPluginProgressEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Experimental transient presentation-neutral progress for organization-required plugin preparation. Clients should localize the phase copy and display plugin specs without translating them.
+   */
+  data: ManagedPluginProgressData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.managed_plugin_progress".
+   */
+  type: "session.managed_plugin_progress";
+}
+/**
+ * Experimental transient presentation-neutral progress for organization-required plugin preparation. Clients should localize the phase copy and display plugin specs without translating them.
+ */
+/** @experimental */
+export interface ManagedPluginProgressData {
+  /**
+   * Current preparation phase.
+   */
+  phase: ManagedPluginProgressPhase;
+  /**
+   * Ordered plugin install specs affected by this phase. Empty while managed settings initialize and when preparation completes.
+   */
+  pluginSpecs: string[];
+}
+/**
+ * Session event "session.managed_settings_resolved". Effective enterprise managed settings applied to the session and their contributing channels. Emitted whenever managed policy is applied or reapplied, including session start, resume, and account switch. This ephemeral live snapshot is delivered to subscribers but not persisted to the session event log; initial resolution occurs before session.start.
  */
 /** @experimental */
 export interface ManagedSettingsResolvedEvent {
@@ -9046,6 +15628,13 @@ export interface ManagedSettingsResolvedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Effective enterprise managed settings applied to the session and their contributing channels. Emitted whenever managed policy is applied or reapplied, including session start, resume, and account switch. This ephemeral live snapshot is delivered to subscribers but not persisted to the session event log; initial resolution occurs before session.start.
+   */
   data: ManagedSettingsResolvedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9069,12 +15658,12 @@ export interface ManagedSettingsResolvedEvent {
   type: "session.managed_settings_resolved";
 }
 /**
- * Enterprise managed-settings resolution: the effective managed settings the session applied and which channels contributed, so SDK clients can show users what is enterprise-managed. Fires whenever managed policy is (re)applied — at session start, on resume, and on account switch. This is an ephemeral live snapshot (delivered to subscribers but not persisted to the session event log), because at session start it resolves before `session.start` is emitted. Device values take precedence over server values per ordinary key, while permissions compose restrictively across device, server, and SDK-client layers. The account-scoped `getManagedSettings()` API does not include session-local client injection. Marked experimental while the managed-settings surface stabilizes.
+ * Effective enterprise managed settings and contributing channels. Session events report applied policy; sessionless resolve reports an account/device snapshot, and compose reports a non-applying preview of candidate documents. Device values take precedence over server values, then the policy helper, per ordinary key, while permissions compose restrictively. Session-local SDK-client policy is included only in session results. Marked experimental while the managed-settings surface stabilizes.
  */
 /** @experimental */
 export interface ManagedSettingsResolvedData {
   /**
-   * Whether enterprise policy disables bypass-permissions ("yolo") mode for this session. Deny-wins across layers, and forced on when `failClosed` is true.
+   * Whether an explicit enterprise policy restriction disables bypass-permissions ("yolo") mode for this session. Deny-wins across layers; an unresolved policy does not force this on by itself.
    */
   bypassPermissionsDisabled: boolean;
   /**
@@ -9086,7 +15675,7 @@ export interface ManagedSettingsResolvedData {
    */
   deviceManaged: boolean;
   /**
-   * Whether managed policy could not be determined (e.g. a failed server fetch) and the session fell back to the fail-closed restriction. When true, restrictions such as disabling bypass-permissions are enforced even though `settings` may be absent.
+   * Whether managed policy could not be determined (e.g. a failed server fetch) and unresolved-policy safeguards remain active. This does not by itself disable bypass-permissions; `bypassPermissionsDisabled` reports only an explicit policy restriction.
    */
   failClosed: boolean;
   /**
@@ -9098,6 +15687,26 @@ export interface ManagedSettingsResolvedData {
    */
   permissionsAllowIntersected?: boolean;
   /**
+   * Reusable retained managed permission policy for managedSettings.permissions.evaluate, including source composition and session-local injection. Provided by live session snapshots; absent in older events. Refresh the context when managed policy changes.
+   */
+  permissionsContext?: ManagedPermissionsContext;
+  /**
+   * Explicit Policy Helper structured-failure and recheck capabilities supported by this runtime.
+   */
+  policyHelperCapabilities?: PolicyHelperCapabilities;
+  /**
+   * The latest unresolved Policy Helper failure for this exact policy context. It remains present across retained-policy refresh failures and clears only after fresh success or authoritative removal.
+   */
+  policyHelperFailure?: PolicyHelperFailure;
+  /**
+   * Whether the policy-helper managed-settings layer was present. The policy helper is the weakest channel: it fills keys no enterprise source set and can never replace one.
+   */
+  policyHelperManaged?: boolean;
+  /**
+   * Whether the effective sandbox policy forces the sandbox on *only* because managed policy could not be determined, rather than because the policy requires it. Lets clients tell a user whose `--no-sandbox` was overridden that the sandbox stayed on as a fail-closed fallback, instead of attributing it to an administrator who set no such policy.
+   */
+  sandboxEnabledByUndeterminedPolicy?: boolean;
+  /**
    * Whether the server (account/org) managed-settings layer was present
    */
   serverManaged: boolean;
@@ -9105,10 +15714,118 @@ export interface ManagedSettingsResolvedData {
    * The effective (resolved) managed settings values, so clients can render exactly what is enforced. Absent when no managed policy is in force.
    */
   settings?: JsonValue;
+  /**
+   * Channel summary: `server`, `device`, `client`, or `policyHelper` when exactly one channel contributed; `mixed` when multiple channels contributed; otherwise `none`. Consult the per-channel booleans for exact provenance.
+   */
   source: ManagedSettingsResolvedSource;
 }
 /**
- * Session event "session.managed_settings_enforced". Runtime enforcement of enterprise managed settings: fires when the session blocks or caps a runtime action because enterprise policy governs it, so SDK clients can explain *why* an action was governed. Unlike `session.managed_settings_resolved` (which reports *what* is managed), this reports a concrete governed action — e.g. a user or host tried to turn on a bypass-permissions escalation while policy disables it. Emitted live (not persisted to the session event log) on user/host-initiated attempts only, never for silent policy application. Marked experimental while the managed-settings surface stabilizes.
+ * Reusable managed permission evaluation context. Treat permissions as runtime-owned policy data and retain it verbatim; it includes source-aware composition metadata. This is a snapshot, not a capability or approval token; only use contexts obtained from trusted policy sources.
+ */
+export interface ManagedPermissionsContext {
+  /**
+   * Policy could not be determined; evaluation must deny every operation.
+   */
+  failClosed: boolean;
+  /**
+   * Runtime-owned composed permissions object. Absent when no permission policy is configured.
+   */
+  permissions?: JsonValue;
+}
+/**
+ * Policy Helper failure and recovery features implemented by this runtime. Capability presence, not absence of an optional failure, determines whether a client may rely on these contracts.
+ */
+export interface PolicyHelperCapabilities {
+  /**
+   * The runtime supports session.managedSettings.recheckPolicyHelper for a fresh scoped helper evaluation.
+   */
+  recheck: boolean;
+  /**
+   * The runtime emits PolicyHelperFailure on shared managed-settings snapshots and applicable structured operation errors.
+   */
+  structuredFailure: boolean;
+}
+/**
+ * The latest unresolved Policy Helper failure for this policy context. Helper-authored text is bounded display-intended content but remains untrusted; render it as plain text, keep diagnostics secondary, and do not automatically log, persist, export, execute, or inject it into model context.
+ */
+export interface PolicyHelperFailure {
+  /**
+   * Managed authority that registered the helper, when known. Known values are device and server; clients must tolerate future values.
+   */
+  authority?: string;
+  /**
+   * Stable runtime classification. Known values are helper-reported, registration-undetermined, working-directory, resolve, resolve-task, spawn, timeout, exit-status, output-too-large, envelope, schema, and internal. This is not a closed set; clients must tolerate unknown values.
+   */
+  category: string;
+  /**
+   * Stable bounded helper-defined identifier for a valid structured helper error. Absent for runtime-detected failures and not globally unique.
+   */
+  code?: string;
+  /**
+   * Optional bounded field-specific findings supplied by the helper.
+   */
+  details?: PolicyHelperFailureDetail[];
+  /**
+   * Optional bounded untrusted secondary troubleshooting text, such as trimmed stderr. Do not use it as primary UI copy.
+   */
+  diagnostic?: string;
+  /**
+   * Effective runtime behavior: ignore continues with remaining or retained policy, while failClosed activates restrictive safeguards. This is runtime-owned, not helper-authored.
+   */
+  failureMode: string;
+  /**
+   * Optional explicit validated additional-information link. URLs embedded in other text are not links.
+   */
+  helpLink?: PolicyHelperHelpLink;
+  /**
+   * Bounded plain-text primary explanation. Runtime-authored for runtime failures and helper-authored for a valid structured helper error.
+   */
+  message: string;
+  /**
+   * True when an earlier successful helper-derived layer still contributes to this effective snapshot. This does not promise that every relaxation from the old layer was retained.
+   */
+  previousPolicyRetained: boolean;
+  /**
+   * Invocation reason. Known values are sessionStart and pluginActivation; clients must tolerate future values.
+   */
+  reason: string;
+  /**
+   * Optional bounded helper-authored plain-text recovery guidance. It is explanatory and must not be executed automatically.
+   */
+  remediation?: string;
+  /**
+   * Runtime-calculated presentation severity: warning for ignore and error for failClosed. Error severity does not imply that session creation failed.
+   */
+  severity: string;
+}
+/**
+ * One bounded field-specific finding reported by a Policy Helper. The path is a helper-defined logical configuration path, not necessarily a filesystem path.
+ */
+export interface PolicyHelperFailureDetail {
+  /**
+   * Bounded helper-authored plain-text explanation for this finding.
+   */
+  message: string;
+  /**
+   * Optional helper-defined logical configuration path.
+   */
+  path?: string;
+}
+/**
+ * An explicit bounded absolute HTTP(S) destination supplied by a Policy Helper. The runtime validates but never fetches, previews, resolves redirects for, or opens it; clients must sanitize it again before navigation.
+ */
+export interface PolicyHelperHelpLink {
+  /**
+   * Optional bounded helper-authored plain-text label. Clients may use localized fallback text when absent.
+   */
+  label?: string;
+  /**
+   * Validated absolute HTTP(S) URL.
+   */
+  url: string;
+}
+/**
+ * Session event "session.managed_settings_enforced". Runtime enforcement of enterprise managed settings: fires when the session blocks or caps a runtime action because enterprise policy governs it, so SDK clients can explain *why* an action was governed. Unlike `session.managed_settings_resolved` (which reports *what* is managed), this reports a concrete governed action — e.g. a user or host tried to turn on bypass permissions or Assisted Permissions while the corresponding policy disables it. Emitted live (not persisted to the session event log) on user/host-initiated attempts only, never for silent policy application. Marked experimental while the managed-settings surface stabilizes.
  */
 /** @experimental */
 export interface ManagedSettingsEnforcedEvent {
@@ -9116,6 +15833,13 @@ export interface ManagedSettingsEnforcedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Runtime enforcement of enterprise managed settings: fires when the session blocks or caps a runtime action because enterprise policy governs it, so SDK clients can explain *why* an action was governed. Unlike `session.managed_settings_resolved` (which reports *what* is managed), this reports a concrete governed action — e.g. a user or host tried to turn on bypass permissions or Assisted Permissions while the corresponding policy disables it. Emitted live (not persisted to the session event log) on user/host-initiated attempts only, never for silent policy application. Marked experimental while the managed-settings surface stabilizes.
+   */
   data: ManagedSettingsEnforcedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9139,11 +15863,17 @@ export interface ManagedSettingsEnforcedEvent {
   type: "session.managed_settings_enforced";
 }
 /**
- * Runtime enforcement of enterprise managed settings: fires when the session blocks or caps a runtime action because enterprise policy governs it, so SDK clients can explain *why* an action was governed. Unlike `session.managed_settings_resolved` (which reports *what* is managed), this reports a concrete governed action — e.g. a user or host tried to turn on a bypass-permissions escalation while policy disables it. Emitted live (not persisted to the session event log) on user/host-initiated attempts only, never for silent policy application. Marked experimental while the managed-settings surface stabilizes.
+ * Runtime enforcement of enterprise managed settings: fires when the session blocks or caps a runtime action because enterprise policy governs it, so SDK clients can explain *why* an action was governed. Unlike `session.managed_settings_resolved` (which reports *what* is managed), this reports a concrete governed action — e.g. a user or host tried to turn on bypass permissions or Assisted Permissions while the corresponding policy disables it. Emitted live (not persisted to the session event log) on user/host-initiated attempts only, never for silent policy application. Marked experimental while the managed-settings surface stabilizes.
  */
 /** @experimental */
 export interface ManagedSettingsEnforcedData {
+  /**
+   * The category of runtime action that managed policy governed.
+   */
   action: ManagedSettingsEnforcedAction;
+  /**
+   * For a `bypass_permissions_blocked` action, which permission-mode or escalation primitive was refused. Absent for actions without a specific primitive.
+   */
   escalation?: ManagedSettingsEnforcedEscalation;
   /**
    * Whether the enforcement was forced by fail-closed handling (managed policy could not be determined) rather than an explicit managed setting. When true, `setting` still names the restriction that was applied.
@@ -9154,18 +15884,25 @@ export interface ManagedSettingsEnforcedData {
    */
   message: string;
   /**
-   * The managed setting key responsible for the enforcement (e.g. `permissions.disableBypassPermissionsMode`).
+   * The managed setting key responsible for the enforcement (for example `permissions.disableBypassPermissionsMode` or `permissions.disableAssistedPermissionsMode`).
    */
   setting: string;
 }
 /**
- * Session event "commands.changed". SDK command registration change notification
+ * Session event "commands.changed". Session command list change notification, for SDK command registration or built-in command availability; `session.commands.list` returns the full list
  */
 export interface CommandsChangedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Session command list change notification, for SDK command registration or built-in command availability; `session.commands.list` returns the full list
+   */
   data: CommandsChangedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9189,7 +15926,7 @@ export interface CommandsChangedEvent {
   type: "commands.changed";
 }
 /**
- * SDK command registration change notification
+ * Session command list change notification, for SDK command registration or built-in command availability; `session.commands.list` returns the full list
  */
 export interface CommandsChangedData {
   /**
@@ -9218,6 +15955,13 @@ export interface CapabilitiesChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Session capability change notification
+   */
   data: CapabilitiesChangedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9244,6 +15988,9 @@ export interface CapabilitiesChangedEvent {
  * Session capability change notification
  */
 export interface CapabilitiesChangedData {
+  /**
+   * UI capability changes
+   */
   ui?: CapabilitiesChangedUI;
 }
 /**
@@ -9271,6 +16018,13 @@ export interface ExitPlanModeRequestedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Plan approval request with plan content and available user actions
+   */
   data: ExitPlanModeRequestedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9309,6 +16063,9 @@ export interface ExitPlanModeRequestedData {
    * Full content of the plan file
    */
   planContent: string;
+  /**
+   * Recommended action to preselect for the user
+   */
   recommendedAction: ExitPlanModeAction;
   /**
    * Unique identifier for this request; used to respond via session.respondToExitPlanMode()
@@ -9327,6 +16084,13 @@ export interface ExitPlanModeCompletedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Plan mode exit completion with the user's approval decision and optional feedback
+   */
   data: ExitPlanModeCompletedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9369,7 +16133,68 @@ export interface ExitPlanModeCompletedData {
    * Request ID of the resolved exit plan mode request; clients should dismiss any UI for this request
    */
   requestId: string;
+  /**
+   * Action selected by the user
+   */
   selectedAction?: ExitPlanModeAction;
+}
+/**
+ * Session event "human_response.recorded". Durable request-correlated evidence for a typed response to a runtime-owned question or plan review.
+ */
+export interface HumanResponseRecordedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Durable request-correlated evidence for a typed response to a runtime-owned question or plan review.
+   */
+  data: HumanResponseRecordedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "human_response.recorded".
+   */
+  type: "human_response.recorded";
+}
+/**
+ * Durable request-correlated evidence for a typed response to a runtime-owned question or plan review.
+ */
+export interface HumanResponseRecordedData {
+  /**
+   * Controlled actor provenance established at response ingress.
+   */
+  actor: HumanResponseActor;
+  /**
+   * Request ID of the runtime-owned question or plan review.
+   */
+  requestId: string;
+  /**
+   * Typed request and response payload.
+   */
+  response: HumanResponseRecordedResponse;
+  /**
+   * Tool call ID that opened the request, when present.
+   */
+  toolCallId?: string;
 }
 /**
  * Session event "session.tools_updated". Payload of `session.tools_updated` identifying the model whose resolved tools were updated.
@@ -9379,6 +16204,13 @@ export interface ToolsUpdatedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.tools_updated` identifying the model whose resolved tools were updated.
+   */
   data: ToolsUpdatedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9418,6 +16250,13 @@ export interface BackgroundTasksChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Empty payload for `session.background_tasks_changed`, indicating background task state changed.
+   */
   data: BackgroundTasksChangedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9445,15 +16284,22 @@ export interface BackgroundTasksChangedEvent {
  */
 export interface BackgroundTasksChangedData {}
 /**
- * Session event "factory.run_updated". Ephemeral invalidation signal for a changed factory run.
+ * Session event "workflow.run_updated". Ephemeral invalidation signal for a changed workflow run.
  */
 /** @experimental */
-export interface FactoryRunUpdatedEvent {
+export interface WorkflowRunUpdatedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
-  data: FactoryRunUpdatedData;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Ephemeral invalidation signal for a changed workflow run.
+   */
+  data: WorkflowRunUpdatedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
    */
@@ -9471,34 +16317,41 @@ export interface FactoryRunUpdatedEvent {
    */
   timestamp: string;
   /**
-   * Type discriminator. Always "factory.run_updated".
+   * Type discriminator. Always "workflow.run_updated".
    */
-  type: "factory.run_updated";
+  type: "workflow.run_updated";
 }
 /**
- * Ephemeral invalidation signal for a changed factory run.
+ * Ephemeral invalidation signal for a changed workflow run.
  */
 /** @experimental */
-export interface FactoryRunUpdatedData {
+export interface WorkflowRunUpdatedData {
   /**
    * Monotonic revision now available for the run.
    */
   revision: number;
   /**
-   * Factory run identifier.
+   * Workflow run identifier.
    */
   runId: string;
 }
 /**
- * Session event "factory.run_started". Ephemeral signal that a factory run attempt began executing.
+ * Session event "workflow.run_started". Ephemeral signal that a workflow run attempt began executing.
  */
 /** @experimental */
-export interface FactoryRunStartedEvent {
+export interface WorkflowRunStartedEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
-  data: FactoryRunStartedData;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Ephemeral signal that a workflow run attempt began executing.
+   */
+  data: WorkflowRunStartedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
    */
@@ -9516,38 +16369,45 @@ export interface FactoryRunStartedEvent {
    */
   timestamp: string;
   /**
-   * Type discriminator. Always "factory.run_started".
+   * Type discriminator. Always "workflow.run_started".
    */
-  type: "factory.run_started";
+  type: "workflow.run_started";
 }
 /**
- * Ephemeral signal that a factory run attempt began executing.
+ * Ephemeral signal that a workflow run attempt began executing.
  */
 /** @experimental */
-export interface FactoryRunStartedData {
+export interface WorkflowRunStartedData {
   /**
    * Attempt number this start committed; a resumed run increments it.
    */
   attempt: number;
   /**
-   * Name of the factory this run executes. Low cardinality by construction.
-   */
-  factoryName: string;
-  /**
-   * Identifier of the factory run that started.
+   * Identifier of the workflow run that started.
    */
   runId: string;
+  /**
+   * Name of the workflow this run executes. Low cardinality by construction.
+   */
+  workflowName: string;
 }
 /**
- * Session event "factory.run_settled". Ephemeral signal that a factory run reached a terminal status.
+ * Session event "workflow.run_settled". Ephemeral signal that a workflow run reached a terminal status.
  */
 /** @experimental */
-export interface FactoryRunSettledEvent {
+export interface WorkflowRunSettledEvent {
   /**
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
-  data: FactoryRunSettledData;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Ephemeral signal that a workflow run reached a terminal status.
+   */
+  data: WorkflowRunSettledData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
    */
@@ -9565,15 +16425,15 @@ export interface FactoryRunSettledEvent {
    */
   timestamp: string;
   /**
-   * Type discriminator. Always "factory.run_settled".
+   * Type discriminator. Always "workflow.run_settled".
    */
-  type: "factory.run_settled";
+  type: "workflow.run_settled";
 }
 /**
- * Ephemeral signal that a factory run reached a terminal status.
+ * Ephemeral signal that a workflow run reached a terminal status.
  */
 /** @experimental */
-export interface FactoryRunSettledData {
+export interface WorkflowRunSettledData {
   /**
    * AI credits this run consumed, in nano-AIU.
    */
@@ -9587,14 +16447,17 @@ export interface FactoryRunSettledData {
    */
   elapsedMs: number;
   /**
-   * Typed failure class recorded on the run, when it failed with one (e.g. `factory_limit_reached`).
+   * Typed failure class recorded on the run, when it failed with one (e.g. `workflow_limit_reached`).
    */
   failureType?: string;
   /**
-   * Identifier of the factory run that settled.
+   * Identifier of the workflow run that settled.
    */
   runId: string;
-  status: FactoryRunSettledStatus;
+  /**
+   * Terminal status the run committed.
+   */
+  status: WorkflowRunSettledStatus;
 }
 /**
  * Session event "session.skills_loaded". Payload of `session.skills_loaded` listing resolved skill metadata.
@@ -9604,6 +16467,13 @@ export interface SkillsLoadedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.skills_loaded` listing resolved skill metadata.
+   */
   data: SkillsLoadedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9648,6 +16518,10 @@ export interface SkillsLoadedSkill {
    */
   commandName?: string;
   /**
+   * Original frontmatter name for an MCP skill, for display only. Use name for identity and enable/disable operations.
+   */
+  declaredName?: string;
+  /**
    * Description of what the skill does
    */
   description: string;
@@ -9656,6 +16530,10 @@ export interface SkillsLoadedSkill {
    */
   enabled: boolean;
   /**
+   * MCP server and skill resource address when source is 'mcp'. Contains no activation grants or internal verification metadata.
+   */
+  mcpOrigin?: McpSkillOrigin;
+  /**
    * Unique identifier for the skill
    */
   name: string;
@@ -9663,11 +16541,27 @@ export interface SkillsLoadedSkill {
    * Absolute path to the skill file, if available
    */
   path?: string;
+  /**
+   * Source location type (e.g., project, personal-copilot, plugin, builtin, remote, sdk)
+   */
   source: SkillSource;
   /**
    * Whether the skill can be invoked by the user as a slash command
    */
   userInvocable: boolean;
+}
+/**
+ * Public MCP skill provenance. The server name and resource URI address session.mcp.resources.read without invoking the skill; they do not grant permission or identify a durable server registration.
+ */
+export interface McpSkillOrigin {
+  /**
+   * Name of the MCP server hosting the skill, matching serverName in session.mcp.resources.read.
+   */
+  serverName: string;
+  /**
+   * Exact URI of the skill's SKILL.md resource, matching uri in session.mcp.resources.read.
+   */
+  uri: string;
 }
 /**
  * Session event "session.custom_agents_updated". Payload of `session.custom_agents_updated` with loaded custom agents plus non-fatal warnings and fatal errors.
@@ -9677,6 +16571,13 @@ export interface CustomAgentsUpdatedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.custom_agents_updated` with loaded custom agents plus non-fatal warnings and fatal errors.
+   */
   data: CustomAgentsUpdatedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9717,13 +16618,17 @@ export interface CustomAgentsUpdatedData {
   warnings: string[];
 }
 /**
- * A single loaded custom agent in `session.custom_agents_updated`, with identity, source, tools, invocability, and model override.
+ * A single loaded custom agent in `session.custom_agents_updated`, with identity, source, tools, invocability, and authored model configuration.
  */
 export interface CustomAgentsUpdatedAgent {
   /**
    * Description of what the agent does
    */
   description: string;
+  /**
+   * Whether model-driven invocation is disabled for this agent.
+   */
+  disableModelInvocation?: boolean;
   /**
    * Human-readable display name
    */
@@ -9736,6 +16641,14 @@ export interface CustomAgentsUpdatedAgent {
    * Model override for this agent, if set
    */
   model?: string;
+  /**
+   * Whether authored models are preferences or required constraints
+   */
+  modelPolicy?: AgentModelPolicy;
+  /**
+   * Authored model ids in priority order, if configured
+   */
+  models?: string[];
   /**
    * Internal name of the agent
    */
@@ -9761,6 +16674,13 @@ export interface McpServersLoadedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.mcp_servers_loaded` listing MCP server status summaries.
+   */
   data: McpServersLoadedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9797,6 +16717,10 @@ export interface McpServersLoadedData {
  */
 export interface McpServersLoadedServer {
   /**
+   * Human-readable display name supplied by a managed server catalog.
+   */
+  displayName?: string;
+  /**
    * Error message if the server failed to connect
    */
   error?: string;
@@ -9812,9 +16736,31 @@ export interface McpServersLoadedServer {
    * Version of the plugin that supplied the effective MCP server config, only when source is plugin
    */
   pluginVersion?: string;
+  /**
+   * Server-advertised metadata for a connected server. Omitted when no live connection metadata is available, including while pending or when failed, disabled, stopped, or not configured.
+   */
+  serverMetadata?: McpServerMetadata;
+  /**
+   * Configuration source: user, workspace, plugin, builtin, or managed
+   */
   source?: McpServerSource;
+  /**
+   * Connection status: connected, failed, needs-auth, pending, disabled, stopped, or not_configured
+   */
   status: McpServerStatus;
+  /**
+   * Transport mechanism: stdio, http, sse (deprecated), or memory (in-process MCP server)
+   */
   transport?: McpServerTransport;
+}
+/**
+ * Server-advertised metadata learned through modern discovery or legacy initialization.
+ */
+export interface McpServerMetadata {
+  /**
+   * Non-empty natural-language guidance for using the server, or null when the server omitted instructions or advertised an empty string.
+   */
+  instructions: string | null;
 }
 /**
  * Session event "session.mcp_server_status_changed". Payload of `session.mcp_server_status_changed` for one MCP server's status and optional failure error.
@@ -9824,6 +16770,13 @@ export interface McpServerStatusChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.mcp_server_status_changed` for one MCP server's status and optional failure error.
+   */
   data: McpServerStatusChangedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9851,14 +16804,167 @@ export interface McpServerStatusChangedEvent {
  */
 export interface McpServerStatusChangedData {
   /**
+   * Runtime configuration provenance for a connected or failed server, or unknown when unavailable. Additional string values may be introduced.
+   */
+  configSource?: string;
+  /**
    * Error message if the server entered a failed state
    */
   error?: string;
   /**
+   * Runtime-produced classification for the final failed connection; unclassified means no classification was supplied. Additional string values may be introduced.
+   */
+  errorClassification?: string;
+  /**
    * Name of the MCP server whose status changed
    */
   serverName: string;
+  /**
+   * Connection status: connected, failed, needs-auth, pending, disabled, stopped, or not_configured
+   */
   status: McpServerStatus;
+}
+/**
+ * Session event "session.mcp_server_tools_loaded". Payload of `session.mcp_server_tools_loaded`, emitted once per connection when an MCP server's tools first become available from tools/list or a cached snapshot. A connected server is still loading tools if this event has not fired since the server last left connected; it can precede connected when the tools come from a cached snapshot.
+ */
+export interface McpServerToolsLoadedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.mcp_server_tools_loaded`, emitted once per connection when an MCP server's tools first become available from tools/list or a cached snapshot. A connected server is still loading tools if this event has not fired since the server last left connected; it can precede connected when the tools come from a cached snapshot.
+   */
+  data: McpServerToolsLoadedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.mcp_server_tools_loaded".
+   */
+  type: "session.mcp_server_tools_loaded";
+}
+/**
+ * Payload of `session.mcp_server_tools_loaded`, emitted once per connection when an MCP server's tools first become available from tools/list or a cached snapshot. A connected server is still loading tools if this event has not fired since the server last left connected; it can precede connected when the tools come from a cached snapshot.
+ */
+export interface McpServerToolsLoadedData {
+  /**
+   * Name of the MCP server whose tools loaded
+   */
+  serverName: string;
+  /**
+   * Number of tools the server listed
+   */
+  toolCount: number;
+}
+/**
+ * Session event "session.mcp_server_removed". Payload of `session.mcp_server_removed` identifying an MCP server the graph no longer runs.
+ */
+export interface McpServerRemovedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.mcp_server_removed` identifying an MCP server the graph no longer runs.
+   */
+  data: McpServerRemovedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.mcp_server_removed".
+   */
+  type: "session.mcp_server_removed";
+}
+/**
+ * Payload of `session.mcp_server_removed` identifying an MCP server the graph no longer runs.
+ */
+export interface McpServerRemovedData {
+  /**
+   * Name of the MCP server that was removed from the graph
+   */
+  serverName: string;
+}
+/**
+ * Session event "session.mcp_server_needs_reconnect". Payload of `session.mcp_server_needs_reconnect` identifying an MCP server whose connection must be re-established.
+ */
+export interface McpServerNeedsReconnectEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.mcp_server_needs_reconnect` identifying an MCP server whose connection must be re-established.
+   */
+  data: McpServerNeedsReconnectData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.mcp_server_needs_reconnect".
+   */
+  type: "session.mcp_server_needs_reconnect";
+}
+/**
+ * Payload of `session.mcp_server_needs_reconnect` identifying an MCP server whose connection must be re-established.
+ */
+export interface McpServerNeedsReconnectData {
+  /**
+   * Name of the MCP server that needs to reconnect
+   */
+  serverName: string;
 }
 /**
  * Session event "mcp.tools.list_changed". Payload identifying the MCP server associated with a list change.
@@ -9868,6 +16974,13 @@ export interface McpToolsListChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload identifying the MCP server associated with a list change.
+   */
   data: McpListChangedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9907,6 +17020,13 @@ export interface McpResourcesListChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload identifying the MCP server associated with a list change.
+   */
   data: McpListChangedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9937,6 +17057,13 @@ export interface McpPromptsListChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload identifying the MCP server associated with a list change.
+   */
   data: McpListChangedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -9967,6 +17094,13 @@ export interface ExtensionsLoadedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.extensions_loaded` listing discovered extensions and their statuses.
+   */
   data: ExtensionsLoadedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -10010,7 +17144,13 @@ export interface ExtensionsLoadedExtension {
    * Extension name (directory name)
    */
   name: string;
+  /**
+   * Discovery source
+   */
   source: ExtensionsLoadedExtensionSource;
+  /**
+   * Current status: running, disabled, failed, or starting
+   */
   status: ExtensionsLoadedExtensionStatus;
 }
 /**
@@ -10022,6 +17162,13 @@ export interface CanvasOpenedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.canvas.opened` with canvas instance and provider IDs plus optional icon, title, status, URL, and input.
+   */
   data: CanvasOpenedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -10095,6 +17242,13 @@ export interface CanvasRegistryChangedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.canvas.registry_changed` listing the canvas declarations currently available.
+   */
   data: CanvasRegistryChangedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -10192,6 +17346,13 @@ export interface CanvasClosedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.canvas.closed` with the closed canvas instance ID, provider ID, and canvas ID.
+   */
   data: CanvasClosedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -10241,6 +17402,13 @@ export interface CanvasUnavailableEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Transient signal that an open canvas instance's provider has dropped (for example the extension is reloading mid-session). The host should keep the panel mounted and surface a reconnecting affordance rather than tearing it down; a subsequent `session.canvas.opened` for the same instanceId clears the affordance once the provider reconnects with a fresh url. Ephemeral and never persisted, so it is never replayed on cold resume.
+   */
   data: CanvasUnavailableData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -10290,6 +17458,13 @@ export interface CanvasRecordedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Durable record that a canvas instance is open, used to restore open canvases on cold session resume. Intentionally omits the transient url and availability.
+   */
   data: CanvasRecordedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -10347,6 +17522,13 @@ export interface CanvasRemovedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Durable record that a canvas instance was closed, superseding a prior instance_recorded during resume replay.
+   */
   data: CanvasRemovedData;
   /**
    * When true, the event is transient and not persisted to the session event log on disk
@@ -10395,6 +17577,13 @@ export interface ExtensionsAttachmentsPushedEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * Payload of `session.extensions.attachments_pushed` with extension-contributed attachments for the next send.
+   */
   data: ExtensionsAttachmentsPushedData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -10434,6 +17623,13 @@ export interface McpAppToolCallCompleteEvent {
    * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
    */
   agentId?: string;
+  /**
+   * Whether this physical journal record belongs to a replay checkpoint rather than original session history.
+   */
+  checkpoint?: boolean;
+  /**
+   * MCP App view called a tool on a connected MCP server (SEP-1865)
+   */
   data: McpAppToolCallCompleteData;
   /**
    * Always true for events that are transient and not persisted to the session event log on disk.
@@ -10470,6 +17666,9 @@ export interface McpAppToolCallCompleteData {
    * Wall-clock duration of the underlying tools/call in milliseconds
    */
   durationMs: number;
+  /**
+   * Set when the underlying tools/call threw an error before returning a CallToolResult
+   */
   error?: McpAppToolCallCompleteError;
   /**
    * Standard MCP CallToolResult returned by the server. Present whether or not the call set isError.
@@ -10485,6 +17684,9 @@ export interface McpAppToolCallCompleteData {
    * True when the call completed without throwing AND the MCP CallToolResult did not set isError
    */
   success: boolean;
+  /**
+   * The tool's `_meta.ui` block at the time of the call, so consumers can decide whether to forward the result to the model without re-listing tools.
+   */
   toolMeta?: McpAppToolCallCompleteToolMeta;
   /**
    * MCP tool name that was invoked
@@ -10504,6 +17706,9 @@ export interface McpAppToolCallCompleteError {
  * The tool's `_meta.ui` block at the time of the call, so consumers can decide whether to forward the result to the model without re-listing tools.
  */
 export interface McpAppToolCallCompleteToolMeta {
+  /**
+   * MCP App tool `_meta.ui` resource URI and SEP-1865 visibility captured with an `mcp_app.tool_call_complete` result.
+   */
   ui?: McpAppToolCallCompleteToolMetaUI;
 }
 /**

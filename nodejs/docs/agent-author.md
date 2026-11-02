@@ -19,8 +19,8 @@ For user-scoped extensions (persist across all repos), add `location: "user"`.
 
 Modify the generated `extension.mjs` using `edit` or `create` tools. The file must:
 
-- Be named `extension.mjs` (only `.mjs` is supported)
-- Use ES module syntax (`import`/`export`)
+- Be named `extension.mjs`, `extension.cjs` or `extension.js` (the scaffold creates `extension.mjs`)
+- Use ES module syntax (`import`/`export`) in `.mjs` files, or CommonJS (`require`) in `.cjs` files
 - Call `joinSession({ ... })`
 
 ### Step 3: Reload extensions
@@ -53,7 +53,7 @@ Discovery rules:
 - The CLI scans `.github/extensions/` relative to the git root
 - It also scans the user's copilot config extensions directory
 - Only immediate subdirectories are checked (not recursive)
-- Each subdirectory must contain a file named `extension.mjs`
+- Each subdirectory must contain a file named `extension.mjs`, `extension.cjs` or `extension.js`
 - Project extensions shadow user extensions on name collision
 
 ---
@@ -122,10 +122,12 @@ hooks: {
     onSessionStart: async (input, invocation) => { ... },
     onSessionEnd: async (input, invocation) => { ... },
     onErrorOccurred: async (input, invocation) => { ... },
+    onSubagentStart: async (input, invocation) => { ... },
+    onSubagentStop: async (input, invocation) => { ... },
 }
 ```
 
-All hook inputs include `timestamp` (`Date`) and `workingDirectory`.
+All hook inputs include `sessionId`, `timestamp` (`Date`) and `workingDirectory`.
 All handlers receive `invocation: { sessionId: string }` as the second argument.
 All handlers may return `void`/`undefined` (no-op) or an output object.
 
@@ -138,6 +140,8 @@ All handlers may return `void`/`undefined` (no-op) or an output object.
 |-------|------|--------|
 | `modifiedPrompt` | `string` | Replaces the user's prompt |
 | `additionalContext` | `string` | Appended as hidden context the agent sees |
+| `decision` | `"block"` | Refuses the prompt: no model turn runs and no user message is recorded |
+| `reason` | `string` | Why the prompt was blocked, carried by the ephemeral `session.warning` (`warningType: "policy_blocked"`) |
 
 ### onPreToolUse
 
@@ -214,7 +218,32 @@ fire it.
 | `retryCount` | `number` | Max retries (when errorHandling is "retry") |
 | `userNotification` | `string` | Message shown to the user |
 
----
+### onSubagentStart
+
+Fires before a sub-agent's first turn. The input's `sessionId` and the
+invocation's `sessionId` identify the parent session, not the child.
+
+**Input:** `{ sessionId: string, transcriptPath: string, agentName: string, agentDisplayName?: string, agentDescription?: string, timestamp, workingDirectory }`
+
+**Output (optional):**
+| Field | Type | Effect |
+|-------|------|--------|
+| `additionalContext` | `string` | Prepended to the child's initial prompt |
+
+### onSubagentStop
+
+Fires after a sub-agent completes a turn. The input includes the child's last
+assistant `response` and the parent's session metadata. `agentId` is available
+when the task registry supplies one. This is distinct from `onAgentStop`, which
+only runs for the top-level agent.
+
+**Input:** `{ sessionId: string, transcriptPath: string, agentName: string, agentDisplayName?: string, agentDescription?: string, agentId?: string, agentType: string, stopReason: "end_turn", response: string, timestamp, workingDirectory }`
+
+**Output (choose one, or return nothing):**
+| Field | Type | Effect |
+|-------|------|--------|
+| `decision` and `reason` | `"block"` and `string` | Continue the child for another turn using `reason` |
+| `modifiedResponse` | `string` | Replace the child's response reported to the parent |
 
 ## Session Object
 
@@ -291,5 +320,5 @@ Low-level typed RPC access to all session APIs (model, mode, plan, workspace, et
 - **Tool name collisions are fatal.** If two extensions register the same tool name, the second extension fails to initialize.
 - **Don't call `session.send()` synchronously from `onUserPromptSubmitted`.** Use `setTimeout(() => session.send(...), 0)` to avoid infinite loops.
 - **Extensions are reloaded on `/clear`.** Any in-memory state is lost between sessions.
-- **Only `.mjs` is supported.** TypeScript (`.ts`) is not yet supported.
+- **The entry file must be `.mjs`, `.cjs` or `.js`.** TypeScript (`.ts`) is not yet supported.
 - **The handler's return value is the tool result.** Returning `undefined` sends an empty success. Throwing sends a failure with the error message.

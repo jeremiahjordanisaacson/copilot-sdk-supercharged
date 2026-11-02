@@ -26,7 +26,7 @@ from copilot._telemetry import get_trace_context, trace_context
 from copilot.session import PermissionHandler
 from copilot.tools import Tool, ToolInvocation, ToolResult
 
-from .testharness import E2ETestContext, get_final_assistant_message
+from .testharness import E2ETestContext
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -102,8 +102,8 @@ class TestTelemetryExport:
             )
             session_id = session.session_id
 
-            await session.send(prompt)
-            answer = await get_final_assistant_message(session, timeout=60.0)
+            answer = await session.send_and_wait(prompt, timeout=60.0)
+            assert answer is not None
             assert "TELEMETRY_E2E_DONE" in (answer.data.content or "")
 
             await session.disconnect()
@@ -118,9 +118,6 @@ class TestTelemetryExport:
             scope = span.get("instrumentationScope") or {}
             assert scope.get("name") == source_name
 
-        trace_ids = {s.get("traceId") for s in spans if s.get("traceId")}
-        assert len(trace_ids) == 1
-
         for span in spans:
             status = (span.get("status") or {}).get("code", 0)
             assert status != 2, f"span in error state: {span}"
@@ -132,11 +129,14 @@ class TestTelemetryExport:
         assert _is_root_span(invoke_agent)
         invoke_agent_span_id = invoke_agent.get("spanId")
         assert invoke_agent_span_id
+        invoke_agent_trace_id = invoke_agent.get("traceId")
+        assert invoke_agent_trace_id
 
         chat_spans = [s for s in spans if _string_attribute(s, "gen_ai.operation.name") == "chat"]
         assert chat_spans
         for chat in chat_spans:
             assert chat.get("parentSpanId") == invoke_agent_span_id
+            assert chat.get("traceId") == invoke_agent_trace_id
         assert any(
             prompt in (_string_attribute(c, "gen_ai.input.messages") or "") for c in chat_spans
         )
@@ -149,12 +149,116 @@ class TestTelemetryExport:
             s for s in spans if _string_attribute(s, "gen_ai.operation.name") == "execute_tool"
         )
         assert tool_span.get("parentSpanId") == invoke_agent_span_id
+        assert tool_span.get("traceId") == invoke_agent_trace_id
         assert _string_attribute(tool_span, "gen_ai.tool.name") == tool_name
         assert (_string_attribute(tool_span, "gen_ai.tool.call.id") or "").strip()
         assert (
             _string_attribute(tool_span, "gen_ai.tool.call.arguments") == f'{{"value":"{marker}"}}'
         )
-        assert _string_attribute(tool_span, "gen_ai.tool.call.result") == marker
+        tool_result = _string_attribute(tool_span, "gen_ai.tool.call.result")
+        assert tool_result is not None
+        assert json.loads(tool_result) == {"content": marker}
+
+    async def test_should_export_per_request_subagent_chat_spans(self, ctx: E2ETestContext):
+        telemetry_path = Path(ctx.work_dir) / f"telemetry-{uuid.uuid4().hex}.jsonl"
+        source_name = "python-sdk-subagent-telemetry-e2e"
+        prompt = (
+            "Use the task tool in sync mode to ask a task agent to read subagent-otel.txt "
+            "with the view tool. Then reply with SUBAGENT_OTEL_DONE."
+        )
+        (Path(ctx.work_dir) / "subagent-otel.txt").write_text(
+            "SUBAGENT_OTEL_FILE_CONTENT", encoding="utf-8"
+        )
+        client = CopilotClient(
+            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
+            working_directory=ctx.work_dir,
+            env=ctx.get_env(),
+            github_token="fake-token-for-e2e-tests"
+            if os.environ.get("GITHUB_ACTIONS") == "true"
+            else None,
+            telemetry=TelemetryConfig(
+                file_path=str(telemetry_path),
+                exporter_type="file",
+                source_name=source_name,
+                capture_content=True,
+            ),
+        )
+        try:
+            session = await client.create_session(
+                on_permission_request=PermissionHandler.approve_all
+            )
+            session_id = session.session_id
+            try:
+                answer = await session.send_and_wait(prompt, timeout=60.0)
+                assert answer is not None
+                assert "SUBAGENT_OTEL_DONE" in (answer.data.content or "")
+            finally:
+                await session.disconnect()
+        finally:
+            await client.stop()
+
+        spans = [
+            entry
+            for entry in _read_telemetry_entries(telemetry_path)
+            if entry.get("type") == "span"
+        ]
+        assert all(
+            (span.get("instrumentationScope") or {}).get("name") == source_name for span in spans
+        )
+        assert all((span.get("status") or {}).get("code", 0) != 2 for span in spans)
+
+        invocations = [
+            s for s in spans if _string_attribute(s, "gen_ai.operation.name") == "invoke_agent"
+        ]
+        assert len(invocations) == 2, invocations
+        roots = [s for s in invocations if _is_root_span(s)]
+        assert len(roots) == 1, roots
+        root = roots[0]
+        assert _string_attribute(root, "gen_ai.conversation.id") == session_id
+        assert root.get("spanId") and root.get("traceId")
+        tasks = [
+            s
+            for s in spans
+            if _string_attribute(s, "gen_ai.operation.name") == "execute_tool"
+            and _string_attribute(s, "gen_ai.tool.name") == "task"
+        ]
+        assert len(tasks) == 1, tasks
+        task = tasks[0]
+        assert task.get("parentSpanId") == root["spanId"]
+        children = [s for s in invocations if s.get("parentSpanId") == task.get("spanId")]
+        assert len(children) == 1, children
+        child = children[0]
+        assert task.get("traceId") == child.get("traceId") == root["traceId"]
+
+        chats = [s for s in spans if _string_attribute(s, "gen_ai.operation.name") == "chat"]
+        assert len(chats) == 4, chats
+        parent_chats = [s for s in chats if s.get("parentSpanId") == root["spanId"]]
+        assert len(parent_chats) == 2
+        assert all(s.get("traceId") == root["traceId"] for s in parent_chats)
+        child_chats = [s for s in chats if s.get("parentSpanId") == child["spanId"]]
+        assert len(child_chats) == 2, child_chats
+        assert all(s.get("traceId") == root["traceId"] for s in child_chats)
+        assert all(
+            _string_attribute(s, "github.copilot.initiator") == "sub-agent" for s in child_chats
+        )
+        requesting_chats = [
+            s
+            for s in child_chats
+            if '"view"' in (_string_attribute(s, "gen_ai.output.messages") or "")
+        ]
+        assert len(requesting_chats) == 1
+        assert "SUBAGENT_OTEL_FILE_CONTENT" not in (
+            _string_attribute(requesting_chats[0], "gen_ai.input.messages") or ""
+        )
+        finals = [
+            s
+            for s in child_chats
+            if "SUBAGENT_OTEL_CHILD_DONE" in (_string_attribute(s, "gen_ai.output.messages") or "")
+        ]
+        assert len(finals) == 1
+        assert "SUBAGENT_OTEL_FILE_CONTENT" in (
+            _string_attribute(finals[0], "gen_ai.input.messages") or ""
+        )
 
 
 # ---------------------------------------------------------------------------

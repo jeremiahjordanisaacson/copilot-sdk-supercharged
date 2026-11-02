@@ -38,10 +38,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -51,12 +53,14 @@ const symbolPrefix = "copilot_runtime_"
 
 // ffiLibrary binds the copilot_runtime_* C ABI exports of a loaded cdylib.
 type ffiLibrary struct {
-	handle          uintptr
-	hostStart       func(argv unsafe.Pointer, argvLen uintptr, env unsafe.Pointer, envLen uintptr) uint32
-	hostShutdown    func(serverID uint32) bool
-	connectionOpen  func(serverID uint32, cb uintptr, userData uintptr, a unsafe.Pointer, aLen uintptr, b unsafe.Pointer, bLen uintptr, c unsafe.Pointer, cLen uintptr) uint32
-	connectionWrite func(connID uint32, bytes unsafe.Pointer, length uintptr) bool
-	connectionClose func(connID uint32) bool
+	handle                       uintptr
+	hostStart                    func(argv unsafe.Pointer, argvLen uintptr, env unsafe.Pointer, envLen uintptr) uint32
+	hostShutdown                 func(serverID uint32) bool
+	connectionOpen               func(serverID uint32, cb uintptr, userData uintptr, a unsafe.Pointer, aLen uintptr, b unsafe.Pointer, bLen uintptr, c unsafe.Pointer, cLen uintptr) uint32
+	connectionWrite              func(connID uint32, bytes unsafe.Pointer, length uintptr) bool
+	connectionClose              func(connID uint32) bool
+	connectionSetUiThreadHandler func(connID uint32, enabled bool) bool
+	connectionRunUiAction        func(connID uint32, actionID uint32) bool
 }
 
 // The cdylib may only be loaded once per process; a second load of a different
@@ -73,6 +77,55 @@ var (
 	outboundTargets        sync.Map
 	nextOutboundToken      atomic.Uint64
 )
+
+var pendingCleanup = struct {
+	sync.Mutex
+	count int
+	idle  chan struct{}
+}{
+	idle: closedChannel(),
+}
+
+func closedChannel() chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}
+
+func beginPendingCleanup() {
+	pendingCleanup.Lock()
+	defer pendingCleanup.Unlock()
+	if pendingCleanup.count == 0 {
+		pendingCleanup.idle = make(chan struct{})
+	}
+	pendingCleanup.count++
+}
+
+func finishPendingCleanup() {
+	pendingCleanup.Lock()
+	defer pendingCleanup.Unlock()
+	pendingCleanup.count--
+	if pendingCleanup.count == 0 {
+		close(pendingCleanup.idle)
+	}
+}
+
+// WaitForCleanup waits for all deferred connection cleanup to finish.
+// In-process test harnesses use this before changing process-global state.
+func WaitForCleanup(timeout time.Duration) bool {
+	pendingCleanup.Lock()
+	idle := pendingCleanup.idle
+	pendingCleanup.Unlock()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-idle:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
 
 func sharedOutboundCallback() uintptr {
 	outboundCallbackOnce.Do(func() {
@@ -122,6 +175,8 @@ func loadLibrary(libraryPath string) (lib *ffiLibrary, err error) {
 	purego.RegisterLibFunc(&bound.connectionOpen, handle, symbolPrefix+"connection_open")
 	purego.RegisterLibFunc(&bound.connectionWrite, handle, symbolPrefix+"connection_write")
 	purego.RegisterLibFunc(&bound.connectionClose, handle, symbolPrefix+"connection_close")
+	purego.RegisterLibFunc(&bound.connectionSetUiThreadHandler, handle, symbolPrefix+"connection_set_ui_thread_handler")
+	purego.RegisterLibFunc(&bound.connectionRunUiAction, handle, symbolPrefix+"connection_run_ui_action")
 
 	loadedLibrary = bound
 	loadedLibraryPath = libraryPath
@@ -145,22 +200,37 @@ type Host struct {
 	lifecycleMu sync.Mutex
 	// mu serializes disposal with native callbacks so the receive buffer cannot
 	// be fed after it is closed.
-	mu           sync.Mutex
-	serverID     uint32
-	connectionID uint32
-	disposed     bool
-	// activeCallbacks counts outbound native callbacks currently executing.
-	activeCallbacks int
+	mu               sync.Mutex
+	serverID         uint32
+	connectionID     uint32
+	disposed         bool
+	cleanupScheduled bool
 
 	recv *receiveBuffer
 
 	callbackToken uintptr
 }
 
+func (h *Host) rearmForeignSignalHandlers() {
+	rearmForeignSignalHandlers(h.lib.handle)
+}
+
+// PrepareForChildProcessWait repairs signal handlers that the embedded runtime
+// may have replaced before the Go process stops or waits for its own child.
+func PrepareForChildProcessWait() {
+	rearmForeignSignalHandlers(0)
+}
+
+// ProtectChildProcessWait keeps SIGCHLD compatible with the Go runtime while a
+// child process is being stopped and reaped.
+func ProtectChildProcessWait() func() {
+	return protectChildProcessSignalHandler()
+}
+
 // Create resolves the native library and prepares the host. environment and
 // args contain SDK-managed runtime options.
-func Create(cliEntrypoint string, environment map[string]string, args []string) (*Host, error) {
-	libraryPath, err := ResolveLibraryPath(cliEntrypoint)
+func Create(runtimeEntrypoint, cliEntrypoint string, environment map[string]string, args []string) (*Host, error) {
+	libraryPath, err := ResolveLibraryPath(runtimeEntrypoint)
 	if err != nil {
 		return nil, err
 	}
@@ -207,18 +277,11 @@ func (h *Host) Start() error {
 	runtime.KeepAlive(argv)
 	runtime.KeepAlive(env)
 	if h.serverID == 0 {
-		return fmt.Errorf("copilot_runtime_host_start failed (library %q, entrypoint %q)", h.libraryPath, h.cliEntrypoint)
+		return fmt.Errorf("copilot_runtime_host_start failed (library %q)", h.libraryPath)
 	}
 
-	// host_start spawned the worker child via libuv's uv_spawn, which installs a
-	// SIGCHLD handler without SA_ONSTACK on its first call. The Go runtime aborts
-	// ("non-Go code set up signal handler without SA_ONSTACK flag") when it later
-	// reaps one of its own os/exec children (e.g. a test-spawned MCP server) and
-	// the delivered SIGCHLD lands on a non-signal stack. Re-add SA_ONSTACK to that
-	// foreign handler now that it exists (implemented on darwin+linux; a no-op on
-	// other platforms, and before the first spawn there is nothing to fix — hence
-	// here rather than at library load).
-	rearmForeignSignalHandlers(h.lib.handle)
+	// An embedded host may install a SIGCHLD handler without SA_ONSTACK.
+	h.rearmForeignSignalHandlers()
 
 	callbackHandle := sharedOutboundCallback()
 	callbackToken := uintptr(nextOutboundToken.Add(1))
@@ -228,11 +291,15 @@ func (h *Host) Start() error {
 	if h.connectionID == 0 {
 		outboundTargets.Delete(callbackToken)
 		h.callbackToken = 0
+		h.rearmForeignSignalHandlers()
 		h.lib.hostShutdown(h.serverID)
-		rearmForeignSignalHandlers(h.lib.handle)
+		h.rearmForeignSignalHandlers()
 		h.serverID = 0
 		return fmt.Errorf("copilot_runtime_connection_open failed")
 	}
+	// Connection initialization may install Tokio's SIGCHLD handler after
+	// host startup, so repair it again before any child process can exit.
+	h.rearmForeignSignalHandlers()
 	return nil
 }
 
@@ -242,15 +309,35 @@ func (h *Host) Writer() io.WriteCloser { return hostWriter{h} }
 // Reader returns the server → client frame source (plug into jsonrpc2 as stdout).
 func (h *Host) Reader() io.ReadCloser { return h.recv }
 
+// ConfigureUiThread registers this SDK connection's native UI scheduling capability.
+func (h *Host) ConfigureUiThread(enabled bool) error {
+	h.mu.Lock()
+	conn, disposed := h.connectionID, h.disposed
+	h.mu.Unlock()
+	if disposed || !h.lib.connectionSetUiThreadHandler(conn, enabled) {
+		return fmt.Errorf("failed to configure the in-process UI dispatcher")
+	}
+	return nil
+}
+
+// RunUiAction enters synchronously on the caller's UI thread, not an FFI worker.
+func (h *Host) RunUiAction(actionID uint32) error {
+	h.mu.Lock()
+	conn, disposed := h.connectionID, h.disposed
+	h.mu.Unlock()
+	if disposed || !h.lib.connectionRunUiAction(conn, actionID) {
+		return fmt.Errorf("native UI action is retired, already executed, or not on the process main thread")
+	}
+	return nil
+}
+
 func (h *Host) buildArgv() []byte {
-	// A `.js` entrypoint (dev) is launched via node; the packaged single-file CLI
-	// embeds its own Node and is invoked directly. `--no-auto-update` pins the
-	// worker to the runtime package matching the loaded cdylib (avoids ABI skew).
-	var argv []string
-	if strings.HasSuffix(strings.ToLower(h.cliEntrypoint), ".js") {
-		argv = []string{"node", h.cliEntrypoint, "--embedded-host", "--no-auto-update"}
-	} else {
-		argv = []string{h.cliEntrypoint, "--embedded-host", "--no-auto-update"}
+	argv := make([]string, 0, len(h.args)+4)
+	if h.cliEntrypoint != "" {
+		if strings.HasSuffix(strings.ToLower(h.cliEntrypoint), ".js") {
+			argv = append(argv, "node")
+		}
+		argv = append(argv, h.cliEntrypoint, "--embedded-host", "--no-auto-update")
 	}
 	argv = append(argv, h.args...)
 	b, _ := json.Marshal(argv)
@@ -274,13 +361,9 @@ func (h *Host) onOutbound(bytesPtr uintptr, bytesLen uintptr) uintptr {
 		h.mu.Unlock()
 		return 0
 	}
-	h.activeCallbacks++
 	h.mu.Unlock()
 
 	defer func() {
-		h.mu.Lock()
-		h.activeCallbacks--
-		h.mu.Unlock()
 		// Never let a panic unwind into native code.
 		_ = recover()
 	}()
@@ -299,11 +382,18 @@ func (h *Host) onOutbound(bytesPtr uintptr, bytesLen uintptr) uintptr {
 }
 
 func (h *Host) writeFrame(frame []byte) (int, error) {
+	h.mu.Lock()
+	disposed := h.disposed
+	h.mu.Unlock()
+	if disposed {
+		return 0, fmt.Errorf("the in-process runtime connection is closed")
+	}
+
 	h.lifecycleMu.Lock()
 	defer h.lifecycleMu.Unlock()
 
 	h.mu.Lock()
-	disposed := h.disposed
+	disposed = h.disposed
 	h.mu.Unlock()
 	connID := h.connectionID
 	if disposed || connID == 0 {
@@ -312,6 +402,9 @@ func (h *Host) writeFrame(frame []byte) (int, error) {
 	if len(frame) == 0 {
 		return 0, nil
 	}
+	// A prior runtime request may have installed or restored Tokio's SIGCHLD
+	// handler. Repair it before another request can stop a native child process.
+	h.rearmForeignSignalHandlers()
 	ok := h.lib.connectionWrite(connID, unsafe.Pointer(&frame[0]), uintptr(len(frame)))
 	runtime.KeepAlive(frame)
 	if !ok {
@@ -320,9 +413,8 @@ func (h *Host) writeFrame(frame []byte) (int, error) {
 	return len(frame), nil
 }
 
-// Dispose closes the FFI connection, shuts down the native host, and releases
-// resources. It is idempotent and waits for any in-flight outbound callback to
-// finish before closing the receive buffer.
+// Dispose closes the receive side immediately and releases native resources
+// after connectionClose confirms that outbound callbacks are quiescent.
 func (h *Host) Dispose() {
 	h.lifecycleMu.Lock()
 	defer h.lifecycleMu.Unlock()
@@ -332,45 +424,65 @@ func (h *Host) Dispose() {
 		h.mu.Unlock()
 		return
 	}
-	// Publish disposed under the same lock onOutbound uses to check it, so no new
-	// callback can pass the check and increment activeCallbacks after the drain
-	// loop below observes zero.
 	h.disposed = true
-	connID := h.connectionID
-	serverID := h.serverID
-	callbackToken := h.callbackToken
-	h.connectionID = 0
-	h.serverID = 0
-	h.callbackToken = 0
 	h.mu.Unlock()
 
+	h.recv.Close()
+	if !h.tryFinalizeCleanupLocked() {
+		h.scheduleCleanupRetryLocked()
+	}
+}
+
+func (h *Host) tryFinalizeCleanupLocked() bool {
+	connID := h.connectionID
+
+	if connID != 0 {
+		h.rearmForeignSignalHandlers()
+		if !h.lib.connectionClose(connID) {
+			return false
+		}
+		h.connectionID = 0
+	}
+
+	callbackToken := h.callbackToken
+	h.callbackToken = 0
 	if callbackToken != 0 {
 		outboundTargets.Delete(callbackToken)
 	}
-
-	// Stop accepting new callbacks and wait for in-flight ones to drain before
-	// closing the receive buffer they feed.
-	for {
-		h.mu.Lock()
-		if h.activeCallbacks == 0 {
-			h.mu.Unlock()
-			break
-		}
-		h.mu.Unlock()
-		runtime.Gosched()
-	}
-
-	if connID != 0 {
-		h.lib.connectionClose(connID)
-	}
+	serverID := h.serverID
 	if serverID != 0 {
-		h.lib.hostShutdown(serverID)
-		// libuv may restore a previously saved SIGCHLD action while tearing down
-		// its final child watcher, so repair the process-wide handler again after
-		// shutdown before Go reaps another os/exec child.
-		rearmForeignSignalHandlers(h.lib.handle)
+		h.rearmForeignSignalHandlers()
+		if !h.lib.hostShutdown(serverID) {
+			log.Printf("FfiRuntimeHost: host_shutdown did not recognize server %d", serverID)
+		}
+		h.serverID = 0
+		// A host may restore its saved SIGCHLD action during shutdown.
+		h.rearmForeignSignalHandlers()
 	}
-	h.recv.Close()
+	return true
+}
+
+func (h *Host) scheduleCleanupRetryLocked() {
+	if h.cleanupScheduled {
+		return
+	}
+	h.cleanupScheduled = true
+	beginPendingCleanup()
+	go func() {
+		defer finishPendingCleanup()
+		timer := time.NewTimer(100 * time.Millisecond)
+		defer timer.Stop()
+		for range timer.C {
+			h.lifecycleMu.Lock()
+			if h.tryFinalizeCleanupLocked() {
+				h.cleanupScheduled = false
+				h.lifecycleMu.Unlock()
+				return
+			}
+			h.lifecycleMu.Unlock()
+			timer.Reset(100 * time.Millisecond)
+		}
+	}()
 }
 
 // hostWriter adapts Host into the io.WriteCloser jsonrpc2 writes request frames to.

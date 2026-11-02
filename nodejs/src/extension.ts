@@ -9,7 +9,7 @@ import {
     type PermissionHandler,
     type ResumeSessionConfig,
 } from "./types.js";
-import type { FactoryHandle } from "./factory.js";
+import type { WorkflowHandle } from "./workflow.js";
 
 export {
     Canvas,
@@ -24,7 +24,7 @@ export {
 
 export type JoinSessionConfig = Omit<
     ResumeSessionConfig,
-    "onPermissionRequest" | "extensionSdkPath"
+    "onPermissionRequest" | "extensionSdkPath" | "skillProvider" | "imageGeneration"
 > & {
     onPermissionRequest?: PermissionHandler;
     /**
@@ -57,41 +57,49 @@ export type JoinSessionConfig = Omit<
      */
     requestedEnvironmentVariables?: string[];
     /**
-     * Factory handles to register when the extension joins the session.
+     * Workflow handles to register when the extension joins the session.
      *
-     * @experimental Part of the experimental Agent Factories surface and may
+     * @experimental Part of the experimental Dynamic Workflows surface and may
      * change or be removed in future SDK or CLI releases.
      */
-    factories?: FactoryHandle[];
+    workflows?: WorkflowHandle[];
 };
 
-export type { ExtensionInfo, FactoryLimits, FactoryMeta } from "./types.js";
+export type { ExtensionInfo } from "./types.js";
 export {
-    defineFactory,
-    FactoryResumeError,
-    isFactoryRunTerminal,
-    type RunOptions,
-    type ResumeOptions,
-    type FactoryResumeErrorCode,
-    type SessionFactoryApi,
-    type FactoryAgentOptions,
-    type FactoryContext,
-    type FactoryDefinition,
-    type FactoryHandle,
-    type FactoryJsonSchema,
+    defineWorkflow,
+    WorkflowResumeError,
+    isWorkflowRunTerminal,
+    type WorkflowRunOptions,
+    type WorkflowResumeOptions,
+    type WorkflowLimitOverrides,
+    type WorkflowResumeErrorCode,
+    type SessionWorkflowApi,
+    type WorkflowAgentOptions,
+    type WorkflowContext,
+    type WorkflowDefinition,
+    type WorkflowHandle,
     type JsonValue,
-    type FactoryPipelineStage,
-    type FactoryStepOptions,
-    type FactoryRunResult,
-    type FactoryRunStatus,
-    type FactoryRunSummary,
-    type FactoryRunDetail,
-    type FactoryProgressPage,
-    type FactoryProgressLine,
-    type FactoryPhaseObservation,
-    type FactoryPhaseStatus,
-    type FactoryAgentSummary,
-} from "./factory.js";
+    type WorkflowJsonSchema,
+    type WorkflowLimits,
+    type WorkflowMeta,
+    type WorkflowPipelineStage,
+    type WorkflowStepOptions,
+    type WorkflowRunResult,
+    type WorkflowRunStatus,
+    type WorkflowRunSummary,
+    type WorkflowListRunsOptions,
+    type WorkflowRunsPage,
+    type WorkflowRunDetail,
+    type WorkflowProgressPage,
+    type WorkflowProgressLine,
+    type WorkflowPhaseObservation,
+    type WorkflowPhaseStatus,
+    type WorkflowAgentContextObservation,
+    type WorkflowAgentModelObservation,
+    type WorkflowAgentReasoningEffortObservation,
+    type WorkflowAgentSummary,
+} from "./workflow.js";
 
 /**
  * Joins the current foreground session.
@@ -119,16 +127,25 @@ export async function joinSession(config: JoinSessionConfig = {}): Promise<Copil
     // Strip `extensionSdkPath` at runtime even though `JoinSessionConfig` omits it
     // at the type level — untyped (JS) callers can still slip it through, and
     // honoring it here would be misleading since the extension subprocess has
-    // already been forked by the host with the SDK the host chose.
+    // already been forked by the host with the SDK the host chose. Skill
+    // providers belong to the session's owning client, and the CLI rejects them
+    // from extensions.
     const {
         extensionSdkPath: _stripped,
-        factories,
+        skillProvider: _strippedSkillProvider,
+        imageGeneration: _strippedImageGeneration,
+        workflows,
         requestedEnvironmentVariables,
         ...rest
     } = config as JoinSessionConfig & {
         extensionSdkPath?: string;
+        skillProvider?: unknown;
+        imageGeneration?: unknown;
     };
     void _stripped;
+    void _strippedSkillProvider;
+    // Image generation consent belongs to the session owner, not joining extensions.
+    void _strippedImageGeneration;
 
     return client.resumeSessionForExtension(
         sessionId,
@@ -137,7 +154,7 @@ export async function joinSession(config: JoinSessionConfig = {}): Promise<Copil
             onPermissionRequest: config.onPermissionRequest ?? defaultJoinSessionPermissionHandler,
             suppressResumeEvent: config.suppressResumeEvent ?? true,
         },
-        factories,
+        { workflows },
         requestedEnvironmentVariables?.length ? { requestedEnvironmentVariables } : undefined
     );
 }

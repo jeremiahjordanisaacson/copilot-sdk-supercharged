@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/base64"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	copilot "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
@@ -23,7 +26,7 @@ func TestSessionE2E(t *testing.T) {
 	t.Run("should create and disconnect sessions", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
-		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll, Model: "claude-sonnet-4.5"})
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{OnPermissionRequest: copilot.PermissionHandler.ApproveAll, Model: "claude-sonnet-5"})
 		if err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
@@ -47,8 +50,8 @@ func TestSessionE2E(t *testing.T) {
 			t.Errorf("Expected session.start sessionId to match")
 		}
 
-		if !startOk || startData.SelectedModel == nil || *startData.SelectedModel != "claude-sonnet-4.5" {
-			t.Errorf("Expected selectedModel to be 'claude-sonnet-4.5', got %v", startData)
+		if !startOk || startData.SelectedModel == nil || *startData.SelectedModel != "claude-sonnet-5" {
+			t.Errorf("Expected selectedModel to be 'claude-sonnet-5', got %v", startData)
 		}
 
 		if err := session.Disconnect(); err != nil {
@@ -154,12 +157,14 @@ func TestSessionE2E(t *testing.T) {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
+		finalMessage := testharness.SubscribeToFinalAssistantMessage(session)
+		defer finalMessage.Close()
 		_, err = session.Send(t.Context(), copilot.MessageOptions{Prompt: "What is your full name?"})
 		if err != nil {
 			t.Fatalf("Failed to send message: %v", err)
 		}
 
-		assistantMessage, err := testharness.GetFinalAssistantMessage(t.Context(), session)
+		assistantMessage, err := finalMessage.Wait(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to get assistant message: %v", err)
 		}
@@ -366,12 +371,14 @@ func TestSessionE2E(t *testing.T) {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
+		finalMessage := testharness.SubscribeToFinalAssistantMessage(session)
+		defer finalMessage.Close()
 		_, err = session.Send(t.Context(), copilot.MessageOptions{Prompt: "What is the secret number for key ALPHA?"})
 		if err != nil {
 			t.Fatalf("Failed to send message: %v", err)
 		}
 
-		assistantMessage, err := testharness.GetFinalAssistantMessage(t.Context(), session)
+		assistantMessage, err := finalMessage.Wait(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to get assistant message: %v", err)
 		}
@@ -400,12 +407,14 @@ func TestSessionE2E(t *testing.T) {
 		}
 		sessionID := session1.SessionID
 
+		finalMessage := testharness.SubscribeToFinalAssistantMessage(session1)
+		defer finalMessage.Close()
 		_, err = session1.Send(t.Context(), copilot.MessageOptions{Prompt: "What is 1+1?"})
 		if err != nil {
 			t.Fatalf("Failed to send message: %v", err)
 		}
 
-		answer, err := testharness.GetFinalAssistantMessage(t.Context(), session1)
+		answer, err := finalMessage.Wait(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to get assistant message: %v", err)
 		}
@@ -426,7 +435,7 @@ func TestSessionE2E(t *testing.T) {
 			t.Errorf("Expected resumed session ID to match, got %q vs %q", session2.SessionID, sessionID)
 		}
 
-		answer2, err := testharness.GetFinalAssistantMessage(t.Context(), session2, true)
+		answer2, err := testharness.GetFinalAssistantMessageFromHistory(t.Context(), session2)
 		if err != nil {
 			t.Fatalf("Failed to get assistant message from resumed session: %v", err)
 		}
@@ -461,12 +470,14 @@ func TestSessionE2E(t *testing.T) {
 		}
 		sessionID := session1.SessionID
 
+		finalMessage := testharness.SubscribeToFinalAssistantMessage(session1)
+		defer finalMessage.Close()
 		_, err = session1.Send(t.Context(), copilot.MessageOptions{Prompt: "What is 1+1?"})
 		if err != nil {
 			t.Fatalf("Failed to send message: %v", err)
 		}
 
-		answer, err := testharness.GetFinalAssistantMessage(t.Context(), session1)
+		answer, err := finalMessage.Wait(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to get assistant message: %v", err)
 		}
@@ -526,6 +537,62 @@ func TestSessionE2E(t *testing.T) {
 		}
 	})
 
+	t.Run("should recover marker after cold resume with explicit session id", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+
+		sessionID := "e2e-cold-resume-" + uuid.NewString()
+
+		client1 := ctx.NewClient()
+		session1, err := client1.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			SessionID:           sessionID,
+		})
+		if err != nil {
+			t.Fatalf("Failed to create session: %v", err)
+		}
+		if session1.SessionID != sessionID {
+			t.Fatalf("Expected explicit session ID %q, got %q", sessionID, session1.SessionID)
+		}
+
+		answer, err := session1.SendAndWait(t.Context(), copilot.MessageOptions{
+			Prompt: `Please remember this exact secret marker for later - MARKER-7f3ac21e. Reply with only the single word "Acknowledged".`,
+		})
+		if err != nil {
+			t.Fatalf("Failed to send message: %v", err)
+		}
+		if ad, ok := answer.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "Acknowledged") {
+			t.Errorf("Expected answer to contain 'Acknowledged', got %v", answer.Data)
+		}
+
+		if err := session1.Disconnect(); err != nil {
+			t.Fatalf("Failed to disconnect session: %v", err)
+		}
+		client1.ForceStop()
+
+		client2 := ctx.NewClient()
+		defer client2.ForceStop()
+
+		session2, err := client2.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		})
+		if err != nil {
+			t.Fatalf("Failed to resume session: %v", err)
+		}
+		if session2.SessionID != sessionID {
+			t.Errorf("Expected resumed session ID to match, got %q vs %q", session2.SessionID, sessionID)
+		}
+
+		answer2, err := session2.SendAndWait(t.Context(), copilot.MessageOptions{
+			Prompt: "What was the exact secret marker I asked you to remember earlier? Reply with only that marker value and nothing else.",
+		})
+		if err != nil {
+			t.Fatalf("Failed to send message after resume: %v", err)
+		}
+		if ad, ok := answer2.Data.(*copilot.AssistantMessageData); !ok || !strings.Contains(ad.Content, "MARKER-7f3ac21e") {
+			t.Errorf("Expected resumed answer to contain marker, got %v", answer2.Data)
+		}
+	})
+
 	t.Run("should throw error when resuming non-existent session", func(t *testing.T) {
 		ctx.ConfigureForTest(t)
 
@@ -574,28 +641,13 @@ func TestSessionE2E(t *testing.T) {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
-		// Set up event listeners BEFORE sending to avoid race conditions
-		toolStartCh := make(chan *copilot.SessionEvent, 1)
-		toolStartErrCh := make(chan error, 1)
-		go func() {
-			evt, err := testharness.GetNextEventOfType(session, copilot.SessionEventTypeToolExecutionStart, 60*time.Second)
-			if err != nil {
-				toolStartErrCh <- err
-			} else {
-				toolStartCh <- evt
-			}
-		}()
-
-		sessionIdleCh := make(chan *copilot.SessionEvent, 1)
-		sessionIdleErrCh := make(chan error, 1)
-		go func() {
-			evt, err := testharness.GetNextEventOfType(session, copilot.SessionEventTypeSessionIdle, 60*time.Second)
-			if err != nil {
-				sessionIdleErrCh <- err
-			} else {
-				sessionIdleCh <- evt
-			}
-		}()
+		// Install subscriptions synchronously; starting a goroutine is not a fence.
+		abortCtx, cancelAbort := context.WithTimeout(t.Context(), 60*time.Second)
+		defer cancelAbort()
+		toolStart := testharness.SubscribeToEvent(session, copilot.SessionEventTypeToolExecutionStart)
+		defer toolStart.Close()
+		sessionIdle := testharness.SubscribeToEvent(session, copilot.SessionEventTypeSessionIdle)
+		defer sessionIdle.Close()
 
 		// Send a message that triggers a long-running shell command
 		_, err = session.Send(t.Context(), copilot.MessageOptions{Prompt: "run the shell command 'sleep 100' (note this works on both bash and PowerShell)"})
@@ -604,10 +656,7 @@ func TestSessionE2E(t *testing.T) {
 		}
 
 		// Wait for tool.execution_start
-		select {
-		case <-toolStartCh:
-			// Tool execution has started
-		case err := <-toolStartErrCh:
+		if _, err := toolStart.Wait(abortCtx); err != nil {
 			t.Fatalf("Failed waiting for tool.execution_start: %v", err)
 		}
 
@@ -618,10 +667,7 @@ func TestSessionE2E(t *testing.T) {
 		}
 
 		// Wait for session.idle after abort
-		select {
-		case <-sessionIdleCh:
-			// Session is idle
-		case err := <-sessionIdleErrCh:
+		if _, err := sessionIdle.Wait(abortCtx); err != nil {
 			t.Fatalf("Failed waiting for session.idle after abort: %v", err)
 		}
 
@@ -647,26 +693,18 @@ func TestSessionE2E(t *testing.T) {
 		}
 
 		// We should be able to send another message
-		answerCh := make(chan *copilot.SessionEvent, 1)
-		answerErrCh := make(chan error, 1)
-		go func() {
-			evt, err := testharness.GetNextEventOfType(session, copilot.SessionEventTypeAssistantMessage, 60*time.Second)
-			if err != nil {
-				answerErrCh <- err
-			} else {
-				answerCh <- evt
-			}
-		}()
+		answerCtx, cancelAnswer := context.WithTimeout(t.Context(), 60*time.Second)
+		defer cancelAnswer()
+		answerWaiter := testharness.SubscribeToEvent(session, copilot.SessionEventTypeAssistantMessage)
+		defer answerWaiter.Close()
 
 		_, err = session.Send(t.Context(), copilot.MessageOptions{Prompt: "What is 2+2?"})
 		if err != nil {
 			t.Fatalf("Failed to send message after abort: %v", err)
 		}
 
-		var answer *copilot.SessionEvent
-		select {
-		case answer = <-answerCh:
-		case err := <-answerErrCh:
+		answer, err := answerWaiter.Wait(answerCtx)
+		if err != nil {
 			t.Fatalf("Failed waiting for assistant message after abort: %v", err)
 		}
 
@@ -705,31 +743,73 @@ func TestSessionE2E(t *testing.T) {
 
 		var receivedEvents []copilot.SessionEvent
 		var receivedEventsMu sync.Mutex
-		idle := make(chan bool, 1)
+		idleEntered := make(chan struct{})
+		idleRelease := make(chan struct{})
+		idleCompleted := make(chan struct{})
+		releaseIdle := sync.OnceFunc(func() { close(idleRelease) })
+		defer releaseIdle()
 
-		session.On(func(event copilot.SessionEvent) {
+		unsubscribe := session.On(func(event copilot.SessionEvent) {
 			receivedEventsMu.Lock()
 			receivedEvents = append(receivedEvents, event)
 			receivedEventsMu.Unlock()
-			if event.Type() == "session.idle" {
-				select {
-				case idle <- true:
-				default:
+			if data, ok := event.Data.(*copilot.SessionIdleData); ok {
+				if (event.AgentID != nil && *event.AgentID != "") ||
+					(data.Mode != nil && *data.Mode == copilot.SessionModeAutopilot) {
+					return
 				}
+				close(idleEntered)
+				<-idleRelease
+				close(idleCompleted)
 			}
 		})
+		defer unsubscribe()
 
-		// Send a message to trigger events
-		_, err = session.Send(t.Context(), copilot.MessageOptions{Prompt: "What is 100+200?"})
-		if err != nil {
-			t.Fatalf("Failed to send message: %v", err)
+		type sendResult struct {
+			message *copilot.SessionEvent
+			err     error
+		}
+		result := make(chan sendResult, 1)
+		sendCtx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+		defer cancel()
+		go func() {
+			message, err := session.SendAndWait(sendCtx, copilot.MessageOptions{Prompt: "What is 100+200?"})
+			result <- sendResult{message, err}
+		}()
+
+		select {
+		case <-idleEntered:
+		case got := <-result:
+			t.Fatalf("SendAndWait returned before the root idle listener entered: %v", got.err)
+		case <-sendCtx.Done():
+			t.Fatal("Timed out waiting for the root idle listener")
 		}
 
-		// Wait for session to become idle
+		// Hold the earlier subscriber inside root-idle processing and give the
+		// waiter a bounded opportunity to return incorrectly on another goroutine.
 		select {
-		case <-idle:
-		case <-time.After(60 * time.Second):
-			t.Fatal("Timed out waiting for session.idle")
+		case got := <-result:
+			t.Fatalf("SendAndWait returned while the root idle listener was active: %v", got.err)
+		case <-time.After(100 * time.Millisecond):
+		}
+		releaseIdle()
+
+		select {
+		case got := <-result:
+			if got.err != nil {
+				t.Fatalf("SendAndWait failed: %v", got.err)
+			}
+			if got.message == nil || got.message.Type() != "assistant.message" {
+				t.Fatalf("Expected final assistant message, got %v", got.message)
+			}
+		case <-sendCtx.Done():
+			t.Fatal("Timed out waiting for SendAndWait")
+		}
+		// Do not wait for the subscriber after SendAndWait: it must be done already.
+		select {
+		case <-idleCompleted:
+		default:
+			t.Fatal("SendAndWait returned before the root idle listener completed")
 		}
 
 		// Should have received multiple events
@@ -767,7 +847,7 @@ func TestSessionE2E(t *testing.T) {
 		// Verify the assistant response contains the expected answer.
 		// session.idle is ephemeral and not in GetEvents(), but we already
 		// confirmed idle via the live event handler above.
-		assistantMessage, err := testharness.GetFinalAssistantMessage(t.Context(), session, true)
+		assistantMessage, err := testharness.GetFinalAssistantMessageFromHistory(t.Context(), session)
 		if err != nil {
 			t.Fatalf("Failed to get assistant message: %v", err)
 		}
@@ -794,12 +874,14 @@ func TestSessionE2E(t *testing.T) {
 		}
 
 		// Session should work normally with custom config dir
+		finalMessage := testharness.SubscribeToFinalAssistantMessage(session)
+		defer finalMessage.Close()
 		_, err = session.Send(t.Context(), copilot.MessageOptions{Prompt: "What is 1+1?"})
 		if err != nil {
 			t.Fatalf("Failed to send message: %v", err)
 		}
 
-		assistantMessage, err := testharness.GetFinalAssistantMessage(t.Context(), session)
+		assistantMessage, err := finalMessage.Wait(t.Context())
 		if err != nil {
 			t.Fatalf("Failed to get assistant message: %v", err)
 		}
@@ -833,14 +915,8 @@ func TestSessionE2E(t *testing.T) {
 			t.Fatalf("Failed to send message to session2: %v", err)
 		}
 
-		// Small delay to ensure session files are written to disk
-		time.Sleep(200 * time.Millisecond)
-
 		// List sessions and verify they're included
-		sessions, err := client.ListSessions(t.Context(), nil)
-		if err != nil {
-			t.Fatalf("Failed to list sessions: %v", err)
-		}
+		sessions := waitForListedSessions(t, client, session1.SessionID, session2.SessionID)
 
 		// Verify it's a list
 		if sessions == nil {
@@ -901,14 +977,8 @@ func TestSessionE2E(t *testing.T) {
 
 		sessionID := session.SessionID
 
-		// Small delay to ensure session file is written to disk
-		time.Sleep(200 * time.Millisecond)
-
 		// Verify session exists in the list
-		sessions, err := client.ListSessions(t.Context(), nil)
-		if err != nil {
-			t.Fatalf("Failed to list sessions: %v", err)
-		}
+		sessions := waitForListedSessions(t, client, sessionID)
 
 		sessionIDs := make([]string, len(sessions))
 		for i, s := range sessions {
@@ -962,14 +1032,12 @@ func TestSessionE2E(t *testing.T) {
 			t.Fatalf("Failed to send message: %v", err)
 		}
 
-		// Small delay to ensure session file is written to disk
-		time.Sleep(200 * time.Millisecond)
-
 		// Get metadata for the session we just created
-		metadata, err := client.GetSessionMetadata(t.Context(), session.SessionID)
-		if err != nil {
-			t.Fatalf("Failed to get session metadata: %v", err)
-		}
+		metadata := waitForPersistedValue(t, "session metadata to persist", func(ctx context.Context) (*copilot.SessionMetadata, error) {
+			return client.GetSessionMetadata(ctx, session.SessionID)
+		}, func(metadata *copilot.SessionMetadata) bool {
+			return metadata != nil
+		})
 
 		if metadata == nil {
 			t.Fatal("Expected metadata to be non-nil")
@@ -1018,13 +1086,9 @@ func TestSessionE2E(t *testing.T) {
 			t.Fatalf("Failed to send message: %v", err)
 		}
 
-		// Small delay to ensure session data is flushed to disk
-		time.Sleep(500 * time.Millisecond)
-
-		lastSessionID, err := client.GetLastSessionID(t.Context())
-		if err != nil {
-			t.Fatalf("Failed to get last session ID: %v", err)
-		}
+		lastSessionID := waitForPersistedValue(t, "last session ID to persist", client.GetLastSessionID, func(id *string) bool {
+			return id != nil && *id == session.SessionID
+		})
 
 		if lastSessionID == nil {
 			t.Fatal("Expected last session ID to be non-nil")
@@ -1178,13 +1242,11 @@ func TestSessionLogE2E(t *testing.T) {
 		t.Fatalf("Failed to create session: %v", err)
 	}
 
-	// Collect events
-	var events []copilot.SessionEvent
-	var mu sync.Mutex
+	events := make(chan copilot.SessionEvent, 4)
 	unsubscribe := session.On(func(event copilot.SessionEvent) {
-		mu.Lock()
-		defer mu.Unlock()
-		events = append(events, event)
+		if getEventMessage(event) != "" {
+			events <- event
+		}
 	})
 	defer unsubscribe()
 
@@ -1193,7 +1255,7 @@ func TestSessionLogE2E(t *testing.T) {
 			t.Fatalf("Log failed: %v", err)
 		}
 
-		evt := waitForEvent(t, &mu, &events, copilot.SessionEventTypeSessionInfo, "Info message", 5*time.Second)
+		evt := waitForLogEvent(t, events, copilot.SessionEventTypeSessionInfo, "Info message")
 		id, idOk := evt.Data.(*copilot.SessionInfoData)
 		if !idOk || id.InfoType != "notification" {
 			t.Errorf("Expected infoType 'notification', got %v", evt.Data)
@@ -1208,7 +1270,7 @@ func TestSessionLogE2E(t *testing.T) {
 			t.Fatalf("Log failed: %v", err)
 		}
 
-		evt := waitForEvent(t, &mu, &events, copilot.SessionEventTypeSessionWarning, "Warning message", 5*time.Second)
+		evt := waitForLogEvent(t, events, copilot.SessionEventTypeSessionWarning, "Warning message")
 		wd, wdOk := evt.Data.(*copilot.SessionWarningData)
 		if !wdOk || wd.WarningType != "notification" {
 			t.Errorf("Expected warningType 'notification', got %v", evt.Data)
@@ -1223,7 +1285,7 @@ func TestSessionLogE2E(t *testing.T) {
 			t.Fatalf("Log failed: %v", err)
 		}
 
-		evt := waitForEvent(t, &mu, &events, copilot.SessionEventTypeSessionError, "Error message", 5*time.Second)
+		evt := waitForLogEvent(t, events, copilot.SessionEventTypeSessionError, "Error message")
 		ed, edOk := evt.Data.(*copilot.SessionErrorData)
 		if !edOk || ed.ErrorType != "notification" {
 			t.Errorf("Expected errorType 'notification', got %v", evt.Data)
@@ -1238,7 +1300,7 @@ func TestSessionLogE2E(t *testing.T) {
 			t.Fatalf("Log failed: %v", err)
 		}
 
-		evt := waitForEvent(t, &mu, &events, copilot.SessionEventTypeSessionInfo, "Ephemeral message", 5*time.Second)
+		evt := waitForLogEvent(t, events, copilot.SessionEventTypeSessionInfo, "Ephemeral message")
 		id2, id2Ok := evt.Data.(*copilot.SessionInfoData)
 		if !id2Ok || id2.InfoType != "notification" {
 			t.Errorf("Expected infoType 'notification', got %v", evt.Data)
@@ -1249,23 +1311,21 @@ func TestSessionLogE2E(t *testing.T) {
 	})
 }
 
-// waitForEvent polls the collected events for a matching event type and message.
-func waitForEvent(t *testing.T, mu *sync.Mutex, events *[]copilot.SessionEvent, eventType copilot.SessionEventType, message string, timeout time.Duration) copilot.SessionEvent {
+func waitForLogEvent(t *testing.T, events <-chan copilot.SessionEvent, eventType copilot.SessionEventType, message string) copilot.SessionEvent {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		for _, evt := range *events {
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case evt := <-events:
 			if evt.Type() == eventType && getEventMessage(evt) == message {
-				mu.Unlock()
 				return evt
 			}
+		case <-timer.C:
+			t.Fatalf("Timed out waiting for %s event with message %q", eventType, message)
+			return copilot.SessionEvent{}
 		}
-		mu.Unlock()
-		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("Timed out waiting for %s event with message %q", eventType, message)
-	return copilot.SessionEvent{} // unreachable
 }
 
 // getEventMessage extracts the Message field from session info/warning/error event data.

@@ -13,6 +13,9 @@ import type {
     SessionFsSqliteQueryType,
 } from "./generated/rpc.js";
 
+const MAX_BINARY_BYTES = ((64 * 1024 * 1024 - 1024) / 4) * 3;
+const MAX_BINARY_CONTENT_LENGTH = Math.ceil(MAX_BINARY_BYTES / 3) * 4;
+
 export type { SessionFsSqliteQueryType, SessionFsSqliteTransactionErrorClass };
 
 /**
@@ -21,6 +24,14 @@ export type { SessionFsSqliteQueryType, SessionFsSqliteTransactionErrorClass };
  * `error` field, since providers signal errors by throwing.
  */
 export type SessionFsFileInfo = Omit<SessionFsStatResult, "error">;
+
+/** Raw bytes and the authoritative total file byte length captured by the same read. */
+export interface SessionFsByteRange {
+    /** Requested bytes; boundaries may split UTF-8 characters. */
+    content: Uint8Array;
+    /** Total file byte length, independent of the requested range. */
+    byteLength: number;
+}
 
 /**
  * Result of a SQLite query execution via {@link SessionFsSqliteProvider.query}.
@@ -61,6 +72,11 @@ export class SessionFsSqliteTransactionFailure extends Error {
         this.name = "SessionFsSqliteTransactionFailure";
         this.errorClass = errorClass;
     }
+}
+
+/** Throw from `writeFile` only when the provider changed the target before failing. */
+export class SessionFsWriteFailure extends Error {
+    readonly writeChanged = true;
 }
 
 /**
@@ -112,7 +128,22 @@ export interface SessionFsProvider {
     /** Reads the full content of a file. Throw if the file does not exist. */
     readFile(path: string): Promise<string>;
 
-    /** Writes content to a file, creating parent directories if needed. */
+    /** Read exact file bytes. Required when capabilities.binary is enabled. */
+    readFileBytes?(path: string): Promise<Uint8Array>;
+
+    /**
+     * Reads raw bytes starting at a non-negative safe integer byte offset.
+     * Omit length to read through EOF; zero returns only byte length.
+     * At or beyond EOF, content is empty. Advertise capabilities.readFileRange
+     * only when every provider implements bounded reads without full-file downloads.
+     * This capability is independent of binary reads and writes.
+     */
+    readFileRange?(path: string, offset: number, length?: number): Promise<SessionFsByteRange>;
+
+    /** Write exact file bytes. Required when capabilities.binary is enabled. */
+    writeFileBytes?(path: string, content: Uint8Array, mode?: number): Promise<void>;
+
+    /** Writes content to a file, creating parent directories if needed. Throw {@link SessionFsWriteFailure} if a failed write changed the target. */
     writeFile(path: string, content: string, mode?: number): Promise<void>;
 
     /** Appends content to a file, creating parent directories if needed. */
@@ -166,6 +197,38 @@ function normalizeSqliteParams(
  */
 export function createSessionFsAdapter(provider: SessionFsProvider): SessionFsHandler {
     return {
+        readFileRange: async ({ path, offset, length }) => {
+            try {
+                if (
+                    !Number.isSafeInteger(offset) ||
+                    offset < 0 ||
+                    (length !== undefined && (!Number.isSafeInteger(length) || length < 0))
+                ) {
+                    throw new RangeError(
+                        "SessionFs byte offset and length must be non-negative safe integers"
+                    );
+                }
+                if (!provider.readFileRange) {
+                    throw new Error(
+                        "Byte-range reads are not supported by this SessionFs provider"
+                    );
+                }
+                const result = await provider.readFileRange(path, offset, length);
+                if (!Number.isSafeInteger(result.byteLength) || result.byteLength < 0) {
+                    throw new Error("SessionFs byte length must be a non-negative safe integer");
+                }
+                const available = Math.max(0, result.byteLength - offset);
+                if (result.content.byteLength !== Math.min(length ?? available, available)) {
+                    throw new Error("SessionFs returned an incorrect byte range length");
+                }
+                return {
+                    content: Buffer.from(result.content).toString("base64"),
+                    byteLength: result.byteLength,
+                };
+            } catch (err) {
+                return { content: "", byteLength: 0, error: toSessionFsError(err) };
+            }
+        },
         readFile: async ({ path }) => {
             try {
                 const content = await provider.readFile(path);
@@ -174,9 +237,62 @@ export function createSessionFsAdapter(provider: SessionFsProvider): SessionFsHa
                 return { content: "", error: toSessionFsError(err) };
             }
         },
+        readFileBytes: async ({ path }) => {
+            if (!provider.readFileBytes) {
+                return {
+                    content: "",
+                    error: { code: "UNKNOWN", message: "Binary reads are not supported" },
+                };
+            }
+            try {
+                const bytes = await provider.readFileBytes(path);
+                if (bytes.length > MAX_BINARY_BYTES) {
+                    return {
+                        content: "",
+                        error: {
+                            code: "UNKNOWN",
+                            message:
+                                "sessionFs.readFileBytes content exceeds the binary read limit",
+                        },
+                    };
+                }
+                return {
+                    content: Buffer.from(bytes).toString("base64"),
+                };
+            } catch (err) {
+                return { content: "", error: toSessionFsError(err) };
+            }
+        },
         writeFile: async ({ path, content, mode }) => {
             try {
                 await provider.writeFile(path, content, mode);
+                return undefined;
+            } catch (err) {
+                const error = toSessionFsError(err);
+                return err instanceof SessionFsWriteFailure
+                    ? { ...error, writeChanged: true }
+                    : error;
+            }
+        },
+        writeFileBytes: async ({ path, content, mode }) => {
+            if (!provider.writeFileBytes) {
+                return { code: "UNKNOWN", message: "Binary writes are not supported" };
+            }
+            if (content.length > MAX_BINARY_CONTENT_LENGTH) {
+                return {
+                    code: "UNKNOWN",
+                    message: "sessionFs.writeFileBytes content exceeds the binary write limit",
+                };
+            }
+            const bytes = Buffer.from(content, "base64");
+            if (bytes.toString("base64") !== content || bytes.length > MAX_BINARY_BYTES) {
+                return {
+                    code: "UNKNOWN",
+                    message: "invalid sessionFs.writeFileBytes base64 content",
+                };
+            }
+            try {
+                await provider.writeFileBytes(path, bytes, mode);
                 return undefined;
             } catch (err) {
                 return toSessionFsError(err);

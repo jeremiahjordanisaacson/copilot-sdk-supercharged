@@ -7,7 +7,7 @@ Session lifecycle hooks let you respond to session start and end events. Use the
 * Track session metrics and analytics
 * Configure session behavior dynamically
 
-## Session start hook {#session-start}
+## Session start hook
 
 The `onSessionStart` hook is called when a session begins (new or resumed).
 
@@ -135,8 +135,8 @@ public interface SessionStartHandler {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `timestamp` | number | Unix timestamp when the hook was triggered |
-| `cwd` | string | Current working directory |
+| `timestamp` | SDK timestamp type | When the hook was triggered |
+| `workingDirectory` | string | Current working directory |
 | `source` | `"startup"` \| `"resume"` \| `"new"` | How the session was started |
 | `initialPrompt` | string \| undefined | The initial prompt if provided |
 
@@ -160,7 +160,7 @@ const session = await client.createSession({
     onSessionStart: async (input, invocation) => {
       console.log(`Session ${invocation.sessionId} started (${input.source})`);
       
-      const projectInfo = await detectProjectType(input.cwd);
+      const projectInfo = await detectProjectType(input.workingDirectory);
       
       return {
         additionalContext: `
@@ -180,22 +180,24 @@ Package manager: ${projectInfo.packageManager}
 <summary><strong>Python</strong></summary>
 
 ```python
+from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
-async def on_session_start(input_data, invocation):
-    print(f"Session {invocation['session_id']} started ({input_data['source']})")
-    
-    project_info = await detect_project_type(input_data["cwd"])
-    
-    return {
-        "additionalContext": f"""
+async def create_project_session(client: CopilotClient, detect_project_type):
+    async def on_session_start(input_data, invocation):
+        print(f"Session {invocation['session_id']} started ({input_data['source']})")
+
+        project_info = await detect_project_type(input_data["workingDirectory"])
+
+        return {
+            "additionalContext": f"""
 This is a {project_info['type']} project.
 Main language: {project_info['language']}
 Package manager: {project_info['packageManager']}
-        """.strip()
-    }
+            """.strip()
+        }
 
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={"on_session_start": on_session_start})
+    return await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={"on_session_start": on_session_start})
 ```
 
 </details>
@@ -252,9 +254,11 @@ const session = await client.createSession({
 });
 ```
 
-## Session end hook {#session-end}
+## Session end hook
 
 The `onSessionEnd` hook is called when a session ends.
+
+A standalone SDK session remains active between prompts. Completing a prompt does not end the session; disconnect or dispose the session to run its end hook.
 
 ### Hook signature
 
@@ -360,8 +364,8 @@ public interface SessionEndHandler {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `timestamp` | number | Unix timestamp when the hook was triggered |
-| `cwd` | string | Current working directory |
+| `timestamp` | SDK timestamp type | When the hook was triggered |
+| `workingDirectory` | string | Current working directory |
 | `reason` | string | Why the session ended (see below) |
 | `finalMessage` | string \| undefined | The last message from the session |
 | `error` | string \| undefined | Error message if session ended due to error |
@@ -392,7 +396,7 @@ public interface SessionEndHandler {
 <summary><strong>Node.js / TypeScript</strong></summary>
 
 ```typescript
-const sessionStartTimes = new Map<string, number>();
+const sessionStartTimes = new Map<string, Date>();
 
 const session = await client.createSession({
   hooks: {
@@ -402,7 +406,7 @@ const session = await client.createSession({
     },
     onSessionEnd: async (input, invocation) => {
       const startTime = sessionStartTimes.get(invocation.sessionId);
-      const duration = startTime ? input.timestamp - startTime : 0;
+      const duration = startTime ? input.timestamp.getTime() - startTime.getTime() : 0;
       
       await recordMetrics({
         sessionId: invocation.sessionId,
@@ -423,28 +427,30 @@ const session = await client.createSession({
 <summary><strong>Python</strong></summary>
 
 ```python
+from copilot import CopilotClient
 from copilot.session import PermissionHandler
 
-session_start_times = {}
+async def create_instrumented_session(client: CopilotClient, record_metrics):
+    session_start_times = {}
 
-async def on_session_start(input_data, invocation):
-    session_start_times[invocation["session_id"]] = input_data["timestamp"]
-    return None
+    async def on_session_start(input_data, invocation):
+        session_start_times[invocation["session_id"]] = input_data["timestamp"]
+        return None
 
-async def on_session_end(input_data, invocation):
-    start_time = session_start_times.get(invocation["session_id"])
-    duration = input_data["timestamp"] - start_time if start_time else 0
-    
-    await record_metrics({
-        "session_id": invocation["session_id"],
-        "duration": duration,
-        "end_reason": input_data["reason"],
-    })
-    
-    session_start_times.pop(invocation["session_id"], None)
-    return None
+    async def on_session_end(input_data, invocation):
+        start_time = session_start_times.get(invocation["session_id"])
+        duration = (input_data["timestamp"] - start_time).total_seconds() * 1000 if start_time else 0
 
-session = await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={
+        await record_metrics({
+            "session_id": invocation["session_id"],
+            "duration": duration,
+            "end_reason": input_data["reason"],
+        })
+
+        session_start_times.pop(invocation["session_id"], None)
+        return None
+
+    return await client.create_session(on_permission_request=PermissionHandler.approve_all, hooks={
         "on_session_start": on_session_start,
         "on_session_end": on_session_end,
     })
@@ -491,7 +497,7 @@ const session = await client.createSession({
         // Save state for potential resume
         await saveSessionState(invocation.sessionId, {
           endTime: input.timestamp,
-          cwd: input.cwd,
+          cwd: input.workingDirectory,
           reason: input.reason,
         });
       }
@@ -504,7 +510,7 @@ const session = await client.createSession({
 #### Log session summary
 
 ```typescript
-const sessionData: Record<string, { prompts: number; tools: number; startTime: number }> = {};
+const sessionData: Record<string, { prompts: number; tools: number; startTime: Date }> = {};
 
 const session = await client.createSession({
   hooks: {
@@ -529,7 +535,7 @@ const session = await client.createSession({
       console.log(`
 Session Summary:
   ID: ${invocation.sessionId}
-  Duration: ${(input.timestamp - data.startTime) / 1000}s
+  Duration: ${(input.timestamp.getTime() - data.startTime.getTime()) / 1000}s
   Prompts: ${data.prompts}
   Tool calls: ${data.tools}
   End reason: ${input.reason}
@@ -542,7 +548,7 @@ Session Summary:
 });
 ```
 
-## Agent stop hook {#agent-stop}
+## Agent stop hook
 
 The agent stop hook runs when the top-level agent naturally reaches the end of a turn. It is separate from `onSessionEnd`: the session remains active, and the hook can request another agent turn.
 

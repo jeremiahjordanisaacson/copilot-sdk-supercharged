@@ -1,12 +1,18 @@
-.github/workflows/*.lock.yml linguist-generated=true merge=ours
+# Normalize line endings to LF on checkout across all platforms.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.node binary
+
+.github/workflows/*.lock.yml linguist-generated=true
 
 # Cross-platform tools rewrite these files, so keep their output deterministic.
 java/**/*.java text eol=lf
 
 # Generated files — keep LF line endings so codegen output is deterministic across platforms.
-nodejs/src/generated/* eol=lf linguist-generated=true
-dotnet/src/Generated/* eol=lf linguist-generated=true
-python/copilot/generated/* eol=lf linguist-generated=true
+nodejs/src/generated/** eol=lf linguist-generated=true
+dotnet/src/Generated/** eol=lf linguist-generated=true
+python/copilot/generated/** eol=lf linguist-generated=true
 go/zsession_events.go eol=lf linguist-generated=true
 go/zsession_encoding.go eol=lf linguist-generated=true
 go/rpc/zrpc.go eol=lf linguist-generated=true
@@ -61,3 +67,5 @@ fsharp/**/*.fs linguist-language=F#
 julia/**/*.jl linguist-language=Julia
 zig/**/*.zig linguist-language=Zig
 solidity/src/**/*.sol linguist-language=Solidity
+rust/src/generated/** eol=lf linguist-generated=true
+java/sdk/src/generated/** eol=lf linguist-generated=true

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
+import json
 import logging
 import os
 import pathlib
@@ -19,13 +20,30 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, Required, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    NotRequired,
+    Protocol,
+    Required,
+    TypedDict,
+    TypeVar,
+    cast,
+    runtime_checkable,
+)
+
+from pydantic import BaseModel
 
 from ._diagnostics import log_timing
 from ._jsonrpc import JsonRpcError, ProcessExitedError
 from ._telemetry import get_trace_context, trace_context
 from .canvas import CanvasError, CanvasHandler, OpenCanvasInstance
+from .generated.rpc import (
+    AutoTier as _RpcAutoTier,
+)
 from .generated.rpc import (
     BuiltinToolInputSchemaType,
     CanvasProviderCloseRequest,
@@ -38,17 +56,21 @@ from .generated.rpc import (
     LogRequest,
     MCPOauthHandlePendingRequest,
     MCPOauthPendingRequestResponse,
-    MCPOauthPendingRequestResponseKind,
+    MCPServerConfigDeferTools,
+    ModelSwitchAutoTierResult,
     ModelSwitchToRequest,
     PermissionDecision,
     PermissionDecisionApproveOnce,
     PermissionDecisionContext,
     PermissionDecisionRequest,
     PermissionDecisionUserNotAvailable,
+    ProtocolExternalToolDefinition,
     ProviderTokenAcquireRequest,
     ProviderTokenAcquireResult,
     SessionLogLevel,
     SessionRpc,
+    SkillProviderDescriptor,
+    ToolsSetRequest,
     UIElicitationRequest,
     UIElicitationResponse,
     UIElicitationResponseAction,
@@ -56,6 +78,8 @@ from .generated.rpc import (
     UIElicitationSchemaProperty,
     UIElicitationSchemaPropertyType,
     UIHandlePendingElicitationRequest,
+    _SkillProviderListResult,
+    _SkillProviderReadResult,
 )
 from .generated.rpc import (
     CanvasHandler as RpcCanvasHandler,
@@ -66,18 +90,25 @@ from .generated.rpc import (
 from .generated.rpc import ModelCapabilitiesOverride as _RpcModelCapabilitiesOverride
 from .generated.session_events import (
     AssistantMessageData,
+    AssistedApprovalAssessment,
     CapabilitiesChangedData,
     CommandExecuteData,
     ElicitationRequestedData,
+    ExternalToolCompletedData,
     ExternalToolRequestedData,
     McpOauthRequiredData,
+    PermissionPromptRequest,
     PermissionRequest,
     PermissionRequestedData,
+    SessionAutopilotStoppedData,
     SessionCanvasClosedData,
     SessionCanvasOpenedData,
     SessionErrorData,
     SessionEvent,
     SessionIdleData,
+    SessionMode,
+    SessionWarningData,
+    UserMessageData,
     session_event_from_dict,
 )
 from .generated.session_events import (
@@ -92,6 +123,7 @@ from .tools import (
 )
 
 logger = logging.getLogger(__name__)
+TResponse = TypeVar("TResponse", bound=BaseModel)
 
 # Fixed name of the runtime's built-in tool-search tool. A client can replace
 # its behavior by registering a tool with this exact name and
@@ -104,6 +136,7 @@ if TYPE_CHECKING:
 
 # Re-export SessionEvent under an alias used internally
 SessionEventTypeAlias = SessionEvent
+
 
 # ============================================================================
 # Reasoning Effort
@@ -119,6 +152,8 @@ class ModelVisionLimitsOverride:
 
 @dataclass
 class ModelLimitsOverride:
+    """Per-field overrides; the context window does not replace a separate prompt limit."""
+
     max_prompt_tokens: int | None = None
     max_output_tokens: int | None = None
     max_context_window_tokens: int | None = None
@@ -150,19 +185,19 @@ def _capabilities_to_dict(caps: ModelCapabilitiesOverride) -> dict:
     if caps.limits is not None:
         lim: dict = {}
         if caps.limits.max_prompt_tokens is not None:
-            lim["maxPromptTokens"] = caps.limits.max_prompt_tokens
+            lim["max_prompt_tokens"] = caps.limits.max_prompt_tokens
         if caps.limits.max_output_tokens is not None:
-            lim["maxOutputTokens"] = caps.limits.max_output_tokens
+            lim["max_output_tokens"] = caps.limits.max_output_tokens
         if caps.limits.max_context_window_tokens is not None:
-            lim["maxContextWindowTokens"] = caps.limits.max_context_window_tokens
+            lim["max_context_window_tokens"] = caps.limits.max_context_window_tokens
         if caps.limits.vision is not None:
             v: dict = {}
             if caps.limits.vision.supported_media_types is not None:
-                v["supportedMediaTypes"] = caps.limits.vision.supported_media_types
+                v["supported_media_types"] = caps.limits.vision.supported_media_types
             if caps.limits.vision.max_prompt_images is not None:
-                v["maxPromptImages"] = caps.limits.vision.max_prompt_images
+                v["max_prompt_images"] = caps.limits.vision.max_prompt_images
             if caps.limits.vision.max_prompt_image_size is not None:
-                v["maxPromptImageSize"] = caps.limits.vision.max_prompt_image_size
+                v["max_prompt_image_size"] = caps.limits.vision.max_prompt_image_size
             if v:
                 lim["vision"] = v
         if lim:
@@ -170,14 +205,91 @@ def _capabilities_to_dict(caps: ModelCapabilitiesOverride) -> dict:
     return result
 
 
-ReasoningEffort = Literal["low", "medium", "high", "xhigh", "max"]
+# Model-defined; use list_models() to discover supported values. BYOK providers can define more.
+ReasoningEffort = str
 ReasoningSummary = Literal["none", "concise", "detailed"]
 ContextTier = Literal["default", "long_context"]
+AutoTier = str
 SessionFsConventions = Literal["posix", "windows"]
+
+
+class _Unset:
+    """Sentinel distinguishing an omitted argument from an explicit ``None``.
+
+    Auto routing treats ``None`` as a meaningful value: it means "return to the
+    provider's default routing". Omitting the argument instead means "leave the
+    current preference alone", so the two cases cannot share a default.
+    """
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+
+_UNSET = _Unset()
+
+
+def _auto_tier_to_wire(auto_tier: AutoTier | _RpcAutoTier | None) -> str | None:
+    """Normalize an Auto tier to its wire value.
+
+    Callers may pass either the ``AutoTier`` string literal or the generated
+    ``AutoTier`` enum, which is the type the SDK hands back on results and
+    events. The JSON-RPC encoder only understands plain strings.
+    """
+    if isinstance(auto_tier, Enum):
+        return str(auto_tier.value)
+    return auto_tier
+
+
+def _tool_to_wire_definition(tool: Tool) -> ProtocolExternalToolDefinition:
+    defer = MCPServerConfigDeferTools(tool.defer) if tool.defer is not None else None
+    return ProtocolExternalToolDefinition(
+        name=tool.name,
+        description=tool.description or "",
+        parameters=tool.parameters or None,
+        overrides_built_in_tool=True if tool.overrides_built_in_tool else None,
+        skip_permission=True if tool.skip_permission else None,
+        defer=defer,
+        metadata=tool.metadata,
+        is_terminal=True if tool.is_terminal else None,
+        namespace=tool.namespace,
+    )
+
+
+def _tools_to_wire_definitions(tools: list[Tool] | None) -> list[ProtocolExternalToolDefinition]:
+    return [_tool_to_wire_definition(tool) for tool in tools or []]
+
+
+def _tool_handlers_for(tools: list[Tool] | None) -> dict[str, ToolHandler]:
+    return {
+        tool.name: tool.handler for tool in tools or [] if tool.name and tool.handler is not None
+    }
+
+
+def _hook_error_text(error: Any) -> Any:
+    """Decode the ``error`` of an errorOccurred or sessionEnd hook input.
+
+    The CLI sends an error object (``{"name", "message", "stack"}`` or
+    ``{"message"}``) where the hook input types declare a string: its message
+    becomes the error, and an object without a string message becomes its
+    compact JSON. Other values pass through.
+    """
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str):
+            return message
+        return json.dumps(error, separators=(",", ":"), ensure_ascii=False)
+    return error
+
+
+def _consume_task_exception(task: asyncio.Task[Any]) -> None:
+    if not task.cancelled():
+        task.exception()
 
 
 class SessionFsCapabilities(TypedDict, total=False):
     sqlite: bool
+    binary: bool
+    read_file_range: bool
 
 
 class SessionFsConfig(TypedDict):
@@ -239,7 +351,43 @@ class BlobAttachment(TypedDict):
     displayName: NotRequired[str]
 
 
-Attachment = FileAttachment | DirectoryAttachment | SelectionAttachment | BlobAttachment
+class ExtensionContextAttachment(TypedDict):
+    """Structured context contributed by an extension."""
+
+    type: Literal["extension_context"]
+    capturedAt: str
+    extensionId: str
+    title: str
+    canvasId: NotRequired[str]
+    instanceId: NotRequired[str]
+    payload: NotRequired[Any]
+
+
+Attachment = (
+    FileAttachment
+    | DirectoryAttachment
+    | SelectionAttachment
+    | BlobAttachment
+    | ExtensionContextAttachment
+)
+
+
+@dataclass(frozen=True)
+class AgentMessageSource:
+    """Identify the agent that produced a message.
+
+    The agent ID is opaque and is sent unchanged after the ``agent-`` prefix.
+    """
+
+    agent_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.agent_id, str):
+            raise TypeError("agent_id must be a string")
+
+
+MessageSource = Literal["user", "system"] | AgentMessageSource
+"""Message provenance, independent of delivery mode."""
 
 # ============================================================================
 # System Message Configuration
@@ -309,12 +457,13 @@ SYSTEM_MESSAGE_SECTIONS: dict[SystemMessageSection, str] = {
     "tool_instructions": "Per-tool usage instructions",
     "custom_instructions": "Repository and organization custom instructions",
     "runtime_instructions": (
-        "Runtime-provided context and instructions"
-        " (e.g. system notifications, memories, workspace context,"
-        " mode-specific instructions, content-exclusion policy)"
+        "Runtime-provided system-prompt context and instructions, such as system"
+        " notifications, memories, workspace context, and content-exclusion policy."
+        " Mode-specific instructions can travel in transition messages instead."
     ),
     "last_instructions": (
-        "End-of-prompt instructions: parallel tool calling, persistence, task completion"
+        "End-of-prompt instructions: parallel tool calling, persistence, task completion,"
+        " and configured subagent-model guidance when the task tool is available"
     ),
 }
 
@@ -409,6 +558,10 @@ def create_attributed_permission_result(
 class PermissionInvocation(TypedDict, total=False):
     session_id: Required[str]
     managed_settings_enabled: NotRequired[bool]
+    assisted_approval_assessment: NotRequired[AssistedApprovalAssessment]
+    # Only standard prompt kinds can clear a raw managed-approval requirement.
+    # Missing and other prompt kinds must remain conservative.
+    prompt_request: NotRequired[PermissionPromptRequest]
 
 
 _PermissionHandlerFn = Callable[
@@ -451,6 +604,7 @@ class McpAuthStaticClientConfig(TypedDict, total=False):
     clientSecret: str
     grantType: Literal["client_credentials"]
     publicClient: bool
+    scope: str
 
 
 class McpAuthRequest(TypedDict, total=False):
@@ -460,6 +614,7 @@ class McpAuthRequest(TypedDict, total=False):
     serverName: Required[str]
     serverUrl: Required[str]
     reason: Required[Literal["initial", "refresh", "reauth", "upscope"]]
+    runtimeRefreshSupported: bool
     wwwAuthenticateParams: McpAuthWwwAuthenticateParams
     resourceMetadata: str
     staticClientConfig: McpAuthStaticClientConfig
@@ -474,9 +629,12 @@ class McpAuthToken(TypedDict, total=False):
 
 
 class McpAuthResult(TypedDict, total=False):
-    """Result returned by an MCP auth request handler."""
+    """Host token, cancellation, or noninteractive handoff for an advertised Refresh.
 
-    kind: Required[Literal["token", "cancelled"]]
+    Handoff acceptance is not token installation or reconnect completion.
+    """
+
+    kind: Required[Literal["token", "cancelled", "runtimeRefresh"]]
     accessToken: str
     tokenType: str
     expiresIn: int
@@ -503,7 +661,7 @@ McpAuthHandler = Callable[
 
 
 class UserInputRequest(TypedDict, total=False):
-    """Request for user input from the agent (enables ask_user tool)"""
+    """Legacy question-and-answer request from the ask_user tool."""
 
     question: str
     choices: list[str]
@@ -864,11 +1022,18 @@ class SessionUiApi:
 class PreToolUseHookInput(TypedDict):
     """Input for pre-tool-use hook"""
 
+    toolCallId: NotRequired[str]
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
     sessionId: str
     timestamp: datetime
     workingDirectory: str
     toolName: str
     toolArgs: Any
+
+    agentId: NotRequired[str]
+    agentType: NotRequired[str]
+    parentAgentId: NotRequired[str]
 
 
 class PreToolUseHookOutput(TypedDict, total=False):
@@ -890,6 +1055,8 @@ PreToolUseHandler = Callable[
 class PreMcpToolCallHookInput(TypedDict):
     """Input for pre-MCP-tool-call hook"""
 
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
     sessionId: str
     timestamp: datetime
     workingDirectory: str
@@ -898,6 +1065,10 @@ class PreMcpToolCallHookInput(TypedDict):
     arguments: Any
     toolCallId: NotRequired[str]
     _meta: NotRequired[dict[str, Any]]
+
+    agentId: NotRequired[str]
+    agentType: NotRequired[str]
+    parentAgentId: NotRequired[str]
 
 
 class PreMcpToolCallHookOutput(TypedDict, total=False):
@@ -921,12 +1092,19 @@ PreMcpToolCallHandler = Callable[
 class PostToolUseHookInput(TypedDict):
     """Input for post-tool-use hook"""
 
+    toolCallId: NotRequired[str]
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
     sessionId: str
     timestamp: datetime
     workingDirectory: str
     toolName: str
     toolArgs: Any
     toolResult: Any
+
+    agentId: NotRequired[str]
+    agentType: NotRequired[str]
+    parentAgentId: NotRequired[str]
 
 
 class PostToolUseHookOutput(TypedDict, total=False):
@@ -951,12 +1129,19 @@ class PostToolUseFailureHookInput(TypedDict):
     ``error`` field (rather than passing the full result object).
     """
 
+    toolCallId: NotRequired[str]
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
     sessionId: str
     timestamp: datetime
     workingDirectory: str
     toolName: str
     toolArgs: Any
     error: str
+
+    agentId: NotRequired[str]
+    agentType: NotRequired[str]
+    parentAgentId: NotRequired[str]
 
 
 class PostToolUseFailureHookOutput(TypedDict, total=False):
@@ -978,18 +1163,31 @@ PostToolUseFailureHandler = Callable[
 class UserPromptSubmittedHookInput(TypedDict):
     """Input for user-prompt-submitted hook"""
 
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
     sessionId: str
     timestamp: datetime
     workingDirectory: str
     prompt: str
 
+    agentId: NotRequired[str]
+    agentType: NotRequired[str]
+    parentAgentId: NotRequired[str]
+
 
 class UserPromptSubmittedHookOutput(TypedDict, total=False):
-    """Output for user-prompt-submitted hook"""
+    """Output for user-prompt-submitted hook.
+
+    A ``decision`` of ``"block"`` refuses the prompt: no model turn runs, no
+    user message is recorded, and the session emits an ephemeral
+    ``session.warning`` (``warningType: "policy_blocked"``) carrying ``reason``.
+    """
 
     modifiedPrompt: str
     additionalContext: str
     suppressOutput: bool
+    decision: Literal["block"]
+    reason: str
 
 
 UserPromptSubmittedHandler = Callable[
@@ -1001,11 +1199,17 @@ UserPromptSubmittedHandler = Callable[
 class UserPromptTransformedHookInput(TypedDict):
     """Input for the user-prompt-transformed hook."""
 
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
     sessionId: str
     timestamp: datetime
     workingDirectory: str
     prompt: str
     transformedPrompt: str
+
+    agentId: NotRequired[str]
+    agentType: NotRequired[str]
+    parentAgentId: NotRequired[str]
 
 
 class UserPromptTransformedHookOutput(TypedDict, total=False):
@@ -1023,11 +1227,17 @@ UserPromptTransformedHandler = Callable[
 class SessionStartHookInput(TypedDict):
     """Input for session-start hook"""
 
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
     sessionId: str
     timestamp: datetime
     workingDirectory: str
     source: Literal["startup", "resume", "new"]
     initialPrompt: NotRequired[str]
+
+    agentId: NotRequired[str]
+    agentType: NotRequired[str]
+    parentAgentId: NotRequired[str]
 
 
 class SessionStartHookOutput(TypedDict, total=False):
@@ -1046,12 +1256,18 @@ SessionStartHandler = Callable[
 class SessionEndHookInput(TypedDict):
     """Input for session-end hook"""
 
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
     sessionId: str
     timestamp: datetime
     workingDirectory: str
     reason: Literal["complete", "error", "abort", "timeout", "user_exit"]
     finalMessage: NotRequired[str]
     error: NotRequired[str]
+
+    agentId: NotRequired[str]
+    agentType: NotRequired[str]
+    parentAgentId: NotRequired[str]
 
 
 class SessionEndHookOutput(TypedDict, total=False):
@@ -1071,12 +1287,18 @@ SessionEndHandler = Callable[
 class ErrorOccurredHookInput(TypedDict):
     """Input for error-occurred hook"""
 
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
     sessionId: str
     timestamp: datetime
     workingDirectory: str
     error: str
     errorContext: Literal["model_call", "tool_execution", "system", "user_input"]
     recoverable: bool
+
+    agentId: NotRequired[str]
+    agentType: NotRequired[str]
+    parentAgentId: NotRequired[str]
 
 
 class ErrorOccurredHookOutput(TypedDict, total=False):
@@ -1097,12 +1319,18 @@ ErrorOccurredHandler = Callable[
 class AgentStopHookInput(TypedDict):
     """Input for the agent-stop hook."""
 
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
     sessionId: str
     timestamp: datetime
     workingDirectory: str
     stopReason: NotRequired[str]
     transcriptPath: NotRequired[str]
     stopHookActive: NotRequired[bool]
+
+    agentId: NotRequired[str]
+    agentType: NotRequired[str]
+    parentAgentId: NotRequired[str]
 
 
 class AgentStopHookOutput(TypedDict, total=False):
@@ -1115,6 +1343,77 @@ class AgentStopHookOutput(TypedDict, total=False):
 AgentStopHandler = Callable[
     [AgentStopHookInput, dict[str, str]],
     AgentStopHookOutput | None | Awaitable[AgentStopHookOutput | None],
+]
+
+
+class SubagentStartHookInput(TypedDict):
+    """Input when a subagent starts; session metadata belongs to its parent."""
+
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
+    sessionId: str
+    timestamp: datetime
+    workingDirectory: str
+    transcriptPath: str
+    agentName: str
+    agentDisplayName: NotRequired[str]
+    agentDescription: NotRequired[str]
+
+    agentId: NotRequired[str]
+    agentType: NotRequired[str]
+    parentAgentId: NotRequired[str]
+
+
+class SubagentStartHookOutput(TypedDict, total=False):
+    """Context prepended to the subagent's initial prompt."""
+
+    additionalContext: str
+
+
+SubagentStartHandler = Callable[
+    [SubagentStartHookInput, dict[str, str]],
+    SubagentStartHookOutput | None | Awaitable[SubagentStartHookOutput | None],
+]
+
+
+class SubagentStopHookInput(TypedDict):
+    """Input after a subagent turn completes; session metadata belongs to its parent."""
+
+    traceparent: NotRequired[str]
+    tracestate: NotRequired[str]
+    sessionId: str
+    timestamp: datetime
+    workingDirectory: str
+    transcriptPath: str
+    agentName: str
+    agentType: str
+    stopReason: Literal["end_turn"]
+    response: str
+    agentId: NotRequired[str]
+    agentDisplayName: NotRequired[str]
+    agentDescription: NotRequired[str]
+
+    parentAgentId: NotRequired[str]
+
+
+class _SubagentStopBlockHookOutput(TypedDict):
+    decision: Literal["block"]
+    reason: str
+    modifiedResponse: NotRequired[str]
+
+
+class _SubagentStopAllowHookOutput(TypedDict, total=False):
+    decision: Literal["allow"]
+    modifiedResponse: str
+
+
+SubagentStopHookOutput = _SubagentStopBlockHookOutput | _SubagentStopAllowHookOutput
+"""Block with a nonempty reason, or allow with an optional response rewrite."""
+
+
+SubagentStopHandler = Callable[
+    [SubagentStopHookInput, dict[str, str]],
+    SubagentStopHookOutput | None | Awaitable[SubagentStopHookOutput | None],
 ]
 
 
@@ -1131,6 +1430,8 @@ class SessionHooks(TypedDict, total=False):
     on_session_end: SessionEndHandler
     on_error_occurred: ErrorOccurredHandler
     on_agent_stop: AgentStopHandler
+    on_subagent_start: SubagentStartHandler
+    on_subagent_stop: SubagentStopHandler
 
 
 # ============================================================================
@@ -1186,6 +1487,7 @@ class GitHubMcpToolConfig(TypedDict, total=False):
 class CustomAgentConfig(TypedDict, total=False):
     """Configuration for a custom agent."""
 
+    hooks: NotRequired[dict[str, list[dict[str, Any]]]]
     name: str  # Unique name of the custom agent
     display_name: NotRequired[str]  # Display name for UI purposes
     description: NotRequired[str]  # Description of what the agent does
@@ -1197,8 +1499,11 @@ class CustomAgentConfig(TypedDict, total=False):
     infer: NotRequired[bool]  # Whether agent is available for model inference
     # Skill names to preload into this agent's context at startup (opt-in; omit for none)
     skills: NotRequired[list[str]]
-    # Model identifier (e.g. "claude-haiku-4.5"); runtime falls back to parent model if unavailable
+    # Model identifier (e.g. "claude-haiku-4.5"); falls back to the parent if unavailable,
+    # unless model_policy is "required".
     model: NotRequired[str]
+    # Whether the authored model is preferred (default) or required without fallback.
+    model_policy: NotRequired[Literal["preferred", "required"]]
     # Reasoning effort for this agent's model. When omitted, the runtime resolves
     # model configuration, then inherits the parent effort only for the same model.
     reasoning_effort: NotRequired[ReasoningEffort]
@@ -1237,6 +1542,18 @@ class InfiniteSessionConfig(TypedDict, total=False):
     buffer_exhaustion_threshold: float
 
 
+class AutopilotOptions(TypedDict, total=False):
+    """Experimental Autopilot policy, independent of the session mode.
+
+    Omitted fields preserve resident values on warm resume or update. New
+    sessions default to continuation enabled with at most five continuations.
+    Re-supply on cold resume.
+    """
+
+    continuation_enabled: bool
+    max_continues: int
+
+
 class SessionLimitsConfig(TypedDict, total=False):
     """Experimental limits for the session's current accounting window."""
 
@@ -1259,6 +1576,39 @@ class LargeToolOutputConfig(TypedDict, total=False):
     max_size_bytes: int
     # Directory to write temp files to. Defaults to the OS temp directory.
     output_directory: str
+
+
+class ImageGenerationConfig(TypedDict, total=False):
+    """**Experimental.** Opt in to an authorized Copilot image model.
+
+    This API may change or be removed in a future release.
+
+    Omission disables on create/cold resume and preserves resident state on
+    resume. Not persisted: re-supply after runtime restart. Policy, permissions,
+    offline mode, and tool filters still apply. BYOK is not supported.
+    """
+
+    enabled: bool
+    """True opts in; False disables image generation."""
+
+    watermark: bool
+    """Request a visible "Made with AI" label on generated and edited images.
+
+    Overrides the user's imageGenerationWatermark preference, which defaults to
+    False. Re-supply after cold resume. Does not enable image generation or
+    enforce enterprise policy.
+    """
+
+    save_to_disk: bool
+    """**Experimental.** Save generated and edited images to the session folder.
+
+    Images go under the session-state directory's ``images`` folder, and the
+    model sees each path as a ``saved_to:`` line in the tool result. Defaults to
+    True; set False to opt out. Subagents follow their parent's value unless they set their own. A
+    failed save still returns the image. Sessions without a local session-state
+    directory never save. Re-supply after cold resume. Does not enable image
+    generation. Sent on the wire as ``saveToDisk``.
+    """
 
 
 class ToolSearchConfig(TypedDict, total=False):
@@ -1292,6 +1642,10 @@ class MemoryConfiguration(TypedDict):
 
     # Whether memory is enabled for the session.
     enabled: bool
+    # "system-prompt" (default) places memories in the system prompt.
+    # "user-prompt" places memories in generated user-role messages.
+    # Experimental: this option may change or be removed in a future release.
+    mode: NotRequired[Literal["system-prompt", "user-prompt"]]
 
 
 # ============================================================================
@@ -1334,6 +1688,46 @@ class ProviderTokenArgs(TypedDict):
 BearerTokenProvider = Callable[[ProviderTokenArgs], str | Awaitable[str]]
 
 
+@runtime_checkable
+class SkillProvider(Protocol):
+    """**Experimental.** Provides session-scoped skills from SDK-owned storage.
+
+    Providers are ephemeral and must be supplied again when resuming a session.
+    The runtime may call providers concurrently, so implementations must be
+    concurrency-safe. Synchronous providers run on the event loop like other
+    Python SDK callbacks; keep them fast or make them async. When the runtime
+    cancels a call, for example after its 30-second limit or when the session
+    disconnects, an async provider's task is cancelled with
+    :class:`asyncio.CancelledError`.
+    """
+
+    def list_skills(
+        self,
+    ) -> list[SkillProviderDescriptor] | None | Awaitable[list[SkillProviderDescriptor] | None]:
+        """Return skill catalog descriptors, or ``None`` for an empty catalog."""
+        ...
+
+    def read_skill(self, name: str) -> str | None | Awaitable[str | None]:
+        """Return SKILL.md markdown for ``name``, or ``None`` when not found."""
+        ...
+
+
+def _skill_provider_failure_error(method_name: Literal["listSkills", "readSkill"]) -> JsonRpcError:
+    return JsonRpcError(-32603, f"Skill provider {method_name} failed")
+
+
+ProviderConfigModelProvider = Literal[
+    "openai",
+    "anthropic",
+    "azure_openai",
+    "ollama",
+    "lm_studio",
+    "foundry_local",
+    "llama_cpp",
+]
+"""Product serving a configured provider's model."""
+
+
 class ProviderConfig(TypedDict, total=False):
     """Configuration for a custom API provider"""
 
@@ -1344,8 +1738,16 @@ class ProviderConfig(TypedDict, total=False):
     # connection instead of HTTP. Applies to OpenAI-compatible providers using
     # wire_api "responses".
     transport: Literal["http", "websockets"]
+    # Product serving the model, such as "ollama" or "lm_studio", reported in
+    # telemetry as model_provider. "azure_openai" also omits explicit
+    # prompt-cache breakpoints, which limit cross-turn cache reuse on Azure; set
+    # it for a proxy or custom domain in front of Azure OpenAI.
+    model_provider: ProviderConfigModelProvider
     base_url: str
     api_key: str
+    # Command run by the runtime before each provider request to obtain a fresh
+    # API key. Command failures fail the turn before sending a model request.
+    api_key_command: str
     # Bearer token for authentication. Sets the Authorization header directly.
     # Use this for services requiring bearer token auth instead of API key.
     # Takes precedence over api_key when both are set.
@@ -1367,6 +1769,9 @@ class ProviderConfig(TypedDict, total=False):
     # (system message, history, tool definitions, user message) would exceed
     # this limit.
     max_prompt_tokens: int
+    # Overrides the maximum combined prompt and output context window.
+    # A separate max_prompt_tokens limit still applies.
+    max_context_window_tokens: int
     # Overrides the resolved model's default max output tokens. When hit, the
     # model stops generating and returns a truncated response.
     max_output_tokens: int
@@ -1374,9 +1779,9 @@ class ProviderConfig(TypedDict, total=False):
     # provider (for example via Azure Managed Identity). Never serialized — the
     # SDK sends hasBearerTokenProvider: true on the wire and answers the
     # runtime's providerToken.getToken requests with this callback's result.
-    # When set alongside api_key/bearer_token, this callback takes precedence: the
-    # runtime applies the token it returns as the Authorization: Bearer header for
-    # each request and does not send the static credential.
+    # When set alongside api_key, api_key_command, or bearer_token, this callback
+    # takes precedence: the runtime applies its token as the Authorization: Bearer header for
+    # each request without sending the static credential or running the command.
     bearer_token_provider: BearerTokenProvider
 
 
@@ -1397,6 +1802,11 @@ class NamedProviderConfig(TypedDict, total=False):
     name: str
     type: Literal["openai", "azure", "anthropic"]
     wire_api: Literal["completions", "responses"]
+    # Product serving this provider's models, such as "ollama" or "lm_studio",
+    # reported in telemetry as model_provider. "azure_openai" also omits
+    # explicit prompt-cache breakpoints, which limit cross-turn cache reuse on
+    # Azure; set it for a proxy or custom domain in front of Azure OpenAI.
+    model_provider: ProviderConfigModelProvider
     base_url: str
     api_key: str
     # Bearer token for authentication. Sets the Authorization header directly.
@@ -1514,6 +1924,15 @@ class _BearerTokenProviderAdapter:
         return ProviderTokenAcquireResult(token=cast(str, result))
 
 
+@dataclass(frozen=True)
+class TranscriptRecoveryReport:
+    """Repair details returned by ``session.resume`` when transcript recovery ran."""
+
+    planned_backup_path: str
+    invalid_line_numbers: list[int]
+    session_start_moved: bool
+
+
 class CopilotSession:
     """
     Represents a single conversation session with the Copilot CLI.
@@ -1548,6 +1967,7 @@ class CopilotSession:
         client: Any,
         workspace_path: os.PathLike[str] | str | None = None,
         managed_settings_enabled: bool = False,
+        on_disconnect: Callable[[], None] | None = None,
     ):
         """
         Initialize a new CopilotSession.
@@ -1565,6 +1985,7 @@ class CopilotSession:
                 creating or resuming the session.
         """
         self.session_id = session_id
+        self.transcript_recovery: TranscriptRecoveryReport | None = None
         self._managed_settings_enabled = managed_settings_enabled
         self._client = client
         self._workspace_path = os.fsdecode(workspace_path) if workspace_path is not None else None
@@ -1572,6 +1993,8 @@ class CopilotSession:
         self._event_handlers_lock = threading.Lock()
         self._tool_handlers: dict[str, ToolHandler] = {}
         self._tool_handlers_lock = threading.Lock()
+        self._set_tools_lock = asyncio.Lock()
+        self._pending_external_tools: dict[str, asyncio.Task[None]] = {}
         self._permission_handler: _PermissionHandlerFn | None = None
         self._permission_handler_lock = threading.Lock()
         self._mcp_auth_handler: McpAuthHandler | None = None
@@ -1588,6 +2011,8 @@ class CopilotSession:
         self._transform_callbacks_lock = threading.Lock()
         self._command_handlers: dict[str, CommandHandler] = {}
         self._command_handlers_lock = threading.Lock()
+        self._skill_provider: SkillProvider | None = None
+        self._skill_provider_lock = threading.Lock()
         self._bearer_token_providers: dict[str, BearerTokenProvider] = {}
         self._bearer_token_providers_lock = threading.Lock()
         self._elicitation_handler: ElicitationHandler | None = None
@@ -1600,6 +2025,77 @@ class CopilotSession:
         self._open_canvases_lock = threading.Lock()
         self._rpc: SessionRpc | None = None
         self._destroyed = False
+        self._response_waits: set[Callable[[], None]] = set()
+        self._structured_waits: set[asyncio.Future[SessionEvent]] = set()
+        self._completion_rpc_unsupported = False
+        self._disconnect_lock = asyncio.Lock()
+        self._on_disconnect = on_disconnect
+
+    def _set_disconnect_callback(self, callback: Callable[[], None]) -> None:
+        """Set the client-owned cleanup callback before the session becomes active."""
+        self._on_disconnect = callback
+
+    def _run_disconnect_callback(self) -> None:
+        callback = self._on_disconnect
+        self._on_disconnect = None
+        if callback is not None:
+            callback()
+
+    def _cancel_pending_external_tools(self) -> None:
+        pending_external_tools = list(self._pending_external_tools.values())
+        self._pending_external_tools.clear()
+        current_task = asyncio.current_task()
+        for task in pending_external_tools:
+            if task is not current_task:
+                task.cancel()
+
+    def _mark_disconnected(self) -> None:
+        with self._event_handlers_lock:
+            if self._destroyed:
+                return
+            self._destroyed = True
+            self._event_handlers.clear()
+        for fail in tuple(self._response_waits):
+            fail()
+        self._response_waits.clear()
+        self._fail_structured_waits()
+        self._cancel_pending_external_tools()
+        with self._tool_handlers_lock:
+            self._tool_handlers.clear()
+        self._clear_skill_provider()
+        with self._permission_handler_lock:
+            self._permission_handler = None
+        with self._mcp_auth_handler_lock:
+            self._mcp_auth_handler = None
+        with self._user_input_handler_lock:
+            self._user_input_handler = None
+        with self._exit_plan_mode_handler_lock:
+            self._exit_plan_mode_handler = None
+        with self._auto_mode_switch_handler_lock:
+            self._auto_mode_switch_handler = None
+        with self._hooks_lock:
+            self._hooks = None
+        with self._transform_callbacks_lock:
+            self._transform_callbacks = None
+        with self._command_handlers_lock:
+            self._command_handlers.clear()
+        with self._bearer_token_providers_lock:
+            self._bearer_token_providers.clear()
+        with self._elicitation_handler_lock:
+            self._elicitation_handler = None
+        with self._canvas_handler_lock:
+            self._canvas_handler = None
+        with self._open_canvases_lock:
+            self._open_canvases.clear()
+        self._client_session_apis = ClientSessionApiHandlers()
+        self._run_disconnect_callback()
+
+    def _fail_structured_waits(self) -> None:
+        for future in tuple(self._structured_waits):
+            if not future.done():
+                future.set_exception(
+                    RuntimeError("Session closed before structured output completed")
+                )
 
     @property
     def rpc(self) -> SessionRpc:
@@ -1649,10 +2145,12 @@ class CopilotSession:
         prompt: str,
         *,
         attachments: list[Attachment] | None = None,
+        source: MessageSource | None = None,
         mode: Literal["enqueue", "immediate"] | None = None,
         agent_mode: Literal["interactive", "plan", "autopilot", "shell"] | None = None,
         request_headers: dict[str, str] | None = None,
         display_prompt: str | None = None,
+        response_schema: dict[str, Any] | type[BaseModel] | None = None,
     ) -> str:
         """
         Send a message to this session.
@@ -1663,7 +2161,11 @@ class CopilotSession:
 
         Args:
             prompt: The message text to send.
-            attachments: Optional file, directory, or selection attachments.
+            attachments: Optional file, directory, selection, blob, or extension-context
+                attachments.
+            source: Optional message provenance (``"user"``, ``"system"``, or
+                :class:`AgentMessageSource` for an identified agent).
+                Omitted when None, preserving the runtime's default for user messages.
             mode: Message delivery mode (``"enqueue"`` or ``"immediate"``).
             agent_mode: The UI mode the agent was in when this message was sent
                 (for example ``"plan"`` or ``"autopilot"``). Defaults to the
@@ -1671,6 +2173,8 @@ class CopilotSession:
             request_headers: Optional per-turn HTTP headers for outbound model requests.
             display_prompt: If provided, this is shown in the timeline instead of
                 ``prompt``.
+            response_schema: JSON Schema or a Pydantic model for this run. Independent
+                sends do not inherit it. Immediate steering cannot specify a schema.
 
         Returns:
             The message ID assigned by the server, which can be used to correlate events.
@@ -1684,12 +2188,37 @@ class CopilotSession:
             ...     attachments=[{"type": "file", "path": "./src/main.py"}],
             ... )
         """
-        params: dict[str, Any] = {
-            "sessionId": self.session_id,
-            "prompt": prompt,
-        }
+        return await self._send_params(
+            self._create_send_params(
+                prompt,
+                attachments,
+                source,
+                mode,
+                agent_mode,
+                request_headers,
+                display_prompt,
+                response_schema,
+            )
+        )
+
+    def _create_send_params(
+        self,
+        prompt: str,
+        attachments: list[Attachment] | None,
+        source: MessageSource | None,
+        mode: Literal["enqueue", "immediate"] | None,
+        agent_mode: Literal["interactive", "plan", "autopilot", "shell"] | None,
+        request_headers: dict[str, str] | None,
+        display_prompt: str | None,
+        response_schema: dict[str, Any] | type[BaseModel] | None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"prompt": prompt}
         if attachments is not None:
             params["attachments"] = attachments
+        if source is not None:
+            params["source"] = (
+                "agent-" + source.agent_id if isinstance(source, AgentMessageSource) else source
+            )
         if mode is not None:
             params["mode"] = mode
         if agent_mode is not None:
@@ -1698,10 +2227,24 @@ class CopilotSession:
             params["requestHeaders"] = request_headers
         if display_prompt is not None:
             params["displayPrompt"] = display_prompt
+        if response_schema is not None:
+            schema = (
+                response_schema.model_json_schema()
+                if isinstance(response_schema, type) and issubclass(response_schema, BaseModel)
+                else response_schema
+            )
+            params["responseFormat"] = {
+                "type": "json_schema",
+                "jsonSchema": {"name": "response", "strict": True, "schema": schema},
+            }
         params.update(get_trace_context())
+        return params
 
+    async def _send_params(self, params: dict[str, Any]) -> str:
         rpc_start = time.perf_counter()
-        response = await self._client.request("session.send", params)
+        response = await self._client.request(
+            "session.send", {"sessionId": self.session_id, **params}
+        )
         message_id = response["messageId"]
         log_timing(
             logger,
@@ -1713,29 +2256,94 @@ class CopilotSession:
         )
         return message_id
 
+    async def set_tools(self, tools: list[Tool]) -> None:
+        """
+        **Experimental.** Replace this client's live external tools for the session.
+
+        This is a complete replacement of the tools supplied by this client
+        connection only; built-in tools, MCP/plugin tools, and tools supplied by
+        other connections are unaffected. Pass the same tool definitions accepted
+        by ``CopilotClient.create_session`` and ``CopilotClient.resume_session``.
+        An empty list removes all tools supplied by this client.
+
+        The local handlers switch only after the runtime accepts the replacement.
+        Running tool calls finish on the handlers they already captured. If the
+        runtime rejects the replacement, the existing handlers are left unchanged
+        and the error is raised. Concurrent ``set_tools`` calls on the same
+        session are applied in order. Cancelling the call while an earlier
+        replacement is still in flight sends nothing. Once the request is sent,
+        cancelling only stops the wait: an accepted replacement still installs
+        its handlers while the session remains connected. Disconnecting the
+        session rejects queued replacements and prevents late acknowledgements
+        from reinstalling handlers.
+
+        The agent sees the new tools from its next model request, which can fall
+        within a turn in progress. A model request already in flight was made
+        with the previous tools, so the agent can still call a tool you removed.
+        This session doesn't answer that call, and it can stay pending until the
+        turn is aborted. If a running turn might still call a tool you remove,
+        replace tools while the session is idle.
+        """
+        if self._destroyed:
+            raise RuntimeError("Session is disconnected")
+        definitions = _tools_to_wire_definitions(tools)
+        handlers = _tool_handlers_for(tools)
+        # Cancelling while an earlier call holds the lock sends nothing. Once
+        # this call holds it, the request runs to completion in its own task,
+        # so an accepted replacement still installs its handlers.
+        await self._set_tools_lock.acquire()
+        task = asyncio.create_task(self._replace_tools(definitions, handlers))
+        task.add_done_callback(_consume_task_exception)
+        await asyncio.shield(task)
+
+    async def _replace_tools(
+        self,
+        definitions: list[ProtocolExternalToolDefinition],
+        handlers: dict[str, ToolHandler],
+    ) -> None:
+        try:
+            if self._destroyed:
+                raise RuntimeError("Session is disconnected")
+            await self.rpc.tools.set(ToolsSetRequest(tools=definitions))
+            with self._tool_handlers_lock:
+                if self._destroyed:
+                    raise RuntimeError("Session is disconnected")
+                self._tool_handlers = handlers
+        finally:
+            self._set_tools_lock.release()
+
     async def send_and_wait(
         self,
         prompt: str,
         *,
         attachments: list[Attachment] | None = None,
+        source: MessageSource | None = None,
         mode: Literal["enqueue", "immediate"] | None = None,
         agent_mode: Literal["interactive", "plan", "autopilot", "shell"] | None = None,
         request_headers: dict[str, str] | None = None,
         display_prompt: str | None = None,
+        response_schema: dict[str, Any] | type[BaseModel] | None = None,
         timeout: float = 60.0,
     ) -> SessionEvent | None:
         """
-        Send a message to this session and wait until the session becomes idle.
+        Send a message to this session and wait for its processing to finish.
 
-        This is a convenience method that combines :meth:`send` with waiting for
-        the session.idle event. Use this when you want to block until the assistant
-        has finished processing the message.
+        Supported local runtimes correlate completion and the response with this
+        message. Unsupported runtimes retain the legacy session.idle wait.
 
         Events are still delivered to handlers registered via :meth:`on` while waiting.
+        Synchronous handlers registered before this call finish processing the
+        terminal event, when present, before it returns successfully.
+        This does not wait for asynchronous work started by a handler.
+        Sub-agent events with a non-empty ``agent_id`` do not complete the wait
+        or supply its reply.
 
         Args:
             prompt: The message text to send.
             attachments: Optional file, directory, or selection attachments.
+            source: Optional message provenance (``"user"``, ``"system"``, or
+                :class:`AgentMessageSource` for an identified agent),
+                independent of delivery mode. Omitted when None.
             mode: Message delivery mode (``"enqueue"`` or ``"immediate"``).
             agent_mode: The UI mode the agent was in when this message was sent
                 (for example ``"plan"`` or ``"autopilot"``). Defaults to the
@@ -1745,12 +2353,14 @@ class CopilotSession:
                 ``prompt``.
             timeout: Timeout in seconds (default: 60). Controls how long to wait;
                 does not abort in-flight agent work.
+            response_schema: A per-run schema. Waits for the last correlated root
+                assistant message without tool requests at non-autopilot idle.
 
         Returns:
             The final assistant message event, or None if none was received.
 
         Raises:
-            TimeoutError: If the timeout is reached before session becomes idle.
+            TimeoutError: If the timeout is reached before completion.
             Exception: If the session has been disconnected or the connection fails.
 
         Example:
@@ -1761,16 +2371,80 @@ class CopilotSession:
             ...         case AssistantMessageData() as data:
             ...             print(data.content)
         """
+        deadline = asyncio.get_running_loop().time() + timeout
+        try:
+            async with asyncio.timeout_at(deadline):
+                params = self._create_send_params(
+                    prompt,
+                    attachments,
+                    source,
+                    mode,
+                    agent_mode,
+                    request_headers,
+                    display_prompt,
+                    response_schema,
+                )
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise TimeoutError
+                return await self._send_and_wait_impl(params, timeout)
+        except TimeoutError:
+            raise TimeoutError(f"Timeout after {timeout}s waiting for session.idle") from None
+
+    async def _send_and_wait_impl(
+        self, params: dict[str, Any], timeout: float
+    ) -> SessionEvent | None:
+        completion = await self._send_with_completion(params)
+        if completion is not None:
+            response, aborted = completion
+            if "responseFormat" in params:
+                if aborted:
+                    raise RuntimeError("Session aborted before structured output completed")
+                if (
+                    response is None
+                    or not isinstance(response.data, AssistantMessageData)
+                    or response.data.tool_requests
+                    or not response.data.content.strip()
+                ):
+                    raise RuntimeError("Run completed without a structured assistant response")
+            if aborted:
+                raise RuntimeError("Session aborted before response completed")
+            return response
+        if "responseFormat" in params:
+            return await self._wait_for_structured_message(
+                lambda: self._send_params(params),
+                timeout,
+            )
         total_start = time.perf_counter()
         idle_event = asyncio.Event()
         error_event: Exception | None = None
         last_assistant_message: SessionEvent | None = None
         first_assistant_message_logged = False
+        message_id: str | None = None
+        request_started = False
+        admitted = False
+        pending: list[SessionEvent | Exception] = []
 
-        def handler(event: SessionEventTypeAlias) -> None:
+        def process(event: SessionEventTypeAlias) -> None:
             nonlocal first_assistant_message_logged, last_assistant_message, error_event
+            nonlocal request_started
+            if idle_event.is_set() or event.agent_id:
+                return
             match event.data:
-                case AssistantMessageData():
+                case UserMessageData() as data if message_id and data.message_id == message_id:
+                    request_started = True
+                case SessionWarningData() as data if (
+                    message_id
+                    and data.warning_type == "policy_blocked"
+                    and data.originating_message_id == message_id
+                ):
+                    request_started = True
+                case AssistantMessageData() as data if (
+                    not message_id
+                    or data.originating_message_id == message_id
+                    or (not data.originating_message_id and request_started)
+                ):
+                    if message_id and data.originating_message_id == message_id:
+                        request_started = True
                     last_assistant_message = event
                     if not first_assistant_message_logged:
                         first_assistant_message_logged = True
@@ -1781,7 +2455,9 @@ class CopilotSession:
                             total_start,
                             session_id=self.session_id,
                         )
-                case SessionIdleData():
+                case SessionIdleData() as data if (
+                    request_started and data.mode != SessionMode.AUTOPILOT
+                ):
                     log_timing(
                         logger,
                         logging.DEBUG,
@@ -1789,21 +2465,65 @@ class CopilotSession:
                         total_start,
                         session_id=self.session_id,
                     )
+                    if data.aborted:
+                        error_event = RuntimeError("Session aborted before response completed")
                     idle_event.set()
-                case SessionErrorData() as data:
+                case SessionAutopilotStoppedData() as data if (
+                    message_id and data.request_id == message_id
+                ):
+                    if data.reason == "error":
+                        error_event = RuntimeError("Autopilot request failed")
+                    elif data.reason == "aborted":
+                        error_event = RuntimeError("Session aborted before response completed")
+                    idle_event.set()
+                case SessionErrorData() as data if (
+                    not data.originating_message_id or data.originating_message_id == message_id
+                ):
                     error_event = Exception(f"Session error: {data.message or str(data)}")
                     idle_event.set()
 
+        def handler(event: SessionEventTypeAlias) -> None:
+            if event.agent_id or not isinstance(
+                event.data,
+                (
+                    UserMessageData,
+                    SessionWarningData,
+                    AssistantMessageData,
+                    SessionIdleData,
+                    SessionAutopilotStoppedData,
+                    SessionErrorData,
+                ),
+            ):
+                return
+            if not admitted:
+                pending.append(event)
+            else:
+                process(event)
+
+        def fail(error: Exception) -> None:
+            nonlocal error_event
+            if not idle_event.is_set():
+                error_event = error
+                idle_event.set()
+
+        def fail_disconnected() -> None:
+            error = RuntimeError("Session closed before response completed")
+            if not admitted:
+                pending.append(error)
+            else:
+                fail(error)
+
         unsubscribe = self.on(handler)
+        self._response_waits.add(fail_disconnected)
         try:
-            await self.send(
-                prompt,
-                attachments=attachments,
-                mode=mode,
-                agent_mode=agent_mode,
-                request_headers=request_headers,
-                display_prompt=display_prompt,
-            )
+            message_id = await self._send_params(params)
+            admitted = True
+            for event in pending:
+                if isinstance(event, Exception):
+                    fail(event)
+                else:
+                    process(event)
+            pending.clear()
             await asyncio.wait_for(idle_event.wait(), timeout=timeout)
             if error_event:
                 log_timing(
@@ -1834,9 +2554,233 @@ class CopilotSession:
                 session_id=self.session_id,
                 completed_by="timeout",
             )
-            raise TimeoutError(f"Timeout after {timeout}s waiting for session.idle")
+            raise TimeoutError(f"Timeout after {timeout}s waiting for response completion")
+        finally:
+            pending.clear()
+            unsubscribe()
+            self._response_waits.discard(fail_disconnected)
+
+    async def _send_with_completion(
+        self, params: dict[str, Any]
+    ) -> tuple[SessionEvent | None, bool] | None:
+        if self._completion_rpc_unsupported:
+            return None
+        if self._destroyed:
+            raise RuntimeError("Session is disconnected")
+        dispatched: set[str] = set()
+        boundary: str | None = None
+        delivered = asyncio.Event()
+        closed = asyncio.Event()
+
+        def handler(event: SessionEvent) -> None:
+            if event.agent_id or not isinstance(
+                event.data, (SessionIdleData, SessionAutopilotStoppedData, SessionErrorData)
+            ):
+                return
+            event_id = str(event.id)
+            dispatched.add(event_id)
+            if event_id == boundary:
+                delivered.set()
+
+        unsubscribe = self.on(handler)
+        self._response_waits.add(closed.set)
+        closed_task = asyncio.create_task(closed.wait())
+        request = asyncio.create_task(
+            self._client.request("session.sendAndWait", {"sessionId": self.session_id, **params})
+        )
+
+        async def drain(event_id: str | None) -> None:
+            nonlocal boundary
+            if event_id is None or event_id in dispatched:
+                return
+            boundary = event_id
+            delivery = asyncio.create_task(delivered.wait())
+            try:
+                await asyncio.wait((delivery, closed_task), return_when=asyncio.FIRST_COMPLETED)
+                if not delivered.is_set():
+                    raise RuntimeError("Session closed before response completed")
+            finally:
+                delivery.cancel()
+                await asyncio.gather(delivery, return_exceptions=True)
+
+        try:
+            await asyncio.wait((request, closed_task), return_when=asyncio.FIRST_COMPLETED)
+            if not request.done():
+                raise RuntimeError("Session closed before response completed")
+            try:
+                result = request.result()
+            except (ProcessExitedError, OSError) as error:
+                if closed.is_set():
+                    raise RuntimeError("Session closed before response completed") from error
+                raise
+            except JsonRpcError as error:
+                if error.code == -32601:
+                    self._completion_rpc_unsupported = True
+                    return None
+                if isinstance(error.data, dict):
+                    await drain(error.data.get("completionEventId"))
+                raise
+            await drain(result.get("completionEventId"))
+            response = (
+                session_event_from_dict(result["response"])
+                if result.get("response") is not None
+                else None
+            )
+            if response is not None and (
+                response.agent_id or not isinstance(response.data, AssistantMessageData)
+            ):
+                raise RuntimeError("The runtime returned a non-assistant response")
+            return response, result["aborted"]
         finally:
             unsubscribe()
+            self._response_waits.discard(closed.set)
+            request.cancel()
+            closed_task.cancel()
+            await asyncio.gather(request, closed_task, return_exceptions=True)
+
+    async def send_and_wait_typed(
+        self,
+        prompt: str,
+        response_type: type[TResponse],
+        *,
+        attachments: list[Attachment] | None = None,
+        source: MessageSource | None = None,
+        mode: Literal["enqueue", "immediate"] | None = None,
+        agent_mode: Literal["interactive", "plan", "autopilot", "shell"] | None = None,
+        request_headers: dict[str, str] | None = None,
+        display_prompt: str | None = None,
+        timeout: float = 60.0,
+    ) -> TResponse:
+        """Infer a schema using Pydantic, then validate and return the final result.
+
+        Uses the same model schema generation as custom tools. Provider schema
+        restrictions still apply (for example, configure ``extra="forbid"`` for
+        closed objects). Validation uses the schema's alias names, including for
+        nested models, regardless of model-level alias validation settings.
+        Streaming events remain text. Timeout or cancellation
+        only stops waiting, not the agent. Request-correlated errors only fail
+        their own wait; errors without an ID retain legacy handling.
+        """
+        if not isinstance(response_type, type) or not issubclass(response_type, BaseModel):
+            raise TypeError("response_type must be a Pydantic BaseModel subclass")
+        if mode == "immediate":
+            raise ValueError(
+                "Structured output cannot be requested on an immediate steering message"
+            )
+        response = await self.send_and_wait(
+            prompt,
+            attachments=attachments,
+            source=source,
+            mode=mode,
+            agent_mode=agent_mode,
+            request_headers=request_headers,
+            display_prompt=display_prompt,
+            response_schema=response_type,
+            timeout=timeout,
+        )
+        assert response is not None and isinstance(response.data, AssistantMessageData)
+        return response_type.model_validate_json(
+            response.data.content, by_alias=True, by_name=False
+        )
+
+    async def _wait_for_structured_message(
+        self, send: Callable[[], Awaitable[str]], timeout: float
+    ) -> SessionEvent:
+        if self._destroyed:
+            raise RuntimeError("Session is disconnected")
+        completion: asyncio.Future[SessionEvent] = asyncio.get_running_loop().create_future()
+        self._structured_waits.add(completion)
+        pending: list[SessionEvent] = []
+        message_id: str | None = None
+        started = False
+        final_message: SessionEvent | None = None
+
+        def process(event: SessionEvent) -> None:
+            nonlocal started, final_message
+            if completion.done() or event.agent_id:
+                return
+            match event.data:
+                case UserMessageData() as data if data.message_id == message_id:
+                    started = True
+                case AssistantMessageData() as data if data.originating_message_id == message_id:
+                    started = True
+                    final_message = None if data.tool_requests else event
+                case (SessionIdleData() | SessionAutopilotStoppedData()) as data if (
+                    isinstance(data, SessionIdleData)
+                    and started
+                    and data.mode != SessionMode.AUTOPILOT
+                ) or (
+                    isinstance(data, SessionAutopilotStoppedData)
+                    and bool(message_id)
+                    and data.request_id == message_id
+                ):
+                    if isinstance(data, SessionAutopilotStoppedData) and data.reason == "error":
+                        completion.set_exception(RuntimeError("Autopilot request failed"))
+                    elif (isinstance(data, SessionIdleData) and data.aborted) or (
+                        isinstance(data, SessionAutopilotStoppedData) and data.reason == "aborted"
+                    ):
+                        completion.set_exception(
+                            RuntimeError("Session aborted before structured output completed")
+                        )
+                    elif (
+                        final_message is None
+                        or not cast(AssistantMessageData, final_message.data).content.strip()
+                    ):
+                        completion.set_exception(
+                            RuntimeError("Run completed without a structured assistant response")
+                        )
+                    else:
+                        completion.set_result(final_message)
+                case SessionErrorData() as data if (
+                    data.originating_message_id == message_id
+                    if data.originating_message_id
+                    else started
+                ):
+                    completion.set_exception(RuntimeError(f"Session error: {data.message}"))
+
+        def handler(event: SessionEvent) -> None:
+            if event.agent_id:
+                return
+            if not isinstance(
+                event.data,
+                (
+                    UserMessageData,
+                    AssistantMessageData,
+                    SessionIdleData,
+                    SessionAutopilotStoppedData,
+                    SessionErrorData,
+                ),
+            ):
+                return
+            if message_id is None:
+                pending.append(event)
+            else:
+                process(event)
+
+        unsubscribe = self.on(handler)
+        admission: asyncio.Future[str] | None = None
+        try:
+            async with asyncio.timeout(timeout):
+                admission = asyncio.ensure_future(send())
+                await asyncio.wait((admission, completion), return_when=asyncio.FIRST_COMPLETED)
+                if completion.done():
+                    return completion.result()
+                message_id = await admission
+                for event in pending:
+                    process(event)
+                pending.clear()
+                return await completion
+        finally:
+            unsubscribe()
+            self._structured_waits.discard(completion)
+            if admission is not None:
+                admission.cancel()
+                await asyncio.gather(admission, return_exceptions=True)
+            # Retrieve an error if admission failed while disconnection also completed the future.
+            if completion.done() and not completion.cancelled():
+                completion.exception()
+            else:
+                completion.cancel()
 
     def on(self, handler: Callable[[SessionEvent], None]) -> Callable[[], None]:
         """
@@ -1866,6 +2810,8 @@ class CopilotSession:
             >>> unsubscribe()
         """
         with self._event_handlers_lock:
+            if self._destroyed:
+                raise RuntimeError("Session is disconnected")
             self._event_handlers.add(handler)
 
         def unsubscribe():
@@ -1887,6 +2833,9 @@ class CopilotSession:
         Args:
             event: The session event to dispatch to all handlers.
         """
+        with self._event_handlers_lock:
+            if self._destroyed:
+                return
         dispatch_start = time.perf_counter()
         # Handle broadcast request events (protocol v3) before dispatching to user handlers.
         # Fire-and-forget: the response is sent asynchronously via RPC.
@@ -1896,6 +2845,9 @@ class CopilotSession:
             handlers = list(self._event_handlers)
 
         for handler in handlers:
+            with self._event_handlers_lock:
+                if self._destroyed:
+                    break
             try:
                 handler(event)
             except Exception:
@@ -1919,7 +2871,7 @@ class CopilotSession:
             case ExternalToolRequestedData() as data:
                 request_id = data.request_id
                 tool_name = data.tool_name
-                if not request_id or not tool_name:
+                if self._destroyed or not request_id or not tool_name:
                     return
 
                 handler = self._get_tool_handler(tool_name)
@@ -1930,11 +2882,33 @@ class CopilotSession:
                 arguments = data.arguments
                 tp = getattr(data, "traceparent", None)
                 ts = getattr(data, "tracestate", None)
-                asyncio.ensure_future(
+                task = asyncio.create_task(
                     self._execute_tool_and_respond(
-                        request_id, tool_name, tool_call_id, arguments, handler, tp, ts
+                        request_id,
+                        tool_name,
+                        tool_call_id,
+                        arguments,
+                        handler,
+                        tp,
+                        ts,
+                        event.agent_id or None,
                     )
                 )
+                if request_id in self._pending_external_tools:
+                    task.cancel()
+                    return
+                self._pending_external_tools[request_id] = task
+                task.add_done_callback(
+                    lambda completed, rid=request_id: self._remove_pending_external_tool(
+                        rid, completed
+                    )
+                )
+
+            case ExternalToolCompletedData() as data:
+                if data.request_id:
+                    task = self._pending_external_tools.pop(data.request_id, None)
+                    if task is not None:
+                        task.cancel()
 
             case PermissionRequestedData() as data:
                 if logger.isEnabledFor(logging.DEBUG):
@@ -1961,7 +2935,11 @@ class CopilotSession:
 
                 asyncio.ensure_future(
                     self._execute_permission_and_respond(
-                        request_id, permission_request, perm_handler
+                        request_id,
+                        permission_request,
+                        perm_handler,
+                        data.prompt_request,
+                        data.assisted_approval_assessment,
                     )
                 )
 
@@ -1983,6 +2961,7 @@ class CopilotSession:
                     "serverName": data.server_name,
                     "serverUrl": data.server_url,
                     "reason": data.reason.value,
+                    "runtimeRefreshSupported": data.runtime_refresh_supported or False,
                 }
                 if data.www_authenticate_params is not None:
                     request["wwwAuthenticateParams"] = {}
@@ -2009,11 +2988,15 @@ class CopilotSession:
                             data.static_client_config.client_secret
                         )
                     if data.static_client_config.grant_type is not None:
-                        static_client_config["grantType"] = data.static_client_config.grant_type
+                        static_client_config["grantType"] = cast(
+                            Literal["client_credentials"], data.static_client_config.grant_type
+                        )
                     if data.static_client_config.public_client is not None:
                         static_client_config["publicClient"] = (
                             data.static_client_config.public_client
                         )
+                    if data.static_client_config.scope is not None:
+                        static_client_config["scope"] = data.static_client_config.scope
                     request["staticClientConfig"] = static_client_config
                 asyncio.ensure_future(self._execute_mcp_auth_and_respond(request, handler))
 
@@ -2053,13 +3036,14 @@ class CopilotSession:
                 asyncio.ensure_future(self._handle_elicitation_request(context, request_id))
 
             case CapabilitiesChangedData() as data:
-                cap: SessionCapabilities = {}
+                # The event names only the capabilities that changed; keep the rest.
                 if data.ui is not None:
-                    ui_cap: SessionUiCapabilities = {}
+                    ui_cap = self._capabilities.get("ui", SessionUiCapabilities()).copy()
                     if data.ui.elicitation is not None:
                         ui_cap["elicitation"] = data.ui.elicitation
-                    cap["ui"] = ui_cap
-                self._capabilities = {**self._capabilities, **cap}
+                    if data.ui.mcp_apps is not None:
+                        ui_cap["mcpApps"] = data.ui.mcp_apps
+                    self._capabilities = {**self._capabilities, "ui": ui_cap}
 
             case SessionCanvasOpenedData() as data:
                 try:
@@ -2086,6 +3070,7 @@ class CopilotSession:
         handler: ToolHandler,
         traceparent: str | None = None,
         tracestate: str | None = None,
+        agent_id: str | None = None,
     ) -> None:
         """Execute a tool handler and send the result back via HandlePendingToolCall RPC."""
         try:
@@ -2108,6 +3093,8 @@ class CopilotSession:
                 tool_name=tool_name,
                 arguments=arguments,
                 available_tools=available_tools,
+                agent_id=agent_id,
+                request_id=request_id,
             )
 
             with trace_context(traceparent, tracestate):
@@ -2142,6 +3129,8 @@ class CopilotSession:
             # standard "Failed to execute..." message. Deliberate user-returned
             # failures send the full structured result to preserve metadata.
             if tool_result._from_exception:
+                if not self._claim_external_tool(request_id):
+                    return
                 rpc_start = time.perf_counter()
                 await self.rpc.tools.handle_pending_tool_call(
                     HandlePendingToolCallRequest(
@@ -2160,6 +3149,8 @@ class CopilotSession:
                     tool_name=tool_name,
                 )
             else:
+                if not self._claim_external_tool(request_id):
+                    return
                 rpc_start = time.perf_counter()
                 await self.rpc.tools.handle_pending_tool_call(
                     HandlePendingToolCallRequest(
@@ -2178,6 +3169,8 @@ class CopilotSession:
                     tool_name=tool_name,
                 )
         except Exception as exc:
+            if not self._claim_external_tool(request_id):
+                return
             try:
                 await self.rpc.tools.handle_pending_tool_call(
                     HandlePendingToolCallRequest(
@@ -2188,22 +3181,37 @@ class CopilotSession:
             except (JsonRpcError, ProcessExitedError, OSError):
                 pass  # Connection lost or RPC error — nothing we can do
 
+    def _remove_pending_external_tool(self, request_id: str, completed: asyncio.Task[None]) -> None:
+        if self._pending_external_tools.get(request_id) is completed:
+            self._pending_external_tools.pop(request_id, None)
+
+    def _claim_external_tool(self, request_id: str) -> bool:
+        current = asyncio.current_task()
+        if self._destroyed or self._pending_external_tools.get(request_id) is not current:
+            return False
+        self._pending_external_tools.pop(request_id, None)
+        return True
+
     async def _execute_permission_and_respond(
         self,
         request_id: str,
         permission_request: Any,
         handler: _PermissionHandlerFn,
+        prompt_request: PermissionPromptRequest | None = None,
+        assisted_approval_assessment: AssistedApprovalAssessment | None = None,
     ) -> None:
         """Execute a permission handler and respond via RPC."""
         try:
             handler_start = time.perf_counter()
-            result = handler(
-                permission_request,
-                {
-                    "session_id": self.session_id,
-                    "managed_settings_enabled": self._managed_settings_enabled,
-                },
-            )
+            invocation: PermissionInvocation = {
+                "session_id": self.session_id,
+                "managed_settings_enabled": self._managed_settings_enabled,
+            }
+            if prompt_request is not None:
+                invocation["prompt_request"] = prompt_request
+            if assisted_approval_assessment is not None:
+                invocation["assisted_approval_assessment"] = assisted_approval_assessment
+            result = handler(permission_request, invocation)
             if inspect.isawaitable(result):
                 result = await result
             log_timing(
@@ -2277,17 +3285,25 @@ class CopilotSession:
                 request_id=request_id,
             )
 
-            if result and result.get("kind", "token") == "token":
-                rpc_result = MCPOauthPendingRequestResponse(
-                    kind=MCPOauthPendingRequestResponseKind.TOKEN,
-                    access_token=result["accessToken"],
-                    expires_in=result.get("expiresIn"),
-                    token_type=result.get("tokenType"),
+            if result and result.get("kind") == "cancelled":
+                rpc_result = MCPOauthPendingRequestResponse.from_dict({"kind": "cancelled"})
+            elif result and result.get("accessToken"):
+                rpc_result = MCPOauthPendingRequestResponse.from_dict(
+                    {
+                        "kind": "token",
+                        "accessToken": result["accessToken"],
+                        "expiresIn": result.get("expiresIn"),
+                        "tokenType": result.get("tokenType"),
+                    }
                 )
+            elif (
+                result
+                and result.get("kind") == "runtimeRefresh"
+                and request.get("runtimeRefreshSupported") is True
+            ):
+                rpc_result = MCPOauthPendingRequestResponse.from_dict({"kind": "runtimeRefresh"})
             else:
-                rpc_result = MCPOauthPendingRequestResponse(
-                    kind=MCPOauthPendingRequestResponseKind.CANCELLED
-                )
+                rpc_result = MCPOauthPendingRequestResponse.from_dict({"kind": "cancelled"})
             await self.rpc.mcp.oauth.handle_pending_request(
                 MCPOauthHandlePendingRequest(
                     request_id=request_id,
@@ -2299,9 +3315,7 @@ class CopilotSession:
                 await self.rpc.mcp.oauth.handle_pending_request(
                     MCPOauthHandlePendingRequest(
                         request_id=request_id,
-                        result=MCPOauthPendingRequestResponse(
-                            kind=MCPOauthPendingRequestResponseKind.CANCELLED
-                        ),
+                        result=MCPOauthPendingRequestResponse.from_dict({"kind": "cancelled"}),
                     )
                 )
             except (JsonRpcError, ProcessExitedError, OSError):
@@ -2572,13 +3586,7 @@ class CopilotSession:
                 all registered tools.
         """
         with self._tool_handlers_lock:
-            self._tool_handlers.clear()
-            if not tools:
-                return
-            for tool in tools:
-                if not tool.name or not tool.handler:
-                    continue
-                self._tool_handlers[tool.name] = tool.handler
+            self._tool_handlers = _tool_handlers_for(tools)
 
     def _get_tool_handler(self, name: str) -> ToolHandler | None:
         """
@@ -2596,6 +3604,77 @@ class CopilotSession:
         """
         with self._tool_handlers_lock:
             return self._tool_handlers.get(name)
+
+    def _register_skill_provider(self, provider: SkillProvider | None) -> None:
+        """Register or clear the session-scoped skill provider."""
+        with self._skill_provider_lock:
+            self._skill_provider = provider
+
+    def _clear_skill_provider(self) -> None:
+        self._register_skill_provider(None)
+
+    async def _handle_skill_provider_list(self) -> dict:
+        provider = self._require_skill_provider()
+        skills = await self._call_skill_provider("listSkills", provider.list_skills)
+        resolved_skills = cast(list[SkillProviderDescriptor] | None, skills)
+        try:
+            return _SkillProviderListResult(
+                skills=[] if resolved_skills is None else list(resolved_skills)
+            ).to_dict()
+        except Exception:
+            self._log_skill_provider_failure("listSkills")
+            raise _skill_provider_failure_error("listSkills") from None
+
+    async def _handle_skill_provider_read(self, name: str) -> dict:
+        provider = self._require_skill_provider()
+        markdown = await self._call_skill_provider(
+            "readSkill", functools.partial(provider.read_skill, name)
+        )
+        return _SkillProviderReadResult(markdown=cast(str | None, markdown)).to_dict()
+
+    def _require_skill_provider(self) -> SkillProvider:
+        with self._skill_provider_lock:
+            provider = self._skill_provider
+        if provider is None:
+            raise JsonRpcError(-32603, f"No skill provider for session: {self.session_id}")
+        return provider
+
+    async def _call_skill_provider(
+        self, operation: Literal["listSkills", "readSkill"], call: Callable[[], Any]
+    ) -> Any:
+        """Run a provider callback, reporting any failure to the runtime generically."""
+        provider_start = time.perf_counter()
+        try:
+            result = call()
+            if inspect.isawaitable(result):
+                result = await result
+        except asyncio.CancelledError:
+            # Only a cancellation of this dispatch task propagates; one raised by
+            # the provider itself is an ordinary provider failure.
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise
+            self._log_skill_provider_failure(operation)
+            raise _skill_provider_failure_error(operation) from None
+        except Exception:
+            self._log_skill_provider_failure(operation)
+            raise _skill_provider_failure_error(operation) from None
+        log_timing(
+            logger,
+            logging.DEBUG,
+            f"CopilotSession skill provider {operation} dispatch",
+            provider_start,
+            session_id=self.session_id,
+        )
+        return result
+
+    def _log_skill_provider_failure(self, operation: Literal["listSkills", "readSkill"]) -> None:
+        logger.warning(
+            "Skill provider %s failed",
+            operation,
+            extra={"session_id": self.session_id},
+            exc_info=True,
+        )
 
     def _register_permission_handler(self, handler: _PermissionHandlerFn | None) -> None:
         """
@@ -2868,6 +3947,8 @@ class CopilotSession:
             "sessionEnd": hooks.get("on_session_end"),
             "errorOccurred": hooks.get("on_error_occurred"),
             "agentStop": hooks.get("on_agent_stop"),
+            "subagentStart": hooks.get("on_subagent_start"),
+            "subagentStop": hooks.get("on_subagent_stop"),
         }
 
         handler = handler_map.get(hook_type)
@@ -2889,6 +3970,10 @@ class CopilotSession:
             timestamp = transformed.get("timestamp")
             if isinstance(timestamp, (int, float)):
                 transformed["timestamp"] = datetime.fromtimestamp(timestamp / 1000, tz=UTC)
+            # The CLI sends errorOccurred's and sessionEnd's ``error`` as an
+            # error object; the hook input types declare a string.
+            if hook_type in ("errorOccurred", "sessionEnd") and "error" in transformed:
+                transformed["error"] = _hook_error_text(transformed["error"])
             # Each per-hook-type TypedDict is structurally compatible with the
             # normalized dict; cast to ``Any`` so ty doesn't try to narrow the
             # specific TypedDict variant from the runtime ``dict``.
@@ -2963,31 +4048,17 @@ class CopilotSession:
             >>> # Clean up when done — session can still be resumed later
             >>> await session.disconnect()
         """
-        # Ensure that the check and update of _destroyed are atomic so that
-        # only the first caller proceeds to send the destroy RPC.
-        with self._event_handlers_lock:
-            if self._destroyed:
-                return
-            self._destroyed = True
-
-        try:
-            await self._client.request("session.destroy", {"sessionId": self.session_id})
-        finally:
-            # Clear handlers even if the request fails.
+        async with self._disconnect_lock:
             with self._event_handlers_lock:
-                self._event_handlers.clear()
-            with self._tool_handlers_lock:
-                self._tool_handlers.clear()
-            with self._permission_handler_lock:
-                self._permission_handler = None
-            with self._command_handlers_lock:
-                self._command_handlers.clear()
-            with self._elicitation_handler_lock:
-                self._elicitation_handler = None
-            with self._exit_plan_mode_handler_lock:
-                self._exit_plan_mode_handler = None
-            with self._auto_mode_switch_handler_lock:
-                self._auto_mode_switch_handler = None
+                if self._destroyed:
+                    return
+
+            response = await self._client.request("session.detach", {"sessionId": self.session_id})
+            if not response.get("success"):
+                detail = response.get("error") or "unknown error"
+                raise RuntimeError(f"Failed to detach session {self.session_id}: {detail}")
+
+            self._mark_disconnected()
 
     async def __aenter__(self) -> CopilotSession:
         """Enable use as an async context manager."""
@@ -3036,6 +4107,7 @@ class CopilotSession:
         reasoning_summary: ReasoningSummary | None = None,
         context_tier: ContextTier | None = None,
         model_capabilities: ModelCapabilitiesOverride | None = None,
+        auto_tier: AutoTier | _RpcAutoTier | None | _Unset = _UNSET,
     ) -> None:
         """
         Change the model for this session.
@@ -3053,6 +4125,14 @@ class CopilotSession:
             context_tier: Optional context window tier for supported models.
                 Omit to use normal model behavior with no explicit tier.
             model_capabilities: Override individual model capabilities resolved by the runtime.
+            auto_tier: **Experimental.** Part of an experimental Auto routing
+                surface and may change or be removed in a future release.
+                Routing preference to apply when ``model`` is ``"auto"``.
+                Pass ``None`` to return to the provider's default Auto routing.
+                Omit the argument to leave the current preference alone. The
+                runtime rejects this option when ``model`` is anything other than
+                ``"auto"``; use :meth:`set_auto_tier` to change the preference
+                without changing the selected model.
 
         Raises:
             Exception: If the session has been destroyed or the connection fails.
@@ -3060,23 +4140,79 @@ class CopilotSession:
         Example:
             >>> await session.set_model("gpt-5.4")
             >>> await session.set_model("claude-sonnet-4.6", reasoning_effort="high")
+            >>> await session.set_model("auto", auto_tier="intelligence")
         """
         rpc_caps = None
         if model_capabilities is not None:
             rpc_caps = _RpcModelCapabilitiesOverride.from_dict(
                 _capabilities_to_dict(model_capabilities)
             )
-        await self.rpc.model.switch_to(
-            ModelSwitchToRequest(
-                model_id=model,
-                reasoning_effort=reasoning_effort,
-                reasoning_summary=(
-                    _RpcReasoningSummary(reasoning_summary)
-                    if reasoning_summary is not None
-                    else None
-                ),
-                context_tier=(_RpcContextTier(context_tier) if context_tier is not None else None),
-                model_capabilities=rpc_caps,
+        request = ModelSwitchToRequest(
+            model_id=model,
+            reasoning_effort=reasoning_effort,
+            reasoning_summary=(
+                _RpcReasoningSummary(reasoning_summary) if reasoning_summary is not None else None
+            ),
+            context_tier=(_RpcContextTier(context_tier) if context_tier is not None else None),
+            model_capabilities=rpc_caps,
+        )
+        if isinstance(auto_tier, _Unset):
+            await self.rpc.model.switch_to(request)
+            return
+
+        # The generated wrapper drops null fields, which would silently turn a
+        # request for default Auto routing into "leave the preference alone", so
+        # send the payload directly to preserve an explicit null.
+        params = {k: v for k, v in request.to_dict().items() if v is not None}
+        params["autoTier"] = _auto_tier_to_wire(auto_tier)
+        params["sessionId"] = self.session_id
+        await self._client.request("session.model.switchTo", params)
+
+    async def set_auto_tier(
+        self, auto_tier: AutoTier | _RpcAutoTier | None
+    ) -> ModelSwitchAutoTierResult:
+        """
+        Change the Auto routing preference without changing the selected model.
+
+        **Experimental.** Part of an experimental Auto routing surface and may
+        change or be removed in a future release.
+
+        The runtime does not apply the preference immediately. It records the
+        request and commits it only when a later user turn using the ``auto``
+        model successfully obtains a usable model from the provider. A
+        ``"pending"`` status therefore confirms that the request was accepted,
+        not that it took effect.
+
+        Watch for the outcome through the ``session.model_change`` event on
+        success, or the ephemeral ``session.auto_tier_switch_failed`` event on
+        failure. You can also read the current committed and in-flight state at
+        any time with ``session.rpc.model.get_current()``.
+
+        Only the most recent request survives: issuing a new request replaces any
+        earlier one that has not yet been claimed by a turn.
+
+        Args:
+            auto_tier: Routing preference to activate, or ``None`` to return to
+                the provider's default Auto routing.
+
+        Returns:
+            The runtime's immediate acknowledgement and Auto preference snapshot.
+
+        Raises:
+            Exception: If the session has been destroyed or the connection fails.
+
+        Example:
+            >>> result = await session.set_auto_tier("intelligence")
+            >>> if result.status == ModelSwitchAutoTierStatus.PENDING:
+            ...     pass  # Takes effect on a later turn that uses the `auto` model.
+        """
+        # `autoTier` is a required field whose null value means "use provider
+        # default routing", so this cannot go through the generated wrapper,
+        # which omits null fields.
+        return ModelSwitchAutoTierResult.from_dict(
+            await self._client.request(
+                "session.model.switchAutoTier",
+                {"sessionId": self.session_id, "autoTier": _auto_tier_to_wire(auto_tier)},
             )
         )
 

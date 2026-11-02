@@ -50,7 +50,12 @@ if (result.started) {
 <summary><strong>Python</strong></summary>
 
 ```python
+from copilot import CopilotClient
 from copilot.rpc import FleetStartRequest
+from copilot.session import PermissionHandler
+
+client = CopilotClient()
+session = await client.create_session(on_permission_request=PermissionHandler.approve_all)
 
 result = await session.rpc.fleet.start(
     FleetStartRequest(
@@ -154,13 +159,10 @@ if (result.Started)
 ```rust
 use github_copilot_sdk::rpc::FleetStartRequest;
 
-let result = session
-    .rpc()
-    .fleet()
-    .start(FleetStartRequest {
-        prompt: Some("Research each crate independently, then summarize the plan.".into()),
-    })
-    .await?;
+let mut request = FleetStartRequest::default();
+request.prompt = Some("Research each crate independently, then summarize the plan.".into());
+
+let result = session.rpc().fleet().start(request).await?;
 
 if result.started {
     println!("Fleet mode started");
@@ -169,7 +171,7 @@ if result.started {
 
 </details>
 
-Native typed bindings for fleet mode were verified in Node.js/TypeScript, Python, Go, .NET, and Rust. A Java binding was not found in `java/src/main/java` on this branch, so Java examples are omitted until that surface is available.
+Java exposes the same binding as `session.getRpc().fleet.start(...)`. The method and its `SessionFleetStartParams` and `SessionFleetStartResult` types are `@CopilotExperimental`, so the consuming class or method must opt in with `@AllowCopilotExperimental`. See [Using experimental APIs](../../java/README.md#using-experimental-apis).
 
 ### From plan mode
 
@@ -243,7 +245,9 @@ This pattern gives every worker a clear owner and lets the parent session reason
 
 Fleet mode invokes sub-agents through the runtime's task mechanism. The runtime emits hook activity for sub-agent tool calls: the runtime 1.0.52 changelog notes that `preToolUse`, `postToolUse`, `subagentStart`, and `subagentStop` fire correctly for sub-agent tool calls.
 
-A dedicated SDK hook callback for `subagentStart` or `subagentStop` was not found in the public SDK surface on this branch. SDK consumers can observe sub-agent activity through the generic session event stream, which includes events such as `subagent.started`, `subagent.completed`, `subagent.failed`, `subagent.selected`, and `subagent.deselected`.
+All six SDKs expose typed sub-agent lifecycle hooks: Node.js uses `onSubagentStart` and `onSubagentStop`, Python and Rust use `on_subagent_start` and `on_subagent_stop`, Go and .NET use `OnSubagentStart` and `OnSubagentStop`, and Java uses `setOnSubagentStart` and `setOnSubagentStop`. Register them when creating or resuming a session. The start hook can prepend `additionalContext` to the child's first prompt; the stop hook can request another child turn with a block reason or replace the response reported to the parent.
+
+For passive status updates, subscribe to the generic session event stream. It includes `subagent.started`, `subagent.completed`, `subagent.failed`, `subagent.selected`, and `subagent.deselected`:
 
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
@@ -270,6 +274,7 @@ session.on((event) => {
 import asyncio
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
+from copilot.session_events import SessionEventType
 
 async def main():
     client = CopilotClient()
@@ -279,9 +284,9 @@ async def main():
     )
 
     def handle_event(event):
-        if event.type == "subagent.started":
+        if event.type == SessionEventType.SUBAGENT_STARTED:
             print(f"Started {event.data.agent_display_name}")
-        elif event.type == "subagent.completed":
+        elif event.type == SessionEventType.SUBAGENT_COMPLETED:
             print(f"Completed {event.data.agent_display_name}")
 
     unsubscribe = session.on(handle_event)
@@ -291,10 +296,12 @@ asyncio.run(main())
 <!-- /docs-validate: hidden -->
 
 ```python
+from copilot.session_events import SessionEventType
+
 def handle_event(event):
-    if event.type == "subagent.started":
+    if event.type == SessionEventType.SUBAGENT_STARTED:
         print(f"Started {event.data.agent_display_name}")
-    elif event.type == "subagent.completed":
+    elif event.type == SessionEventType.SUBAGENT_COMPLETED:
         print(f"Completed {event.data.agent_display_name}")
 
 unsubscribe = session.on(handle_event)
@@ -338,9 +345,8 @@ Keep plugin-provided sub-agent types narrow and descriptive so the orchestrator 
 
 * Fleet mode is exposed through generated session RPC bindings and is marked experimental in several SDKs.
 * The SQL todos pattern is the canonical coordination model in the runtime guidance, but whether it is a stable extensibility contract for SDK consumers is still an open question.
-* `subagentStart` and `subagentStop` are runtime hook names; this branch exposes sub-agent lifecycle to SDK consumers through the generic session event stream, not dedicated hook callbacks.
+* Sub-agent lifecycle hook inputs identify the parent session but do not yet carry a shared tool-call ID for correlating with `subagent.*` events.
 * Plugin sub-agent registration is configured at the runtime layer through `--plugin-dir`; no SDK-level plugin registration helper was verified on this branch.
-* Java native typed bindings for `session.fleet.start` were not found in the Java SDK source on this branch.
 * Fleet mode does not remove the need for parent-agent review. Parallel workers can produce inconsistent assumptions that the orchestrator must reconcile.
 
 ## See also

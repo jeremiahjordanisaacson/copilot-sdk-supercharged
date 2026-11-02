@@ -2,6 +2,7 @@
 
 import base64
 import os
+import uuid
 from datetime import datetime
 
 import pytest
@@ -14,7 +15,6 @@ from copilot.tools import Tool, ToolResult
 from .testharness import (
     DEFAULT_GITHUB_TOKEN,
     E2ETestContext,
-    get_final_assistant_message,
     get_next_event_of_type,
     wait_for_condition,
 )
@@ -25,7 +25,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="module")
 class TestSessions:
     async def test_should_create_and_disconnect_sessions(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all, model="claude-sonnet-4.5"
+            on_permission_request=PermissionHandler.approve_all, model="claude-sonnet-5"
         )
         assert session.session_id
 
@@ -33,7 +33,7 @@ class TestSessions:
         assert len(messages) > 0
         assert messages[0].type.value == "session.start"
         assert messages[0].data.session_id == session.session_id
-        assert messages[0].data.selected_model == "claude-sonnet-4.5"
+        assert messages[0].data.selected_model == "claude-sonnet-5"
 
         await session.disconnect()
 
@@ -62,8 +62,8 @@ class TestSessions:
             system_message={"mode": "append", "content": system_message_suffix},
         )
 
-        await session.send("What is your full name?")
-        assistant_message = await get_final_assistant_message(session)
+        assistant_message = await session.send_and_wait("What is your full name?", timeout=10.0)
+        assert assistant_message is not None
         assert "GitHub" in assistant_message.data.content
         assert "Have a nice day!" in assistant_message.data.content
 
@@ -82,8 +82,8 @@ class TestSessions:
             system_message={"mode": "replace", "content": test_system_message},
         )
 
-        await session.send("What is your full name?")
-        assistant_message = await get_final_assistant_message(session)
+        assistant_message = await session.send_and_wait("What is your full name?", timeout=10.0)
+        assert assistant_message is not None
         assert "GitHub" not in assistant_message.data.content
         assert "Testy" in assistant_message.data.content
 
@@ -220,7 +220,6 @@ class TestSessions:
                 await s.get_events()
 
     async def test_should_resume_a_session_using_the_same_client(self, ctx: E2ETestContext):
-        # Create initial session
         session1 = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all
         )
@@ -234,8 +233,12 @@ class TestSessions:
             session_id, on_permission_request=PermissionHandler.approve_all
         )
         assert session2.session_id == session_id
-        answer2 = await get_final_assistant_message(session2, already_idle=True)
-        assert "2" in answer2.data.content
+        # The completed turn's assistant message is durable; session.idle is not.
+        messages = await session2.get_events()
+        assert not any(message.type.value == "session.error" for message in messages)
+        answers = [message for message in messages if message.type.value == "assistant.message"]
+        assert answers
+        assert "2" in answers[-1].data.content
 
         # Can continue the conversation statefully
         answer3 = await session2.send_and_wait("Now if you double that, what do you get?")
@@ -243,7 +246,6 @@ class TestSessions:
         assert "4" in answer3.data.content
 
     async def test_should_resume_a_session_using_a_new_client(self, ctx: E2ETestContext):
-        # Create initial session
         session1 = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all
         )
@@ -315,6 +317,57 @@ class TestSessions:
         finally:
             await new_client.force_stop()
 
+    async def test_should_recover_marker_after_cold_resume_with_explicit_session_id(
+        self, ctx: E2ETestContext
+    ):
+        session_id = f"e2e-cold-resume-{uuid.uuid4()}"
+        github_token = DEFAULT_GITHUB_TOKEN if os.environ.get("GITHUB_ACTIONS") == "true" else None
+
+        client1 = CopilotClient(
+            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
+            working_directory=ctx.work_dir,
+            env=ctx.get_env(),
+            github_token=github_token,
+        )
+        try:
+            session1 = await client1.create_session(
+                on_permission_request=PermissionHandler.approve_all,
+                session_id=session_id,
+            )
+            assert session1.session_id == session_id
+
+            answer = await session1.send_and_wait(
+                "Please remember this exact secret marker for later - MARKER-7f3ac21e. "
+                'Reply with only the single word "Acknowledged".'
+            )
+            assert answer is not None
+            assert "Acknowledged" in answer.data.content
+
+            await session1.disconnect()
+        finally:
+            await client1.force_stop()
+
+        client2 = CopilotClient(
+            connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
+            working_directory=ctx.work_dir,
+            env=ctx.get_env(),
+            github_token=github_token,
+        )
+        try:
+            session2 = await client2.resume_session(
+                session_id, on_permission_request=PermissionHandler.approve_all
+            )
+            assert session2.session_id == session_id
+
+            answer2 = await session2.send_and_wait(
+                "What was the exact secret marker I asked you to remember earlier? "
+                "Reply with only that marker value and nothing else."
+            )
+            assert answer2 is not None
+            assert "MARKER-7f3ac21e" in answer2.data.content
+        finally:
+            await client2.force_stop()
+
     async def test_should_throw_error_resuming_nonexistent_session(self, ctx: E2ETestContext):
         with pytest.raises(Exception):
             await ctx.client.resume_session(
@@ -322,8 +375,6 @@ class TestSessions:
             )
 
     async def test_should_list_sessions(self, ctx: E2ETestContext):
-        import asyncio
-
         # Create a couple of sessions and send messages to persist them
         session1 = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all
@@ -334,11 +385,21 @@ class TestSessions:
         )
         await session2.send_and_wait("Say goodbye")
 
-        # Small delay to ensure session files are written to disk
-        await asyncio.sleep(0.2)
+        sessions = []
+
+        async def sessions_are_persisted() -> bool:
+            nonlocal sessions
+            sessions = await ctx.client.list_sessions()
+            ids = {s.session_id for s in sessions}
+            return {session1.session_id, session2.session_id} <= ids
+
+        await wait_for_condition(
+            sessions_are_persisted,
+            timeout=10.0,
+            timeout_message="Timed out waiting for both sessions to be listed.",
+        )
 
         # List sessions and verify they're included
-        sessions = await ctx.client.list_sessions()
         assert isinstance(sessions, list)
 
         session_ids = [s.session_id for s in sessions]
@@ -365,8 +426,6 @@ class TestSessions:
                 assert isinstance(session_data.context.working_directory, str)
 
     async def test_should_delete_session(self, ctx: E2ETestContext):
-        import asyncio
-
         # Create a session and send a message to persist it
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all
@@ -374,15 +433,23 @@ class TestSessions:
         await session.send_and_wait("Hello")
         session_id = session.session_id
 
-        # Small delay to ensure session file is written to disk
-        await asyncio.sleep(0.2)
+        sessions = []
+
+        async def session_is_persisted() -> bool:
+            nonlocal sessions
+            sessions = await ctx.client.list_sessions()
+            return any(s.session_id == session_id for s in sessions)
+
+        await wait_for_condition(
+            session_is_persisted,
+            timeout=10.0,
+            timeout_message=f"Timed out waiting for session {session_id} to be listed.",
+        )
 
         # Verify session exists in the list
-        sessions = await ctx.client.list_sessions()
         session_ids = [s.session_id for s in sessions]
         assert session_id in session_ids
 
-        # Delete the session
         await ctx.client.delete_session(session_id)
 
         # Verify session no longer exists in the list
@@ -433,18 +500,25 @@ class TestSessions:
         assert not_found is None
 
     async def test_should_get_last_session_id(self, ctx: E2ETestContext):
-        import asyncio
-
         # Create a session and send a message to persist it
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all
         )
         await session.send_and_wait("Say hello")
 
-        # Small delay to ensure session data is flushed to disk
-        await asyncio.sleep(0.5)
+        last_session_id = None
 
-        last_session_id = await ctx.client.get_last_session_id()
+        async def last_session_is_persisted() -> bool:
+            nonlocal last_session_id
+            last_session_id = await ctx.client.get_last_session_id()
+            return last_session_id == session.session_id
+
+        await wait_for_condition(
+            last_session_is_persisted,
+            timeout=10.0,
+            timeout_message=f"Timed out waiting for last session ID {session.session_id}.",
+        )
+
         assert last_session_id == session.session_id
 
         await session.disconnect()
@@ -530,26 +604,26 @@ class TestSessions:
         )
 
         # Set up event listeners BEFORE sending to avoid race conditions
-        wait_for_tool_start = asyncio.create_task(
-            get_next_event_of_type(session, "tool.execution_start", timeout=60.0)
-        )
-        wait_for_session_idle = asyncio.create_task(
-            get_next_event_of_type(session, "session.idle", timeout=30.0)
-        )
+        wait_for_tool_start = get_next_event_of_type(session, "tool.execution_start", timeout=60.0)
+        wait_for_session_idle = get_next_event_of_type(session, "session.idle", timeout=30.0)
 
-        # Send a message that will trigger a long-running shell command
-        await session.send(
-            "run the shell command 'sleep 100' (note this works on both bash and PowerShell)"
-        )
+        try:
+            # Send a message that will trigger a long-running shell command
+            await session.send(
+                "run the shell command 'sleep 100' (note this works on both bash and PowerShell)"
+            )
 
-        # Wait for the tool to start executing
-        _ = await wait_for_tool_start
+            _ = await wait_for_tool_start
 
-        # Abort the session while the tool is running
-        await session.abort()
+            # Abort the session while the tool is running
+            await session.abort()
 
-        # Wait for session to become idle after abort
-        _ = await wait_for_session_idle
+            # Wait for session to become idle after abort
+            _ = await wait_for_session_idle
+        finally:
+            wait_for_tool_start.cancel()
+            wait_for_session_idle.cancel()
+            await asyncio.gather(wait_for_tool_start, wait_for_session_idle, return_exceptions=True)
 
         # The session should still be alive and usable after abort
         messages = await session.get_events()
@@ -560,11 +634,8 @@ class TestSessions:
         assert len(abort_events) > 0, "Expected an abort event in messages"
 
         # We should be able to send another message
-        wait_for_answer = asyncio.create_task(
-            get_next_event_of_type(session, "assistant.message", timeout=60.0)
-        )
-        await session.send("What is 2+2?")
-        answer = await wait_for_answer
+        answer = await session.send_and_wait("What is 2+2?", timeout=60.0)
+        assert answer is not None
         assert "4" in answer.data.content
 
     async def test_should_receive_session_events(self, ctx: E2ETestContext):
@@ -619,11 +690,13 @@ class TestSessions:
         assert "assistant.message" in event_types
         assert "session.idle" in event_types
 
-        # Verify the assistant response contains the expected answer.
-        # session.idle is ephemeral and not in get_events(), but we already
-        # confirmed idle via the live event handler above.
-        assistant_message = await get_final_assistant_message(session, already_idle=True)
-        assert "300" in assistant_message.data.content
+        # Idle was observed live, so inspect the messages captured for this turn.
+        assert "session.error" not in event_types
+        assistant_messages = [
+            event for event in received_events if event.type.value == "assistant.message"
+        ]
+        assert assistant_messages
+        assert "300" in assistant_messages[-1].data.content
 
     async def test_should_create_session_with_custom_config_dir(self, ctx: E2ETestContext):
         import os
@@ -636,8 +709,8 @@ class TestSessions:
         assert session.session_id
 
         # Session should work normally with custom config dir
-        await session.send("What is 1+1?")
-        assistant_message = await get_final_assistant_message(session)
+        assistant_message = await session.send_and_wait("What is 1+1?", timeout=10.0)
+        assert assistant_message is not None
         assert "2" in assistant_message.data.content
 
     async def test_session_log_emits_events_at_all_levels(self, ctx: E2ETestContext):
@@ -648,26 +721,23 @@ class TestSessions:
         )
 
         received_events = []
+        notifications_received = asyncio.Event()
 
         def on_event(event):
             if event.type.value in ("session.info", "session.warning", "session.error"):
                 received_events.append(event)
+                if len(received_events) >= 4:
+                    notifications_received.set()
 
-        session.on(on_event)
-
-        await session.log("Info message")
-        await session.log("Warning message", level="warning")
-        await session.log("Error message", level="error")
-        await session.log("Ephemeral message", ephemeral=True)
-
-        # Poll until all 4 notification events arrive
-        deadline = asyncio.get_event_loop().time() + 10
-        while len(received_events) < 4:
-            if asyncio.get_event_loop().time() > deadline:
-                pytest.fail(
-                    f"Timed out waiting for 4 notification events, got {len(received_events)}"
-                )
-            await asyncio.sleep(0.1)
+        unsubscribe = session.on(on_event)
+        try:
+            await session.log("Info message")
+            await session.log("Warning message", level="warning")
+            await session.log("Error message", level="error")
+            await session.log("Ephemeral message", ephemeral=True)
+            await asyncio.wait_for(notifications_received.wait(), timeout=10)
+        finally:
+            unsubscribe()
 
         by_message = {e.data.message: e for e in received_events}
 
@@ -941,74 +1011,103 @@ class TestSessions:
         self, ctx: E2ETestContext
     ):
         """`send` returns before the session goes idle; events are streamed."""
-        session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-        )
-        events: list[str] = []
-
-        def on_event(event):
-            events.append(event.type.value)
-
-        session.on(on_event)
-
-        # Use a slow command so we can verify send() returns before completion
-        await session.send("Run 'sleep 2 && echo done'")
-
-        # send() should return before turn completes (no session.idle yet)
-        assert "session.idle" not in events
-
-        message = await get_final_assistant_message(session)
-        assert "done" in message.data.content
-        assert "session.idle" in events
-        assert "assistant.message" in events
-
-        await session.disconnect()
-
-    async def test_sendandwait_blocks_until_session_idle_and_returns_final_assistant_message(
-        self, ctx: E2ETestContext
-    ):
-        """`send_and_wait` blocks until idle and returns the final assistant message."""
-        session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-        )
-        events: list[str] = []
-        session.on(lambda evt: events.append(evt.type.value))
-
-        response = await session.send_and_wait("What is 2+2?")
-        assert response is not None
-        assert response.type.value == "assistant.message"
-        assert "4" in (response.data.content or "")
-        assert "session.idle" in events
-        assert "assistant.message" in events
-
-        await session.disconnect()
-
-    async def test_sendandwait_throws_on_timeout(self, ctx: E2ETestContext):
-        """`send_and_wait` raises TimeoutError when the session does not become idle."""
         import asyncio
 
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all,
         )
+        events = []
 
-        # Start a background wait for session.idle so we can drain after we abort.
-        idle_task = asyncio.create_task(
-            get_next_event_of_type(session, "session.idle", timeout=30.0)
+        def on_event(event):
+            events.append(event)
+
+        unsubscribe = session.on(on_event)
+        idle_task = get_next_event_of_type(session, "session.idle")
+        started = asyncio.get_running_loop().time()
+        try:
+            # Use a slow command so we can verify send() returns before completion
+            await session.send("Run 'sleep 2 && echo done'")
+            send_duration = asyncio.get_running_loop().time() - started
+
+            # send() should return before turn completes (no session.idle yet)
+            assert not any(event.type.value == "session.idle" for event in events)
+
+            try:
+                await idle_task
+            except TimeoutError as exc:
+                raise AssertionError(
+                    f"session.idle did not arrive after send() returned in {send_duration:.1f}s; "
+                    f"observed events: {[event.type.value for event in events]}"
+                ) from exc
+            messages = [event for event in events if event.type.value == "assistant.message"]
+            assert messages
+            assert "done" in messages[-1].data.content
+            assert any(event.type.value == "session.idle" for event in events)
+        finally:
+            idle_task.cancel()
+            await asyncio.gather(idle_task, return_exceptions=True)
+            unsubscribe()
+            await session.disconnect()
+
+    async def test_sendandwait_blocks_until_session_idle_and_returns_final_assistant_message(
+        self, ctx: E2ETestContext
+    ):
+        """The synchronous root-idle listener finishes before `send_and_wait` returns."""
+        import asyncio
+
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all,
+        )
+        events: list[str] = []
+        ordering: list[str] = []
+        waiter_pending: list[bool] = []
+        listener_loops = []
+        loop = asyncio.get_running_loop()
+
+        def on_event(event):
+            events.append(event.type.value)
+            if event.type.value == "session.idle" and not event.agent_id:
+                ordering.append("listener entered")
+                listener_loops.append(asyncio.get_running_loop())
+                waiter_pending.append(not send_task.done())
+                # Dispatch is synchronous on the asyncio loop, even though the
+                # JSON-RPC reader is a thread. A blocking gate would deadlock it.
+                ordering.append("listener completed")
+
+        unsubscribe = session.on(on_event)
+        try:
+            send_task = asyncio.create_task(session.send_and_wait("What is 2+2?"))
+            response = await send_task
+            ordering.append("wait returned")
+            assert ordering == ["listener entered", "listener completed", "wait returned"]
+            assert waiter_pending == [True]
+            assert listener_loops == [loop]
+            assert response is not None
+            assert response.type.value == "assistant.message"
+            assert "4" in (response.data.content or "")
+            assert "session.idle" in events
+            assert "assistant.message" in events
+        finally:
+            unsubscribe()
+            await session.disconnect()
+
+    async def test_sendandwait_throws_on_timeout(self, ctx: E2ETestContext):
+        """`send_and_wait` raises TimeoutError when the session does not become idle."""
+        session = await ctx.client.create_session(
+            on_permission_request=PermissionHandler.approve_all,
         )
 
-        with pytest.raises(TimeoutError) as exc_info:
-            await session.send_and_wait(
-                "Run 'sleep 2 && echo done'",
-                timeout=0.1,
-            )
-        assert "Timeout" in str(exc_info.value) or "timed out" in str(exc_info.value).lower()
-
-        # The timeout only cancels the client-side wait; abort the agent and wait for idle
-        # so leftover requests don't leak into subsequent tests.
-        await session.abort()
-        await idle_task
-
-        await session.disconnect()
+        try:
+            with pytest.raises(TimeoutError) as exc_info:
+                await session.send_and_wait(
+                    "Run 'sleep 2 && echo done'",
+                    timeout=0.1,
+                )
+            assert "Timeout" in str(exc_info.value) or "timed out" in str(exc_info.value).lower()
+        finally:
+            # The deadline can expire before admission, so no idle event is guaranteed.
+            # Disconnect drains any admitted work before the next test starts.
+            await session.disconnect()
 
     async def test_sendandwait_throws_operationcanceledexception_when_token_cancelled(
         self, ctx: E2ETestContext
@@ -1020,12 +1119,8 @@ class TestSessions:
             on_permission_request=PermissionHandler.approve_all,
         )
 
-        tool_start_task = asyncio.create_task(
-            get_next_event_of_type(session, "tool.execution_start", timeout=60.0)
-        )
-        idle_task = asyncio.create_task(
-            get_next_event_of_type(session, "session.idle", timeout=30.0)
-        )
+        tool_start_task = get_next_event_of_type(session, "tool.execution_start", timeout=60.0)
+        idle_task = get_next_event_of_type(session, "session.idle", timeout=30.0)
 
         send_task = asyncio.create_task(
             session.send_and_wait(
@@ -1034,18 +1129,23 @@ class TestSessions:
             )
         )
 
-        # Wait for the tool to begin executing before cancelling.
-        await tool_start_task
+        try:
+            # Wait for the tool to begin executing before cancelling.
+            await tool_start_task
 
-        send_task.cancel()
-        with pytest.raises((asyncio.CancelledError, BaseException)):
-            await send_task
+            send_task.cancel()
+            with pytest.raises((asyncio.CancelledError, BaseException)):
+                await send_task
 
-        # Cancelling only cancels the client-side wait; abort and wait for idle.
-        await session.abort()
-        await idle_task
-
-        await session.disconnect()
+            # Cancelling only cancels the client-side wait; abort and wait for idle.
+            await session.abort()
+            await idle_task
+        finally:
+            tool_start_task.cancel()
+            idle_task.cancel()
+            send_task.cancel()
+            await asyncio.gather(tool_start_task, idle_task, send_task, return_exceptions=True)
+            await session.disconnect()
 
     async def test_should_set_model_on_existing_session(self, ctx: E2ETestContext):
         """`set_model` emits a session.model_change event with the new model."""

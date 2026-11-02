@@ -16,6 +16,7 @@ type ServerRpc = ReturnType<typeof createServerRpc>;
 
 const sharedTextDecoder = new TextDecoder("utf-8", { fatal: false });
 const sharedTextEncoder = new TextEncoder();
+const HTTP_RESPONSE_READ_AHEAD_BYTES = 32 * 1024;
 
 const kBridge = Symbol("copilotWebSocketResponseBridge");
 const kCompletion = Symbol("copilotWebSocketCompletion");
@@ -34,6 +35,8 @@ export interface CopilotRequestContext {
     readonly requestId: string;
     readonly sessionId?: string;
     readonly agentId?: string;
+    /** Runtime-provided logical invocation identity, unchanged across physical retries. */
+    readonly agentInvocationId?: string;
     readonly parentAgentId?: string;
     readonly interactionType?: string;
     readonly transport: "http" | "websocket";
@@ -112,7 +115,14 @@ export abstract class CopilotWebSocketHandler implements AsyncDisposable {
         this.#resolveCompletion(status);
     }
 
-    abstract sendRequestMessage(data: string | Uint8Array): Promise<void> | void;
+    /**
+     * Forward a runtime message. When supplied by the adapter, ctx carries this
+     * message's invocation identity, not the identity that opened the connection.
+     */
+    abstract sendRequestMessage(
+        data: string | Uint8Array,
+        ctx?: CopilotRequestContext
+    ): Promise<void> | void;
 
     async [Symbol.asyncDispose](): Promise<void> {
         if (!this[kSuppressCloseOnDispose] && !this.#closed) {
@@ -148,7 +158,7 @@ export class CopilotWebSocketForwarder extends CopilotWebSocketHandler {
         super(context);
     }
 
-    override sendRequestMessage(data: string | Uint8Array): void {
+    override sendRequestMessage(data: string | Uint8Array, _ctx?: CopilotRequestContext): void {
         if (this.#upstream?.readyState !== WebSocket.OPEN) {
             return;
         }
@@ -160,7 +170,9 @@ export class CopilotWebSocketForwarder extends CopilotWebSocketHandler {
         if (this.#upstream) {
             return;
         }
-        const upstream = new WebSocket(this.context.url);
+        const upstream = new WebSocket(this.context.url, {
+            headers: forwardedRequestHeaders(this.context.headers),
+        });
         upstream.binaryType = "arraybuffer";
         this.#upstream = upstream;
         upstream.addEventListener("message", (event) => {
@@ -253,6 +265,7 @@ export class CopilotRequestHandler {
             requestId: exchange.requestId,
             sessionId: exchange.sessionId,
             agentId: exchange.agentId,
+            agentInvocationId: exchange.agentInvocationId,
             parentAgentId: exchange.parentAgentId,
             interactionType: exchange.interactionType,
             transport: exchange.transport,
@@ -292,7 +305,10 @@ export class CopilotRequestHandler {
             let cancelled: unknown;
             const clientSettled = (async () => {
                 for await (const chunk of exchange.requestBody) {
-                    await handler.sendRequestMessage(decodeFrame(chunk));
+                    await handler.sendRequestMessage(decodeFrame(chunk.chunk ?? new Uint8Array()), {
+                        ...ctx,
+                        agentInvocationId: chunk.agentInvocationId,
+                    });
                 }
                 return "client-complete" as const;
             })().catch((err) => {
@@ -341,7 +357,7 @@ export class CopilotRequestHandler {
 export function createCopilotRequestAdapter(
     handler: CopilotRequestHandler,
     getServerRpc: () => ServerRpc | undefined
-): LlmInferenceHandler {
+): LlmInferenceHandler & { cancelPending(): void } {
     const pending = new Map<string, CopilotRequestExchange>();
 
     function getOrCreate(requestId: string): CopilotRequestExchange {
@@ -378,7 +394,9 @@ export function createCopilotRequestAdapter(
             const message = err instanceof Error ? err.message : String(err);
             await finalize(exchange, 502, message);
         } finally {
-            pending.delete(exchange.requestId);
+            if (pending.get(exchange.requestId) === exchange) {
+                pending.delete(exchange.requestId);
+            }
         }
     }
 
@@ -400,6 +418,13 @@ export function createCopilotRequestAdapter(
             // body is buffered, never lost.
             routeChunk(getOrCreate(params.requestId), params);
             return {};
+        },
+        cancelPending(): void {
+            const exchanges = [...pending.values()];
+            pending.clear();
+            for (const exchange of exchanges) {
+                exchange.pushCancel("RPC connection closed");
+            }
         },
     };
 }
@@ -432,7 +457,7 @@ function routeChunk(
         return;
     }
     if (params.data && params.data.length > 0) {
-        exchange.pushChunk(decodeChunkData(params.data, !!params.binary));
+        exchange.pushChunk(decodeChunkData(params.data, !!params.binary), params.agentInvocationId);
     }
     if (params.end) {
         exchange.pushEnd();
@@ -448,6 +473,7 @@ interface ResponseInit {
 
 interface BodyQueueItem {
     chunk?: Uint8Array;
+    agentInvocationId?: string;
     end?: boolean;
     cancel?: { reason?: string };
 }
@@ -463,6 +489,7 @@ class CopilotRequestExchange {
     readonly requestId: string;
     sessionId?: string;
     agentId?: string;
+    agentInvocationId?: string;
     parentAgentId?: string;
     interactionType?: string;
     method = "GET";
@@ -488,6 +515,7 @@ class CopilotRequestExchange {
     setContext(params: LlmInferenceHttpRequestStartRequest): void {
         this.sessionId = params.sessionId;
         this.agentId = params.agentId;
+        this.agentInvocationId = params.agentInvocationId;
         this.parentAgentId = params.parentAgentId;
         this.interactionType = params.interactionType;
         this.method = params.method;
@@ -514,8 +542,8 @@ class CopilotRequestExchange {
 
     // --- Request body feed (driven by the adapter as chunk frames arrive) ---
 
-    pushChunk(chunk: Uint8Array): void {
-        this.#push({ chunk });
+    pushChunk(chunk: Uint8Array, agentInvocationId?: string): void {
+        this.#push({ chunk, agentInvocationId });
     }
 
     pushEnd(): void {
@@ -539,10 +567,10 @@ class CopilotRequestExchange {
      * Request body bytes, yielded as they arrive. A cancel frame surfaces as a
      * thrown error so the handler's upstream call is torn down.
      */
-    get requestBody(): AsyncIterable<Uint8Array> {
+    get requestBody(): AsyncIterable<BodyQueueItem> {
         return {
-            [Symbol.asyncIterator]: (): AsyncIterator<Uint8Array> => ({
-                next: async (): Promise<IteratorResult<Uint8Array>> => {
+            [Symbol.asyncIterator]: (): AsyncIterator<BodyQueueItem> => ({
+                next: async (): Promise<IteratorResult<BodyQueueItem>> => {
                     if (this.#drained) {
                         return { value: undefined, done: true };
                     }
@@ -564,7 +592,7 @@ class CopilotRequestExchange {
                         this.#drained = true;
                         return { value: undefined, done: true };
                     }
-                    return { value: item.chunk ?? new Uint8Array(), done: false };
+                    return { value: item, done: false };
                 },
             }),
         };
@@ -655,19 +683,29 @@ const FORBIDDEN_REQUEST_HEADERS = new Set([
     "trailer",
 ]);
 
-async function buildFetchRequest(exchange: CopilotRequestExchange): Promise<Request> {
+/**
+ * The request headers to send upstream, minus hop-by-hop and WebSocket headers the
+ * outbound HTTP or WebSocket client sets itself.
+ */
+function forwardedRequestHeaders(source: LlmInferenceHeaders): Headers {
     const headers = new Headers();
-    for (const [name, values] of Object.entries(exchange.headers)) {
+    for (const [name, values] of Object.entries(source)) {
         if (!values) {
             continue;
         }
-        if (FORBIDDEN_REQUEST_HEADERS.has(name.toLowerCase())) {
+        const lower = name.toLowerCase();
+        if (FORBIDDEN_REQUEST_HEADERS.has(lower) || lower.startsWith("sec-websocket-")) {
             continue;
         }
         for (const value of values) {
             headers.append(name, value);
         }
     }
+    return headers;
+}
+
+async function buildFetchRequest(exchange: CopilotRequestExchange): Promise<Request> {
+    const headers = forwardedRequestHeaders(exchange.headers);
 
     const method = exchange.method.toUpperCase();
     const hasBody = method !== "GET" && method !== "HEAD";
@@ -685,12 +723,14 @@ async function buildFetchRequest(exchange: CopilotRequestExchange): Promise<Requ
     return new Request(exchange.url, { method, headers, body });
 }
 
-async function drainAsync(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+async function drainAsync(stream: AsyncIterable<BodyQueueItem>): Promise<Uint8Array> {
     const parts: Uint8Array[] = [];
     let total = 0;
-    for await (const chunk of stream) {
-        parts.push(chunk);
-        total += chunk.byteLength;
+    for await (const item of stream) {
+        if (item.chunk) {
+            parts.push(item.chunk);
+            total += item.chunk.byteLength;
+        }
     }
     if (parts.length === 0) {
         return new Uint8Array(0);
@@ -708,32 +748,189 @@ async function drainAsync(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array
 }
 
 async function streamResponse(response: Response, exchange: CopilotRequestExchange): Promise<void> {
-    await exchange.startResponse({
-        status: response.status,
-        statusText: response.statusText || undefined,
-        headers: headersToMultiMap(response.headers),
-    });
-
-    const body = response.body;
-    if (!body) {
-        await exchange.endResponse();
-        return;
-    }
-
-    const reader = body.getReader();
+    const reader = response.body
+        ? new HttpResponseReader(response.body, exchange.signal)
+        : undefined;
     try {
-        for (;;) {
-            const { value, done } = await reader.read();
-            if (done) {
-                break;
-            }
-            if (value && value.byteLength > 0) {
-                await exchange.writeResponse(value);
+        await exchange.startResponse({
+            status: response.status,
+            statusText: response.statusText || undefined,
+            headers: headersToMultiMap(response.headers),
+        });
+
+        if (reader) {
+            for (;;) {
+                const chunk = await reader.nextChunk();
+                if (!chunk) {
+                    break;
+                }
+                await exchange.writeResponse(chunk);
             }
         }
+
         await exchange.endResponse();
     } finally {
-        reader.releaseLock();
+        await reader?.dispose();
+    }
+}
+
+/**
+ * Pulls independently of response RPC acknowledgements, bounding how far ahead
+ * of the runtime the source may run. Frames are held by reference and only
+ * copied when more than one has accumulated, so a consumer that keeps up pays
+ * no copy at all.
+ */
+class HttpResponseReader {
+    readonly #reader: ReadableStreamDefaultReader<Uint8Array>;
+    readonly #signal: AbortSignal;
+    readonly #frames: Uint8Array[] = [];
+    readonly #pump: Promise<void>;
+    readonly #onAbort: () => void;
+    #queued = 0;
+    #done = false;
+    #cancelled = false;
+    #hasError = false;
+    #error: unknown;
+    #dataWaker: (() => void) | undefined;
+    #spaceWaker: (() => void) | undefined;
+    #cancelPromise: Promise<void> | undefined;
+
+    constructor(body: ReadableStream<Uint8Array>, signal: AbortSignal) {
+        this.#reader = body.getReader();
+        this.#signal = signal;
+        this.#onAbort = () => {
+            void this.cancel(signal.reason);
+        };
+        signal.addEventListener("abort", this.#onAbort, { once: true });
+        this.#pump = this.#pumpSource();
+        if (signal.aborted) {
+            this.#onAbort();
+        }
+    }
+
+    async nextChunk(): Promise<Uint8Array | undefined> {
+        while (this.#frames.length === 0 && !this.#done && !this.#hasError) {
+            await new Promise<void>((resolve) => {
+                this.#dataWaker = resolve;
+            });
+        }
+
+        if (this.#frames.length > 0) {
+            const chunk = this.#takeQueued();
+            this.#wakeSpace();
+            return chunk;
+        }
+
+        if (this.#hasError) {
+            this.#hasError = false;
+            throw this.#error;
+        }
+
+        return undefined;
+    }
+
+    #takeQueued(): Uint8Array {
+        const frames = this.#frames;
+        const total = this.#queued;
+        this.#queued = 0;
+
+        // The consumer kept up, so a single frame is waiting: forward the
+        // source's own buffer instead of copying it through a staging buffer.
+        if (frames.length === 1) {
+            return frames.pop()!;
+        }
+
+        const chunk = new Uint8Array(total);
+        let offset = 0;
+        for (const frame of frames) {
+            chunk.set(frame, offset);
+            offset += frame.byteLength;
+        }
+        frames.length = 0;
+        return chunk;
+    }
+
+    async dispose(): Promise<void> {
+        this.#signal.removeEventListener("abort", this.#onAbort);
+        if (!this.#done) {
+            await this.cancel();
+        } else if (this.#cancelPromise) {
+            await this.#cancelPromise;
+        }
+        await this.#pump;
+    }
+
+    cancel(reason?: unknown): Promise<void> {
+        if (this.#done) {
+            return Promise.resolve();
+        }
+        if (!this.#cancelPromise) {
+            this.#cancelled = true;
+            this.#done = true;
+            this.#hasError = true;
+            this.#error =
+                reason instanceof Error ? reason : new Error("HTTP response body cancelled.");
+            this.#frames.length = 0;
+            this.#queued = 0;
+            this.#wakeData();
+            this.#wakeSpace();
+            this.#cancelPromise = this.#reader.cancel(reason).catch(() => undefined);
+        }
+        return this.#cancelPromise;
+    }
+
+    async #pumpSource(): Promise<void> {
+        try {
+            while (!this.#cancelled) {
+                while (this.#queued >= HTTP_RESPONSE_READ_AHEAD_BYTES && !this.#cancelled) {
+                    await new Promise<void>((resolve) => {
+                        this.#spaceWaker = resolve;
+                    });
+                }
+                if (this.#cancelled) {
+                    return;
+                }
+
+                const { value, done } = await this.#reader.read();
+                if (done) {
+                    return;
+                }
+                if (value.byteLength > 0) {
+                    this.#frames.push(value);
+                    this.#queued += value.byteLength;
+                    this.#wakeData();
+                    continue;
+                }
+
+                // A source that only ever yields empty frames would never reach
+                // the read-ahead bound, so yield explicitly to keep timers and
+                // socket I/O — including the acknowledgements this loop is
+                // racing — from being starved by the microtask queue.
+                await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+        } catch (error) {
+            if (!this.#cancelled) {
+                this.#hasError = true;
+                this.#error = error;
+            }
+        } finally {
+            this.#done = true;
+            this.#wakeData();
+            this.#wakeSpace();
+            this.#reader.releaseLock();
+        }
+    }
+
+    #wakeData(): void {
+        const waker = this.#dataWaker;
+        this.#dataWaker = undefined;
+        waker?.();
+    }
+
+    #wakeSpace(): void {
+        const waker = this.#spaceWaker;
+        this.#spaceWaker = undefined;
+        waker?.();
     }
 }
 

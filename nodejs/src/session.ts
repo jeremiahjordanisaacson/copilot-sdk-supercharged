@@ -8,20 +8,32 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { MessageConnection } from "vscode-jsonrpc/node.js";
-import { ConnectionError, ErrorCodes, ResponseError } from "vscode-jsonrpc/node.js";
-import { createSessionRpc } from "./generated/rpc.js";
+import type { CancellationToken, MessageConnection } from "vscode-jsonrpc/node";
+import {
+    CancellationTokenSource,
+    ConnectionError,
+    ErrorCodes,
+    ResponseError,
+} from "vscode-jsonrpc/node";
+import { createInternalSessionRpc, createSessionRpc } from "./generated/rpc.js";
 import type {
     ClientSessionApiHandlers,
     CanvasActionInvokeResult,
     CurrentToolMetadata,
     McpOauthPendingRequestResponse,
-    FactoryLogLine,
-    FactoryRunResult as WireFactoryRunResult,
+    ProtocolExternalToolDefinition,
+    WorkflowLogLine,
+    WorkflowRunResult as WireWorkflowRunResult,
+    ModelSwitchAutoTierResult,
+    SendAndWaitResult,
+    SessionManagementCreateHostRequest,
+    SessionManagementCreateResult,
+    SessionManagementPolicy,
 } from "./generated/rpc.js";
 import { type Canvas, CanvasError } from "./canvas.js";
 import type { OpenCanvasInstance } from "./generated/rpc.js";
 import { getTraceContext } from "./telemetry.js";
+import { isResponseSchema, toJsonSchema } from "./schema.js";
 import { isAttributedPermissionResult } from "./types.js";
 import type {
     CommandHandler,
@@ -38,65 +50,77 @@ import type {
     BearerTokenProvider,
     UiInputOptions,
     MessageOptions,
+    ResponseSchema,
     McpAuthHandler,
     McpAuthRequest,
     PermissionHandler,
+    PermissionHandlerInvocation,
     PermissionRequest,
+    PermissionRequestedData,
     PermissionRequestResult,
     ContextTier,
     ReasoningEffort,
     ReasoningSummary,
+    AutoTier,
     ModelCapabilitiesOverride,
     SectionTransformFn,
     SessionCapabilities,
+    SessionConfig,
     SessionEvent,
     SessionEventHandler,
     SessionEventPayload,
     SessionEventType,
     SessionHooks,
     SessionUiApi,
+    SkillProvider,
+    SkillProviderCallOptions,
+    SkillProviderDescriptor,
+    SessionCreationHandler,
     Tool,
     ToolHandler,
     ToolResult,
     ToolResultObject,
     TraceContextProvider,
+    TranscriptRecovery,
     TypedSessionEventHandler,
     UserInputHandler,
     UserInputRequest,
     UserInputResponse,
 } from "./types.js";
 import {
-    FACTORY_AGENT_OPTION_KEYS,
-    getFactoryDefinition,
-    FactoryResumeError,
-    isFactoryRunTerminal,
-    type FactoryResumeErrorCode,
-    type FactoryRunResult,
-    type FactoryAgentOptions,
-    type RunOptions,
-    type SessionFactoryApi,
-    type FactoryContext,
-    type FactoryHandle,
+    WORKFLOW_AGENT_OPTION_KEYS,
+    getWorkflowDefinition,
+    WorkflowResumeError,
+    isWorkflowRunTerminal,
+    type WorkflowResumeErrorCode,
+    type WorkflowListRunsOptions,
+    type WorkflowRunResult,
+    type WorkflowAgentOptions,
+    type WorkflowRunOptions,
+    type SessionWorkflowApi,
+    type WorkflowContext,
+    type WorkflowHandle,
     type JsonValue,
-    type FactoryStepOptions,
-} from "./factory.js";
+    type WorkflowStepOptions,
+} from "./workflow.js";
 
-function isFactoryResumeErrorCode(value: unknown): value is FactoryResumeErrorCode {
+function isWorkflowResumeErrorCode(value: unknown): value is WorkflowResumeErrorCode {
     return (
         value === "not_found" ||
         value === "non_resumable" ||
+        value === "workflow_run_not_resumable" ||
         value === "already_active" ||
-        value === "factory_already_running" ||
-        value === "factory_limits_invalid" ||
-        value === "factory_session_disposed" ||
-        value === "factory_storage_unavailable" ||
-        value === "factory_storage_corrupt"
+        value === "workflow_already_running" ||
+        value === "workflow_limits_invalid" ||
+        value === "workflow_session_disposed" ||
+        value === "workflow_storage_unavailable" ||
+        value === "workflow_storage_corrupt"
     );
 }
 
-function copyDefinedFactoryAgentOption<TKey extends keyof FactoryAgentOptions>(
-    source: FactoryAgentOptions,
-    target: FactoryAgentOptions,
+function copyDefinedWorkflowAgentOption<TKey extends keyof WorkflowAgentOptions>(
+    source: WorkflowAgentOptions,
+    target: WorkflowAgentOptions,
     key: TKey
 ): void {
     const value = source[key];
@@ -105,14 +129,45 @@ function copyDefinedFactoryAgentOption<TKey extends keyof FactoryAgentOptions>(
     }
 }
 
-const factoryExecutionStore = new AsyncLocalStorage<{ active: boolean }>();
+/**
+ * The wire definition `session.tools.set` takes for a tool, matching what
+ * session creation and resumption send for the same tool.
+ */
+function toToolDefinition(tool: Tool): ProtocolExternalToolDefinition {
+    return {
+        name: tool.name,
+        description: tool.description ?? "",
+        parameters: toJsonSchema(tool.parameters) as ProtocolExternalToolDefinition["parameters"],
+        overridesBuiltInTool: tool.overridesBuiltInTool,
+        skipPermission: tool.skipPermission,
+        defer: tool.defer,
+        metadata: tool.metadata as ProtocolExternalToolDefinition["metadata"],
+        isTerminal: tool.isTerminal,
+        namespace: tool.namespace,
+    };
+}
 
-function throwIfFactoryExecutionIsActive(): void {
-    if (factoryExecutionStore.getStore()?.active) {
+type WorkflowExecutionContext = {
+    active: boolean;
+    helperScope?: "parallel" | "pipeline";
+};
+
+const workflowExecutionStore = new AsyncLocalStorage<WorkflowExecutionContext>();
+
+function throwIfWorkflowExecutionIsActive(): void {
+    if (workflowExecutionStore.getStore()?.active) {
         throw new Error(
-            "factory.run and factory.resume are not allowed while a factory body is running on this call path."
+            "workflow.run, workflow.resume, and workflow.pause are not allowed while a workflow body is running on this call path."
         );
     }
+}
+
+function runInWorkflowHelperScope<TResult>(
+    helperScope: "parallel" | "pipeline",
+    callback: () => Promise<TResult> | TResult
+): Promise<TResult> | TResult {
+    const current = workflowExecutionStore.getStore();
+    return workflowExecutionStore.run({ active: current?.active ?? false, helperScope }, callback);
 }
 
 /**
@@ -142,6 +197,27 @@ function deserializeHookInput(raw: unknown): unknown {
     };
 }
 
+/**
+ * The CLI sends the `error` of an errorOccurred or sessionEnd hook input as an
+ * error object (`{ name, message, stack }` or `{ message }`), where the hook
+ * input types declare a string. The object's message becomes the error, and an
+ * object without a string message becomes its JSON. Other values pass through.
+ */
+function normalizeHookError(hookType: string, input: unknown): unknown {
+    if (hookType !== "errorOccurred" && hookType !== "sessionEnd") {
+        return input;
+    }
+    if (!input || typeof input !== "object" || !("error" in input)) {
+        return input;
+    }
+    const { error } = input as { error: unknown };
+    if (!error || typeof error !== "object" || Array.isArray(error)) {
+        return input;
+    }
+    const { message } = error as { message?: unknown };
+    return { ...input, error: typeof message === "string" ? message : JSON.stringify(error) };
+}
+
 function isOpenCanvasInstance(value: unknown): value is OpenCanvasInstance {
     if (!value || typeof value !== "object") {
         return false;
@@ -157,18 +233,18 @@ function isOpenCanvasInstance(value: unknown): value is OpenCanvasInstance {
     );
 }
 
-const FACTORY_LOG_FLUSH_DELAY_MS = 10;
-const MAX_FACTORY_FANOUT_ITEMS = 4096;
+const WORKFLOW_LOG_FLUSH_DELAY_MS = 10;
+const MAX_WORKFLOW_FANOUT_ITEMS = 4096;
 
-function assertFactoryFanoutSize(kind: "parallel" | "pipeline", size: number): void {
-    if (size > MAX_FACTORY_FANOUT_ITEMS) {
+function assertWorkflowFanoutSize(kind: "parallel" | "pipeline", size: number): void {
+    if (size > MAX_WORKFLOW_FANOUT_ITEMS) {
         throw new Error(
-            `${kind}() accepts at most ${MAX_FACTORY_FANOUT_ITEMS} items; got ${size}.`
+            `${kind}() accepts at most ${MAX_WORKFLOW_FANOUT_ITEMS} items; got ${size}.`
         );
     }
 }
 
-async function runFactoryParallel<TResult>(
+async function runWorkflowParallel<TResult>(
     thunks: Array<() => Promise<TResult> | TResult>
 ): Promise<Array<TResult | null>> {
     if (!Array.isArray(thunks)) {
@@ -176,7 +252,7 @@ async function runFactoryParallel<TResult>(
             "parallel() expects an array of functions, not promises. Wrap each call: () => agent(...)"
         );
     }
-    assertFactoryFanoutSize("parallel", thunks.length);
+    assertWorkflowFanoutSize("parallel", thunks.length);
     if (thunks.some((thunk) => typeof thunk !== "function")) {
         throw new Error(
             "parallel() expects an array of functions, not promises. Wrap each call: () => agent(...)"
@@ -185,15 +261,9 @@ async function runFactoryParallel<TResult>(
     return Promise.all(
         thunks.map((thunk) =>
             Promise.resolve()
-                .then(() => thunk())
+                .then(() => runInWorkflowHelperScope("parallel", thunk))
                 .catch((error) => {
-                    // Cancellation and hard runtime failures must propagate out
-                    // of the combinator rather than be mapped to a successful
-                    // `null`; otherwise an aborted run, or one that hit a
-                    // resource ceiling or durable-state failure, could be
-                    // reported as completed. An ordinary subagent failure never
-                    // rejects — it already resolves `null`.
-                    if (isFactoryFatalError(error)) {
+                    if (isWorkflowFatalError(error)) {
                         throw error;
                     }
                     return null;
@@ -202,7 +272,7 @@ async function runFactoryParallel<TResult>(
     );
 }
 
-async function runFactoryPipeline(
+async function runWorkflowPipeline(
     items: unknown[],
     ...stages: Array<
         (previous: unknown, item: unknown, index: number) => Promise<unknown> | unknown
@@ -211,19 +281,17 @@ async function runFactoryPipeline(
     if (!Array.isArray(items)) {
         throw new Error("pipeline(items, ...stages): items must be an array");
     }
-    assertFactoryFanoutSize("pipeline", items.length);
+    assertWorkflowFanoutSize("pipeline", items.length);
     return Promise.all(
         items.map(async (item, index) => {
             let previous = item;
             for (const stage of stages) {
                 try {
-                    previous = await stage(previous, item, index);
+                    previous = await runInWorkflowHelperScope("pipeline", () =>
+                        stage(previous, item, index)
+                    );
                 } catch (error) {
-                    // Propagate cancellation and hard runtime failures instead
-                    // of mapping them to `null`, so an aborted stage — or one
-                    // that hit a resource ceiling or durable-state failure —
-                    // does not let the run report success.
-                    if (isFactoryFatalError(error)) {
+                    if (isWorkflowFatalError(error)) {
                         throw error;
                     }
                     return null;
@@ -234,22 +302,28 @@ async function runFactoryPipeline(
     );
 }
 
-class FactoryProgressBuffer {
+class WorkflowProgressBuffer {
     private nextSeq = 0;
-    private pending: FactoryLogLine[] = [];
+    private pending: WorkflowLogLine[] = [];
     private flushTimer?: ReturnType<typeof setTimeout>;
     private flushTail: Promise<void> = Promise.resolve();
     private flushError: unknown;
     private flushFailed = false;
     private closed = false;
 
-    constructor(private readonly send: (lines: FactoryLogLine[]) => Promise<void>) {}
+    constructor(private readonly send: (lines: WorkflowLogLine[]) => Promise<void>) {}
 
-    enqueue(kind: FactoryLogLine["kind"], text: string): void {
+    enqueue(kind: WorkflowLogLine["kind"], text: unknown): void {
         if (this.closed) {
-            throw new Error("Cannot log after the factory run has settled");
+            throw new Error("Cannot log after the workflow run has settled");
         }
-
+        // Reject here rather than at flush time: the runtime refuses the whole batch
+        // for one non-string line, and a failed flush fails every later step.
+        if (typeof text !== "string") {
+            throw new TypeError(
+                `${kind}() expects a string; got ${text === null ? "null" : typeof text}.`
+            );
+        }
         this.pending.push({ seq: this.nextSeq++, kind, text });
         this.scheduleFlush();
     }
@@ -282,7 +356,7 @@ class FactoryProgressBuffer {
         await this.flushTail;
         if (this.flushFailed) {
             console.warn(
-                "Ignoring a background factory progress flush failure after the factory body settled",
+                "Ignoring a background workflow progress flush failure after the workflow body settled",
                 this.flushError
             );
         }
@@ -291,7 +365,7 @@ class FactoryProgressBuffer {
                 await this.send(lines);
             } catch (error) {
                 console.warn(
-                    "Failed to flush final factory progress after the factory body settled",
+                    "Failed to flush final workflow progress after the workflow body settled",
                     error
                 );
             }
@@ -305,7 +379,7 @@ class FactoryProgressBuffer {
         this.flushTimer = setTimeout(() => {
             this.flushTimer = undefined;
             void this.flush().catch(() => {});
-        }, FACTORY_LOG_FLUSH_DELAY_MS);
+        }, WORKFLOW_LOG_FLUSH_DELAY_MS);
         this.flushTimer.unref?.();
     }
 
@@ -317,7 +391,7 @@ class FactoryProgressBuffer {
     }
 }
 
-async function awaitFactoryOperation<TResult>(
+async function awaitWorkflowOperation<TResult>(
     operation: () => Promise<TResult>,
     signal: AbortSignal
 ): Promise<TResult> {
@@ -328,31 +402,31 @@ async function awaitFactoryOperation<TResult>(
         rejectAbort = reject;
     });
     const onAbort = () =>
-        rejectAbort?.(signal.reason ?? new DOMException("Factory run was aborted", "AbortError"));
+        rejectAbort?.(signal.reason ?? new DOMException("Workflow run was aborted", "AbortError"));
     // Register before the abort check and before dispatching, so an abort can
     // neither be missed by a not-yet-attached listener nor start work on an
     // already-cancelled run.
     signal.addEventListener("abort", onAbort, { once: true });
     try {
-        throwIfFactoryAborted(signal);
+        throwIfWorkflowAborted(signal);
         return await Promise.race([operation(), abortPromise]);
     } finally {
         signal.removeEventListener("abort", onAbort);
     }
 }
 
-function throwIfFactoryAborted(signal: AbortSignal): void {
+function throwIfWorkflowAborted(signal: AbortSignal): void {
     if (signal.aborted) {
-        throw signal.reason ?? new DOMException("Factory run was aborted", "AbortError");
+        throw signal.reason ?? new DOMException("Workflow run was aborted", "AbortError");
     }
 }
 
 /**
- * Whether an error represents factory run cancellation (an `AbortError`-shaped
- * rejection from {@link awaitFactoryOperation}). Cancellation must bubble out of
+ * Whether an error represents workflow run cancellation (an `AbortError`-shaped
+ * rejection from {@link awaitWorkflowOperation}). Cancellation must bubble out of
  * `parallel`/`pipeline` rather than being flattened into a `null` result.
  */
-function isFactoryAbortError(error: unknown): boolean {
+function isWorkflowAbortError(error: unknown): boolean {
     return (
         typeof error === "object" &&
         error !== null &&
@@ -362,7 +436,7 @@ function isFactoryAbortError(error: unknown): boolean {
 }
 
 /**
- * Errors a factory combinator must never swallow into a `null` item.
+ * Errors a workflow combinator must never swallow into a `null` item.
  *
  * Cooperative cancellation aborts the run, and a rejected RPC is a hard
  * runtime failure — a reached limit, a durable-state failure, or a dropped
@@ -370,12 +444,32 @@ function isFactoryAbortError(error: unknown): boolean {
  * successfully-`null` item. An ordinary subagent failure does not reject; the
  * runtime already resolves it as `null`.
  */
-function isFactoryFatalError(error: unknown): boolean {
+function isWorkflowFatalError(error: unknown): boolean {
     return (
-        isFactoryAbortError(error) ||
+        isWorkflowAbortError(error) ||
         error instanceof ResponseError ||
         error instanceof ConnectionError
     );
+}
+
+/** Node.js fires a timer whose delay exceeds this after 1 ms instead. */
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
+
+/**
+ * Like `setTimeout`, but a delay beyond {@link MAX_TIMER_DELAY_MS}, including
+ * `Infinity`, waits its full length instead of firing after 1 ms.
+ * Returns a function that cancels the timer.
+ */
+function setLongTimeout(callback: () => void, delayMs: number): () => void {
+    let timer: ReturnType<typeof setTimeout>;
+    const arm = (remainingMs: number) => {
+        timer =
+            remainingMs > MAX_TIMER_DELAY_MS
+                ? setTimeout(() => arm(remainingMs - MAX_TIMER_DELAY_MS), MAX_TIMER_DELAY_MS)
+                : setTimeout(callback, remainingMs);
+    };
+    arm(delayMs);
+    return () => clearTimeout(timer);
 }
 
 /** Assistant message event - the final response from the assistant. */
@@ -415,71 +509,83 @@ const TOOL_SEARCH_TOOL_NAME = "tool_search_tool";
  */
 
 export class CopilotSession {
+    private _transcriptRecovery?: TranscriptRecovery;
     private eventHandlers: Set<SessionEventHandler> = new Set();
     private typedEventHandlers: Map<SessionEventType, Set<(event: SessionEvent) => void>> =
         new Map();
     private toolHandlers: Map<string, ToolHandler> = new Map();
+    /** Settles once every earlier `setTools` call has finished. */
+    private setToolsQueue: Promise<void> = Promise.resolve();
+    private pendingExternalTools: Map<string, AbortController> = new Map();
+    private pendingSessionCreations = new Set<AbortController>();
     private canvases: Map<string, Canvas> = new Map();
     private bearerTokenProviders: Map<string, BearerTokenProvider> = new Map();
     private commandHandlers: Map<string, CommandHandler> = new Map();
-    private factories = new Map<string, ReturnType<typeof getFactoryDefinition>>();
-    private factoryAbortControllers = new Map<string, Map<string, AbortController>>();
+    private workflows = new Map<string, ReturnType<typeof getWorkflowDefinition>>();
+    private workflowAbortControllers = new Map<string, Map<string, AbortController>>();
     private permissionHandler?: PermissionHandler;
     private mcpAuthHandler?: McpAuthHandler;
     private userInputHandler?: UserInputHandler;
     private elicitationHandler?: ElicitationHandler;
     private exitPlanModeHandler?: ExitPlanModeHandler;
     private autoModeSwitchHandler?: AutoModeSwitchHandler;
+    private skillProvider?: SkillProvider;
+    private sessionCreationHandler?: SessionCreationHandler;
     private hooks?: SessionHooks;
     private transformCallbacks?: Map<string, SectionTransformFn>;
     private _rpc: ReturnType<typeof createSessionRpc> | null = null;
+    private _internalRpc: ReturnType<typeof createInternalSessionRpc> | null = null;
     private traceContextProvider?: TraceContextProvider;
     private readonly managedSettingsEnabled: boolean;
     private _capabilities: SessionCapabilities = {};
     private openCanvasInstances: OpenCanvasInstance[] = [];
     private disconnected = false;
+    private readonly pendingResponseWaits = new Set<(error: Error) => void>();
+    private readonly pendingStructuredWaits = new Set<(error: Error) => void>();
+    private completionRpcUnsupported = false;
+    private disconnecting = false;
+    private onDisconnected?: () => void;
 
     /** @internal Client session API handlers, populated by CopilotClient during create/resume. */
     clientSessionApis: ClientSessionApiHandlers = {};
 
     /**
-     * Friendly factory API for running registered factories by name or handle.
+     * Friendly workflow API for running registered workflows by name or handle.
      *
-     * @experimental Part of the experimental Agent Factories surface and may
+     * @experimental Part of the experimental Dynamic Workflows surface and may
      * change or be removed in future SDK or CLI releases.
      */
-    readonly factory: SessionFactoryApi = {
+    readonly workflow: SessionWorkflowApi = {
         run: (async (
-            nameOrHandle: string | FactoryHandle,
-            options?: RunOptions
+            nameOrHandle: string | WorkflowHandle,
+            options?: WorkflowRunOptions
         ): Promise<unknown> => {
-            throwIfFactoryExecutionIsActive();
+            throwIfWorkflowExecutionIsActive();
             const name =
                 typeof nameOrHandle === "string"
                     ? nameOrHandle
-                    : getFactoryDefinition(nameOrHandle).meta.name;
-            if (options?.resumeFromRunId !== undefined) {
-                return this.factory.resume(options.resumeFromRunId, {
-                    limits: options.limits,
-                });
-            }
-            const envelope = await this.rpc.factory.run({
+                    : getWorkflowDefinition(nameOrHandle).meta.name;
+            const envelope = await this.rpc.workflow.run({
                 name,
                 args: options?.args === undefined ? {} : options.args,
                 options: {
                     limits: options?.limits,
+                    notifyOnComplete: options?.notifyOnComplete,
+                    logPhaseNames: options?.logPhaseNames,
                 },
             });
 
-            return this.settleFactoryRun(envelope);
-        }) as SessionFactoryApi["run"],
-        resume: (async (runId: string, options?: Parameters<SessionFactoryApi["resume"]>[1]) => {
-            throwIfFactoryExecutionIsActive();
+            return this.settleWorkflowRun(envelope);
+        }) as SessionWorkflowApi["run"],
+        resume: (async (runId: string, options?: Parameters<SessionWorkflowApi["resume"]>[1]) => {
+            throwIfWorkflowExecutionIsActive();
             let response;
             try {
-                response = await this.rpc.factory.resume({
+                response = await this.rpc.workflow.resume({
                     runId,
                     limits: options?.limits,
+                    notifyOnComplete: options?.notifyOnComplete,
+                    logPhaseNames: options?.logPhaseNames,
                 });
             } catch (error) {
                 if (
@@ -488,39 +594,39 @@ export class CopilotSession {
                     error.data !== null
                 ) {
                     const code = (error.data as { code?: unknown }).code;
-                    if (isFactoryResumeErrorCode(code)) {
-                        throw new FactoryResumeError(code, error.message);
+                    if (isWorkflowResumeErrorCode(code)) {
+                        throw new WorkflowResumeError(code, error.message);
                     }
                 }
                 throw error;
             }
-            return this.settleFactoryRun(response.run);
-        }) as SessionFactoryApi["resume"],
-        getRun: async (runId) => this.rpc.factory.getRun({ runId }),
-        waitForRun: (runId, options) => this.waitForFactoryRun(runId, options?.signal),
-        listRuns: async () => (await this.rpc.factory.listRuns({})).runs,
-        getRunDetail: (runId) => this.rpc.factory.getRunDetail({ runId }),
+            return this.settleWorkflowRun(response.run);
+        }) as SessionWorkflowApi["resume"],
+        getRun: async (runId) => this.rpc.workflow.getRun({ runId }),
+        waitForRun: (runId, options) => this.waitForWorkflowRun(runId, options?.signal),
+        listRuns: (async (options?: WorkflowListRunsOptions) => {
+            const page = await this.rpc.workflow.listRuns(options ?? {});
+            return options === undefined ? page.runs : page;
+        }) as SessionWorkflowApi["listRuns"],
+        getRunDetail: (runId) => this.rpc.workflow.getRunDetail({ runId }),
         getRunProgress: (runId, options = {}) =>
-            this.rpc.factory.getRunProgress({ runId, ...options }),
-        cancel: async (runId) => this.rpc.factory.cancel({ runId }),
+            this.rpc.workflow.getRunProgress({ runId, ...options }),
+        pause: async (runId) => {
+            throwIfWorkflowExecutionIsActive();
+            return this.rpc.workflow.pause({ runId });
+        },
+        cancel: async (runId) => this.rpc.workflow.cancel({ runId }),
     };
 
-    /**
-     * Resolve a start/resume envelope into the terminal envelope callers expect.
-     *
-     * The CLI may answer `session.factory.run` and `session.factory.resume`
-     * before the run settles, so a non-terminal envelope is followed by a wait
-     * on the run's terminal state.
-     */
-    private settleFactoryRun(envelope: WireFactoryRunResult): Promise<FactoryRunResult> {
-        if (isFactoryRunTerminal(envelope.status)) {
+    private settleWorkflowRun(envelope: WireWorkflowRunResult): Promise<WorkflowRunResult> {
+        if (isWorkflowRunTerminal(envelope.status)) {
             return Promise.resolve(envelope);
         }
-        return this.waitForFactoryRun(envelope.runId);
+        return this.waitForWorkflowRun(envelope.runId);
     }
 
     /**
-     * Resolve when a factory run reaches a terminal status.
+     * Resolve when a workflow run reaches a terminal status.
      *
      * The subscription is installed *before* the first read so a transition
      * landing between the two cannot be missed, and re-reads are serialized so
@@ -529,14 +635,14 @@ export class CopilotSession {
      * collapse into a single in-flight read. A bounded periodic re-read keeps a
      * dropped invalidation from leaving the wait pending forever.
      */
-    private waitForFactoryRun(runId: string, signal?: AbortSignal): Promise<FactoryRunResult> {
+    private waitForWorkflowRun(runId: string, signal?: AbortSignal): Promise<WorkflowRunResult> {
         const abortError = (): unknown =>
-            signal?.reason ?? new DOMException("Factory run wait was aborted", "AbortError");
+            signal?.reason ?? new DOMException("Workflow run wait was aborted", "AbortError");
         if (signal?.aborted === true) {
             return Promise.reject(abortError());
         }
 
-        return new Promise<FactoryRunResult>((resolve, reject) => {
+        return new Promise<WorkflowRunResult>((resolve, reject) => {
             let settled = false;
             let reading = false;
             let rereadRequested = false;
@@ -571,8 +677,8 @@ export class CopilotSession {
                 try {
                     do {
                         rereadRequested = false;
-                        const envelope = await this.rpc.factory.getRun({ runId });
-                        if (isFactoryRunTerminal(envelope.status)) {
+                        const envelope = await this.rpc.workflow.getRun({ runId });
+                        if (isWorkflowRunTerminal(envelope.status)) {
                             finish(() => resolve(envelope));
                             return;
                         }
@@ -589,7 +695,7 @@ export class CopilotSession {
                 signal.addEventListener("abort", onAbort, { once: true });
             }
 
-            unsubscribe = this.on("factory.run_updated", (event) => {
+            unsubscribe = this.on("workflow.run_updated", (event) => {
                 if (event.data.runId === runId) {
                     void read();
                 }
@@ -617,11 +723,16 @@ export class CopilotSession {
         private connection: MessageConnection,
         private _workspacePath?: string,
         traceContextProvider?: TraceContextProvider,
-        options?: { mcpAuthHandler?: McpAuthHandler; managedSettingsEnabled?: boolean }
+        options?: {
+            mcpAuthHandler?: McpAuthHandler;
+            managedSettingsEnabled?: boolean;
+            onDisconnected?: () => void;
+        }
     ) {
         this.traceContextProvider = traceContextProvider;
         this.mcpAuthHandler = options?.mcpAuthHandler;
         this.managedSettingsEnabled = options?.managedSettingsEnabled === true;
+        this.onDisconnected = options?.onDisconnected;
     }
 
     /**
@@ -634,6 +745,14 @@ export class CopilotSession {
         return this._rpc;
     }
 
+    /** @internal */
+    private get internalRpc(): ReturnType<typeof createInternalSessionRpc> {
+        if (!this._internalRpc) {
+            this._internalRpc = createInternalSessionRpc(this.connection, this.sessionId);
+        }
+        return this._internalRpc;
+    }
+
     /**
      * Path to the session workspace directory when infinite sessions are enabled.
      * Contains checkpoints/, plan.md, and files/ subdirectories.
@@ -641,6 +760,16 @@ export class CopilotSession {
      */
     get workspacePath(): string | undefined {
         return this._workspacePath;
+    }
+
+    /** Recovery observed while loading this session; undefined on a clean resume. */
+    get transcriptRecovery(): TranscriptRecovery | undefined {
+        return this._transcriptRecovery;
+    }
+
+    /** @internal */
+    setTranscriptRecovery(recovery: TranscriptRecovery | undefined): void {
+        this._transcriptRecovery = recovery;
     }
 
     /**
@@ -673,13 +802,14 @@ export class CopilotSession {
     }
 
     /**
-     * Sends a message to this session and waits for the response.
+     * Sends a message to this session and returns once it is admitted.
      *
      * The message is processed asynchronously. Subscribe to events via {@link on}
      * to receive streaming responses and other session events.
      *
      * @param options - The message options including the prompt and optional attachments
-     * @returns A promise that resolves with the message ID of the response
+     * @returns The submitted user message's ID, not an assistant response ID.
+     *          When this send starts a run, root assistant messages carry it as originatingMessageId.
      * @throws Error if the session has been disconnected or the connection fails
      *
      * @example
@@ -695,36 +825,69 @@ export class CopilotSession {
     async send(optionsOrPrompt: MessageOptions | string): Promise<string> {
         const options: MessageOptions =
             typeof optionsOrPrompt === "string" ? { prompt: optionsOrPrompt } : optionsOrPrompt;
+        return this.sendMessage(options);
+    }
+
+    private async sendMessage(options: MessageOptions, cancelled?: () => boolean): Promise<string> {
+        const message = await this.createSendParams(options);
+        if (cancelled?.()) {
+            throw new Error("Completion wait cancelled");
+        }
         const response = await this.connection.sendRequest("session.send", {
-            ...(await getTraceContext(this.traceContextProvider)),
             sessionId: this.sessionId,
-            prompt: options.prompt,
-            displayPrompt: options.displayPrompt,
-            attachments: options.attachments,
-            mode: options.mode,
-            agentMode: options.agentMode,
-            requestHeaders: options.requestHeaders,
-            responseFormat: options.responseFormat,
-            imageOptions: options.imageOptions,
+            ...message,
         });
 
         return (response as { messageId: string }).messageId;
     }
 
+    private async createSendParams(options: MessageOptions) {
+        return {
+            ...(await getTraceContext(this.traceContextProvider)),
+            prompt: options.prompt,
+            source: options.source,
+            displayPrompt: options.displayPrompt,
+            attachments: options.attachments,
+            mode: options.mode,
+            agentMode: options.agentMode,
+            requestHeaders: options.requestHeaders,
+            // Supercharged extension: legacy per-message image options.
+            imageOptions: options.imageOptions,
+            ...(options.responseSchema
+                ? {
+                      responseFormat: {
+                          type: "json_schema",
+                          jsonSchema: {
+                              name: "response",
+                              strict: true,
+                              schema: toJsonSchema(options.responseSchema),
+                          },
+                      },
+                  }
+                : {}),
+        };
+    }
+
     /**
-     * Sends a message to this session and waits until the session becomes idle.
+     * Sends a message and waits for its response to complete.
      *
-     * This is a convenience method that combines {@link send} with waiting for
-     * the `session.idle` event. Use this when you want to block until the
-     * assistant has finished processing the message.
+     * Supported local runtimes correlate completion and the response with this
+     * message. Unsupported runtimes retain the legacy non-Autopilot `session.idle`
+     * or request-correlated `session.autopilot_stopped` wait. Autopilot completion
+     * does not wait for or stop attached shells.
      *
      * Events are still delivered to handlers registered via {@link on} while waiting.
+     * Sub-agent events with a non-empty `agentId` do not complete the wait or supply its reply.
+     * With a schema as the second argument, returns its parsed, validated result.
+     * Structured waits select only root-agent output originating from this send;
+     * other queued work may delay session.idle but cannot replace the result.
      *
      * @param options - The message options including the prompt and optional attachments
      * @param timeout - Timeout in milliseconds (default: 60000). Controls how long to wait; does not abort in-flight agent work.
-     * @returns A promise that resolves with the final assistant message when the session becomes idle,
+     * @returns A promise that resolves with this message's final assistant response,
      *          or undefined if no assistant message was received
-     * @throws Error if the timeout is reached before the session becomes idle
+     * @throws Error if the run is aborted before completion
+     * @throws Error if the timeout is reached before completion
      * @throws Error if the session has been disconnected or the connection fails
      *
      * @example
@@ -735,90 +898,497 @@ export class CopilotSession {
      * ```
      */
     async sendAndWait(prompt: string, timeout?: number): Promise<AssistantMessageEvent | undefined>;
+    async sendAndWait<TResult>(
+        options: MessageOptions | string,
+        responseSchema: ResponseSchema<TResult>,
+        timeout?: number
+    ): Promise<TResult>;
     async sendAndWait(
         options: MessageOptions,
         timeout?: number
     ): Promise<AssistantMessageEvent | undefined>;
     async sendAndWait(
         optionsOrPrompt: MessageOptions | string,
+        schemaOrTimeout?: ResponseSchema | number,
         timeout?: number
-    ): Promise<AssistantMessageEvent | undefined> {
+    ): Promise<unknown> {
         const options: MessageOptions =
             typeof optionsOrPrompt === "string" ? { prompt: optionsOrPrompt } : optionsOrPrompt;
-        const effectiveTimeout = timeout ?? 60_000;
+        const typedSchema = isResponseSchema(schemaOrTimeout) ? schemaOrTimeout : undefined;
+        if (schemaOrTimeout !== undefined && typeof schemaOrTimeout !== "number" && !typedSchema) {
+            throw new TypeError(
+                "The second argument must be a timeout or a schema with toJSONSchema() and parse(). " +
+                    "Pass raw JSON Schema in options.responseSchema instead."
+            );
+        }
+        const effectiveTimeout =
+            (typeof schemaOrTimeout === "number" ? schemaOrTimeout : timeout) ?? 60_000;
 
-        type SessionOutcome = { kind: "idle" } | { kind: "error"; error: Error };
+        if (typedSchema && options.responseSchema) {
+            throw new Error(
+                "Do not specify responseSchema in options when requesting a typed response."
+            );
+        }
+        if (typedSchema && options.mode === "immediate") {
+            throw new Error(
+                "Structured output cannot be requested on an immediate steering message."
+            );
+        }
+        const startedAt = Date.now();
+        const completion = await this.sendWithCompletion(
+            typedSchema ? { ...options, responseSchema: typedSchema } : options,
+            effectiveTimeout
+        );
+        if (completion !== undefined) {
+            const message = completion.response;
+            if (
+                message !== undefined &&
+                (message.type !== "assistant.message" || message.agentId)
+            ) {
+                throw new Error("The runtime returned a non-assistant response.");
+            }
+            if (typedSchema || options.responseSchema) {
+                if (completion.aborted) {
+                    throw new Error(
+                        "The requested run was aborted before a structured result was completed."
+                    );
+                }
+                if (!message || message.data.toolRequests?.length || !message.data.content.trim()) {
+                    throw new Error(
+                        "The requested run completed without a structured assistant response."
+                    );
+                }
+                return typedSchema ? typedSchema.parse(JSON.parse(message.data.content)) : message;
+            }
+            if (completion.aborted) {
+                throw new Error("The requested run was aborted before completion.");
+            }
+            return message;
+        }
+        const remainingTimeout = Math.max(0, effectiveTimeout - (Date.now() - startedAt));
+        if (typedSchema || options.responseSchema) {
+            const message = await this.sendAndWaitForStructuredMessage(
+                typedSchema ? { ...options, responseSchema: typedSchema } : options,
+                remainingTimeout
+            );
+            if (typedSchema) {
+                if (!message) {
+                    throw new Error(
+                        "The requested run completed without a structured assistant response."
+                    );
+                }
+                return typedSchema.parse(JSON.parse(message.data.content));
+            }
+            return message;
+        }
+
+        type SessionOutcome =
+            | { kind: "idle"; message: AssistantMessageEvent | undefined }
+            | { kind: "error"; error: Error };
         let resolveOutcome: (outcome: SessionOutcome) => void;
         const outcomePromise = new Promise<SessionOutcome>((resolve) => {
             resolveOutcome = resolve;
         });
 
         let lastAssistantMessage: AssistantMessageEvent | undefined;
+        let messageId: string | undefined;
+        let requestStarted = false;
+        let admitted = false;
+        const buffered: (SessionEvent | Error)[] = [];
 
         // Register event handler BEFORE calling send to avoid race condition
-        // where session.idle fires before we start listening
-        const unsubscribe = this.on((event) => {
-            if (event.type === "assistant.message") {
+        // where completion fires before the send response supplies its request ID.
+        const observe = (event: SessionEvent) => {
+            if (event.agentId) return;
+            if (event.type === "user.message" && event.data.messageId === messageId) {
+                requestStarted = true;
+            } else if (
+                event.type === "session.warning" &&
+                event.data.warningType === "policy_blocked" &&
+                event.data.originatingMessageId === messageId
+            ) {
+                requestStarted = true;
+            } else if (
+                event.type === "assistant.message" &&
+                (event.data.originatingMessageId === messageId ||
+                    (!event.data.originatingMessageId && requestStarted))
+            ) {
                 lastAssistantMessage = event;
-            } else if (event.type === "session.idle") {
-                resolveOutcome({ kind: "idle" });
-            } else if (event.type === "session.error") {
+                if (event.data.originatingMessageId === messageId) requestStarted = true;
+            } else if (
+                event.type === "session.idle" &&
+                requestStarted &&
+                event.data.mode !== "autopilot"
+            ) {
+                resolveOutcome(
+                    event.data.aborted
+                        ? {
+                              kind: "error",
+                              error: new Error("The requested run was aborted before completion."),
+                          }
+                        : { kind: "idle", message: lastAssistantMessage }
+                );
+            } else if (
+                event.type === "session.autopilot_stopped" &&
+                messageId &&
+                event.data.requestId === messageId
+            ) {
+                if (event.data.reason === "error") {
+                    resolveOutcome({
+                        kind: "error",
+                        error: new Error("Autopilot request failed"),
+                    });
+                } else if (event.data.reason === "aborted") {
+                    resolveOutcome({
+                        kind: "error",
+                        error: new Error("The requested run was aborted before completion."),
+                    });
+                } else {
+                    resolveOutcome({ kind: "idle", message: lastAssistantMessage });
+                }
+            } else if (
+                event.type === "session.error" &&
+                (!event.data.originatingMessageId || event.data.originatingMessageId === messageId)
+            ) {
                 const error = new Error(event.data.message);
                 error.stack = event.data.stack;
                 resolveOutcome({ kind: "error", error });
             }
+        };
+        const unsubscribe = this.on((event) => {
+            if (
+                event.agentId ||
+                (event.type !== "assistant.message" &&
+                    event.type !== "user.message" &&
+                    event.type !== "session.warning" &&
+                    event.type !== "session.idle" &&
+                    event.type !== "session.autopilot_stopped" &&
+                    event.type !== "session.error")
+            ) {
+                return;
+            }
+            if (!admitted) buffered.push(event);
+            else observe(event);
         });
+        const fail = (error: Error) => {
+            if (!admitted) buffered.push(error);
+            else resolveOutcome({ kind: "error", error });
+        };
+        this.pendingResponseWaits.add(fail);
 
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        let cancelTimeout: (() => void) | undefined;
+        let waiting = true;
         try {
-            await this.send(options);
-
             const timeoutPromise = new Promise<never>((_, reject) => {
-                timeoutId = setTimeout(
+                cancelTimeout = setLongTimeout(
                     () =>
                         reject(
                             new Error(
-                                `Timeout after ${effectiveTimeout}ms waiting for session.idle`
+                                `Timeout after ${effectiveTimeout}ms waiting for response completion`
                             )
                         ),
-                    effectiveTimeout
+                    remainingTimeout
                 );
             });
-            const outcome = await Promise.race([outcomePromise, timeoutPromise]);
+            const outcome = await Promise.race([
+                this.sendMessage(options, () => !waiting).then((id) => {
+                    messageId = id;
+                    admitted = true;
+                    for (const event of buffered) {
+                        if (event instanceof Error) fail(event);
+                        else observe(event);
+                    }
+                    buffered.length = 0;
+                    return outcomePromise;
+                }),
+                timeoutPromise,
+            ]);
             if (outcome.kind === "error") {
                 throw outcome.error;
             }
 
-            return lastAssistantMessage;
+            return outcome.message;
         } finally {
-            if (timeoutId !== undefined) {
-                clearTimeout(timeoutId);
-            }
+            waiting = false;
+            cancelTimeout?.();
             unsubscribe();
+            buffered.length = 0;
+            this.pendingResponseWaits.delete(fail);
+        }
+    }
+
+    private async sendWithCompletion(
+        options: MessageOptions,
+        timeout: number
+    ): Promise<SendAndWaitResult | undefined> {
+        if (this.completionRpcUnsupported) return undefined;
+        if (this.disconnected) throw new Error("Session is disconnected");
+
+        const cancellation = new CancellationTokenSource();
+        const dispatched = new Set<string>();
+        let completionEventId: string | undefined;
+        let resolveDispatched!: () => void;
+        const dispatchCompleted = new Promise<void>((resolve) => {
+            resolveDispatched = resolve;
+        });
+        const unsubscribe = this.on((event) => {
+            if (
+                event.agentId ||
+                (event.type !== "session.idle" &&
+                    event.type !== "session.autopilot_stopped" &&
+                    event.type !== "session.error")
+            ) {
+                return;
+            }
+            dispatched.add(event.id);
+            if (event.id === completionEventId) resolveDispatched();
+        });
+        const drain = async (id: string | undefined) => {
+            if (id && !dispatched.has(id)) {
+                completionEventId = id;
+                await dispatchCompleted;
+            }
+        };
+        let fail!: (error: Error) => void;
+        const stopped = new Promise<never>((_, reject) => {
+            fail = reject;
+        });
+        this.pendingResponseWaits.add(fail);
+        const cancelTimeout = setLongTimeout(
+            () => fail(new Error(`Timeout after ${timeout}ms waiting for session.idle`)),
+            timeout
+        );
+        const operation = async () => {
+            try {
+                const message = await this.createSendParams(options);
+                if (cancellation.token.isCancellationRequested) {
+                    throw new Error("Completion wait cancelled");
+                }
+                const result = await this.connection.sendRequest<SendAndWaitResult>(
+                    "session.sendAndWait",
+                    {
+                        sessionId: this.sessionId,
+                        ...message,
+                    },
+                    cancellation.token
+                );
+                await drain(result.completionEventId);
+                return result;
+            } catch (error) {
+                if (error instanceof ResponseError && error.code === ErrorCodes.MethodNotFound) {
+                    this.completionRpcUnsupported = true;
+                    return undefined;
+                }
+                if (
+                    error instanceof ResponseError &&
+                    typeof error.data === "object" &&
+                    error.data !== null
+                ) {
+                    if ("stack" in error.data && typeof error.data.stack === "string") {
+                        error.stack = error.data.stack;
+                    }
+                    if (
+                        "completionEventId" in error.data &&
+                        typeof error.data.completionEventId === "string"
+                    ) {
+                        await drain(error.data.completionEventId);
+                    }
+                }
+                throw error;
+            }
+        };
+        try {
+            return await Promise.race([operation(), stopped]);
+        } finally {
+            cancelTimeout();
+            unsubscribe();
+            this.pendingResponseWaits.delete(fail);
+            resolveDispatched();
+            cancellation.cancel();
+            cancellation.dispose();
+        }
+    }
+
+    private async sendAndWaitForStructuredMessage(
+        options: MessageOptions,
+        timeout: number
+    ): Promise<AssistantMessageEvent | undefined> {
+        if (this.disconnected) {
+            throw new Error("Session is disconnected");
+        }
+        type Outcome =
+            | { kind: "idle"; message: AssistantMessageEvent | undefined }
+            | { kind: "error"; error: Error };
+        let resolveOutcome!: (outcome: Outcome) => void;
+        const outcomePromise = new Promise<Outcome>((resolve) => {
+            resolveOutcome = resolve;
+        });
+        const fail = (error: Error) => resolveOutcome({ kind: "error", error });
+        let messageId: string | undefined;
+        let consumed = false;
+        let lastMessage: AssistantMessageEvent | undefined;
+        const buffered: SessionEvent[] = [];
+        const observe = (event: SessionEvent) => {
+            if (event.agentId) return;
+            if (event.type === "user.message" && event.data.messageId === messageId) {
+                consumed = true;
+            } else if (
+                event.type === "assistant.message" &&
+                event.data.originatingMessageId === messageId
+            ) {
+                consumed = true;
+                lastMessage = event.data.toolRequests?.length ? undefined : event;
+            } else if (
+                (consumed && event.type === "session.idle" && event.data.mode !== "autopilot") ||
+                (event.type === "session.autopilot_stopped" && event.data.requestId === messageId)
+            ) {
+                if (event.type === "session.autopilot_stopped" && event.data.reason === "error") {
+                    fail(new Error("Autopilot request failed"));
+                } else if (
+                    (event.type === "session.idle" && event.data.aborted) ||
+                    (event.type === "session.autopilot_stopped" && event.data.reason === "aborted")
+                ) {
+                    fail(
+                        new Error(
+                            "The requested run was aborted before a structured result was completed."
+                        )
+                    );
+                } else {
+                    resolveOutcome({ kind: "idle", message: lastMessage });
+                }
+            } else if (
+                event.type === "session.error" &&
+                (event.data.originatingMessageId
+                    ? event.data.originatingMessageId === messageId
+                    : consumed)
+            ) {
+                const error = new Error(event.data.message);
+                error.stack = event.data.stack;
+                fail(error);
+            }
+        };
+        const unsubscribe = this.on((event) => {
+            if (
+                event.type !== "user.message" &&
+                event.type !== "assistant.message" &&
+                event.type !== "session.idle" &&
+                event.type !== "session.autopilot_stopped" &&
+                event.type !== "session.error"
+            ) {
+                return;
+            }
+            if (messageId === undefined) {
+                buffered.push(event);
+            } else {
+                observe(event);
+            }
+        });
+        this.pendingStructuredWaits.add(fail);
+        let waiting = true;
+        const cancelTimeout = setLongTimeout(
+            () => fail(new Error(`Timeout after ${timeout}ms waiting for the structured response`)),
+            timeout
+        );
+        try {
+            const sendOutcome = this.sendMessage(options, () => !waiting).then(
+                (id) => {
+                    if (!id) {
+                        throw new Error(
+                            "The runtime did not return a message ID for the structured send."
+                        );
+                    }
+                    messageId = id;
+                    for (const event of buffered) observe(event);
+                    buffered.length = 0;
+                    return outcomePromise;
+                },
+                (error: unknown): Outcome => ({
+                    kind: "error",
+                    error: error instanceof Error ? error : new Error(String(error)),
+                })
+            );
+            const outcome = await Promise.race([sendOutcome, outcomePromise]);
+            if (outcome.kind === "error") throw outcome.error;
+            return outcome.message;
+        } finally {
+            waiting = false;
+            cancelTimeout();
+            buffered.length = 0;
+            unsubscribe();
+            this.pendingStructuredWaits.delete(fail);
+        }
+    }
+
+    private assertConnected(): void {
+        if (this.disconnected) {
+            throw new Error("Session is disconnected");
         }
     }
 
     /** @internal */
     _markDisconnected(): void {
+        if (this.disconnected) {
+            return;
+        }
         this.disconnected = true;
+        for (const fail of this.pendingResponseWaits) {
+            fail(new Error("Session disconnected while waiting for a response"));
+        }
+        this.pendingResponseWaits.clear();
+        for (const fail of this.pendingStructuredWaits) {
+            fail(new Error("Session disconnected while waiting for a structured response"));
+        }
+        this.pendingStructuredWaits.clear();
+        for (const controller of this.pendingExternalTools.values()) {
+            controller.abort();
+        }
+        this.pendingExternalTools.clear();
+        for (const controller of this.pendingSessionCreations) {
+            controller.abort();
+        }
+        this.pendingSessionCreations.clear();
         this.eventHandlers.clear();
         this.typedEventHandlers.clear();
         this.toolHandlers.clear();
         this.permissionHandler = undefined;
+        this.mcpAuthHandler = undefined;
         this.userInputHandler = undefined;
         this.elicitationHandler = undefined;
         this.exitPlanModeHandler = undefined;
         this.autoModeSwitchHandler = undefined;
+        this.skillProvider = undefined;
+        this.sessionCreationHandler = undefined;
+        this.hooks = undefined;
+        this.traceContextProvider = undefined;
+        this.bearerTokenProviders.clear();
         this.commandHandlers.clear();
         this.canvases.clear();
-        this.factories.clear();
-        for (const controllersForRun of this.factoryAbortControllers.values()) {
+        this.workflows.clear();
+        for (const controllersForRun of this.workflowAbortControllers.values()) {
             for (const controller of controllersForRun.values()) {
                 controller.abort();
             }
         }
-        this.factoryAbortControllers.clear();
-        this.transformCallbacks?.clear();
+        this.workflowAbortControllers.clear();
+        this.transformCallbacks = undefined;
+        delete this.clientSessionApis.providerToken;
+        delete this.clientSessionApis.canvas;
+        delete this.clientSessionApis.workflow;
+        delete this.clientSessionApis.sessionFs;
+        this._runOnDisconnected();
+    }
+
+    /** @internal */
+    _runOnDisconnected(): void {
+        const callback = this.onDisconnected;
+        this.onDisconnected = undefined;
+        callback?.();
+    }
+
+    /** @internal */
+    _setOnDisconnected(callback: () => void): void {
+        this.assertConnected();
+        this.onDisconnected = callback;
     }
 
     /**
@@ -873,6 +1443,9 @@ export class CopilotSession {
         eventTypeOrHandler: K | SessionEventHandler,
         handler?: TypedSessionEventHandler<K>
     ): () => void {
+        if (this.disconnected) {
+            throw new Error("Session is disconnected");
+        }
         // Overload 1: on(eventType, handler) - typed event subscription
         if (typeof eventTypeOrHandler === "string" && handler) {
             const eventType = eventTypeOrHandler;
@@ -962,20 +1535,37 @@ export class CopilotSession {
                     args,
                     handler,
                     traceparent,
-                    tracestate
+                    tracestate,
+                    event.agentId || undefined
                 );
             }
+        } else if (event.type === "external_tool.completed") {
+            const { requestId } = event.data as { requestId?: string };
+            if (requestId) {
+                const controller = this.pendingExternalTools.get(requestId);
+                if (controller) {
+                    this.pendingExternalTools.delete(requestId);
+                    controller.abort();
+                }
+            }
         } else if (event.type === "permission.requested") {
-            const { requestId, permissionRequest, resolvedByHook } = event.data as {
-                requestId: string;
-                permissionRequest: PermissionRequest;
-                resolvedByHook?: boolean;
-            };
+            const {
+                requestId,
+                permissionRequest,
+                promptRequest,
+                assistedApprovalAssessment,
+                resolvedByHook,
+            } = event.data as PermissionRequestedData;
             if (resolvedByHook) {
                 return; // Already resolved by a permissionRequest hook; no client action needed.
             }
             if (this.permissionHandler) {
-                void this._executePermissionAndRespond(requestId, permissionRequest);
+                void this._executePermissionAndRespond(
+                    requestId,
+                    permissionRequest,
+                    promptRequest,
+                    assistedApprovalAssessment
+                );
             }
         } else if (event.type === "mcp.oauth_required") {
             const data = event.data as McpAuthRequest | undefined;
@@ -1015,7 +1605,12 @@ export class CopilotSession {
                 );
             }
         } else if (event.type === "capabilities.changed") {
-            this._capabilities = { ...this._capabilities, ...event.data };
+            // The event names only the capabilities that changed, so merge `ui` key by key.
+            const { ui, ...changed } = event.data;
+            this._capabilities = { ...this._capabilities, ...changed };
+            if (ui) {
+                this._capabilities.ui = { ...this._capabilities.ui, ...ui };
+            }
         } else if (event.type === "session.canvas.opened") {
             this.upsertOpenCanvasFromEvent(event.data);
         } else if (event.type === "session.canvas.closed") {
@@ -1072,8 +1667,15 @@ export class CopilotSession {
         args: unknown,
         handler: ToolHandler,
         traceparent?: string,
-        tracestate?: string
+        tracestate?: string,
+        agentId?: string
     ): Promise<void> {
+        const controller = new AbortController();
+        if (this.disconnected || this.pendingExternalTools.has(requestId)) {
+            return;
+        }
+        this.pendingExternalTools.set(requestId, controller);
+
         try {
             // The built-in tool-search tool receives a snapshot of the session's
             // currently initialized tools so an override can filter the live
@@ -1082,12 +1684,26 @@ export class CopilotSession {
             // leaves the snapshot undefined rather than failing the tool.
             let availableTools: CurrentToolMetadata[] | undefined;
             if (toolName === TOOL_SEARCH_TOOL_NAME) {
+                if (controller.signal.aborted) {
+                    return;
+                }
+                const aborted = new Promise<undefined>((resolve) => {
+                    controller.signal.addEventListener("abort", () => resolve(undefined), {
+                        once: true,
+                    });
+                });
                 try {
-                    const metadata = await this.rpc.tools.getCurrentMetadata();
-                    availableTools = metadata.tools ?? undefined;
+                    const metadata = await Promise.race([
+                        this.rpc.tools.getCurrentMetadata(),
+                        aborted,
+                    ]);
+                    availableTools = metadata?.tools ?? undefined;
                 } catch {
                     availableTools = undefined;
                 }
+            }
+            if (controller.signal.aborted) {
+                return;
             }
             const rawResult = await handler(args, {
                 sessionId: this.sessionId,
@@ -1097,6 +1713,9 @@ export class CopilotSession {
                 availableTools,
                 traceparent,
                 tracestate,
+                signal: controller.signal,
+                agentId,
+                requestId,
             });
             let result: ToolResult;
             if (rawResult == null) {
@@ -1108,12 +1727,12 @@ export class CopilotSession {
             } else {
                 result = JSON.stringify(rawResult);
             }
-            if (this.disconnected) {
+            if (!this._claimExternalTool(requestId, controller)) {
                 return;
             }
             await this.rpc.tools.handlePendingToolCall({ requestId, result });
         } catch (error) {
-            if (this.disconnected) {
+            if (!this._claimExternalTool(requestId, controller)) {
                 return;
             }
             const message = error instanceof Error ? error.message : String(error);
@@ -1125,7 +1744,20 @@ export class CopilotSession {
                 }
                 // Connection lost or RPC error — nothing we can do
             }
+        } finally {
+            if (this.pendingExternalTools.get(requestId) === controller) {
+                this.pendingExternalTools.delete(requestId);
+            }
+            controller.abort();
         }
+    }
+
+    private _claimExternalTool(requestId: string, controller: AbortController): boolean {
+        if (this.disconnected || this.pendingExternalTools.get(requestId) !== controller) {
+            return false;
+        }
+        this.pendingExternalTools.delete(requestId);
+        return true;
     }
 
     /**
@@ -1134,13 +1766,18 @@ export class CopilotSession {
      */
     private async _executePermissionAndRespond(
         requestId: string,
-        permissionRequest: PermissionRequest
+        permissionRequest: PermissionRequest,
+        promptRequest?: PermissionRequestedData["promptRequest"],
+        assistedApprovalAssessment?: PermissionRequestedData["assistedApprovalAssessment"]
     ): Promise<void> {
         try {
-            const handlerResult = await this.permissionHandler!(permissionRequest, {
+            const invocation: PermissionHandlerInvocation = {
                 sessionId: this.sessionId,
                 managedSettingsEnabled: this.managedSettingsEnabled,
-            });
+                ...(promptRequest === undefined ? {} : { promptRequest }),
+                ...(assistedApprovalAssessment === undefined ? {} : { assistedApprovalAssessment }),
+            };
+            const handlerResult = await this.permissionHandler!(permissionRequest, invocation);
             const isAttributed = isAttributedPermissionResult(handlerResult);
             const result: PermissionRequestResult = isAttributed
                 ? handlerResult.result
@@ -1190,9 +1827,19 @@ export class CopilotSession {
         try {
             const result = await this.mcpAuthHandler!(request, { sessionId: this.sessionId });
             const response: McpOauthPendingRequestResponse =
-                result && "accessToken" in result
-                    ? { kind: "token", ...result }
-                    : { kind: "cancelled" };
+                result && "kind" in result && result.kind === "cancelled"
+                    ? { kind: "cancelled" }
+                    : result &&
+                        "accessToken" in result &&
+                        typeof result.accessToken === "string" &&
+                        result.accessToken.length > 0
+                      ? { ...result, kind: "token" }
+                      : result &&
+                          "kind" in result &&
+                          result.kind === "runtimeRefresh" &&
+                          request.runtimeRefreshSupported === true
+                        ? { kind: "runtimeRefresh" }
+                        : { kind: "cancelled" };
             await this.rpc.mcp.oauth.handlePendingRequest({
                 requestId: request.requestId,
                 result: response,
@@ -1266,7 +1913,8 @@ export class CopilotSession {
      * @param tools - An array of tool definitions with their handlers, or undefined to clear all tools
      * @internal This method is typically called internally when creating a session with tools.
      */
-    registerTools(tools?: Tool[]): void {
+    registerTools(tools?: SessionConfig["tools"]): void {
+        this.assertConnected();
         this.toolHandlers.clear();
         if (!tools) {
             return;
@@ -1274,7 +1922,29 @@ export class CopilotSession {
 
         for (const tool of tools) {
             if (tool.handler) {
-                this.toolHandlers.set(tool.name, tool.handler);
+                const handler = tool.handler;
+                if (
+                    tool.name === "apply_patch" &&
+                    tool.overridesBuiltInTool &&
+                    toJsonSchema(tool.parameters)?.type === "string"
+                ) {
+                    this.toolHandlers.set(tool.name, (args, invocation) => {
+                        if (typeof args === "string") {
+                            return handler(args, invocation);
+                        }
+                        if (
+                            typeof args === "object" &&
+                            args !== null &&
+                            "input" in args &&
+                            typeof args.input === "string"
+                        ) {
+                            return handler(args.input, invocation);
+                        }
+                        throw new TypeError("apply_patch string override requires a string input");
+                    });
+                } else {
+                    this.toolHandlers.set(tool.name, handler);
+                }
             }
         }
     }
@@ -1297,6 +1967,7 @@ export class CopilotSession {
      * @internal Called by the SDK when creating/resuming a session with `canvases`.
      */
     registerCanvases(canvases?: Canvas[]): void {
+        this.assertConnected();
         this.canvases.clear();
         if (!canvases || canvases.length === 0) {
             delete this.clientSessionApis.canvas;
@@ -1348,36 +2019,37 @@ export class CopilotSession {
     }
 
     /**
-     * Registers factory closures and reverse-RPC handlers for this session.
+     * Registers workflow closures and reverse-RPC handlers for this session.
      *
-     * @param factories - Factory handles declared by the joining extension.
+     * @param workflows - Workflow handles declared by the joining extension.
      * @internal Called by the SDK when an extension joins a session.
      */
-    registerFactories(factories?: FactoryHandle[]): void {
-        this.factories.clear();
-        if (!factories || factories.length === 0) {
-            delete this.clientSessionApis.factory;
+    registerWorkflows(workflows?: WorkflowHandle[]): void {
+        this.assertConnected();
+        this.workflows.clear();
+        if (!workflows || workflows.length === 0) {
+            delete this.clientSessionApis.workflow;
             return;
         }
 
-        for (const handle of factories) {
-            const definition = getFactoryDefinition(handle);
-            if (this.factories.has(definition.meta.name)) {
+        for (const handle of workflows) {
+            const definition = getWorkflowDefinition(handle);
+            if (this.workflows.has(definition.meta.name)) {
                 throw new Error(
-                    `Duplicate factory name "${definition.meta.name}". Factory names must be unique within a joinSession call.`
+                    `Duplicate workflow name "${definition.meta.name}". Workflow names must be unique within a joinSession call.`
                 );
             }
-            this.factories.set(definition.meta.name, definition);
+            this.workflows.set(definition.meta.name, definition);
         }
 
         const self = this;
-        this.clientSessionApis.factory = {
+        this.clientSessionApis.workflow = {
             async execute(params) {
-                const definition = self.factories.get(params.name);
+                const definition = self.workflows.get(params.name);
                 if (!definition) {
-                    const message = `No factory registered with name "${params.name}"`;
+                    const message = `No workflow registered with name "${params.name}"`;
                     throw new ResponseError(ErrorCodes.InvalidParams, message, {
-                        code: "factory_not_found",
+                        code: "workflow_not_found",
                         name: params.name,
                     });
                 }
@@ -1385,43 +2057,43 @@ export class CopilotSession {
                 const controller = new AbortController();
                 // Keyed by execution token as well as run ID so overlapping
                 // attempts for one run stay individually addressable.
-                let controllersForRun = self.factoryAbortControllers.get(params.runId);
+                let controllersForRun = self.workflowAbortControllers.get(params.runId);
                 if (controllersForRun === undefined) {
                     controllersForRun = new Map();
-                    self.factoryAbortControllers.set(params.runId, controllersForRun);
+                    self.workflowAbortControllers.set(params.runId, controllersForRun);
                 }
                 controllersForRun.set(params.executionToken, controller);
-                const progress = new FactoryProgressBuffer(async (lines) => {
-                    await self.rpc.factory.log({
+                const progress = new WorkflowProgressBuffer(async (lines) => {
+                    await self.rpc.workflow.log({
                         runId: params.runId,
                         executionToken: params.executionToken,
                         lines,
                     });
                 });
                 try {
-                    const context: FactoryContext = {
+                    const context: WorkflowContext = {
                         runId: params.runId,
                         args: params.args,
                         session: self,
                         signal: controller.signal,
                         phase: (title: string) => {
-                            throwIfFactoryAborted(controller.signal);
+                            throwIfWorkflowAborted(controller.signal);
                             progress.enqueue("phase", title);
                         },
                         log: (message: string) => {
-                            throwIfFactoryAborted(controller.signal);
+                            throwIfWorkflowAborted(controller.signal);
                             progress.enqueue("log", message);
                         },
                         agent: async (prompt, options = {}) => {
                             await progress.flush();
-                            const opts: FactoryAgentOptions = {};
-                            for (const key of FACTORY_AGENT_OPTION_KEYS) {
-                                copyDefinedFactoryAgentOption(options, opts, key);
+                            const opts: WorkflowAgentOptions = {};
+                            for (const key of WORKFLOW_AGENT_OPTION_KEYS) {
+                                copyDefinedWorkflowAgentOption(options, opts, key);
                             }
-                            const response = await awaitFactoryOperation(
+                            const response = await awaitWorkflowOperation(
                                 () =>
-                                    self.rpc.factory.agent({
-                                        factoryRunId: params.runId,
+                                    self.rpc.workflow.agent({
+                                        workflowRunId: params.runId,
                                         executionToken: params.executionToken,
                                         prompt,
                                         opts,
@@ -1433,21 +2105,21 @@ export class CopilotSession {
                         step: async (
                             key: string,
                             producer: () => Promise<JsonValue> | JsonValue,
-                            options: FactoryStepOptions = {}
+                            options: WorkflowStepOptions = {}
                         ): Promise<JsonValue> => {
                             await progress.flush();
                             if (options.volatile) {
                                 // The flush above is an await point, so an abort can land
                                 // between entering step() and running the producer. The
-                                // journaled branch is covered by awaitFactoryOperation;
+                                // journaled branch is covered by awaitWorkflowOperation;
                                 // this one has to check for itself, or a cancelled run
                                 // would still start new extension work.
-                                throwIfFactoryAborted(controller.signal);
+                                throwIfWorkflowAborted(controller.signal);
                                 return producer();
                             }
-                            const cached = await awaitFactoryOperation(
+                            const cached = await awaitWorkflowOperation(
                                 () =>
-                                    self.rpc.factory.journal.get({
+                                    self.rpc.workflow.journal.get({
                                         runId: params.runId,
                                         executionToken: params.executionToken,
                                         key,
@@ -1460,17 +2132,17 @@ export class CopilotSession {
                                         `step("${key}") journal returned a hit without a result`
                                     );
                                 }
-                                assertFactoryStepResult(cached.resultJson, key);
+                                assertWorkflowStepResult(cached.resultJson, key);
                                 return cached.resultJson;
                             }
 
                             // Producers are best-effort at-least-once across crashes or
                             // concurrent callers, so authors must make side effects idempotent.
                             const result = await producer();
-                            assertFactoryStepResult(result, key);
-                            await awaitFactoryOperation(
+                            assertWorkflowStepResult(result, key);
+                            await awaitWorkflowOperation(
                                 () =>
-                                    self.rpc.factory.journal.put({
+                                    self.rpc.workflow.journal.put({
                                         runId: params.runId,
                                         executionToken: params.executionToken,
                                         key,
@@ -1480,14 +2152,44 @@ export class CopilotSession {
                             );
                             return result;
                         },
-                        parallel: runFactoryParallel,
-                        pipeline: runFactoryPipeline,
-                        factory: async () => {
-                            throw new Error("nested factories are not supported");
+                        pause: async (key: string): Promise<void> => {
+                            if (typeof key !== "string" || key.length === 0) {
+                                throw new Error("Workflow pause checkpoint key must not be empty");
+                            }
+                            const helperScope = workflowExecutionStore.getStore()?.helperScope;
+                            if (helperScope !== undefined) {
+                                throw new Error(
+                                    `Workflow pause checkpoints are not allowed inside ${helperScope}() branches`
+                                );
+                            }
+                            await progress.flush();
+                            const response = await awaitWorkflowOperation(
+                                () =>
+                                    self.internalRpc.workflow.pauseAtCheckpoint({
+                                        runId: params.runId,
+                                        executionToken: params.executionToken,
+                                        key,
+                                    }),
+                                controller.signal
+                            );
+                            switch (response.action) {
+                                case "continue":
+                                    return;
+                                case "pause":
+                                    await awaitWorkflowOperation(
+                                        () => new Promise<never>(() => {}),
+                                        controller.signal
+                                    );
+                            }
+                        },
+                        parallel: runWorkflowParallel,
+                        pipeline: runWorkflowPipeline,
+                        workflow: async () => {
+                            throw new Error("nested workflows are not supported");
                         },
                     };
                     const execution = { active: true };
-                    const result = await factoryExecutionStore.run(execution, async () => {
+                    const result = await workflowExecutionStore.run(execution, async () => {
                         try {
                             return await definition.run(context);
                         } finally {
@@ -1497,29 +2199,27 @@ export class CopilotSession {
                     if (result === undefined) {
                         return {};
                     }
-                    assertFactoryResult(result);
+                    assertWorkflowResult(result);
                     return { result };
                 } finally {
                     try {
                         await progress.close();
                     } finally {
-                        const controllersForRun = self.factoryAbortControllers.get(params.runId);
+                        const controllersForRun = self.workflowAbortControllers.get(params.runId);
                         if (controllersForRun?.get(params.executionToken) === controller) {
                             controllersForRun.delete(params.executionToken);
                             if (controllersForRun.size === 0) {
-                                self.factoryAbortControllers.delete(params.runId);
+                                self.workflowAbortControllers.delete(params.runId);
                             }
                         }
                     }
                 }
             },
             async abort(params) {
-                const controllersForRun = self.factoryAbortControllers.get(params.runId);
-                if (controllersForRun !== undefined) {
-                    const reason = new DOMException("Factory run was aborted", "AbortError");
-                    for (const controller of controllersForRun.values()) {
-                        controller.abort(reason);
-                    }
+                const controllersForRun = self.workflowAbortControllers.get(params.runId);
+                const controller = controllersForRun?.get(params.executionToken);
+                if (controller !== undefined) {
+                    controller.abort(new DOMException("Workflow run was aborted", "AbortError"));
                 }
                 return {};
             },
@@ -1539,6 +2239,7 @@ export class CopilotSession {
      * @internal This method is called internally when creating/resuming a session.
      */
     registerBearerTokenProviders(providers?: Map<string, BearerTokenProvider>): void {
+        this.assertConnected();
         this.bearerTokenProviders.clear();
         if (!providers || providers.size === 0) {
             delete this.clientSessionApis.providerToken;
@@ -1551,6 +2252,7 @@ export class CopilotSession {
         const self = this;
         this.clientSessionApis.providerToken = {
             async getToken(params) {
+                self.assertConnected();
                 const callback = self.bearerTokenProviders.get(params.providerName);
                 if (!callback) {
                     throw new Error(
@@ -1573,6 +2275,7 @@ export class CopilotSession {
      * @internal This method is typically called internally when creating/resuming a session.
      */
     registerCommands(commands?: { name: string; handler: CommandHandler }[]): void {
+        this.assertConnected();
         this.commandHandlers.clear();
         if (!commands) {
             return;
@@ -1589,6 +2292,7 @@ export class CopilotSession {
      * @internal This method is typically called internally when creating/resuming a session.
      */
     registerElicitationHandler(handler?: ElicitationHandler): void {
+        this.assertConnected();
         this.elicitationHandler = handler;
     }
 
@@ -1599,6 +2303,7 @@ export class CopilotSession {
      * @internal This method is typically called internally when creating/resuming a session.
      */
     registerExitPlanModeHandler(handler?: ExitPlanModeHandler): void {
+        this.assertConnected();
         this.exitPlanModeHandler = handler;
     }
 
@@ -1609,6 +2314,7 @@ export class CopilotSession {
      * @internal This method is typically called internally when creating/resuming a session.
      */
     registerAutoModeSwitchHandler(handler?: AutoModeSwitchHandler): void {
+        this.assertConnected();
         this.autoModeSwitchHandler = handler;
     }
 
@@ -1651,6 +2357,7 @@ export class CopilotSession {
      * @internal
      */
     async _handleExitPlanModeRequest(request: ExitPlanModeRequest): Promise<ExitPlanModeResult> {
+        this.assertConnected();
         if (!this.exitPlanModeHandler) {
             return { approved: true };
         }
@@ -1665,6 +2372,7 @@ export class CopilotSession {
     async _handleAutoModeSwitchRequest(
         request: AutoModeSwitchRequest
     ): Promise<AutoModeSwitchResponse> {
+        this.assertConnected();
         if (!this.autoModeSwitchHandler) {
             return "no";
         }
@@ -1788,6 +2496,7 @@ export class CopilotSession {
      * @internal This method is typically called internally when creating a session.
      */
     registerPermissionHandler(handler?: PermissionHandler): void {
+        this.assertConnected();
         this.permissionHandler = handler;
     }
 
@@ -1801,7 +2510,132 @@ export class CopilotSession {
      * @internal This method is typically called internally when creating a session.
      */
     registerUserInputHandler(handler?: UserInputHandler): void {
+        this.assertConnected();
         this.userInputHandler = handler;
+    }
+
+    /**
+     * Registers the session's skill provider.
+     *
+     * @param provider - The skill provider, or undefined to remove it
+     * @internal This method is typically called internally when creating a session.
+     */
+    registerSkillProvider(provider?: SkillProvider): void {
+        this.assertConnected();
+        this.skillProvider = provider;
+    }
+
+    /**
+     * Registers the host's creation callback without enabling the tool group.
+     * Enable it separately with `session.rpc.management.configure({ enabled: true })`.
+     */
+    async setSessionCreationHandler(
+        handler?: SessionCreationHandler
+    ): Promise<SessionManagementPolicy> {
+        this.assertConnected();
+        const previous = this.sessionCreationHandler;
+        this.sessionCreationHandler = handler;
+        try {
+            return await this.rpc.management.configure({ hasCreateHandler: handler !== undefined });
+        } catch (error) {
+            if (this.sessionCreationHandler === handler) this.sessionCreationHandler = previous;
+            throw error;
+        }
+    }
+
+    /** @internal */
+    async _handleSessionManagementCreate(
+        request: SessionManagementCreateHostRequest,
+        token: CancellationToken
+    ): Promise<SessionManagementCreateResult> {
+        this.assertConnected();
+        const handler = this.sessionCreationHandler;
+        if (
+            !handler ||
+            request.parentSessionId !== this.sessionId ||
+            request.sessionId !== this.sessionId
+        ) {
+            throw new Error("Session creation handler is unavailable");
+        }
+        const controller = new AbortController();
+        this.pendingSessionCreations.add(controller);
+        const subscription = token.onCancellationRequested(() => controller.abort());
+        if (token.isCancellationRequested) controller.abort();
+        try {
+            return await handler(request, { signal: controller.signal });
+        } catch {
+            throw new Error("Session creation callback failed");
+        } finally {
+            subscription.dispose();
+            this.pendingSessionCreations.delete(controller);
+        }
+    }
+
+    /**
+     * Handles a `skillProvider.list` request from the runtime.
+     *
+     * @internal This method is for internal use by the SDK.
+     */
+    async _handleSkillProviderList(
+        token?: CancellationToken
+    ): Promise<{ skills: SkillProviderDescriptor[] }> {
+        const provider = this.requireSkillProvider();
+        return await this.callSkillProvider("listSkills", token, async (options) => ({
+            skills: (await provider.listSkills(options)) ?? [],
+        }));
+    }
+
+    /**
+     * Handles a `skillProvider.read` request from the runtime.
+     *
+     * @internal This method is for internal use by the SDK.
+     */
+    async _handleSkillProviderRead(
+        name: string,
+        token?: CancellationToken
+    ): Promise<{ markdown: string | null }> {
+        const provider = this.requireSkillProvider();
+        return await this.callSkillProvider("readSkill", token, async (options) => ({
+            markdown: (await provider.readSkill(name, options)) ?? null,
+        }));
+    }
+
+    private requireSkillProvider(): SkillProvider {
+        this.assertConnected();
+        if (!this.skillProvider) {
+            throw new Error(`No skill provider for session: ${this.sessionId}`);
+        }
+        return this.skillProvider;
+    }
+
+    /**
+     * Runs a provider call with an abort signal tied to the runtime's request
+     * cancellation. Failures are logged locally and reported generically.
+     */
+    private async callSkillProvider<T>(
+        operation: string,
+        token: CancellationToken | undefined,
+        call: (options: SkillProviderCallOptions) => Promise<T>
+    ): Promise<T> {
+        const controller = new AbortController();
+        const subscription = token?.onCancellationRequested(() => controller.abort());
+        if (token?.isCancellationRequested) {
+            controller.abort();
+        }
+        try {
+            return await call({ signal: controller.signal });
+        } catch (error) {
+            if (controller.signal.aborted) {
+                throw new ResponseError(-32800, `Skill provider ${operation} cancelled`);
+            }
+            console.error(`Skill provider ${operation} failed`, {
+                sessionId: this.sessionId,
+                error,
+            });
+            throw skillProviderFailure(operation);
+        } finally {
+            subscription?.dispose();
+        }
     }
 
     /**
@@ -1814,6 +2648,7 @@ export class CopilotSession {
      * @internal This method is typically called internally when creating a session.
      */
     registerHooks(hooks?: SessionHooks): void {
+        this.assertConnected();
         this.hooks = hooks;
     }
 
@@ -1824,6 +2659,7 @@ export class CopilotSession {
      * @internal This method is typically called internally when creating a session.
      */
     registerTransformCallbacks(callbacks?: Map<string, SectionTransformFn>): void {
+        this.assertConnected();
         this.transformCallbacks = callbacks;
     }
 
@@ -1838,6 +2674,7 @@ export class CopilotSession {
     async _handleSystemMessageTransform(
         sections: Record<string, { content: string }>
     ): Promise<{ sections: Record<string, { content: string }> }> {
+        this.assertConnected();
         const result: Record<string, { content: string }> = {};
 
         for (const [sectionId, { content }] of Object.entries(sections)) {
@@ -1867,6 +2704,7 @@ export class CopilotSession {
      * @internal This method is for internal use by the SDK.
      */
     async _handleUserInputRequest(request: unknown): Promise<UserInputResponse> {
+        this.assertConnected();
         if (!this.userInputHandler) {
             // No handler registered, throw error
             throw new Error("User input requested but no handler registered");
@@ -1892,6 +2730,7 @@ export class CopilotSession {
      * @internal This method is for internal use by the SDK.
      */
     async _handleHooksInvoke(hookType: string, input: unknown): Promise<unknown> {
+        this.assertConnected();
         if (!this.hooks) {
             return undefined;
         }
@@ -1902,7 +2741,7 @@ export class CopilotSession {
         // is left alone — the user-facing handler types still cast unknown to the
         // specific HookInput, so a runtime type mismatch surfaces as a normal
         // TypeError in user code rather than being silently masked.
-        const normalized = deserializeHookInput(input);
+        const normalized = normalizeHookError(hookType, deserializeHookInput(input));
 
         type GenericHandler = (
             input: unknown,
@@ -1920,6 +2759,8 @@ export class CopilotSession {
             sessionEnd: this.hooks.onSessionEnd as GenericHandler | undefined,
             errorOccurred: this.hooks.onErrorOccurred as GenericHandler | undefined,
             agentStop: this.hooks.onAgentStop as GenericHandler | undefined,
+            subagentStart: this.hooks.onSubagentStart as GenericHandler | undefined,
+            subagentStop: this.hooks.onSubagentStop as GenericHandler | undefined,
         };
 
         const handler = handlerMap[hookType];
@@ -1985,13 +2826,27 @@ export class CopilotSession {
      * ```
      */
     async disconnect(): Promise<void> {
-        if (this.disconnected) {
+        if (this.disconnected || this.disconnecting) {
             return;
         }
-        await this.connection.sendRequest("session.destroy", {
-            sessionId: this.sessionId,
-        });
-        this._markDisconnected();
+        this.disconnecting = true;
+        try {
+            let response: { success: boolean; error?: string } = { success: false };
+            for (let attempt = 0; attempt < 2 && !response.success; attempt++) {
+                response = (await this.connection.sendRequest("session.detach", {
+                    sessionId: this.sessionId,
+                })) as { success: boolean; error?: string };
+            }
+            if (!response.success) {
+                throw new Error(
+                    `Failed to disconnect session ${this.sessionId}: ${response.error || "Unknown error"}`
+                );
+            }
+            this._markDisconnected();
+        } catch (error) {
+            this.disconnecting = false;
+            throw error;
+        }
     }
 
     /** Enables `await using session = ...` syntax for automatic cleanup. */
@@ -2036,6 +2891,9 @@ export class CopilotSession {
      * ```typescript
      * await session.setModel("gpt-5.4");
      * await session.setModel("claude-sonnet-4.6", { reasoningEffort: "high" });
+     *
+     * // Select the Auto model and its routing preference in one call.
+     * await session.setModel("auto", { autoTier: "intelligence" });
      * ```
      */
     async setModel(
@@ -2045,9 +2903,113 @@ export class CopilotSession {
             reasoningSummary?: ReasoningSummary;
             contextTier?: ContextTier;
             modelCapabilities?: ModelCapabilitiesOverride;
+            /**
+             * Routing preference to apply when `model` is `auto`.
+             *
+             * Pass `null` to return to the provider's default Auto routing. The
+             * runtime rejects this option when `model` is anything other than
+             * `auto`; use {@link setAutoTier} to change the preference without
+             * changing the selected model.
+             *
+             * @experimental Part of an experimental Auto routing surface and may
+             * change or be removed in a future release.
+             */
+            autoTier?: AutoTier | null;
         }
     ): Promise<void> {
         await this.rpc.model.switchTo({ modelId: model, ...options });
+    }
+
+    /**
+     * Change the Auto routing preference without changing the selected model.
+     *
+     * The runtime does not apply the preference immediately. It records the
+     * request and commits it only when a later user turn using the `auto` model
+     * successfully obtains a usable model from the provider. A `pending` status
+     * therefore confirms that the request was accepted, not that it took effect.
+     *
+     * Watch for the outcome through the `session.model_change` event on success,
+     * or the ephemeral `session.auto_tier_switch_failed` event on failure. You
+     * can also read the current committed and in-flight state at any time with
+     * `session.rpc.model.getCurrent()`.
+     *
+     * Only the most recent request survives: issuing a new request replaces any
+     * earlier one that has not yet been claimed by a turn.
+     *
+     * @param autoTier - Routing preference to activate, or `null` to return to
+     *   the provider's default Auto routing
+     * @returns The runtime's immediate acknowledgement and Auto preference snapshot
+     *
+     * @experimental Part of an experimental Auto routing surface and may change
+     * or be removed in a future release.
+     *
+     * @example
+     * ```typescript
+     * const result = await session.setAutoTier("intelligence");
+     * if (result.status === "pending") {
+     *     // Takes effect on a later turn that uses the `auto` model.
+     * }
+     * ```
+     */
+    async setAutoTier(autoTier: AutoTier | null): Promise<ModelSwitchAutoTierResult> {
+        return await this.rpc.model.switchAutoTier({ autoTier });
+    }
+
+    /**
+     * Replace the tools this client supplies to the session.
+     *
+     * `tools` becomes the complete set of tools this client implements,
+     * replacing the ones it supplied when the session was created or resumed,
+     * or in an earlier call. Built-in, MCP, and plugin tools, and tools other
+     * connected clients supply, are unaffected. Pass an empty array to remove
+     * all of this client's tools.
+     *
+     * Tools are defined the same way as for `createSession`: calls to tools
+     * with a `handler` are dispatched to it, and tools without one are
+     * declaration-only. Once the runtime accepts the replacement, every tool
+     * call this session dispatches uses the new handlers; calls already
+     * running finish on their original handlers. If the runtime rejects the
+     * replacement, this rejects and the previous tools and handlers stay in
+     * place. Concurrent calls on the same session are applied one at a time,
+     * in the order they are made.
+     *
+     * The agent sees the new tools from its next model request, which can fall
+     * within a turn in progress. A model request already in flight was made
+     * with the previous tools, so the agent can still call a tool you removed.
+     * This session doesn't answer that call, and it can stay pending until the
+     * turn is aborted. If a running turn might still call a tool you remove,
+     * replace tools while the session is idle.
+     *
+     * @param tools - The complete set of tools this client supplies
+     * @throws Error if the session disconnects before the replacement is applied
+     *
+     * @experimental Wraps the experimental `session.tools.set` RPC and may change
+     * or be removed in a future release.
+     *
+     * @example
+     * ```typescript
+     * await session.setTools([
+     *     defineTool("search_issues", {
+     *         description: "Search the issues shown on the current page",
+     *         parameters: z.object({ query: z.string() }),
+     *         handler: async ({ query }) => searchIssues(query),
+     *     }),
+     * ]);
+     * ```
+     */
+    async setTools(tools: NonNullable<SessionConfig["tools"]>): Promise<void> {
+        this.assertConnected();
+        const definitions = tools.map(toToolDefinition);
+        const replacement = this.setToolsQueue.then(async () => {
+            this.assertConnected();
+            await this.rpc.tools.set({ tools: definitions });
+            this.registerTools(tools);
+        });
+        this.setToolsQueue = replacement.then(
+            () => undefined,
+            () => undefined
+        );
+        await replacement;
     }
 
     /**
@@ -2113,7 +3075,12 @@ function toCanvasRpcError(error: unknown): ResponseError<unknown> {
     return new ResponseError(ErrorCodes.InternalError, message, { code, message });
 }
 
-type FactoryResultValidationCategory =
+// The provider's own error text is deliberately not forwarded to the runtime.
+function skillProviderFailure(operation: string): ResponseError<undefined> {
+    return new ResponseError(ErrorCodes.InternalError, `Skill provider ${operation} failed`);
+}
+
+type WorkflowResultValidationCategory =
     | "unsupported_type"
     | "non_finite_number"
     | "negative_zero"
@@ -2122,17 +3089,17 @@ type FactoryResultValidationCategory =
     | "unsupported_object";
 
 interface StrictJsonValidationContext {
-    code: "factory_result_not_json" | "factory_step_not_json";
+    code: "workflow_result_not_json" | "workflow_step_not_json";
     label: string;
     allowTopLevelUndefined: boolean;
 }
 
 function strictJsonValidationError(
     context: StrictJsonValidationContext,
-    category: FactoryResultValidationCategory,
+    category: WorkflowResultValidationCategory,
     message: string,
     path: string
-): ResponseError<{ code: string; category: FactoryResultValidationCategory; path: string }> {
+): ResponseError<{ code: string; category: WorkflowResultValidationCategory; path: string }> {
     return new ResponseError(ErrorCodes.InternalError, message, {
         code: context.code,
         category,
@@ -2295,18 +3262,18 @@ function assertStrictJson(
     visit(value, "$", context.allowTopLevelUndefined);
 }
 
-function assertFactoryResult(value: unknown): asserts value is JsonValue | undefined {
+function assertWorkflowResult(value: unknown): asserts value is JsonValue | undefined {
     assertStrictJson(value, {
-        code: "factory_result_not_json",
-        label: "Factory result",
+        code: "workflow_result_not_json",
+        label: "Workflow result",
         allowTopLevelUndefined: true,
     });
 }
 
-function assertFactoryStepResult(value: unknown, key: string): asserts value is JsonValue {
+function assertWorkflowStepResult(value: unknown, key: string): asserts value is JsonValue {
     assertStrictJson(value, {
-        code: "factory_step_not_json",
-        label: `Factory step "${key}" result`,
+        code: "workflow_step_not_json",
+        label: `Workflow step "${key}" result`,
         allowTopLevelUndefined: false,
     });
 }

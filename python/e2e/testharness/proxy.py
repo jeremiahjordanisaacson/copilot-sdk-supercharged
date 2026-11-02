@@ -5,14 +5,18 @@ This manages a child process that acts as a replaying proxy to AI endpoints.
 It spawns the shared test harness server from test/harness/server.ts.
 """
 
+import asyncio
 import json
 import os
 import platform
 import re
 import subprocess
+import warnings
 from typing import Any
 
 import httpx
+
+PROCESS_SHUTDOWN_TIMEOUT_SECONDS = 5
 
 
 class CapiProxy:
@@ -46,15 +50,17 @@ class CapiProxy:
             cwd=os.path.dirname(server_path),
             shell=use_shell,
         )
+        process = self._process
+        assert process.stdout is not None
 
         # Read until the server prints "Listening: http://..."; npm/npx may emit
         # wrapper output first on some platforms.
         line = ""
         match = None
         while True:
-            line = self._process.stdout.readline()
+            line = process.stdout.readline()
             if not line:
-                self._process.kill()
+                process.kill()
                 raise RuntimeError("Failed to read proxy URL")
             match = re.search(r"Listening: (http://[^\s]+)", line.strip())
             if match:
@@ -63,17 +69,17 @@ class CapiProxy:
         self._proxy_url = match.group(1)
         metadata_match = re.search(r"(\{.*\})\s*$", line.strip())
         if not metadata_match:
-            self._process.kill()
+            process.kill()
             raise RuntimeError(f"Proxy startup line missing CONNECT proxy metadata: {line}")
         try:
             metadata = json.loads(metadata_match.group(1))
         except json.JSONDecodeError as exc:
-            self._process.kill()
+            process.kill()
             raise RuntimeError(f"Failed to parse proxy startup metadata: {line}") from exc
         self._connect_proxy_url = metadata.get("connectProxyUrl")
         self._ca_file_path = metadata.get("caFilePath")
         if not self._connect_proxy_url or not self._ca_file_path:
-            self._process.kill()
+            process.kill()
             raise RuntimeError(f"Proxy startup metadata missing CONNECT proxy details: {line}")
         return self._proxy_url
 
@@ -86,21 +92,50 @@ class CapiProxy:
         if not self._process:
             return
 
-        # Send stop request to the server
-        if self._proxy_url:
+        process = self._process
+        shutdown_error: Exception | None = None
+        try:
+            # Send stop request to the server
+            if self._proxy_url:
+                try:
+                    stop_url = f"{self._proxy_url}/stop"
+                    if skip_writing_cache:
+                        stop_url += "?skipWritingCache=true"
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(stop_url)
+                        if not response.is_success:
+                            shutdown_error = RuntimeError(
+                                f"Proxy shutdown failed: HTTP {response.status_code}: "
+                                f"{response.text}"
+                            )
+                except httpx.HTTPError as error:
+                    shutdown_error = error
+        finally:
+            reaping = asyncio.create_task(asyncio.to_thread(_reap_process, process))
+            cancellation: asyncio.CancelledError | None = None
             try:
-                stop_url = f"{self._proxy_url}/stop"
-                if skip_writing_cache:
-                    stop_url += "?skipWritingCache=true"
-                async with httpx.AsyncClient() as client:
-                    await client.post(stop_url)
-            except Exception:
-                pass  # Best effort
+                # Even repeated teardown cancellation must not abandon the owned process.
+                while not reaping.done():
+                    try:
+                        await asyncio.shield(reaping)
+                    except asyncio.CancelledError as error:
+                        cancellation = error
+                reaping.result()
+                if cancellation is not None:
+                    raise cancellation
+            finally:
+                self._process = None
+                self._proxy_url = None
 
-        # Wait for process to exit
-        self._process.wait()
-        self._process = None
-        self._proxy_url = None
+        if shutdown_error is None:
+            if process.returncode is None:
+                shutdown_error = RuntimeError(
+                    f"Proxy process {process.pid} did not exit after being killed"
+                )
+            elif process.returncode != 0:
+                shutdown_error = RuntimeError(f"Proxy exited with code {process.returncode}")
+        if shutdown_error is not None:
+            raise shutdown_error
 
     async def configure(self, file_path: str, work_dir: str):
         """Send configuration to the proxy."""
@@ -164,3 +199,43 @@ class CapiProxy:
             "GH_ENTERPRISE_TOKEN": "",
             "GITHUB_ENTERPRISE_TOKEN": "",
         }
+
+
+def _reap_process(process: subprocess.Popen) -> None:
+    try:
+        process.wait(timeout=PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(process)
+        try:
+            process.wait(timeout=PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            warnings.warn(
+                f"Proxy process {process.pid} did not exit after being killed",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+
+def _kill_process_tree(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+
+    if platform.system() == "Windows":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=PROCESS_SHUTDOWN_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            # Fall through to the direct-process kill below.
+            pass
+
+    if process.poll() is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            # The process exited between poll() and kill().
+            pass

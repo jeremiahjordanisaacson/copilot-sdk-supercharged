@@ -58,8 +58,8 @@ def _wants_stream(body: bytes) -> bool:
 def model_catalog(supported_endpoints: list[str] | None = None) -> dict:
     """The synthetic ``/models`` catalog payload."""
     model: dict = {
-        "id": "claude-sonnet-4.5",
-        "name": "Claude Sonnet 4.5",
+        "id": "claude-sonnet-5",
+        "name": "Claude Sonnet 5",
         "object": "model",
         "vendor": "Anthropic",
         "version": "1",
@@ -67,7 +67,7 @@ def model_catalog(supported_endpoints: list[str] | None = None) -> dict:
         "model_picker_enabled": True,
         "capabilities": {
             "type": "chat",
-            "family": "claude-sonnet-4.5",
+            "family": "claude-sonnet-5",
             "tokenizer": "o200k_base",
             "limits": {"max_context_window_tokens": 200000, "max_output_tokens": 8192},
             "supports": {
@@ -81,6 +81,30 @@ def model_catalog(supported_endpoints: list[str] | None = None) -> dict:
     if supported_endpoints is not None:
         model["supported_endpoints"] = supported_endpoints
     return {"data": [model]}
+
+
+AUTO_METADATA: dict = {
+    "default_tier": "balance",
+    "tiers": [
+        {
+            "id": tier_id,
+            "display_name": display_name,
+            "description": description,
+            "type": "auto",
+            "status": {"enabled": True},
+        }
+        for tier_id, display_name, description in (
+            ("efficiency", "Efficiency", "Faster, lower-cost models"),
+            ("balance", "Balance", "A balance of speed and capability"),
+            ("intelligence", "Intelligence", "The most capable models"),
+        )
+    ],
+}
+
+
+def meta_catalog(supported_endpoints: list[str] | None = None) -> dict:
+    """The synthetic CAPI ``/meta`` payload: the ``/models`` catalog plus Auto tiers."""
+    return {"models": model_catalog(supported_endpoints), "auto": AUTO_METADATA}
 
 
 def responses_events(text: str, resp_id: str = "resp_stub_1") -> list[dict]:
@@ -143,6 +167,12 @@ def build_non_inference_response(
 ) -> httpx.Response:
     """Build a minimal ``httpx.Response`` for non-inference model-layer requests."""
     path = url.lower().split("?", 1)[0]  # strip query params before matching
+    if path.endswith("/meta"):
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            content=json.dumps(meta_catalog(supported_endpoints)).encode(),
+        )
     if path.endswith("/models"):
         return httpx.Response(
             200,
@@ -191,7 +221,7 @@ def build_inference_response(request: httpx.Request, text: str = SYNTHETIC_TEXT)
             "id": "chatcmpl-stub-1",
             "object": "chat.completion.chunk",
             "created": 1,
-            "model": "claude-sonnet-4.5",
+            "model": "claude-sonnet-5",
         }
         chunks = [
             {
@@ -234,7 +264,7 @@ def build_inference_response(request: httpx.Request, text: str = SYNTHETIC_TEXT)
                             "id": "msg_stub_1",
                             "type": "message",
                             "role": "assistant",
-                            "model": "claude-sonnet-4.5",
+                            "model": "claude-sonnet-5",
                             "content": [],
                             "stop_reason": None,
                             "stop_sequence": None,
@@ -283,7 +313,7 @@ def build_inference_response(request: httpx.Request, text: str = SYNTHETIC_TEXT)
                     "id": "msg_stub_1",
                     "type": "message",
                     "role": "assistant",
-                    "model": "claude-sonnet-4.5",
+                    "model": "claude-sonnet-5",
                     "content": [{"type": "text", "text": text}],
                     "stop_reason": "end_turn",
                     "stop_sequence": None,
@@ -300,7 +330,7 @@ def build_inference_response(request: httpx.Request, text: str = SYNTHETIC_TEXT)
                 "id": "chatcmpl-stub-1",
                 "object": "chat.completion",
                 "created": 1,
-                "model": "claude-sonnet-4.5",
+                "model": "claude-sonnet-5",
                 "choices": [
                     {
                         "index": 0,
