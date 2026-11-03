@@ -229,11 +229,13 @@ copilot_jsonrpc_request() {
 
         local response="$COPILOT_JSONRPC_LAST_RESPONSE"
 
-        # Check if this response has our request ID
-        local response_id
+        # Check if this response has our request ID (server -> client requests carry
+        # their own "id" plus a "method", so they are never mistaken for our response)
+        local response_id has_method
         response_id=$(echo "$response" | jq -r '.id // empty' 2>/dev/null)
+        has_method=$(echo "$response" | jq -r 'has("method")' 2>/dev/null) || has_method=""
 
-        if [[ "$response_id" == "$request_id" ]]; then
+        if [[ "$has_method" != "true" ]] && [[ "$response_id" == "$request_id" ]]; then
             # This is our response. Check for error.
             local has_error
             has_error=$(echo "$response" | jq 'has("error")' 2>/dev/null)
@@ -245,6 +247,12 @@ copilot_jsonrpc_request() {
 
             # Success - COPILOT_JSONRPC_LAST_RESPONSE already set
             return 0
+        fi
+
+        # Answer server -> client requests the SDK handles inline (gitHubToken.getToken,
+        # hooks.invoke); they can arrive while a request such as session.create is pending.
+        if [[ "$has_method" == "true" ]] && declare -f _copilot_handle_server_request > /dev/null 2>&1; then
+            _copilot_handle_server_request "$response" || true
         fi
 
         # Not our response (notification or other) - store and continue

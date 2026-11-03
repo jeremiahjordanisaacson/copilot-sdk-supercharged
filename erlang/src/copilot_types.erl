@@ -26,7 +26,19 @@
     session_limits/1,
     memory_configuration/1,
     client_options_params/1,
-    agent_definition/1
+    agent_definition/1,
+    client_info/1,
+    auto_tier/1,
+    ask_user_variant/1,
+    message_source/1,
+    sandbox_config/1,
+    image_generation/1,
+    autopilot_options/1,
+    provider_config/1,
+    model_capabilities/1,
+    model_limits/1,
+    github_token_result/1,
+    response_format_json_schema/1
 ]).
 
 %% ---------------------------------------------------------------------------
@@ -61,7 +73,10 @@
     request_handler       :: fun() | undefined,
     bearer_token_provider :: fun() | undefined,
     builtin_plugin_directories :: [binary()] | undefined,
-    in_process            :: boolean() | undefined
+    in_process            :: boolean() | undefined,
+    %% Integrating application identity sent on the `connect` handshake:
+    %% #{application_name, application_version, integration_name, integration_version}
+    client_info           :: map() | undefined
 }).
 
 -record(session_config, {
@@ -105,7 +120,26 @@
     tool_search              :: map() | undefined,
     experimental_mode        :: boolean() | undefined,
     content_exclusion        :: boolean() | undefined,
-    on_mcp_auth_request      :: fun() | undefined
+    on_mcp_auth_request      :: fun() | undefined,
+    %% v2.6.0 session options (parity with @github/copilot-sdk)
+    auto_tier                :: binary() | undefined,
+    ask_user_variant         :: binary() | undefined,
+    github_token_provider    :: fun((map()) -> map()) | undefined,
+    sandbox_config           :: map() | undefined,
+    feature_flags            :: #{binary() => boolean()} | undefined,
+    allowed_models           :: [binary()] | undefined,
+    auth_client_id_metadata_url :: binary() | undefined,
+    name                     :: binary() | undefined,
+    agent_directories        :: [binary()] | undefined,
+    hook_directories         :: [binary()] | undefined,
+    interactive_user         :: boolean() | undefined,
+    excluded_managed_settings :: [binary()] | undefined,
+    enforce_managed_model_defaults :: boolean() | undefined,
+    trust_working_directory  :: binary() | undefined,
+    refresh_custom_instructions :: boolean() | undefined,
+    allow_transcript_recovery :: boolean() | undefined,
+    image_generation         :: map() | undefined,
+    autopilot                :: map() | undefined
 }).
 
 -record(command_context, {
@@ -361,6 +395,8 @@ hook_type(post_tool_use)         -> <<"postToolUse">>;
 hook_type(pre_mcp_tool_call)     -> <<"preMcpToolCall">>;
 hook_type(user_prompt_submitted) -> <<"userPromptSubmitted">>;
 hook_type(user_prompt_transformed) -> <<"userPromptTransformed">>;
+hook_type(subagent_start)        -> <<"subagentStart">>;
+hook_type(subagent_stop)         -> <<"subagentStop">>;
 hook_type(session_start)         -> <<"sessionStart">>;
 hook_type(session_end)           -> <<"sessionEnd">>.
 
@@ -396,3 +432,162 @@ agent_definition(Opts) ->
         <<"description">> => maps:get(description, Opts, undefined),
         <<"argsSchema">>  => maps:get(args_schema, Opts, undefined)
     }).
+
+%% ---------------------------------------------------------------------------
+%% v2.6.0 feature constants & helpers (parity with @github/copilot-sdk)
+%% ---------------------------------------------------------------------------
+
+%% @doc Build the `connect` handshake clientInfo wire map from the client_info
+%% client option (#{application_name, application_version, integration_name,
+%% integration_version}). Empty fields are dropped; an all-empty identity
+%% yields an empty map, in which case the client skips `connect`.
+-spec client_info(map() | undefined) -> map().
+client_info(undefined) ->
+    #{};
+client_info(Info) when is_map(Info) ->
+    Pairs = [
+        {application_name,    <<"editorName">>},
+        {application_version, <<"editorVersion">>},
+        {integration_name,    <<"extensionName">>},
+        {integration_version, <<"extensionVersion">>}
+    ],
+    lists:foldl(fun({Key, JsonKey}, Acc) ->
+        case maps:get(Key, Info, undefined) of
+            undefined -> Acc;
+            <<>>      -> Acc;
+            []        -> Acc;
+            Value     -> Acc#{JsonKey => to_binary(Value)}
+        end
+    end, #{}, Pairs).
+
+%% @doc Auto routing tier constants (session option auto_tier; experimental).
+-spec auto_tier(efficiency | balance | intelligence | fast) -> binary().
+auto_tier(efficiency)   -> <<"efficiency">>;
+auto_tier(balance)      -> <<"balance">>;
+auto_tier(intelligence) -> <<"intelligence">>;
+auto_tier(fast)         -> <<"fast">>.
+
+%% @doc Ask-user variant constants (session option ask_user_variant).
+-spec ask_user_variant(legacy | elicitation) -> binary().
+ask_user_variant(legacy)      -> <<"legacy">>;
+ask_user_variant(elicitation) -> <<"elicitation">>.
+
+%% @doc Message provenance for the `source` message option: `user`, `system`,
+%% or `{agent, AgentId}` (=> <<"agent-", AgentId/binary>>). Binaries pass through.
+-spec message_source(user | system | {agent, binary() | string()} | binary()) -> binary().
+message_source(user)           -> <<"user">>;
+message_source(system)         -> <<"system">>;
+message_source({agent, Id})    -> <<"agent-", (to_binary(Id))/binary>>;
+message_source(Source) when is_binary(Source) -> Source.
+
+%% @doc Build a sandboxConfig wire map. allow_bypass is an opt-in that lets the
+%% agent request an individual command outside the sandbox through the normal
+%% permission flow.
+-spec sandbox_config(map()) -> map().
+sandbox_config(Opts) ->
+    to_wire(Opts, [
+        {enabled,                       <<"enabled">>},
+        {user_policy,                   <<"userPolicy">>},
+        {add_current_working_directory, <<"addCurrentWorkingDirectory">>},
+        {sandbox_mcp_servers,           <<"sandboxMcpServers">>},
+        {sandbox_lsp_servers,           <<"sandboxLspServers">>},
+        {sandbox_extensions,            <<"sandboxExtensions">>},
+        {allow_bypass,                  <<"allowBypass">>}
+    ]).
+
+%% @doc Build a session-level imageGeneration wire map
+%% (#{enabled, watermark, save_to_disk}).
+-spec image_generation(map()) -> map().
+image_generation(Opts) ->
+    to_wire(Opts, [
+        {enabled,      <<"enabled">>},
+        {watermark,    <<"watermark">>},
+        {save_to_disk, <<"saveToDisk">>}
+    ]).
+
+%% @doc Build an autopilot options wire map (#{continuation_enabled, max_continues}).
+-spec autopilot_options(map()) -> map().
+autopilot_options(Opts) ->
+    to_wire(Opts, [
+        {continuation_enabled, <<"continuationEnabled">>},
+        {max_continues,        <<"maxContinues">>}
+    ]).
+
+%% @doc Build a BYOK provider wire map. model_provider is one of openai,
+%% anthropic, azure_openai, ollama, lm_studio, foundry_local or llama_cpp;
+%% api_key_command is a command whose stdout is used as the API key.
+-spec provider_config(map()) -> map().
+provider_config(Opts) ->
+    to_wire(Opts, [
+        {type,            <<"type">>},
+        {wire_api,        <<"wireApi">>},
+        {base_url,        <<"baseUrl">>},
+        {api_key,         <<"apiKey">>},
+        {bearer_token,    <<"bearerToken">>},
+        {model_provider,  <<"modelProvider">>},
+        {api_key_command, <<"apiKeyCommand">>}
+    ]).
+
+%% @doc Build a modelCapabilities override wire map; a `limits` map is
+%% converted with model_limits/1.
+-spec model_capabilities(map() | term()) -> map() | term().
+model_capabilities(Opts) when is_map(Opts) ->
+    Wire = to_wire(Opts, [{limits, <<"limits">>}, {supports, <<"supports">>}]),
+    case maps:get(<<"limits">>, Wire, undefined) of
+        Limits when is_map(Limits) -> Wire#{<<"limits">> => model_limits(Limits)};
+        _                          -> Wire
+    end;
+model_capabilities(Other) ->
+    Other.
+
+%% @doc Build the model capabilities override `limits` wire map. Wire keys are
+%% snake_case (max_prompt_tokens, max_output_tokens, max_context_window_tokens).
+-spec model_limits(map()) -> map().
+model_limits(Opts) ->
+    to_wire(Opts, [
+        {max_prompt_tokens,         <<"max_prompt_tokens">>},
+        {max_output_tokens,         <<"max_output_tokens">>},
+        {max_context_window_tokens, <<"max_context_window_tokens">>}
+    ]).
+
+%% @doc Convert a github_token_provider result into its wire map:
+%% #{kind => token, access_token => T, token_type => Type, expires_in => Secs}
+%% or #{kind => cancelled}.
+-spec github_token_result(map()) -> map().
+github_token_result(Result) ->
+    to_wire(Result, [
+        {kind,         <<"kind">>},
+        {access_token, <<"accessToken">>},
+        {token_type,   <<"tokenType">>},
+        {expires_in,   <<"expiresIn">>}
+    ]).
+
+%% @doc Structured-output responseFormat wire object for a JSON Schema
+%% (message option response_schema).
+-spec response_format_json_schema(map()) -> map().
+response_format_json_schema(Schema) ->
+    #{
+        <<"type">>       => <<"json_schema">>,
+        <<"jsonSchema">> => #{
+            <<"name">>   => <<"response">>,
+            <<"strict">> => true,
+            <<"schema">> => Schema
+        }
+    }.
+
+%% Convert known atom keys to their wire keys (dropping undefined values);
+%% any other key passes through unchanged, so wire-shaped maps are accepted.
+to_wire(Opts, Pairs) when is_map(Opts) ->
+    maps:fold(fun(Key, Value, Acc) ->
+        case lists:keyfind(Key, 1, Pairs) of
+            {Key, _JsonKey} when Value =:= undefined -> Acc;
+            {Key, JsonKey}                           -> Acc#{JsonKey => Value};
+            false                                    -> Acc#{Key => Value}
+        end
+    end, #{}, Opts);
+to_wire(Other, _Pairs) ->
+    Other.
+
+to_binary(V) when is_binary(V) -> V;
+to_binary(V) when is_list(V)   -> unicode:characters_to_binary(V);
+to_binary(V) when is_atom(V)   -> atom_to_binary(V, utf8).

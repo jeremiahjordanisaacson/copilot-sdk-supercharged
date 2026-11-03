@@ -3,6 +3,7 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 
 require "open3"
+require "securerandom"
 require "socket"
 require "thread"
 require "fileutils"
@@ -43,6 +44,9 @@ module Copilot
     # @param env              [Hash, nil]    environment variables for the CLI process
     # @param github_token     [String, nil]  GitHub token for authentication
     # @param use_logged_in_user [Boolean, nil] use logged-in user auth (default: true unless github_token)
+    # @param client_info      [ClientInfo, Hash, nil] identity of the integrating application
+    #   (application_name, application_version, integration_name, integration_version),
+    #   declared on the +connect+ handshake when any field is set
     #
     # @raise [ArgumentError] if mutually exclusive options are provided
     def initialize(
@@ -58,7 +62,8 @@ module Copilot
       env: nil,
       github_token: nil,
       use_logged_in_user: nil,
-      on_get_trace_context: nil
+      on_get_trace_context: nil,
+      client_info: nil
     )
       # Validate mutually exclusive options
       if cli_url && (use_stdio == false || cli_path)
@@ -85,6 +90,8 @@ module Copilot
       # Default use_logged_in_user based on github_token
       use_logged_in_user = github_token ? false : true if use_logged_in_user.nil?
 
+      client_info = ClientInfo.new(**client_info.transform_keys(&:to_sym)) if client_info.is_a?(Hash)
+
       @options = ClientOptions.new(
         cli_path: cli_path || "copilot",
         cli_args: cli_args,
@@ -99,6 +106,7 @@ module Copilot
         github_token: github_token,
         use_logged_in_user: use_logged_in_user,
         on_get_trace_context: on_get_trace_context,
+        client_info: client_info,
       )
 
       @process    = nil
@@ -119,6 +127,10 @@ module Copilot
       @typed_lifecycle_handlers = {} # type => [handler]
       @lifecycle_handlers_lock  = Mutex.new
 
+      # registration id => { provider:, session_id: } for session github_token_provider callbacks
+      @github_token_providers      = {}
+      @github_token_providers_lock = Mutex.new
+
       @stderr_thread = nil
     end
 
@@ -136,6 +148,7 @@ module Copilot
       begin
         start_cli_server unless @is_external_server
         connect_to_server
+        send_client_info
         verify_protocol_version
         @state = ConnectionState::CONNECTED
       rescue StandardError
@@ -173,6 +186,9 @@ module Copilot
 
       # Clear models cache
       @models_cache_lock.synchronize { @models_cache = nil }
+
+      # Drop all GitHub token provider registrations
+      @github_token_providers_lock.synchronize { @github_token_providers.clear }
 
       # Close socket if TCP
       if @socket
@@ -232,6 +248,7 @@ module Copilot
       end
 
       @models_cache_lock.synchronize { @models_cache = nil }
+      @github_token_providers_lock.synchronize { @github_token_providers.clear }
 
       if @socket
         begin
@@ -274,8 +291,16 @@ module Copilot
     def create_session(**config)
       ensure_connected!
 
+      registration_id = register_github_token_provider(config, config[:session_id])
       payload = build_create_session_payload(config)
-      response = @rpc_client.request("session.create", payload)
+      payload[:gitHubTokenProviderRegistrationId] = registration_id if registration_id
+
+      begin
+        response = @rpc_client.request("session.create", payload)
+      rescue StandardError
+        unregister_github_token_provider(registration_id)
+        raise
+      end
 
       session_id = response["sessionId"]
       workspace_path = response["workspacePath"]
@@ -289,6 +314,7 @@ module Copilot
       if @options.on_get_trace_context
         session._register_trace_context_provider(@options.on_get_trace_context)
       end
+      attach_github_token_provider(session, registration_id)
 
       @sessions_lock.synchronize { @sessions[session_id] = session }
       session
@@ -302,8 +328,16 @@ module Copilot
     def resume_session(session_id, **config)
       ensure_connected!
 
+      registration_id = register_github_token_provider(config, session_id)
       payload = build_resume_session_payload(session_id, config)
-      response = @rpc_client.request("session.resume", payload)
+      payload[:gitHubTokenProviderRegistrationId] = registration_id if registration_id
+
+      begin
+        response = @rpc_client.request("session.resume", payload)
+      rescue StandardError
+        unregister_github_token_provider(registration_id)
+        raise
+      end
 
       resumed_id = response["sessionId"]
       workspace_path = response["workspacePath"]
@@ -317,6 +351,7 @@ module Copilot
       if @options.on_get_trace_context
         session._register_trace_context_provider(@options.on_get_trace_context)
       end
+      attach_github_token_provider(session, registration_id)
 
       @sessions_lock.synchronize { @sessions[resumed_id] = session }
       session
@@ -458,6 +493,16 @@ module Copilot
       params[:conventions] = conventions
 
       @rpc_client.request("sessionFs.setProvider", params)
+    end
+
+    # Clear the runtime's cached managed (enterprise policy) settings so they are
+    # re-read on next use.
+    #
+    # @return [Hash] the raw result
+    def clear_managed_settings_cache
+      raise_not_connected! unless @rpc_client
+
+      @rpc_client.request("managedSettings.clearCache", {})
     end
 
     # Subscribe to session lifecycle events.
@@ -653,6 +698,10 @@ module Copilot
         handle_exit_plan_mode_request(params)
       end
 
+      @rpc_client.on_request("gitHubToken.getToken") do |params|
+        handle_github_token_request(params)
+      end
+
       register_session_fs_handlers
     end
 
@@ -675,6 +724,18 @@ module Copilot
       @rpc_client.on_request("sessionFs.readdirWithTypes") { |params| handle_session_fs_readdir_with_types(params) }
       @rpc_client.on_request("sessionFs.rm") { |params| handle_session_fs_rm(params) }
       @rpc_client.on_request("sessionFs.rename") { |params| handle_session_fs_rename(params) }
+    end
+
+    # Declare the integrating application's identity (+client_info+) on the
+    # +connect+ handshake, before the protocol-version ping. Skipped when no field
+    # is set; older CLIs that do not implement +connect+ are tolerated.
+    def send_client_info
+      wire = @options.client_info&.to_wire
+      return unless wire
+
+      @rpc_client.request("connect", { clientInfo: wire })
+    rescue JsonRpcError => e
+      raise unless e.code == -32601 || e.message.include?("Unhandled method connect")
     end
 
     def verify_protocol_version
@@ -826,6 +887,74 @@ module Copilot
       end
     end
 
+    # ---- GitHub token provider (gitHubToken.getToken) ----
+
+    # Validates a session's +github_token_provider+ and stores it in the client-level
+    # registry. Returns the opaque registration id sent on the wire, or nil.
+    def register_github_token_provider(config, session_id = nil)
+      provider = config[:github_token_provider]
+      return nil unless provider
+
+      if config[:github_token] || config[:git_hub_token] || config[:auth_token]
+        raise ArgumentError, "github_token and github_token_provider are mutually exclusive"
+      end
+      raise ArgumentError, "github_token_provider must respond to #call" unless provider.respond_to?(:call)
+
+      registration_id = SecureRandom.uuid
+      @github_token_providers_lock.synchronize do
+        @github_token_providers[registration_id] = { provider: provider, session_id: session_id }
+      end
+      registration_id
+    end
+
+    def unregister_github_token_provider(registration_id)
+      return unless registration_id
+
+      @github_token_providers_lock.synchronize { @github_token_providers.delete(registration_id) }
+    end
+
+    # Binds a registration to its session and releases it when the session is destroyed.
+    def attach_github_token_provider(session, registration_id)
+      return unless registration_id
+
+      @github_token_providers_lock.synchronize do
+        entry = @github_token_providers[registration_id]
+        entry[:session_id] = session.session_id if entry
+      end
+      session._on_destroy { unregister_github_token_provider(registration_id) }
+    end
+
+    def handle_github_token_request(params)
+      registration_id = params["registrationId"]
+      registration = @github_token_providers_lock.synchronize { @github_token_providers[registration_id] }
+      unless registration
+        raise "No GitHub token provider registered for registration ID \"#{registration_id}\""
+      end
+
+      args = GitHubTokenProviderArgs.new(
+        host: params["host"],
+        session_id: params["sessionId"] || registration[:session_id],
+        reason: params["reason"]
+      )
+      normalize_github_token_result(registration[:provider].call(args))
+    end
+
+    # Accepts a GitHubTokenResult or a Hash with camelCase or snake_case keys.
+    def normalize_github_token_result(result)
+      return result.to_wire if result.respond_to?(:to_wire)
+      raise "GitHub token provider must return a Hash or GitHubTokenResult" unless result.is_a?(Hash)
+
+      h = result.transform_keys(&:to_s)
+      return { kind: "cancelled" } if h["kind"].to_s == "cancelled"
+
+      GitHubTokenResult.new(
+        kind: "token",
+        access_token: h["accessToken"] || h["access_token"],
+        token_type: h["tokenType"] || h["token_type"],
+        expires_in: h["expiresIn"] || h["expires_in"]
+      ).to_wire
+    end
+
     # ---- SessionFs provider request handlers ----
     #
     # These service the CLI's +sessionFs.*+ callbacks against the real
@@ -957,7 +1086,7 @@ module Copilot
 
     # ---- Payload builders ----
 
-    def build_create_session_payload(config)
+    def build_create_session_payload(config, resume: false)
       payload = {}
 
       payload[:model] = config[:model] if config[:model]
@@ -1014,7 +1143,7 @@ module Copilot
         payload[:memory] = mem.respond_to?(:to_wire) ? mem.to_wire : mem
       end
       payload[:otlpProtocol] = config[:otlp_protocol] if config[:otlp_protocol]
-      payload[:enableWebSocketResponses] = config[:enable_web_socket_responses] unless config[:enable_web_socket_responses].nil?
+      # enable_web_socket_responses is sent inside the +capi+ object (see below).
       payload[:expAssignments] = config[:exp_assignments] if config[:exp_assignments]
       # --- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk) ---
       payload[:rewindEnabled] = config[:rewind_enabled] unless config[:rewind_enabled].nil? # enable session rewind
@@ -1033,13 +1162,51 @@ module Copilot
       # MCP OAuth host token handler: signal to the runtime that a handler is registered.
       payload[:mcpAuthHandler] = true if config[:on_mcp_auth_request]
 
+      # --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
+      capi = {}
+      capi[:autoTier] = config[:auto_tier] if config[:auto_tier]
+      capi[:enableWebSocketResponses] = config[:enable_web_socket_responses] unless config[:enable_web_socket_responses].nil?
+      payload[:capi] = capi unless capi.empty?
+      payload[:askUserVariant] = config[:ask_user_variant] if config[:ask_user_variant]
+      if config[:sandbox_config]
+        sc = config[:sandbox_config]
+        payload[:sandboxConfig] = sc.respond_to?(:to_wire) ? sc.to_wire : sc
+      end
+      payload[:featureFlags] = config[:feature_flags] unless config[:feature_flags].nil?
+      payload[:allowedModels] = config[:allowed_models] if config[:allowed_models]
+      payload[:authClientIdMetadataUrl] = config[:auth_client_id_metadata_url] if config[:auth_client_id_metadata_url]
+      if config[:model_capabilities]
+        mc = config[:model_capabilities]
+        payload[:modelCapabilities] = mc.respond_to?(:to_wire) ? mc.to_wire : mc
+      end
+      payload[:agentDirectories] = config[:agent_directories] if config[:agent_directories]
+      payload[:hookDirectories] = config[:hook_directories] if config[:hook_directories]
+      payload[:interactiveUser] = config[:interactive_user] unless config[:interactive_user].nil?
+      payload[:excludedManagedSettings] = config[:excluded_managed_settings] if config[:excluded_managed_settings]
+      payload[:enforceManagedModelDefaults] = config[:enforce_managed_model_defaults] unless config[:enforce_managed_model_defaults].nil?
+      if config[:image_generation]
+        ig = config[:image_generation]
+        payload[:imageGeneration] = ig.respond_to?(:to_wire) ? ig.to_wire : ig
+      end
+      if config[:autopilot]
+        ap = config[:autopilot]
+        payload[:autopilot] = ap.respond_to?(:to_wire) ? ap.to_wire : ap
+      end
+      unless resume
+        # Create-only options.
+        payload[:name] = config[:name] if config[:name]
+        payload[:trustWorkingDirectory] = config[:trust_working_directory] if config[:trust_working_directory]
+        payload[:refreshCustomInstructions] = config[:refresh_custom_instructions] unless config[:refresh_custom_instructions].nil?
+      end
+
       payload
     end
 
     def build_resume_session_payload(session_id, config)
-      payload = build_create_session_payload(config)
+      payload = build_create_session_payload(config, resume: true)
       payload[:sessionId] = session_id
       payload[:disableResume] = config[:disable_resume] if config[:disable_resume]
+      payload[:allowTranscriptRecovery] = config[:allow_transcript_recovery] unless config[:allow_transcript_recovery].nil?
       payload
     end
 

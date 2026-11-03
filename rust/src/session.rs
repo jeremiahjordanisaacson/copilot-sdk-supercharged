@@ -73,6 +73,55 @@ pub type SessionEventHandlerFn = Arc<dyn Fn(SessionEvent) + Send + Sync>;
 /// A typed session event handler for a specific event type.
 pub type TypedSessionEventHandlerFn = Arc<dyn Fn(SessionEvent) + Send + Sync>;
 
+/// A GitHub token provider registered for one session (routes `gitHubToken.getToken`).
+#[derive(Clone)]
+pub(crate) struct GitHubTokenRegistration {
+    pub(crate) provider: GitHubTokenProviderFn,
+    pub(crate) session_id: Option<String>,
+}
+
+/// Client-level registry of GitHub token providers, keyed by registration ID.
+pub(crate) type GitHubTokenRegistry = Arc<Mutex<HashMap<String, GitHubTokenRegistration>>>;
+
+/// Builds the structured-output `responseFormat` wire object for a JSON Schema.
+fn structured_response_format(schema: &Value) -> Value {
+    serde_json::json!({
+        "type": "json_schema",
+        "jsonSchema": {
+            "name": "response",
+            "strict": true,
+            "schema": schema,
+        },
+    })
+}
+
+/// Applies `f` to the locked value without blocking a runtime thread.
+///
+/// Uses `try_lock` first; when contended inside a runtime the update runs on a
+/// spawned task (tokio's `blocking_lock` panics there), otherwise it blocks.
+fn lock_detached<T, F>(mutex: Arc<Mutex<T>>, f: F)
+where
+    T: Send + 'static,
+    F: FnOnce(&mut T) + Send + 'static,
+{
+    if let Ok(mut guard) = mutex.try_lock() {
+        f(&mut guard);
+        return;
+    }
+    match tokio::runtime::Handle::try_current() {
+        Ok(runtime) => {
+            runtime.spawn(async move {
+                let mut guard = mutex.lock().await;
+                f(&mut guard);
+            });
+        }
+        Err(_) => {
+            let mut guard = mutex.blocking_lock();
+            f(&mut guard);
+        }
+    }
+}
+
 // ============================================================================
 // Unsubscribe Guard
 // ============================================================================
@@ -163,6 +212,8 @@ pub struct CopilotSession {
     typed_event_handlers: Arc<Mutex<HashMap<String, Vec<(u64, TypedSessionEventHandlerFn)>>>>,
     /// Counter for handler IDs (for unsubscribe).
     next_handler_id: Arc<Mutex<u64>>,
+    /// GitHub token provider registration owned by this session (removed on destroy).
+    github_token_registration: Mutex<Option<(String, GitHubTokenRegistry)>>,
 }
 
 impl CopilotSession {
@@ -183,6 +234,7 @@ impl CopilotSession {
             event_handlers: Arc::new(Mutex::new(Vec::new())),
             typed_event_handlers: Arc::new(Mutex::new(HashMap::new())),
             next_handler_id: Arc::new(Mutex::new(0)),
+            github_token_registration: Mutex::new(None),
         }
     }
 
@@ -207,7 +259,7 @@ impl CopilotSession {
     ///
     /// Returns the message ID.
     pub async fn send(&self, options: MessageOptions) -> Result<String, CopilotError> {
-        let params = serde_json::json!({
+        let mut params = serde_json::json!({
             "sessionId": self.session_id,
             "prompt": options.prompt,
             "attachments": options.attachments,
@@ -218,6 +270,13 @@ impl CopilotSession {
             "responseFormat": options.response_format,
             "imageOptions": options.image_options,
         });
+        if let Some(source) = options.source.as_ref() {
+            params["source"] = Value::String(source.to_string());
+        }
+        // Structured output takes precedence over the legacy string response format.
+        if let Some(schema) = options.response_schema.as_ref() {
+            params["responseFormat"] = structured_response_format(schema);
+        }
 
         let response = self.rpc_client.request("session.send", params, None).await?;
         let message_id = response
@@ -245,8 +304,10 @@ impl CopilotSession {
 
         // Channel to signal idle or error
         let (idle_tx, mut idle_rx) = mpsc::channel::<Result<(), CopilotError>>(1);
-        let last_assistant_message: Arc<Mutex<Option<SessionEvent>>> =
-            Arc::new(Mutex::new(None));
+        // A std mutex: the handler runs synchronously on a runtime thread, where
+        // tokio's `blocking_lock` would panic.
+        let last_assistant_message: Arc<std::sync::Mutex<Option<SessionEvent>>> =
+            Arc::new(std::sync::Mutex::new(None));
 
         let last_msg_clone = Arc::clone(&last_assistant_message);
         let idle_tx_clone = idle_tx.clone();
@@ -255,8 +316,9 @@ impl CopilotSession {
         let sub = self
             .on(move |event: SessionEvent| {
                 if event.is_assistant_message() {
-                    let mut msg = last_msg_clone.blocking_lock();
-                    *msg = Some(event);
+                    if let Ok(mut msg) = last_msg_clone.lock() {
+                        *msg = Some(event);
+                    }
                 } else if event.is_session_idle() {
                     let _ = idle_tx_clone.try_send(Ok(()));
                 } else if event.is_session_error() {
@@ -284,13 +346,49 @@ impl CopilotSession {
 
         match result {
             Ok(Some(Ok(()))) => {
-                let msg = last_assistant_message.lock().await;
-                Ok(msg.clone())
+                let msg = last_assistant_message
+                    .lock()
+                    .map(|msg| msg.clone())
+                    .unwrap_or(None);
+                Ok(msg)
             }
             Ok(Some(Err(e))) => Err(e),
             Ok(None) => Err(CopilotError::ConnectionClosed),
             Err(_) => Err(CopilotError::Timeout(effective_timeout)),
         }
+    }
+
+    /// Sends a message requesting structured output and returns the parsed JSON result.
+    ///
+    /// Sets `response_schema` on the message, waits via [`send_and_wait`](Self::send_and_wait),
+    /// and parses the final assistant message content as JSON. Returns an error when the
+    /// run completes without assistant content.
+    ///
+    /// # Arguments
+    /// * `options` - The message options, or just a prompt (`&str` / `String`)
+    /// * `schema` - JSON Schema describing the expected response
+    /// * `timeout` - Optional timeout in milliseconds (defaults to 60000)
+    pub async fn send_and_wait_structured(
+        &self,
+        options: impl Into<MessageOptions>,
+        schema: Value,
+        timeout: Option<u64>,
+    ) -> Result<Value, CopilotError> {
+        let mut options = options.into();
+        options.response_schema = Some(schema);
+        let event = self.send_and_wait(options, timeout).await?;
+        let content = event
+            .as_ref()
+            .and_then(|e| e.assistant_message_content())
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .ok_or_else(|| {
+                CopilotError::SessionError(
+                    "The requested run completed without a structured assistant response."
+                        .to_string(),
+                )
+            })?;
+        serde_json::from_str(content).map_err(|e| CopilotError::Serialization(e.to_string()))
     }
 
     // ========================================================================
@@ -319,10 +417,10 @@ impl CopilotSession {
 
         let event_handlers = Arc::clone(&self.event_handlers);
         Subscription::new(move || {
-            // We need to use blocking_lock since unsubscribe may be called from Drop
-            // in a non-async context
-            let mut handlers = event_handlers.blocking_lock();
-            handlers.retain(|(id, _)| *id != handler_id);
+            // Unsubscribe may run from Drop in sync or async contexts
+            lock_detached(event_handlers, move |handlers| {
+                handlers.retain(|(id, _)| *id != handler_id);
+            });
         })
     }
 
@@ -354,10 +452,11 @@ impl CopilotSession {
         let typed_handlers = Arc::clone(&self.typed_event_handlers);
         let et = event_type_str;
         Subscription::new(move || {
-            let mut handlers = typed_handlers.blocking_lock();
-            if let Some(list) = handlers.get_mut(&et) {
-                list.retain(|(id, _)| *id != handler_id);
-            }
+            lock_detached(typed_handlers, move |handlers| {
+                if let Some(list) = handlers.get_mut(&et) {
+                    list.retain(|(id, _)| *id != handler_id);
+                }
+            });
         })
     }
 
@@ -524,12 +623,30 @@ impl CopilotSession {
 
     /// Destroys this session and releases all associated resources.
     ///
-    /// After calling this method, the session can no longer be used.
+    /// Sends `session.detach` (falling back to `session.destroy` on runtimes that
+    /// don't implement it). Session state on disk is preserved, so the session can
+    /// be resumed later. After calling this method, the session can no longer be used.
     pub async fn destroy(&self) -> Result<(), CopilotError> {
         let params = serde_json::json!({ "sessionId": self.session_id });
-        self.rpc_client
-            .request("session.destroy", params, None)
-            .await?;
+        match self
+            .rpc_client
+            .request("session.detach", params.clone(), None)
+            .await
+        {
+            Ok(_) => {}
+            Err(CopilotError::JsonRpc { code: -32601, .. }) => {
+                self.rpc_client
+                    .request("session.destroy", params, None)
+                    .await?;
+            }
+            Err(e) => return Err(e),
+        }
+
+        // Drop this session's GitHub token provider registration
+        if let Some((registration_id, registry)) = self.github_token_registration.lock().await.take()
+        {
+            registry.lock().await.remove(&registration_id);
+        }
 
         // Clear all handlers
         {
@@ -563,5 +680,49 @@ impl CopilotSession {
             .request("session.abort", params, None)
             .await?;
         Ok(())
+    }
+
+    /// Changes the Auto routing preference without changing the selected model
+    /// (`session.model.switchAutoTier`). Experimental.
+    ///
+    /// Pass `None` to return to the provider's default Auto routing. Returns the
+    /// runtime's acknowledgement (`status`, `effectiveAutoTier`, `pendingAutoTier`,
+    /// `activatingAutoTier`, `supersededAutoTier`).
+    pub async fn set_auto_tier(&self, auto_tier: Option<AutoTier>) -> Result<Value, CopilotError> {
+        let params = serde_json::json!({
+            "sessionId": self.session_id,
+            "autoTier": auto_tier,
+        });
+        self.rpc_client
+            .request("session.model.switchAutoTier", params, None)
+            .await
+    }
+
+    /// Gets the managed (enterprise) settings in effect for this session
+    /// (`session.managedSettings.get`).
+    pub async fn get_managed_settings(&self) -> Result<Value, CopilotError> {
+        let params = serde_json::json!({ "sessionId": self.session_id });
+        self.rpc_client
+            .request("session.managedSettings.get", params, None)
+            .await
+    }
+
+    /// Re-runs the managed-settings policy helper for this session
+    /// (`session.managedSettings.recheckPolicyHelper`).
+    pub async fn recheck_policy_helper(&self) -> Result<Value, CopilotError> {
+        let params = serde_json::json!({ "sessionId": self.session_id });
+        self.rpc_client
+            .request("session.managedSettings.recheckPolicyHelper", params, None)
+            .await
+    }
+
+    /// Records the GitHub token provider registration owned by this session.
+    pub(crate) async fn set_github_token_registration(
+        &self,
+        registration_id: String,
+        registry: GitHubTokenRegistry,
+    ) {
+        let mut registration = self.github_token_registration.lock().await;
+        *registration = Some((registration_id, registry));
     }
 }

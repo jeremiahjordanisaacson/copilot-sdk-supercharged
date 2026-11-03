@@ -238,6 +238,141 @@ Hooks = #{
 }).
 ```
 
+## What's New in v2.6.0
+
+Parity with upstream `@github/copilot-sdk` v2.6.0. Session keys go in the
+`create_session/2` / `resume_session/3` config map (atom keys, serialized to the
+camelCase wire keys). Object options (`sandbox_config`, `image_generation`,
+`autopilot`, `provider`, `model_capabilities`) accept atom-keyed maps, which are
+converted to wire keys, or wire-shaped binary-keyed maps, which pass through.
+
+**Client info** — identify the integrating application. Sent as a `connect`
+request (`clientInfo` → `editorName`/`editorVersion`/`extensionName`/`extensionVersion`)
+before the ping handshake; skipped when unset, and ignored by older CLIs:
+
+```erlang
+{ok, Client} = copilot_client:start_link(#{
+    client_info => #{
+        application_name    => <<"acme-portal">>,
+        application_version => <<"2.4.0">>,
+        integration_name    => <<"acme-copilot-plugin">>,
+        integration_version => <<"0.9.1">>
+    }
+}).
+```
+
+**Auto routing tier (experimental)** — `auto_tier` and `enable_web_socket_responses`
+are sent inside the `capi` object; switch the tier later with `set_auto_tier/2`
+(`session.model.switchAutoTier`, pass `null` to return to default routing):
+
+```erlang
+{ok, Session} = copilot_client:create_session(Client, #{
+    model     => <<"auto">>,
+    auto_tier => copilot_types:auto_tier(intelligence)
+}),
+{ok, #{<<"status">> := _}} = copilot_session:set_auto_tier(Session, <<"balance">>),
+{ok, _} = copilot_session:set_auto_tier(Session, null).
+```
+
+**GitHub token provider** — supply GitHub tokens on demand (mutually exclusive
+with `github_token`). The client answers `gitHubToken.getToken` requests from a
+client-level registry; the registration is dropped when the session ends:
+
+```erlang
+Provider = fun(#{host := Host, session_id := _SessionId, reason := _Reason}) ->
+    #{kind => token, access_token => my_vault:github_token(Host), expires_in => 28800}
+    %% or #{kind => cancelled}
+end,
+{ok, Session} = copilot_client:create_session(Client, #{github_token_provider => Provider}).
+```
+
+**Session options** — sandboxing, feature flags, model allowlist, OAuth client
+metadata, name and directories, runtime toggles, image generation, autopilot,
+and BYOK/model-limit additions:
+
+```erlang
+{ok, Session} = copilot_client:create_session(Client, #{
+    name                           => <<"release-triage">>,          %% create only
+    ask_user_variant               => copilot_types:ask_user_variant(elicitation),
+    sandbox_config                 => #{enabled => true, allow_bypass => true},
+    feature_flags                  => #{<<"some_flag">> => true},   %% sent even when #{}
+    allowed_models                 => [<<"gpt-5">>, <<"claude-sonnet-4.6">>],
+    auth_client_id_metadata_url    => <<"https://example.com/oauth/client.json">>,
+    agent_directories              => [<<"./agents">>],
+    hook_directories               => [<<"./hooks">>],
+    interactive_user               => true,
+    excluded_managed_settings      => [<<"model">>],
+    enforce_managed_model_defaults => true,
+    trust_working_directory        => <<"session">>,                %% create only
+    refresh_custom_instructions    => true,                         %% create only
+    image_generation               => #{enabled => true, watermark => true, save_to_disk => false},
+    autopilot                      => #{continuation_enabled => true, max_continues => 3},
+    provider                       => #{base_url        => <<"http://localhost:11434/v1">>,
+                                        model_provider  => <<"ollama">>,
+                                        api_key_command => <<"op read op://dev/ollama/key">>},
+    model_capabilities             => #{limits => #{max_output_tokens => 8192}}
+}),
+{ok, Resumed} = copilot_client:resume_session(Client, SessionId, #{
+    allow_transcript_recovery => true                               %% resume only
+}).
+```
+
+Wire helpers are also exported: `copilot_types:sandbox_config/1`,
+`image_generation/1`, `autopilot_options/1`, `provider_config/1`,
+`model_capabilities/1`, `model_limits/1`, and `client_info/1`.
+
+**Message source and structured output** — `source` accepts `user`, `system`,
+`{agent, Id}` or a binary (`copilot_types:message_source/1`); `response_schema`
+sends a `json_schema` `responseFormat`, and `send_and_wait_structured/3,4` returns
+the final assistant content decoded as JSON:
+
+```erlang
+{ok, _} = copilot_session:send(Session, #{prompt => <<"Build is green">>, source => system}),
+{ok, _} = copilot_session:send(Session, #{
+    prompt => <<"Review the plan">>,
+    source => copilot_types:message_source({agent, <<"planner">>})
+}),
+Schema = #{
+    <<"type">>       => <<"object">>,
+    <<"properties">> => #{<<"answer">> => #{<<"type">> => <<"integer">>}},
+    <<"required">>   => [<<"answer">>]
+},
+{ok, #{<<"answer">> := 42}} =
+    copilot_session:send_and_wait_structured(Session, <<"What is 6 * 7?">>, Schema).
+```
+
+**Managed settings and detach**:
+
+```erlang
+{ok, _} = copilot_client:clear_managed_settings_cache(Client),   %% managedSettings.clearCache
+{ok, Settings} = copilot_session:get_managed_settings(Session),  %% session.managedSettings.get
+{ok, _} = copilot_session:recheck_policy_helper(Session),        %% session.managedSettings.recheckPolicyHelper
+ok = copilot_session:disconnect(Session).  %% session.detach (falls back to session.destroy)
+```
+
+**Sub-agent lifecycle hooks** — `on_subagent_start` / `on_subagent_stop`
+(`copilot_types:hook_type(subagent_start)` → `<<"subagentStart">>`):
+
+```erlang
+Hooks = #{
+    on_subagent_start => fun(Data) ->
+        io:format("sub-agent ~s started~n", [maps:get(<<"agentName">>, Data, <<>>)])
+    end,
+    on_subagent_stop => fun(Data) ->
+        io:format("sub-agent ~s finished~n", [maps:get(<<"agentName">>, Data, <<>>)])
+    end
+},
+{ok, Session} = copilot_client:create_session(Client, #{hooks => Hooks}).
+```
+
+**Parity notes**
+
+- External-tool cancellation is N/A: this SDK runs tools on the `tool.call` request path.
+- Experimental host-integration callbacks (skill provider, installation confirmation,
+  extension launch provider, Entra/Kerberos auth callbacks) are not yet available in this SDK.
+- Like the other Erlang hooks, the sub-agent hooks are observers dispatched from the
+  `subagent.started` / `subagent.completed` events; their return values are ignored.
+
 ## Recent Features (v2.4–v2.5)
 
 Keys added in the v2.4 and v2.5 upstream syncs. Session keys go in the
@@ -270,7 +405,7 @@ camelCase wire keys shown); transport/BYOK options live in `copilot_types`.
 - Session spending limits — `copilot_types:session_limits/1` (`maxAiCredits`)
 - Session memory — `copilot_types:memory_configuration/1`
 - OTLP protocol — `otlp_protocol` → `otlpProtocol`
-- WebSocket responses — `enable_web_socket_responses` → `enableWebSocketResponses`
+- WebSocket responses — `enable_web_socket_responses` → `capi.enableWebSocketResponses`
 - Experiment assignments — `exp_assignments` → `expAssignments`
 - Tool defer loading — `copilot_types:tool_defer/1` (`auto` | `never`)
 - System-message sections — `copilot_types:system_message_section/1` (`preamble` | `preserve`)
@@ -387,6 +522,7 @@ rebar3 ct
 | `list_sessions(Pid)` | List all sessions |
 | `delete_session(Pid, Id)` | Delete a session |
 | `get_session_metadata(Pid, Id)` | Get session metadata |
+| `clear_managed_settings_cache(Pid)` | Clear the managed-settings cache |
 | `state(Pid)` | Get connection state |
 
 ### copilot_session
@@ -396,10 +532,15 @@ rebar3 ct
 | `send(Pid, Options)` | Send a message |
 | `send_and_wait(Pid, Options)` | Send and wait for idle |
 | `send_and_wait(Pid, Options, Timeout)` | Send and wait with timeout |
+| `send_and_wait_structured(Pid, PromptOrOptions, Schema)` | Send with a JSON Schema and decode the JSON reply |
 | `subscribe(Pid, Subscriber)` | Subscribe to events (returns ref) |
 | `unsubscribe(Pid, Ref)` | Unsubscribe from events |
 | `get_messages(Pid)` | Get conversation history |
 | `abort(Pid)` | Abort current processing |
+| `set_auto_tier(Pid, Tier)` | Switch the Auto routing tier (`null` resets) |
+| `get_managed_settings(Pid)` | Get effective managed settings |
+| `recheck_policy_helper(Pid)` | Re-run the managed policy helper |
+| `disconnect(Pid)` | Detach from the server session and stop the process |
 | `session_id(Pid)` | Get session ID |
 
 ### copilot_tools

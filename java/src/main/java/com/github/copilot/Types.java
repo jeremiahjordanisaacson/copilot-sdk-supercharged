@@ -4,7 +4,9 @@
 package com.github.copilot;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -264,6 +266,10 @@ public final class Types {
         @JsonProperty("apiKey") public String apiKey;
         @JsonProperty("bearerToken") public String bearerToken;
         @JsonProperty("wireApi") public String wireApi;
+        /** Product serving the model, reported as {@code model_provider} (see {@link ModelProvider}). Omitted when null. */
+        @JsonProperty("modelProvider") @JsonInclude(JsonInclude.Include.NON_NULL) public String modelProvider;
+        /** Command run before each provider request; its stdout is used as the API key. Omitted when null. */
+        @JsonProperty("apiKeyCommand") @JsonInclude(JsonInclude.Include.NON_NULL) public String apiKeyCommand;
     }
 
     /** MCP server configuration. */
@@ -366,6 +372,7 @@ public final class Types {
         @JsonIgnoreProperties(ignoreUnknown = true)
         public static class ModelLimits {
             @JsonProperty("max_prompt_tokens") public Integer maxPromptTokens;
+            @JsonProperty("max_output_tokens") public Integer maxOutputTokens;
             @JsonProperty("max_context_window_tokens") public int maxContextWindowTokens;
         }
     }
@@ -566,5 +573,304 @@ public final class Types {
     @FunctionalInterface
     public interface McpAuthHandler {
         String handle(Map<String, Object> request, String sessionId) throws Exception;
+    }
+
+    // --- v2.6.0 upstream-sync feature types ---
+
+    /**
+     * Identity of the integrating application, declared once on the {@code connect} handshake so
+     * runtime telemetry is attributed to a consistent surface. All fields are optional; empty
+     * fields are dropped and an all-empty identity skips the handshake entirely.
+     */
+    public static class ClientInfo {
+        /** Name of the application using the SDK, e.g. {@code "acme-developer-portal"}. */
+        public String applicationName;
+        /** Version of the application using the SDK, e.g. {@code "2.4.0"}. */
+        public String applicationVersion;
+        /** Name of a specific integration within the application, such as an extension or plugin. */
+        public String integrationName;
+        /** Version of the integration identified by {@code integrationName}. */
+        public String integrationVersion;
+
+        public ClientInfo() {}
+
+        public ClientInfo(String applicationName, String applicationVersion) {
+            this.applicationName = applicationName;
+            this.applicationVersion = applicationVersion;
+        }
+
+        public ClientInfo applicationName(String name) { this.applicationName = name; return this; }
+        public ClientInfo applicationVersion(String version) { this.applicationVersion = version; return this; }
+        public ClientInfo integrationName(String name) { this.integrationName = name; return this; }
+        public ClientInfo integrationVersion(String version) { this.integrationVersion = version; return this; }
+
+        /**
+         * Maps this identity onto the {@code connect} wire shape, dropping empty fields.
+         *
+         * @return the wire map, or null when no field carries a non-empty value
+         */
+        public Map<String, Object> toWire() {
+            Map<String, Object> wire = new HashMap<>();
+            if (applicationName != null && !applicationName.isEmpty()) wire.put("editorName", applicationName);
+            if (applicationVersion != null && !applicationVersion.isEmpty()) wire.put("editorVersion", applicationVersion);
+            if (integrationName != null && !integrationName.isEmpty()) wire.put("extensionName", integrationName);
+            if (integrationVersion != null && !integrationVersion.isEmpty()) wire.put("extensionVersion", integrationVersion);
+            return wire.isEmpty() ? null : wire;
+        }
+    }
+
+    /** Auto-model routing preferences for {@code SessionConfig.autoTier} and {@code CopilotSession.setAutoTier} (experimental). */
+    public static final class AutoTier {
+        public static final String EFFICIENCY = "efficiency";
+        public static final String BALANCE = "balance";
+        public static final String INTELLIGENCE = "intelligence";
+        public static final String FAST = "fast";
+        private AutoTier() {}
+    }
+
+    /** Model-facing shapes of the built-in {@code ask_user} tool. */
+    public static final class AskUserVariant {
+        public static final String LEGACY = "legacy";
+        public static final String ELICITATION = "elicitation";
+        private AskUserVariant() {}
+    }
+
+    /** Working-directory trust scopes for {@code SessionConfig.trustWorkingDirectory}. */
+    public static final class WorkingDirectoryTrust {
+        /** Trust applies only to this session. */
+        public static final String SESSION = "session";
+        /** Trust is persisted for later sessions. */
+        public static final String USER = "user";
+        private WorkingDirectoryTrust() {}
+    }
+
+    /** Message provenance values for {@code MessageOptions.source}. */
+    public static final class MessageSource {
+        public static final String USER = "user";
+        public static final String SYSTEM = "system";
+        private MessageSource() {}
+
+        /**
+         * Builds the source value for a message originating from an identified agent.
+         *
+         * @param agentId the agent identifier
+         * @return {@code "agent-" + agentId}
+         */
+        public static String agent(String agentId) {
+            return "agent-" + agentId;
+        }
+    }
+
+    /** Products serving a BYOK model, for {@code ProviderConfig.modelProvider}. */
+    public static final class ModelProvider {
+        public static final String OPENAI = "openai";
+        public static final String ANTHROPIC = "anthropic";
+        public static final String AZURE_OPENAI = "azure_openai";
+        public static final String OLLAMA = "ollama";
+        public static final String LM_STUDIO = "lm_studio";
+        public static final String FOUNDRY_LOCAL = "foundry_local";
+        public static final String LLAMA_CPP = "llama_cpp";
+        private ModelProvider() {}
+    }
+
+    /** Sandbox configuration applied before MCP servers or session tools start (experimental). */
+    public static class SandboxConfig {
+        /** Whether sandboxing is enabled for the session. */
+        public boolean enabled;
+        /** User-managed sandbox policy fragment merged into the auto-discovered base policy. */
+        public Map<String, Object> userPolicy;
+        /** Whether to auto-add the current working directory to the read-write paths (runtime default: true). */
+        public Boolean addCurrentWorkingDirectory;
+        /** Whether MCP servers the session launches are confined by the sandbox (runtime default: true). */
+        public Boolean sandboxMcpServers;
+        /** Whether language servers the session launches are confined by the sandbox (runtime default: true). */
+        public Boolean sandboxLspServers;
+        /** Whether extension processes the session launches are confined by the sandbox (runtime default: true). */
+        public Boolean sandboxExtensions;
+        /**
+         * Opt-in: lets the agent request that an individual command run outside the sandbox,
+         * which the host approves or denies through the normal permission flow (default: false).
+         */
+        public Boolean allowBypass;
+
+        public SandboxConfig() {}
+        public SandboxConfig(boolean enabled) { this.enabled = enabled; }
+
+        public SandboxConfig userPolicy(Map<String, Object> policy) { this.userPolicy = policy; return this; }
+        public SandboxConfig addCurrentWorkingDirectory(boolean add) { this.addCurrentWorkingDirectory = add; return this; }
+        public SandboxConfig sandboxMcpServers(boolean sandbox) { this.sandboxMcpServers = sandbox; return this; }
+        public SandboxConfig sandboxLspServers(boolean sandbox) { this.sandboxLspServers = sandbox; return this; }
+        public SandboxConfig sandboxExtensions(boolean sandbox) { this.sandboxExtensions = sandbox; return this; }
+        public SandboxConfig allowBypass(boolean allow) { this.allowBypass = allow; return this; }
+
+        /**
+         * Converts this configuration to its wire shape, omitting unset optional fields.
+         *
+         * @return the wire map
+         */
+        public Map<String, Object> toMap() {
+            Map<String, Object> wire = new HashMap<>();
+            wire.put("enabled", enabled);
+            if (userPolicy != null) wire.put("userPolicy", userPolicy);
+            if (addCurrentWorkingDirectory != null) wire.put("addCurrentWorkingDirectory", addCurrentWorkingDirectory);
+            if (sandboxMcpServers != null) wire.put("sandboxMcpServers", sandboxMcpServers);
+            if (sandboxLspServers != null) wire.put("sandboxLspServers", sandboxLspServers);
+            if (sandboxExtensions != null) wire.put("sandboxExtensions", sandboxExtensions);
+            if (allowBypass != null) wire.put("allowBypass", allowBypass);
+            return wire;
+        }
+    }
+
+    /** Non-persisted session-level opt-in to image generation (experimental). */
+    public static class ImageGenerationConfig {
+        /** Opt in to image generation through an authorized Copilot image model. */
+        public Boolean enabled;
+        /** Request a visible "Made with AI" label on generated and edited images. */
+        public Boolean watermark;
+        /** Save generated images under the session-state {@code images} folder (runtime default: true). */
+        public Boolean saveToDisk;
+
+        public ImageGenerationConfig() {}
+        public ImageGenerationConfig(Boolean enabled) { this.enabled = enabled; }
+
+        public ImageGenerationConfig enabled(boolean enabled) { this.enabled = enabled; return this; }
+        public ImageGenerationConfig watermark(boolean watermark) { this.watermark = watermark; return this; }
+        public ImageGenerationConfig saveToDisk(boolean saveToDisk) { this.saveToDisk = saveToDisk; return this; }
+
+        /**
+         * Converts this configuration to its wire shape, omitting unset fields.
+         *
+         * @return the wire map
+         */
+        public Map<String, Object> toMap() {
+            Map<String, Object> wire = new HashMap<>();
+            if (enabled != null) wire.put("enabled", enabled);
+            if (watermark != null) wire.put("watermark", watermark);
+            if (saveToDisk != null) wire.put("saveToDisk", saveToDisk);
+            return wire;
+        }
+    }
+
+    /** Autopilot continuation policy (experimental). */
+    public static class AutopilotOptions {
+        /** Enable runtime-owned automatic continuation while in Autopilot mode (runtime default: true). */
+        public Boolean continuationEnabled;
+        /** Maximum automatic continuations outside an active objective (runtime default: 5; 0 allows none). */
+        public Integer maxContinues;
+
+        public AutopilotOptions() {}
+        public AutopilotOptions(Boolean continuationEnabled, Integer maxContinues) {
+            this.continuationEnabled = continuationEnabled;
+            this.maxContinues = maxContinues;
+        }
+
+        public AutopilotOptions continuationEnabled(boolean enabled) { this.continuationEnabled = enabled; return this; }
+        public AutopilotOptions maxContinues(int max) { this.maxContinues = max; return this; }
+
+        /**
+         * Converts these options to their wire shape, omitting unset fields.
+         *
+         * @return the wire map
+         */
+        public Map<String, Object> toMap() {
+            Map<String, Object> wire = new HashMap<>();
+            if (continuationEnabled != null) wire.put("continuationEnabled", continuationEnabled);
+            if (maxContinues != null) wire.put("maxContinues", maxContinues);
+            return wire;
+        }
+    }
+
+    /** Arguments passed to a {@link GitHubTokenProvider}. */
+    public static class GitHubTokenProviderArgs {
+        /** Effective GitHub host for which a token is required. */
+        public String host;
+        /** Session receiving the token, or null before a session id is assigned. */
+        public String sessionId;
+        /** Why a token is requested: {@code "initial"} or {@code "refresh"}. */
+        public String reason;
+
+        public GitHubTokenProviderArgs() {}
+
+        public GitHubTokenProviderArgs(String host, String sessionId, String reason) {
+            this.host = host;
+            this.sessionId = sessionId;
+            this.reason = reason;
+        }
+    }
+
+    /** Tagged token or cancellation returned by a {@link GitHubTokenProvider}. */
+    public static class GitHubTokenProviderResult {
+        /** {@code "token"} or {@code "cancelled"}. */
+        public String kind;
+        /** GitHub access token (token results only). */
+        public String accessToken;
+        /** OAuth token type; defaults to bearer when omitted. */
+        public String tokenType;
+        /** Remaining token lifetime in seconds (token results only). */
+        public Long expiresIn;
+
+        public GitHubTokenProviderResult() {}
+
+        /**
+         * Creates a token result.
+         *
+         * @param accessToken the GitHub access token
+         * @param expiresIn remaining lifetime in seconds
+         * @return the token result
+         */
+        public static GitHubTokenProviderResult token(String accessToken, long expiresIn) {
+            return token(accessToken, null, expiresIn);
+        }
+
+        /**
+         * Creates a token result with an explicit token type.
+         *
+         * @param accessToken the GitHub access token
+         * @param tokenType the OAuth token type, or null for bearer
+         * @param expiresIn remaining lifetime in seconds
+         * @return the token result
+         */
+        public static GitHubTokenProviderResult token(String accessToken, String tokenType, long expiresIn) {
+            GitHubTokenProviderResult result = new GitHubTokenProviderResult();
+            result.kind = "token";
+            result.accessToken = accessToken;
+            result.tokenType = tokenType;
+            result.expiresIn = expiresIn;
+            return result;
+        }
+
+        /**
+         * Creates a cancellation result.
+         *
+         * @return the cancellation result
+         */
+        public static GitHubTokenProviderResult cancelled() {
+            GitHubTokenProviderResult result = new GitHubTokenProviderResult();
+            result.kind = "cancelled";
+            return result;
+        }
+
+        /**
+         * Converts this result to its wire shape, omitting unset fields.
+         *
+         * @return the wire map
+         */
+        public Map<String, Object> toMap() {
+            Map<String, Object> wire = new HashMap<>();
+            wire.put("kind", kind);
+            if (accessToken != null) wire.put("accessToken", accessToken);
+            if (tokenType != null) wire.put("tokenType", tokenType);
+            if (expiresIn != null) wire.put("expiresIn", expiresIn);
+            return wire;
+        }
+    }
+
+    /**
+     * Acquires short-lived GitHub credentials for one session on demand.
+     * Mutually exclusive with {@code SessionConfig.gitHubToken}.
+     */
+    @FunctionalInterface
+    public interface GitHubTokenProvider {
+        GitHubTokenProviderResult getToken(GitHubTokenProviderArgs args) throws Exception;
     }
 }

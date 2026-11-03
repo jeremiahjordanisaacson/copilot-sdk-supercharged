@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 // ============================================================================
@@ -421,6 +423,82 @@ pub struct ErrorOccurredHookOutput {
     pub user_notification: Option<String>,
 }
 
+/// Input for the sub-agent start hook (`subagentStart`), fired before a sub-agent's first turn.
+///
+/// The session metadata belongs to the parent session, not the child.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentStartHookInput {
+    pub timestamp: f64,
+    pub cwd: String,
+    pub transcript_path: String,
+    pub agent_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_description: Option<String>,
+}
+
+/// Output for the sub-agent start hook. `additional_context` is prepended to the child's prompt.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentStartHookOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_context: Option<String>,
+}
+
+/// Input for the sub-agent stop hook (`subagentStop`), fired after a sub-agent completes a turn.
+///
+/// `response` is the child's last assistant message before any hook rewrite.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentStopHookInput {
+    pub timestamp: f64,
+    pub cwd: String,
+    pub transcript_path: String,
+    pub agent_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    pub agent_type: String,
+    /// Why the sub-agent stopped (currently always `"end_turn"`).
+    pub stop_reason: String,
+    pub response: String,
+}
+
+/// Output for the sub-agent stop hook.
+///
+/// `decision: "block"` with a non-empty `reason` continues the child; otherwise
+/// `modified_response` replaces the response reported to the parent.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentStopHookOutput {
+    /// `"block"` or `"allow"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_response: Option<String>,
+}
+
+/// Hook type identifiers delivered to the hooks handler by `hooks.invoke`.
+pub mod hook_types {
+    pub const PRE_TOOL_USE: &str = "preToolUse";
+    pub const POST_TOOL_USE: &str = "postToolUse";
+    pub const PRE_MCP_TOOL_CALL: &str = "preMcpToolCall";
+    pub const USER_PROMPT_SUBMITTED: &str = "userPromptSubmitted";
+    pub const USER_PROMPT_TRANSFORMED: &str = "userPromptTransformed";
+    pub const SESSION_START: &str = "sessionStart";
+    pub const SESSION_END: &str = "sessionEnd";
+    pub const ERROR_OCCURRED: &str = "errorOccurred";
+    pub const SUBAGENT_START: &str = "subagentStart";
+    pub const SUBAGENT_STOP: &str = "subagentStop";
+}
+
 // ============================================================================
 // MCP Server Configuration Types
 // ============================================================================
@@ -522,7 +600,7 @@ pub struct AzureProviderOptions {
 }
 
 /// Configuration for a custom API provider (BYOK).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -537,6 +615,13 @@ pub struct ProviderConfig {
     pub bearer_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub azure: Option<AzureProviderOptions>,
+    /// Model provider identity (`modelProvider`): `"openai"`, `"anthropic"`, `"azure_openai"`,
+    /// `"ollama"`, `"lm_studio"`, `"foundry_local"`, or `"llama_cpp"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<String>,
+    /// Command whose stdout is used as the API key (`apiKeyCommand`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_command: Option<String>,
 }
 
 // ============================================================================
@@ -551,6 +636,89 @@ pub enum ReasoningEffort {
     Medium,
     High,
     Xhigh,
+}
+
+// ============================================================================
+// v2.6.0 Session Option Types
+// ============================================================================
+
+/// Routing preference used when the session model is `auto` (`capi.autoTier`).
+///
+/// Experimental: part of the Auto routing surface and may change in a future release.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoTier {
+    Efficiency,
+    Balance,
+    Intelligence,
+    Fast,
+}
+
+/// Which ask-user surface the runtime uses (`askUserVariant`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AskUserVariant {
+    Legacy,
+    Elicitation,
+}
+
+/// How long the working directory is trusted (`trustWorkingDirectory`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TrustWorkingDirectory {
+    Session,
+    User,
+}
+
+/// Sandbox configuration for the session (`sandboxConfig`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxConfig {
+    /// Whether sandboxing is enabled for the session.
+    pub enabled: bool,
+    /// User-managed sandbox policy fragment merged into the auto-discovered base policy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_policy: Option<serde_json::Value>,
+    /// Auto-add the current working directory to the read/write paths (runtime default: true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub add_current_working_directory: Option<bool>,
+    /// Confine MCP servers launched by the session (runtime default: true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_mcp_servers: Option<bool>,
+    /// Confine language servers launched by the session (runtime default: true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_lsp_servers: Option<bool>,
+    /// Confine extension processes launched by the session (runtime default: true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_extensions: Option<bool>,
+    /// Opt in to letting the agent request that an individual command run outside the
+    /// sandbox; the request goes through the normal permission flow (default: false).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_bypass: Option<bool>,
+}
+
+/// Image generation opt-in (`imageGeneration`). Not persisted across runtime restarts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageGenerationConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Request a visible "Made with AI" label on generated images.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watermark: Option<bool>,
+    /// Save generated images under the session-state `images` folder (runtime default: true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub save_to_disk: Option<bool>,
+}
+
+/// Autopilot continuation options (`autopilot`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutopilotOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continuation_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_continues: Option<u32>,
 }
 
 // ============================================================================
@@ -639,7 +807,9 @@ pub struct SessionConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub otlp_protocol: Option<String>,
     /// Enable the WebSocket transport for streamed responses.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// Sent inside the `capi` wire object (`capi.enableWebSocketResponses`).
+    #[serde(skip_serializing)]
     pub enable_web_socket_responses: Option<bool>,
     /// Experiment (feature-flag) assignment overrides.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -676,6 +846,62 @@ pub struct SessionConfig {
     /// Respect repository content-exclusion rules (`contentExclusion`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_exclusion: Option<bool>,
+
+    // --- v2.6.0 session options (parity with @github/copilot-sdk) ---
+    /// Auto-model routing preference, sent as `capi.autoTier` (experimental).
+    #[serde(skip_serializing)]
+    pub auto_tier: Option<AutoTier>,
+    /// Ask-user surface: legacy tool or elicitation (`askUserVariant`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ask_user_variant: Option<AskUserVariant>,
+    /// Sandbox configuration (`sandboxConfig`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_config: Option<SandboxConfig>,
+    /// Runtime feature-flag overrides (`featureFlags`); sent whenever set, even if empty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature_flags: Option<HashMap<String, bool>>,
+    /// Restrict the models this session may use (`allowedModels`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_models: Option<Vec<String>>,
+    /// OAuth client-ID metadata document URL for MCP auth (`authClientIdMetadataUrl`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_client_id_metadata_url: Option<String>,
+    /// Human-readable session name (`name`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Directories to load custom agents from (`agentDirectories`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_directories: Option<Vec<String>>,
+    /// Directories to load file-based hooks from (`hookDirectories`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_directories: Option<Vec<String>>,
+    /// Whether a human is interactively driving the session (`interactiveUser`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interactive_user: Option<bool>,
+    /// Managed settings to ignore for this session (`excludedManagedSettings`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excluded_managed_settings: Option<Vec<String>>,
+    /// Enforce managed model defaults (`enforceManagedModelDefaults`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enforce_managed_model_defaults: Option<bool>,
+    /// Trust the working directory for this session or for the user (`trustWorkingDirectory`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust_working_directory: Option<TrustWorkingDirectory>,
+    /// Reload custom instructions when the session starts (`refreshCustomInstructions`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_custom_instructions: Option<bool>,
+    /// Image generation opt-in (`imageGeneration`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_generation: Option<ImageGenerationConfig>,
+    /// Autopilot continuation options (`autopilot`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autopilot: Option<AutopilotOptions>,
+    /// Per-session GitHub token provider (not serialized; mutually exclusive with `github_token`).
+    ///
+    /// The SDK registers it and sends `gitHubTokenProviderRegistrationId`; the runtime then
+    /// calls back through `gitHubToken.getToken`.
+    #[serde(skip)]
+    pub github_token_provider: Option<GitHubTokenProviderFn>,
 
     /// Slash commands registered for this session (not serialized).
     #[serde(skip)]
@@ -828,6 +1054,56 @@ pub struct ResumeSessionConfig {
     pub request_user_input: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hooks: Option<bool>,
+
+    // --- v2.6.0 session options (parity with @github/copilot-sdk) ---
+    /// Enable the WebSocket transport for streamed responses (`capi.enableWebSocketResponses`).
+    #[serde(skip_serializing)]
+    pub enable_web_socket_responses: Option<bool>,
+    /// Auto-model routing preference, sent as `capi.autoTier` (experimental).
+    #[serde(skip_serializing)]
+    pub auto_tier: Option<AutoTier>,
+    /// Ask-user surface: legacy tool or elicitation (`askUserVariant`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ask_user_variant: Option<AskUserVariant>,
+    /// Sandbox configuration (`sandboxConfig`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_config: Option<SandboxConfig>,
+    /// Runtime feature-flag overrides (`featureFlags`); sent whenever set, even if empty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature_flags: Option<HashMap<String, bool>>,
+    /// Restrict the models this session may use (`allowedModels`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_models: Option<Vec<String>>,
+    /// OAuth client-ID metadata document URL for MCP auth (`authClientIdMetadataUrl`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_client_id_metadata_url: Option<String>,
+    /// Directories to load custom agents from (`agentDirectories`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_directories: Option<Vec<String>>,
+    /// Directories to load file-based hooks from (`hookDirectories`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_directories: Option<Vec<String>>,
+    /// Whether a human is interactively driving the session (`interactiveUser`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interactive_user: Option<bool>,
+    /// Managed settings to ignore for this session (`excludedManagedSettings`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excluded_managed_settings: Option<Vec<String>>,
+    /// Enforce managed model defaults (`enforceManagedModelDefaults`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enforce_managed_model_defaults: Option<bool>,
+    /// Allow recovering the conversation from the transcript on resume (`allowTranscriptRecovery`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_transcript_recovery: Option<bool>,
+    /// Image generation opt-in (`imageGeneration`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_generation: Option<ImageGenerationConfig>,
+    /// Autopilot continuation options (`autopilot`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autopilot: Option<AutopilotOptions>,
+    /// Per-session GitHub token provider (not serialized; mutually exclusive with `github_token`).
+    #[serde(skip)]
+    pub github_token_provider: Option<GitHubTokenProviderFn>,
 }
 
 // ============================================================================
@@ -956,6 +1232,83 @@ pub struct MessageOptions {
     /// Custom HTTP headers to include in outbound model requests for this turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_headers: Option<HashMap<String, String>>,
+    /// Origin of this message (`source`): user, system, or another agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<MessageSource>,
+    /// JSON Schema for structured output. When set, `session.send` carries
+    /// `responseFormat: { type: "json_schema", jsonSchema: { name, strict, schema } }`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_schema: Option<serde_json::Value>,
+}
+
+impl From<&str> for MessageOptions {
+    fn from(prompt: &str) -> Self {
+        MessageOptions {
+            prompt: prompt.to_string(),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<String> for MessageOptions {
+    fn from(prompt: String) -> Self {
+        MessageOptions {
+            prompt,
+            ..Default::default()
+        }
+    }
+}
+
+/// Origin of a message sent with `session.send` (wire field `source`).
+///
+/// Serialized as `"user"`, `"system"`, or `"agent-<id>"`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum MessageSource {
+    /// A message from the user (`"user"`).
+    User,
+    /// A system-generated message (`"system"`).
+    System,
+    /// A message produced by another agent (`"agent-<id>"`).
+    Agent(String),
+}
+
+impl MessageSource {
+    /// Builds an agent source (`"agent-<id>"`).
+    pub fn agent(agent_id: impl Into<String>) -> Self {
+        MessageSource::Agent(agent_id.into())
+    }
+}
+
+impl std::fmt::Display for MessageSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageSource::User => f.write_str("user"),
+            MessageSource::System => f.write_str("system"),
+            MessageSource::Agent(id) => write!(f, "agent-{}", id),
+        }
+    }
+}
+
+impl Serialize for MessageSource {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for MessageSource {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "user" => Ok(MessageSource::User),
+            "system" => Ok(MessageSource::System),
+            other => other
+                .strip_prefix("agent-")
+                .map(|id| MessageSource::Agent(id.to_string()))
+                .ok_or_else(|| {
+                    serde::de::Error::custom(format!("invalid message source: {}", other))
+                }),
+        }
+    }
 }
 
 // ============================================================================
@@ -1088,6 +1441,9 @@ pub struct VisionLimits {
 pub struct ModelLimits {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_prompt_tokens: Option<u64>,
+    /// Maximum output tokens (wire key `max_output_tokens`, as in model capability overrides).
+    #[serde(rename = "max_output_tokens", skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
     pub max_context_window_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vision: Option<VisionLimits>,
@@ -1365,6 +1721,115 @@ impl std::fmt::Debug for McpAuthHandlerFn {
     }
 }
 
+/// Identity of the integrating application, declared once on the `connect` handshake
+/// (`clientInfo`) so runtime telemetry is attributed to a consistent surface.
+///
+/// Empty fields are dropped; when every field is empty, `connect` is not sent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CopilotClientInfo {
+    /// Name of the application using the SDK (wire: `editorName`).
+    pub application_name: Option<String>,
+    /// Version of the application using the SDK (wire: `editorVersion`).
+    pub application_version: Option<String>,
+    /// Name of an integration within the application, e.g. a plugin (wire: `extensionName`).
+    pub integration_name: Option<String>,
+    /// Version of the integration (wire: `extensionVersion`).
+    pub integration_version: Option<String>,
+}
+
+impl CopilotClientInfo {
+    /// Returns the `connect` wire shape, or `None` when no field carries a non-empty value.
+    pub fn to_wire(&self) -> Option<serde_json::Value> {
+        let fields = [
+            ("editorName", &self.application_name),
+            ("editorVersion", &self.application_version),
+            ("extensionName", &self.integration_name),
+            ("extensionVersion", &self.integration_version),
+        ];
+        let mut wire = serde_json::Map::new();
+        for (key, value) in fields {
+            if let Some(value) = value.as_deref().filter(|v| !v.is_empty()) {
+                wire.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+            }
+        }
+        if wire.is_empty() {
+            None
+        } else {
+            Some(serde_json::Value::Object(wire))
+        }
+    }
+}
+
+/// Arguments passed to a session's GitHub token provider (`gitHubToken.getToken`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubTokenProviderArgs {
+    /// Effective GitHub host the token is for (e.g. `github.com`).
+    pub host: String,
+    /// Session receiving the token; `None` only before the session ID is known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Why the runtime wants a token: `"initial"` or `"refresh"`.
+    pub reason: String,
+}
+
+/// Result returned by a GitHub token provider.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind")]
+pub enum GitHubTokenProviderResult {
+    /// A token plus its remaining lifetime in seconds (`{ kind: "token", ... }`).
+    #[serde(rename = "token", rename_all = "camelCase")]
+    Token {
+        access_token: String,
+        /// OAuth token type; the runtime assumes bearer when omitted.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        token_type: Option<String>,
+        expires_in: u64,
+    },
+    /// The host declined to supply a token (`{ kind: "cancelled" }`).
+    #[serde(rename = "cancelled")]
+    Cancelled,
+}
+
+/// Future returned by a [`GitHubTokenProviderFn`].
+pub type GitHubTokenProviderFuture = Pin<
+    Box<
+        dyn Future<
+                Output = Result<GitHubTokenProviderResult, Box<dyn std::error::Error + Send + Sync>>,
+            > + Send,
+    >,
+>;
+
+/// Clonable, debuggable async GitHub token provider for one session (`gitHubTokenProvider`).
+#[derive(Clone)]
+pub struct GitHubTokenProviderFn(
+    pub Arc<dyn Fn(GitHubTokenProviderArgs) -> GitHubTokenProviderFuture + Send + Sync>,
+);
+
+impl GitHubTokenProviderFn {
+    /// Wraps an async closure as a GitHub token provider.
+    pub fn new<F, Fut>(provider: F) -> Self
+    where
+        F: Fn(GitHubTokenProviderArgs) -> Fut + Send + Sync + 'static,
+        Fut: Future<
+                Output = Result<GitHubTokenProviderResult, Box<dyn std::error::Error + Send + Sync>>,
+            > + Send
+            + 'static,
+    {
+        Self(Arc::new(
+            move |args: GitHubTokenProviderArgs| -> GitHubTokenProviderFuture {
+                Box::pin(provider(args))
+            },
+        ))
+    }
+}
+
+impl std::fmt::Debug for GitHubTokenProviderFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<github_token_provider>")
+    }
+}
+
 // ============================================================================
 // Client Options
 // ============================================================================
@@ -1412,6 +1877,8 @@ pub struct CopilotClientOptions {
     pub builtin_plugin_directories: Option<Vec<String>>,
     /// Use the in-process (FFI) transport instead of a subprocess (`inProcess`).
     pub in_process: Option<bool>,
+    /// Application identity declared on the `connect` handshake (`clientInfo`).
+    pub client_info: Option<CopilotClientInfo>,
 }
 
 impl Default for CopilotClientOptions {
@@ -1437,6 +1904,7 @@ impl Default for CopilotClientOptions {
             bearer_token_provider: None,
             builtin_plugin_directories: None,
             in_process: None,
+            client_info: None,
         }
     }
 }

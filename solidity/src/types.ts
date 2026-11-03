@@ -9,6 +9,21 @@ import type {
     CopilotClientOptions,
     SessionConfig,
     Tool,
+    AskUserVariant,
+    AutoTier,
+    CopilotClientInfo,
+    GitHubTokenProvider,
+    GitHubTokenProviderArgs,
+    GitHubTokenProviderResult,
+    ModelSwitchAutoTierResult,
+    ProviderConfigModelProvider,
+    SubagentStartHandler,
+    SubagentStartHookInput,
+    SubagentStartHookOutput,
+    SubagentStopHandler,
+    SubagentStopHookInput,
+    SubagentStopHookOutput,
+    WorkingDirectoryTrust,
     CanvasAction,
     CanvasActionContext,
     CanvasDeclaration,
@@ -36,6 +51,21 @@ import type {
 } from "copilot-sdk-supercharged";
 
 export type {
+    AskUserVariant,
+    AutoTier,
+    CopilotClientInfo,
+    GitHubTokenProvider,
+    GitHubTokenProviderArgs,
+    GitHubTokenProviderResult,
+    ModelSwitchAutoTierResult,
+    ProviderConfigModelProvider,
+    SubagentStartHandler,
+    SubagentStartHookInput,
+    SubagentStartHookOutput,
+    SubagentStopHandler,
+    SubagentStopHookInput,
+    SubagentStopHookOutput,
+    WorkingDirectoryTrust,
     CanvasAction,
     CanvasActionContext,
     CanvasDeclaration,
@@ -182,6 +212,13 @@ export interface CopilotSolidityClientOptions extends CopilotClientOptions {
     remote?: boolean;
     /** W3C Trace Context provider for distributed tracing. */
     onGetTraceContext?: TraceContextProvider;
+    /**
+     * Identity of the integrating application. When any field is non-empty the
+     * base client sends it on the `connect` handshake (as editorName /
+     * editorVersion / extensionName / extensionVersion) before `ping`; older
+     * runtimes without `connect` are tolerated.
+     */
+    clientInfo?: CopilotClientInfo;
 }
 
 /** Configuration for a Solidity-focused session. */
@@ -196,8 +233,8 @@ export interface SoliditySessionConfig extends SessionConfig {
     enableSessionTelemetry?: boolean;
     /** Handler for exit-plan-mode requests. */
     onExitPlanMode?: ExitPlanModeHandler;
-    /** Model capabilities override. */
-    modelCapabilities?: ModelCapabilitiesOverride;
+    /** Model capabilities override (`limits` accepts {@link ModelLimitsOverride}). */
+    modelCapabilities?: ModelCapabilitiesOverride & { limits?: ModelLimitsOverride };
 }
 
 // ---------------------------------------------------------------------------
@@ -523,6 +560,17 @@ export interface SolidityHooks {
     onPostToolUse?: PostToolUseHandler;
     /** Invoked before an MCP tool call is dispatched. */
     onPreMcpToolCall?: PreMcpToolCallHandler;
+    /**
+     * Invoked before a sub-agent's first turn (hook type `subagentStart`).
+     * Return `{ additionalContext }` to prepend context to the child's prompt.
+     */
+    onSubagentStart?: SubagentStartHandler;
+    /**
+     * Invoked after a sub-agent completes a turn (hook type `subagentStop`).
+     * Return `{ decision: "block", reason }` to continue the child, or
+     * `{ modifiedResponse }` to rewrite what the parent sees.
+     */
+    onSubagentStop?: SubagentStopHandler;
 }
 
 /**
@@ -551,8 +599,15 @@ export interface SolidityMessageOptions {
     displayPrompt?: string;
     /** Extra HTTP headers for this message's model requests. */
     requestHeaders?: Record<string, string>;
-    /** Desired response format. */
+    /** Desired response format (legacy; ignored when {@link responseSchema} is set). */
     responseFormat?: "text" | "image" | "json_object";
+    /** Message provenance: `"user"`, `"system"`, or `"agent-<id>"` (see {@link MessageSource}). */
+    source?: MessageSource;
+    /**
+     * JSON Schema for a structured response. Sent as
+     * `responseFormat: { type: "json_schema", jsonSchema: { name: "response", strict: true, schema } }`.
+     */
+    responseSchema?: Record<string, unknown>;
 }
 
 /** Upstream-sync session options forwarded to the base SDK on session creation. */
@@ -607,6 +662,53 @@ export interface SolidityUpstreamSessionOptions {
     experimentalMode?: boolean;
     /** Enable content exclusion policy enforcement. */
     contentExclusion?: boolean;
+
+    // --- v2.6.0 upstream-sync options ---
+
+    /**
+     * Auto model routing preference, sent as `capi.autoTier` (experimental).
+     * Change it on a live session with `CopilotSolidityClient.setAutoTier`.
+     */
+    autoTier?: AutoTier;
+    /** Ask-user tool variant (`"legacy"` or `"elicitation"`). */
+    askUserVariant?: AskUserVariant;
+    /**
+     * Per-session GitHub token callback answering `gitHubToken.getToken`
+     * requests. Mutually exclusive with `gitHubToken`.
+     */
+    gitHubTokenProvider?: GitHubTokenProvider;
+    /** Per-session GitHub token (mutually exclusive with {@link gitHubTokenProvider}). */
+    gitHubToken?: string;
+    /** Sandbox configuration for tool execution. */
+    sandboxConfig?: SandboxConfig;
+    /** Runtime feature flags; sent whenever provided, even when empty. */
+    featureFlags?: Record<string, boolean>;
+    /** Model allowlist for the session. */
+    allowedModels?: string[];
+    /** OAuth client ID metadata document URL. */
+    authClientIdMetadataUrl?: string;
+    /** Session name (create only). */
+    name?: string;
+    /** Custom agent definition directories. */
+    agentDirectories?: string[];
+    /** Hook definition directories. */
+    hookDirectories?: string[];
+    /** Whether a human user is interacting with the session. */
+    interactiveUser?: boolean;
+    /** Managed-settings keys to exclude for this session. */
+    excludedManagedSettings?: string[];
+    /** Enforce managed model defaults. */
+    enforceManagedModelDefaults?: boolean;
+    /** Grant working-directory trust at creation: `"session"` or `"user"` (create only). */
+    trustWorkingDirectory?: WorkingDirectoryTrust;
+    /** Invalidate the custom-instruction discovery cache first (create only). */
+    refreshCustomInstructions?: boolean;
+    /** Allow the runtime to recover a damaged transcript (resume only). */
+    allowTranscriptRecovery?: boolean;
+    /** Session-level image generation configuration. */
+    imageGeneration?: ImageGenerationOptions;
+    /** Autopilot continuation options. */
+    autopilot?: AutopilotOptions;
 }
 
 /** Tool "defer" loading policy: eager pre-load ("never") or lazy via search ("auto"). */
@@ -644,3 +746,75 @@ export const GitHubAttachment = {
 } as const;
 export type GitHubAttachmentType =
     (typeof GitHubAttachment)[keyof typeof GitHubAttachment];
+
+// ---------------------------------------------------------------------------
+// v2.6.0 upstream-sync types & constants (parity with @github/copilot-sdk)
+// ---------------------------------------------------------------------------
+
+/** Message provenance for {@link SolidityMessageOptions.source}. */
+export type MessageSource = "user" | "system" | `agent-${string}`;
+
+/** Well-known {@link MessageSource} values and an agent-source builder. */
+export const MessageSource = {
+    user: "user",
+    system: "system",
+    /** Build the `"agent-<id>"` source for messages from an identified agent. */
+    agent: (agentId: string): MessageSource => `agent-${agentId}`,
+} as const;
+
+/** Sandbox configuration (`sandboxConfig`) for tool execution. */
+export interface SandboxConfig {
+    /** Whether the sandbox is enabled. */
+    enabled: boolean;
+    /** User sandbox policy (filesystem / network rules), passed through as-is. */
+    userPolicy?: Record<string, unknown>;
+    /** Grant the current working directory to the sandbox. */
+    addCurrentWorkingDirectory?: boolean;
+    /** Run MCP servers inside the sandbox. */
+    sandboxMcpServers?: boolean;
+    /** Run LSP servers inside the sandbox. */
+    sandboxLspServers?: boolean;
+    /** Run extensions inside the sandbox. */
+    sandboxExtensions?: boolean;
+    /**
+     * Opt in to letting the agent request an individual command outside the
+     * sandbox through the normal permission flow.
+     */
+    allowBypass?: boolean;
+}
+
+/** Session-level image generation configuration (`imageGeneration`). */
+export interface ImageGenerationOptions {
+    /** Opt in to image generation. */
+    enabled?: boolean;
+    /** Request a visible "Made with AI" label on generated images. */
+    watermark?: boolean;
+    /** Save generated images under the session-state `images` folder. */
+    saveToDisk?: boolean;
+}
+
+/** Autopilot continuation options (`autopilot`). */
+export interface AutopilotOptions {
+    /** Whether autopilot may continue automatically after a turn ends. */
+    continuationEnabled?: boolean;
+    /** Maximum number of automatic continuations. */
+    maxContinues?: number;
+}
+
+/**
+ * Model capability limits override (`modelCapabilities.limits`). Wire keys
+ * are snake_case; `max_output_tokens` caps the tokens generated per response.
+ */
+export interface ModelLimitsOverride {
+    max_prompt_tokens?: number;
+    max_context_window_tokens?: number;
+    max_output_tokens?: number;
+}
+
+/** BYOK provider fields passed through on the session `provider` config. */
+export interface ByokProviderOptions {
+    /** Product serving the model (`"openai"`, `"ollama"`, `"lm_studio"`, ...). */
+    modelProvider?: ProviderConfigModelProvider;
+    /** Command whose stdout is used as the API key for each provider request. */
+    apiKeyCommand?: string;
+}

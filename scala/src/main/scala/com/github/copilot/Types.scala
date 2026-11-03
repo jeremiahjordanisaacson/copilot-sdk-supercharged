@@ -192,11 +192,20 @@ case class ProviderConfig(
   wireApi: Option[String] = None,
   apiKey: Option[String] = None,
   bearerToken: Option[String] = None,
-  azure: Option[AzureProviderOptions] = None
+  azure: Option[AzureProviderOptions] = None,
+
+  /** Product serving the model, reported as `model_provider` (see [[ModelProvider]]). */
+  modelProvider: Option[String] = None,
+
+  /** Command run before each provider request; its stdout is used as the API key. */
+  apiKeyCommand: Option[String] = None
 )
 
 object ProviderConfig:
-  given Encoder[ProviderConfig] = deriveEncoder
+  // The optional v2.6.0 fields are omitted when unset so existing provider payloads are unchanged.
+  given Encoder[ProviderConfig] = deriveEncoder[ProviderConfig].mapJsonObject(
+    _.filter { case (key, value) => !(value.isNull && (key == "modelProvider" || key == "apiKeyCommand")) }
+  )
   given Decoder[ProviderConfig] = deriveDecoder
 
 // ============================================================================
@@ -487,6 +496,57 @@ case class SessionConfig(
 
   /** Respect repository content-exclusion rules. */
   contentExclusion: Option[Boolean] = None,
+
+  /** Auto-model routing preference (see [[AutoTier]]); sent under `capi`. Experimental. */
+  autoTier: Option[String] = None,
+
+  /** Model-facing shape of the built-in ask_user tool (see [[AskUserVariant]]). */
+  askUserVariant: Option[String] = None,
+
+  /** Acquires short-lived GitHub tokens on demand. Mutually exclusive with `gitHubToken`. */
+  gitHubTokenProvider: Option[GitHubTokenProvider] = None,
+
+  /** Sandbox configuration applied before MCP servers or session tools start. */
+  sandboxConfig: Option[SandboxConfig] = None,
+
+  /** Host-resolved feature-flag values; sent whenever provided, even if empty. */
+  featureFlags: Option[Map[String, Boolean]] = None,
+
+  /** Exact model IDs allowed by the host. */
+  allowedModels: Option[List[String]] = None,
+
+  /** OAuth Client ID Metadata Document URL identifying the host for MCP authorization. */
+  authClientIdMetadataUrl: Option[String] = None,
+
+  /** Session name applied at creation. */
+  name: Option[String] = None,
+
+  /** Explicit discovery-only custom-agent roots. */
+  agentDirectories: Option[List[String]] = None,
+
+  /** Explicit discovery-only file-hook roots. */
+  hookDirectories: Option[List[String]] = None,
+
+  /** Declares that a human drives this session's conversation. */
+  interactiveUser: Option[Boolean] = None,
+
+  /** Managed-setting paths this host handles externally or does not support. */
+  excludedManagedSettings: Option[List[String]] = None,
+
+  /** Enforce locked managed model controls for this session. */
+  enforceManagedModelDefaults: Option[Boolean] = None,
+
+  /** Grants trust to the working directory at creation (see [[WorkingDirectoryTrust]]). */
+  trustWorkingDirectory: Option[String] = None,
+
+  /** Invalidate the custom-instruction discovery cache before creating the session. */
+  refreshCustomInstructions: Option[Boolean] = None,
+
+  /** Session-level image generation opt-in. */
+  imageGeneration: Option[ImageGenerationConfig] = None,
+
+  /** Autopilot continuation policy. */
+  autopilot: Option[AutopilotOptions] = None,
 )
 
 /** Configuration for resuming an existing session. */
@@ -535,6 +595,54 @@ case class ResumeSessionConfig(
   disableResume: Option[Boolean] = None,
   /** Custom instruction directory paths. */
   instructionDirectories: Option[Seq[String]] = None,
+
+  /** Stream model responses over WebSocket transport; sent under `capi`. */
+  enableWebSocketResponses: Option[Boolean] = None,
+
+  /** Auto-model routing preference (see [[AutoTier]]); sent under `capi`. Experimental. */
+  autoTier: Option[String] = None,
+
+  /** Model-facing shape of the built-in ask_user tool (see [[AskUserVariant]]). */
+  askUserVariant: Option[String] = None,
+
+  /** Acquires short-lived GitHub tokens on demand. Mutually exclusive with `gitHubToken`. */
+  gitHubTokenProvider: Option[GitHubTokenProvider] = None,
+
+  /** Sandbox configuration applied before MCP servers or session tools start. */
+  sandboxConfig: Option[SandboxConfig] = None,
+
+  /** Host-resolved feature-flag values; sent whenever provided, even if empty. */
+  featureFlags: Option[Map[String, Boolean]] = None,
+
+  /** Exact model IDs allowed by the host. */
+  allowedModels: Option[List[String]] = None,
+
+  /** OAuth Client ID Metadata Document URL identifying the host for MCP authorization. */
+  authClientIdMetadataUrl: Option[String] = None,
+
+  /** Explicit discovery-only custom-agent roots. */
+  agentDirectories: Option[List[String]] = None,
+
+  /** Explicit discovery-only file-hook roots. */
+  hookDirectories: Option[List[String]] = None,
+
+  /** Declares that a human drives this session's conversation. */
+  interactiveUser: Option[Boolean] = None,
+
+  /** Managed-setting paths this host handles externally or does not support. */
+  excludedManagedSettings: Option[List[String]] = None,
+
+  /** Enforce locked managed model controls for this session. */
+  enforceManagedModelDefaults: Option[Boolean] = None,
+
+  /** Allow the runtime to recover a damaged transcript during resume. */
+  allowTranscriptRecovery: Option[Boolean] = None,
+
+  /** Session-level image generation opt-in. */
+  imageGeneration: Option[ImageGenerationConfig] = None,
+
+  /** Autopilot continuation policy. */
+  autopilot: Option[AutopilotOptions] = None,
 )
 
 // ============================================================================
@@ -882,6 +990,61 @@ object ErrorOccurredHookOutput:
 
 type ErrorOccurredHandler = (ErrorOccurredHookInput, HookInvocation) => Future[Option[ErrorOccurredHookOutput]]
 
+/** Input for the sub-agent start hook (`subagentStart`); session metadata belongs to the parent. */
+case class SubagentStartHookInput(
+  timestamp: Long,
+  cwd: String,
+  transcriptPath: String,
+  agentName: String,
+  agentDisplayName: Option[String] = None,
+  agentDescription: Option[String] = None
+)
+
+object SubagentStartHookInput:
+  given Decoder[SubagentStartHookInput] = deriveDecoder
+
+/** Output for the sub-agent start hook. Context is prepended to the child's initial prompt. */
+case class SubagentStartHookOutput(
+  additionalContext: Option[String] = None
+)
+
+object SubagentStartHookOutput:
+  given Encoder[SubagentStartHookOutput] = deriveEncoder[SubagentStartHookOutput].mapJson(_.dropNullValues)
+
+type SubagentStartHandler = (SubagentStartHookInput, HookInvocation) => Future[Option[SubagentStartHookOutput]]
+
+/** Input for the sub-agent stop hook (`subagentStop`), fired after a sub-agent completes a turn. */
+case class SubagentStopHookInput(
+  timestamp: Long,
+  cwd: String,
+  transcriptPath: String,
+  agentName: String,
+  agentType: String,
+  stopReason: String,
+  response: String,
+  agentDisplayName: Option[String] = None,
+  agentDescription: Option[String] = None,
+  agentId: Option[String] = None
+)
+
+object SubagentStopHookInput:
+  given Decoder[SubagentStopHookInput] = deriveDecoder
+
+/**
+ * Output for the sub-agent stop hook. `decision = Some("block")` with a non-empty `reason` continues
+ * the child; otherwise `modifiedResponse` replaces the response reported to the parent.
+ */
+case class SubagentStopHookOutput(
+  decision: Option[String] = None,
+  reason: Option[String] = None,
+  modifiedResponse: Option[String] = None
+)
+
+object SubagentStopHookOutput:
+  given Encoder[SubagentStopHookOutput] = deriveEncoder[SubagentStopHookOutput].mapJson(_.dropNullValues)
+
+type SubagentStopHandler = (SubagentStopHookInput, HookInvocation) => Future[Option[SubagentStopHookOutput]]
+
 /** Configuration for session hooks. */
 case class SessionHooks(
   onPreToolUse: Option[PreToolUseHandler] = None,
@@ -893,7 +1056,13 @@ case class SessionHooks(
   onUserPromptTransformed: Option[UserPromptSubmittedHandler] = None,
   onSessionStart: Option[SessionStartHandler] = None,
   onSessionEnd: Option[SessionEndHandler] = None,
-  onErrorOccurred: Option[ErrorOccurredHandler] = None
+  onErrorOccurred: Option[ErrorOccurredHandler] = None,
+
+  /** Called before a sub-agent's first turn; return context to prepend to its prompt. */
+  onSubagentStart: Option[SubagentStartHandler] = None,
+
+  /** Called after a sub-agent completes a turn; block to continue it or rewrite its response. */
+  onSubagentStop: Option[SubagentStopHandler] = None
 ):
   /** Returns true if at least one hook handler is registered. */
   def hasAny: Boolean =
@@ -901,7 +1070,8 @@ case class SessionHooks(
       onPreMcpToolCall.isDefined ||
       onUserPromptSubmitted.isDefined || onUserPromptTransformed.isDefined ||
       onSessionStart.isDefined ||
-      onSessionEnd.isDefined || onErrorOccurred.isDefined
+      onSessionEnd.isDefined || onErrorOccurred.isDefined ||
+      onSubagentStart.isDefined || onSubagentStop.isDefined
 
 // ============================================================================
 // Ping Response
@@ -969,7 +1139,8 @@ object ModelVisionLimits:
 case class ModelLimits(
   max_context_window_tokens: Int,
   max_prompt_tokens: Option[Int] = None,
-  vision: Option[ModelVisionLimits] = None
+  vision: Option[ModelVisionLimits] = None,
+  max_output_tokens: Option[Int] = None
 )
 
 object ModelLimits:
@@ -1383,7 +1554,13 @@ case class MessageOptions(
   agentMode: Option[String] = None,
 
   /** Prompt text to display in the UI in place of the actual prompt. */
-  displayPrompt: Option[String] = None
+  displayPrompt: Option[String] = None,
+
+  /** Message provenance: "user", "system", or "agent-<id>" (see [[MessageSource]]). */
+  source: Option[String] = None,
+
+  /** JSON Schema for structured output; sent as a `json_schema` response format when set. */
+  responseSchema: Option[JsonObject] = None
 )
 
 // ============================================================================
@@ -1487,7 +1664,10 @@ case class CopilotClientOptions(
   builtinPluginDirectories: Option[List[String]] = None,
 
   /** Use the in-process (FFI) transport instead of a subprocess. */
-  inProcess: Option[Boolean] = None
+  inProcess: Option[Boolean] = None,
+
+  /** Identity of the integrating application, sent on the `connect` handshake. */
+  clientInfo: Option[ClientInfo] = None
 )
 
 // ============================================================================
@@ -1619,3 +1799,151 @@ case class SystemMessageCustomizeConfig(
 object SystemMessageCustomizeConfig:
   given Encoder[SystemMessageCustomizeConfig] = deriveEncoder
   given Decoder[SystemMessageCustomizeConfig] = deriveDecoder
+
+// ============================================================================
+// v2.6.0 upstream-sync feature types
+// ============================================================================
+
+/**
+ * Identity of the integrating application, declared once on the `connect` handshake so runtime
+ * telemetry is attributed to a consistent surface. Empty fields are dropped and an all-empty
+ * identity skips the handshake entirely.
+ *
+ * @param applicationName    Name of the application using the SDK, e.g. "acme-developer-portal"
+ * @param applicationVersion Version of the application using the SDK
+ * @param integrationName    Name of a specific integration (extension or plugin) within the application
+ * @param integrationVersion Version of the integration identified by `integrationName`
+ */
+case class ClientInfo(
+  applicationName: Option[String] = None,
+  applicationVersion: Option[String] = None,
+  integrationName: Option[String] = None,
+  integrationVersion: Option[String] = None
+)
+
+/** Auto-model routing preferences for `autoTier` and [[CopilotSession.setAutoTier]] (experimental). */
+object AutoTier:
+  val Efficiency   = "efficiency"
+  val Balance      = "balance"
+  val Intelligence = "intelligence"
+  val Fast         = "fast"
+
+/** Model-facing shapes of the built-in `ask_user` tool. */
+object AskUserVariant:
+  val Legacy      = "legacy"
+  val Elicitation = "elicitation"
+
+/** Working-directory trust scopes for `SessionConfig.trustWorkingDirectory`. */
+object WorkingDirectoryTrust:
+  /** Trust applies only to this session. */
+  val Session = "session"
+  /** Trust is persisted for later sessions. */
+  val User    = "user"
+
+/** Message provenance values for `MessageOptions.source`. */
+object MessageSource:
+  val User   = "user"
+  val System = "system"
+
+  /** Builds the source value for a message originating from an identified agent. */
+  def agent(agentId: String): String = s"agent-$agentId"
+
+/** Products serving a BYOK model, for `ProviderConfig.modelProvider`. */
+object ModelProvider:
+  val OpenAI       = "openai"
+  val Anthropic    = "anthropic"
+  val AzureOpenAI  = "azure_openai"
+  val Ollama       = "ollama"
+  val LmStudio     = "lm_studio"
+  val FoundryLocal = "foundry_local"
+  val LlamaCpp     = "llama_cpp"
+
+/**
+ * Sandbox configuration applied before MCP servers or session tools start (experimental).
+ *
+ * @param enabled                    Whether sandboxing is enabled for the session
+ * @param userPolicy                 User-managed policy fragment merged into the auto-discovered base policy
+ * @param addCurrentWorkingDirectory Auto-add the working directory to read-write paths (runtime default: true)
+ * @param sandboxMcpServers          Confine MCP servers the session launches (runtime default: true)
+ * @param sandboxLspServers          Confine language servers the session launches (runtime default: true)
+ * @param sandboxExtensions          Confine extension processes the session launches (runtime default: true)
+ * @param allowBypass                Opt-in: let the agent request that an individual command run outside the
+ *                                   sandbox, approved or denied through the normal permission flow (default: false)
+ */
+case class SandboxConfig(
+  enabled: Boolean,
+  userPolicy: Option[Map[String, Json]] = None,
+  addCurrentWorkingDirectory: Option[Boolean] = None,
+  sandboxMcpServers: Option[Boolean] = None,
+  sandboxLspServers: Option[Boolean] = None,
+  sandboxExtensions: Option[Boolean] = None,
+  allowBypass: Option[Boolean] = None
+)
+
+object SandboxConfig:
+  given Encoder[SandboxConfig] = deriveEncoder[SandboxConfig].mapJson(_.dropNullValues)
+
+/**
+ * Non-persisted session-level opt-in to image generation (experimental).
+ *
+ * @param enabled    Opt in to image generation through an authorized Copilot image model
+ * @param watermark  Request a visible "Made with AI" label on generated and edited images
+ * @param saveToDisk Save generated images under the session-state `images` folder (runtime default: true)
+ */
+case class ImageGenerationConfig(
+  enabled: Option[Boolean] = None,
+  watermark: Option[Boolean] = None,
+  saveToDisk: Option[Boolean] = None
+)
+
+object ImageGenerationConfig:
+  given Encoder[ImageGenerationConfig] = deriveEncoder[ImageGenerationConfig].mapJson(_.dropNullValues)
+
+/**
+ * Autopilot continuation policy (experimental).
+ *
+ * @param continuationEnabled Enable runtime-owned automatic continuation in Autopilot mode (runtime default: true)
+ * @param maxContinues        Maximum automatic continuations outside an active objective (runtime default: 5)
+ */
+case class AutopilotOptions(
+  continuationEnabled: Option[Boolean] = None,
+  maxContinues: Option[Int] = None
+)
+
+object AutopilotOptions:
+  given Encoder[AutopilotOptions] = deriveEncoder[AutopilotOptions].mapJson(_.dropNullValues)
+
+/**
+ * Arguments passed to a [[GitHubTokenProvider]].
+ *
+ * @param host      Effective GitHub host for which a token is required
+ * @param sessionId Session receiving the token, if already assigned
+ * @param reason    Why a token is requested: "initial" or "refresh"
+ */
+case class GitHubTokenProviderArgs(
+  host: String,
+  sessionId: Option[String],
+  reason: String
+)
+
+/** Tagged token or cancellation returned by a [[GitHubTokenProvider]]. */
+enum GitHubTokenProviderResult:
+  /** A GitHub access token with its remaining lifetime in seconds. */
+  case Token(accessToken: String, expiresIn: Long, tokenType: Option[String] = None)
+  /** The host declined to supply a token. */
+  case Cancelled
+
+object GitHubTokenProviderResult:
+  given Encoder[GitHubTokenProviderResult] = Encoder.instance:
+    case GitHubTokenProviderResult.Token(accessToken, expiresIn, tokenType) =>
+      Json.obj(
+        "kind" -> "token".asJson,
+        "accessToken" -> accessToken.asJson,
+        "expiresIn" -> expiresIn.asJson,
+        "tokenType" -> tokenType.asJson
+      ).dropNullValues
+    case GitHubTokenProviderResult.Cancelled =>
+      Json.obj("kind" -> "cancelled".asJson)
+
+/** Acquires short-lived GitHub credentials for one session on demand. */
+type GitHubTokenProvider = GitHubTokenProviderArgs => Future[GitHubTokenProviderResult]

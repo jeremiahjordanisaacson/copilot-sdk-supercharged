@@ -86,3 +86,21 @@ bool copilot_session_event_is_delta(const copilot_session_event_t *event)
 {
     return copilot_session_event_is_type(event, COPILOT_EVENT_ASSISTANT_MESSAGE_DELTA);
 }
+
+/* ============================================================================
+ * Message source helpers
+ * ============================================================================ */
+
+char *copilot_message_source_agent(const char *agent_id)
+{
+    if (!agent_id) return NULL;
+
+    size_t prefix_len = strlen(COPILOT_MESSAGE_SOURCE_AGENT_PREFIX);
+    size_t id_len = strlen(agent_id);
+    char *source = malloc(prefix_len + id_len + 1);
+    if (!source) return NULL;
+
+    memcpy(source, COPILOT_MESSAGE_SOURCE_AGENT_PREFIX, prefix_len);
+    memcpy(source + prefix_len, agent_id, id_len + 1);
+    return source;
+}

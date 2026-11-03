@@ -28,6 +28,9 @@ CopilotClient <- R6::R6Class(
     #'   Default: TRUE (but FALSE when github_token is provided).
     #' @param env Named list or NULL. Additional environment variables.
     #' @param session_fs SessionFsConfig or NULL. Custom session filesystem provider config.
+    #' @param client_info ClientInfo, named list, or NULL. Identity of the integrating
+    #'   application (application_name, application_version, integration_name,
+    #'   integration_version), sent on the \code{connect} handshake when any field is set.
     #'
     #' @return A CopilotClient R6 object.
     #'
@@ -40,7 +43,7 @@ CopilotClient <- R6::R6Class(
     initialize = function(cli_path = NULL, cwd = getwd(), log_level = "info",
                           auto_start = TRUE, github_token = NULL,
                           use_logged_in_user = NULL, env = NULL,
-                          session_fs = NULL) {
+                          session_fs = NULL, client_info = NULL) {
       # Determine CLI path
       if (is.null(cli_path)) {
         cli_path <- Sys.which("copilot")
@@ -61,7 +64,8 @@ CopilotClient <- R6::R6Class(
         auto_start = auto_start,
         github_token = github_token,
         use_logged_in_user = use_logged_in_user,
-        env = env
+        env = env,
+        client_info = client_info
       )
 
       private$process <- NULL
@@ -71,6 +75,7 @@ CopilotClient <- R6::R6Class(
       private$models_cache <- NULL
       private$lifecycle_handlers <- list()
       private$session_fs_config <- session_fs
+      private$github_token_providers <- new.env(parent = emptyenv())
     },
 
     #' @description Start the CLI server and establish connection.
@@ -88,6 +93,7 @@ CopilotClient <- R6::R6Class(
         {
           private$start_cli_server()
           private$connect_to_server()
+          private$send_connect_handshake()
           private$verify_protocol_version()
 
           # Register session filesystem provider if configured
@@ -131,6 +137,7 @@ CopilotClient <- R6::R6Class(
       }
       # Clear sessions
       rm(list = ls(private$sessions), envir = private$sessions)
+      rm(list = ls(private$github_token_providers), envir = private$github_token_providers)
 
       # Stop client
       if (!is.null(private$client)) {
@@ -164,6 +171,7 @@ CopilotClient <- R6::R6Class(
     #' @description Force stop without graceful cleanup.
     force_stop = function() {
       rm(list = ls(private$sessions), envir = private$sessions)
+      rm(list = ls(private$github_token_providers), envir = private$github_token_providers)
 
       if (!is.null(private$client)) {
         tryCatch(private$client$stop(), error = function(e) NULL)
@@ -237,6 +245,28 @@ CopilotClient <- R6::R6Class(
     #' @param bearer_token_provider Function or NULL. BYOK callback receiving ProviderTokenArgs.
     #' @param agent_mode Character or NULL. Default agent mode applied to sent messages.
     #' @param display_prompt Character or NULL. Default display prompt applied to sent messages.
+    #' @param auto_tier Character or NULL. Experimental Auto routing preference
+    #'   ("efficiency", "balance", "intelligence", or "fast"); sent inside \code{capi}.
+    #' @param ask_user_variant Character or NULL. Ask-user tool variant ("legacy" or "elicitation").
+    #' @param github_token_provider Function or NULL. Callback receiving GitHubTokenProviderArgs
+    #'   (host, session_id, reason) and returning \code{list(kind = "token", accessToken = ...,
+    #'   expiresIn = ...)} or \code{list(kind = "cancelled")}. Mutually exclusive with github_token.
+    #' @param sandbox_config SandboxConfig, named list, or NULL. Sandbox configuration.
+    #' @param feature_flags Named list of logicals or NULL. Runtime feature-flag overrides
+    #'   (sent whenever provided, even when empty).
+    #' @param allowed_models Character vector or NULL. Model allowlist for the session.
+    #' @param auth_client_id_metadata_url Character or NULL. OAuth client ID metadata document URL.
+    #' @param name Character or NULL. Human-readable session name.
+    #' @param agent_directories Character vector or NULL. Extra custom-agent directories.
+    #' @param hook_directories Character vector or NULL. Extra hook-definition directories.
+    #' @param interactive_user Logical or NULL. Whether a human user is present.
+    #' @param excluded_managed_settings Character vector or NULL. Managed settings to ignore.
+    #' @param enforce_managed_model_defaults Logical or NULL. Enforce managed model defaults.
+    #' @param trust_working_directory Character or NULL. Trust scope for the working directory
+    #'   ("session" or "user").
+    #' @param refresh_custom_instructions Logical or NULL. Re-read custom instructions.
+    #' @param image_generation ImageGenerationConfig, named list, or NULL. Image generation opt-in.
+    #' @param autopilot AutopilotOptions, named list, or NULL. Autopilot continuation options.
     #'
     #' @return A CopilotSession R6 object.
     create_session = function(model = NULL, session_id = NULL, tools = NULL,
@@ -278,7 +308,27 @@ CopilotClient <- R6::R6Class(
                               on_mcp_auth_request = NULL,
                               bearer_token_provider = NULL,
                               agent_mode = NULL,
-                              display_prompt = NULL) {
+                              display_prompt = NULL,
+                              auto_tier = NULL,
+                              ask_user_variant = NULL,
+                              github_token_provider = NULL,
+                              sandbox_config = NULL,
+                              feature_flags = NULL,
+                              allowed_models = NULL,
+                              auth_client_id_metadata_url = NULL,
+                              name = NULL,
+                              agent_directories = NULL,
+                              hook_directories = NULL,
+                              interactive_user = NULL,
+                              excluded_managed_settings = NULL,
+                              enforce_managed_model_defaults = NULL,
+                              trust_working_directory = NULL,
+                              refresh_custom_instructions = NULL,
+                              image_generation = NULL,
+                              autopilot = NULL) {
+      if (!is.null(github_token) && !is.null(github_token_provider)) {
+        stop("github_token and github_token_provider are mutually exclusive")
+      }
       if (is.null(private$client)) {
         if (isTRUE(self$options$auto_start)) {
           self$start()
@@ -365,9 +415,9 @@ CopilotClient <- R6::R6Class(
         payload$memory <- if (inherits(memory, "MemoryConfiguration")) memory$to_list() else memory
       }
       if (!is.null(otlp_protocol)) payload$otlpProtocol <- otlp_protocol
-      if (!is.null(enable_web_socket_responses)) {
-        payload$enableWebSocketResponses <- enable_web_socket_responses
-      }
+      # CAPI transport options: the runtime only accepts enableWebSocketResponses inside `capi`.
+      capi <- build_capi_options(auto_tier, enable_web_socket_responses)
+      if (!is.null(capi)) payload$capi <- capi
       if (!is.null(exp_assignments)) payload$expAssignments <- exp_assignments
       # --- Second upstream-sync batch (2026-08 parity with @github/copilot-sdk) ---
       if (!is.null(rewind_enabled)) payload$rewindEnabled <- rewind_enabled
@@ -394,13 +444,46 @@ CopilotClient <- R6::R6Class(
           payload$provider$bearerToken <- token
         }
       }
+      # --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
+      if (!is.null(name)) payload$name <- name
+      if (!is.null(trust_working_directory)) payload$trustWorkingDirectory <- trust_working_directory
+      if (!is.null(refresh_custom_instructions)) {
+        payload$refreshCustomInstructions <- refresh_custom_instructions
+      }
+      payload <- add_common_session_options(
+        payload,
+        ask_user_variant = ask_user_variant,
+        sandbox_config = sandbox_config,
+        feature_flags = feature_flags,
+        allowed_models = allowed_models,
+        auth_client_id_metadata_url = auth_client_id_metadata_url,
+        agent_directories = agent_directories,
+        hook_directories = hook_directories,
+        interactive_user = interactive_user,
+        excluded_managed_settings = excluded_managed_settings,
+        enforce_managed_model_defaults = enforce_managed_model_defaults,
+        image_generation = image_generation,
+        autopilot = autopilot
+      )
+      gh_registration_id <- NULL
+      if (!is.null(github_token_provider)) {
+        gh_registration_id <- private$register_github_token_provider(github_token_provider, session_id)
+        payload$gitHubTokenProviderRegistrationId <- gh_registration_id
+      }
 
-      response <- private$client$request("session.create", payload)
+      response <- tryCatch(
+        private$client$request("session.create", payload),
+        error = function(e) {
+          if (!is.null(gh_registration_id)) private$unregister_github_token_provider(gh_registration_id)
+          stop(e)
+        }
+      )
 
       sid <- response$sessionId
       workspace_path <- response$workspacePath
 
       session <- CopilotSession$new(sid, private$client, workspace_path)
+      private$commit_github_token_provider(session, gh_registration_id)
 
       # Register tools
       if (!is.null(tools)) {
@@ -449,6 +532,22 @@ CopilotClient <- R6::R6Class(
     #' @param enable_config_discovery Logical or NULL. Auto-discover MCP server configs.
     #' @param include_sub_agent_streaming_events Logical or NULL. Include sub-agent streaming events.
     #' @param commands List of CommandDefinition or NULL. Slash commands for this session.
+    #' @param enable_web_socket_responses Logical or NULL. Use the WebSocket response transport.
+    #' @param auto_tier Character or NULL. Experimental Auto routing preference; sent inside \code{capi}.
+    #' @param ask_user_variant Character or NULL. Ask-user tool variant ("legacy" or "elicitation").
+    #' @param github_token_provider Function or NULL. GitHub token callback (see create_session).
+    #' @param sandbox_config SandboxConfig, named list, or NULL. Sandbox configuration.
+    #' @param feature_flags Named list of logicals or NULL. Runtime feature-flag overrides.
+    #' @param allowed_models Character vector or NULL. Model allowlist for the session.
+    #' @param auth_client_id_metadata_url Character or NULL. OAuth client ID metadata document URL.
+    #' @param agent_directories Character vector or NULL. Extra custom-agent directories.
+    #' @param hook_directories Character vector or NULL. Extra hook-definition directories.
+    #' @param interactive_user Logical or NULL. Whether a human user is present.
+    #' @param excluded_managed_settings Character vector or NULL. Managed settings to ignore.
+    #' @param enforce_managed_model_defaults Logical or NULL. Enforce managed model defaults.
+    #' @param allow_transcript_recovery Logical or NULL. Allow recovering from a damaged transcript.
+    #' @param image_generation ImageGenerationConfig, named list, or NULL. Image generation opt-in.
+    #' @param autopilot AutopilotOptions, named list, or NULL. Autopilot continuation options.
     #'
     #' @return A CopilotSession R6 object.
     resume_session = function(session_id, model = NULL, tools = NULL,
@@ -462,7 +561,26 @@ CopilotClient <- R6::R6Class(
                               model_capabilities = NULL,
                               enable_config_discovery = NULL,
                               include_sub_agent_streaming_events = NULL,
-                              commands = NULL) {
+                              commands = NULL,
+                              enable_web_socket_responses = NULL,
+                              auto_tier = NULL,
+                              ask_user_variant = NULL,
+                              github_token_provider = NULL,
+                              sandbox_config = NULL,
+                              feature_flags = NULL,
+                              allowed_models = NULL,
+                              auth_client_id_metadata_url = NULL,
+                              agent_directories = NULL,
+                              hook_directories = NULL,
+                              interactive_user = NULL,
+                              excluded_managed_settings = NULL,
+                              enforce_managed_model_defaults = NULL,
+                              allow_transcript_recovery = NULL,
+                              image_generation = NULL,
+                              autopilot = NULL) {
+      if (!is.null(github_token) && !is.null(github_token_provider)) {
+        stop("github_token and github_token_provider are mutually exclusive")
+      }
       if (is.null(private$client)) {
         if (isTRUE(self$options$auto_start)) {
           self$start()
@@ -507,13 +625,46 @@ CopilotClient <- R6::R6Class(
         })
         payload$commands <- cmds_list
       }
+      # --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
+      capi <- build_capi_options(auto_tier, enable_web_socket_responses)
+      if (!is.null(capi)) payload$capi <- capi
+      if (!is.null(allow_transcript_recovery)) {
+        payload$allowTranscriptRecovery <- allow_transcript_recovery
+      }
+      payload <- add_common_session_options(
+        payload,
+        ask_user_variant = ask_user_variant,
+        sandbox_config = sandbox_config,
+        feature_flags = feature_flags,
+        allowed_models = allowed_models,
+        auth_client_id_metadata_url = auth_client_id_metadata_url,
+        agent_directories = agent_directories,
+        hook_directories = hook_directories,
+        interactive_user = interactive_user,
+        excluded_managed_settings = excluded_managed_settings,
+        enforce_managed_model_defaults = enforce_managed_model_defaults,
+        image_generation = image_generation,
+        autopilot = autopilot
+      )
+      gh_registration_id <- NULL
+      if (!is.null(github_token_provider)) {
+        gh_registration_id <- private$register_github_token_provider(github_token_provider, session_id)
+        payload$gitHubTokenProviderRegistrationId <- gh_registration_id
+      }
 
-      response <- private$client$request("session.resume", payload)
+      response <- tryCatch(
+        private$client$request("session.resume", payload),
+        error = function(e) {
+          if (!is.null(gh_registration_id)) private$unregister_github_token_provider(gh_registration_id)
+          stop(e)
+        }
+      )
 
       sid <- response$sessionId
       workspace_path <- response$workspacePath
 
       session <- CopilotSession$new(sid, private$client, workspace_path)
+      private$commit_github_token_provider(session, gh_registration_id)
       if (!is.null(tools)) session$register_tools(tools)
       if (!is.null(on_permission_request)) session$register_permission_handler(on_permission_request)
       if (!is.null(on_user_input_request)) session$register_user_input_handler(on_user_input_request)
@@ -588,6 +739,14 @@ CopilotClient <- R6::R6Class(
       private$client$request("auth.getStatus", list())
     },
 
+    #' @description Clear the runtime's cached managed (enterprise) settings so they are
+    #'   re-read on next use.
+    #' @return The response from the server.
+    clear_managed_settings_cache = function() {
+      if (is.null(private$client)) stop("Client not connected")
+      private$client$request("managedSettings.clearCache", empty_json_object())
+    },
+
     #' @description Get the last session ID.
     #' @return Character or NULL if no previous session.
     get_last_session_id = function() {
@@ -659,6 +818,7 @@ CopilotClient <- R6::R6Class(
     models_cache = NULL,
     lifecycle_handlers = NULL,
     session_fs_config = NULL,
+    github_token_providers = NULL,
 
     start_cli_server = function() {
       cli_path <- self$options$cli_path
@@ -750,7 +910,27 @@ CopilotClient <- R6::R6Class(
         private$handle_hooks_invoke(params)
       })
 
+      private$client$set_request_handler("gitHubToken.getToken", function(params) {
+        private$handle_github_token_request(params)
+      })
+
       private$client$start()
+    },
+
+    # Send the `connect` handshake carrying the integrating application's identity.
+    # Skipped when no client_info field is set; older CLIs without `connect` are tolerated.
+    send_connect_handshake = function() {
+      wire <- client_info_to_wire(self$options$client_info)
+      if (is.null(wire)) return(invisible(NULL))
+      tryCatch(
+        private$client$request("connect", list(clientInfo = wire)),
+        json_rpc_error = function(e) {
+          method_not_found <- identical(as.integer(e$code), -32601L) ||
+            grepl("Unhandled method connect", e$rpc_message %||% "", fixed = TRUE)
+          if (!method_not_found) stop(e)
+        }
+      )
+      invisible(NULL)
     },
 
     verify_protocol_version = function() {
@@ -781,6 +961,8 @@ CopilotClient <- R6::R6Class(
       if (!is.null(provider$api_key)) wire$apiKey <- provider$api_key
       if (!is.null(provider$wire_api)) wire$wireApi <- provider$wire_api
       if (!is.null(provider$bearer_token)) wire$bearerToken <- provider$bearer_token
+      if (!is.null(provider$model_provider)) wire$modelProvider <- provider$model_provider
+      if (!is.null(provider$api_key_command)) wire$apiKeyCommand <- provider$api_key_command
       if (!is.null(provider$azure)) {
         wire_azure <- list()
         if (!is.null(provider$azure$api_version)) wire_azure$apiVersion <- provider$azure$api_version
@@ -921,6 +1103,71 @@ CopilotClient <- R6::R6Class(
       session <- get(session_id, envir = private$sessions)
       output <- session$handle_hooks_invoke(hook_type, input_data)
       list(output = output)
+    },
+
+    # --- GitHub token provider registry (gitHubToken.getToken) ---
+
+    register_github_token_provider = function(provider, session_id = NULL) {
+      registration_id <- uuid::UUIDgenerate()
+      assign(
+        registration_id,
+        list(provider = provider, session_id = session_id, committed = FALSE),
+        envir = private$github_token_providers
+      )
+      registration_id
+    },
+
+    unregister_github_token_provider = function(registration_id) {
+      if (!is.null(registration_id) &&
+          exists(registration_id, envir = private$github_token_providers, inherits = FALSE)) {
+        rm(list = registration_id, envir = private$github_token_providers)
+      }
+      invisible(NULL)
+    },
+
+    # Bind a registration to its session and drop it when the session is destroyed.
+    # A later resume of the same session replaces the previously committed registration.
+    commit_github_token_provider = function(session, registration_id) {
+      if (is.null(registration_id)) return(invisible(NULL))
+      sid <- session$session_id
+      for (other_id in ls(private$github_token_providers)) {
+        if (identical(other_id, registration_id)) next
+        other <- get(other_id, envir = private$github_token_providers, inherits = FALSE)
+        if (isTRUE(other$committed) && identical(other$session_id, sid)) {
+          rm(list = other_id, envir = private$github_token_providers)
+        }
+      }
+      if (exists(registration_id, envir = private$github_token_providers, inherits = FALSE)) {
+        registration <- get(registration_id, envir = private$github_token_providers, inherits = FALSE)
+        registration$session_id <- sid
+        registration$committed <- TRUE
+        assign(registration_id, registration, envir = private$github_token_providers)
+      }
+      session$register_disconnect_callback(function() {
+        private$unregister_github_token_provider(registration_id)
+      })
+      invisible(NULL)
+    },
+
+    handle_github_token_request = function(params) {
+      registration_id <- params$registrationId
+      registration <- NULL
+      if (is.character(registration_id) && length(registration_id) == 1 &&
+          exists(registration_id, envir = private$github_token_providers, inherits = FALSE)) {
+        registration <- get(registration_id, envir = private$github_token_providers, inherits = FALSE)
+      }
+      if (is.null(registration)) {
+        stop(paste0(
+          "No GitHub token provider registered for registration ID \"",
+          paste(registration_id, collapse = ""), "\""
+        ))
+      }
+      args <- GitHubTokenProviderArgs$new(
+        host = params$host,
+        session_id = params$sessionId %||% registration$session_id,
+        reason = params$reason
+      )
+      github_token_result_to_wire(registration$provider(args))
     }
   )
 )
@@ -1065,7 +1312,8 @@ GitHubAttachment <- list(
 #' COPILOT_HOOK_NAMES
 #'
 #' Supported hook names, including \code{on_post_tool_use} and \code{on_pre_mcp_tool_call}
-#' (and the \code{on_mcp_auth_request} MCP OAuth host token handler).
+#' (and the \code{on_mcp_auth_request} MCP OAuth host token handler), plus the
+#' \code{on_subagent_start} / \code{on_subagent_stop} sub-agent lifecycle hooks.
 #'
 #' @keywords internal
 COPILOT_HOOK_NAMES <- c(
@@ -1077,5 +1325,327 @@ COPILOT_HOOK_NAMES <- c(
   "on_session_end",
   "on_error_occurred",
   "on_pre_mcp_tool_call",
-  "on_mcp_auth_request"
+  "on_mcp_auth_request",
+  "on_subagent_start",
+  "on_subagent_stop"
 )
+
+
+# ---------------------------------------------------------------------------
+# v2.6.0 upstream-sync types & helpers (parity with @github/copilot-sdk)
+# ---------------------------------------------------------------------------
+
+#' ClientInfo
+#'
+#' Identity of the application integrating the SDK. Sent on the \code{connect}
+#' handshake (as editorName / editorVersion / extensionName / extensionVersion)
+#' when at least one field is non-empty.
+#'
+#' @field application_name Character or NULL. Integrating application name.
+#' @field application_version Character or NULL. Integrating application version.
+#' @field integration_name Character or NULL. Integration (extension) name.
+#' @field integration_version Character or NULL. Integration (extension) version.
+#' @export
+ClientInfo <- R6::R6Class(
+  "ClientInfo",
+  public = list(
+    application_name = NULL,
+    application_version = NULL,
+    integration_name = NULL,
+    integration_version = NULL,
+
+    #' @description Create a new ClientInfo.
+    #' @param application_name Character or NULL.
+    #' @param application_version Character or NULL.
+    #' @param integration_name Character or NULL.
+    #' @param integration_version Character or NULL.
+    initialize = function(application_name = NULL, application_version = NULL,
+                          integration_name = NULL, integration_version = NULL) {
+      self$application_name <- application_name
+      self$application_version <- application_version
+      self$integration_name <- integration_name
+      self$integration_version <- integration_version
+    },
+
+    #' @description Convert to the \code{connect} wire shape (empty fields dropped).
+    to_list = function() {
+      client_info_to_wire(self) %||% list()
+    }
+  )
+)
+
+#' SandboxConfig
+#'
+#' Sandbox configuration for a session (wire key \code{sandboxConfig}).
+#'
+#' @field enabled Logical. Whether sandboxing is enabled.
+#' @field user_policy Named list or NULL. User policy fragment merged into the base policy.
+#' @field add_current_working_directory Logical or NULL. Auto-add the working directory.
+#' @field sandbox_mcp_servers Logical or NULL. Confine MCP servers (FALSE opts out).
+#' @field sandbox_lsp_servers Logical or NULL. Confine language servers (FALSE opts out).
+#' @field sandbox_extensions Logical or NULL. Confine extension processes (FALSE opts out).
+#' @field allow_bypass Logical or NULL. Opt in to letting the agent request that an individual
+#'   command run outside the sandbox, approved through the normal permission flow.
+#' @export
+SandboxConfig <- R6::R6Class(
+  "SandboxConfig",
+  public = list(
+    enabled = TRUE,
+    user_policy = NULL,
+    add_current_working_directory = NULL,
+    sandbox_mcp_servers = NULL,
+    sandbox_lsp_servers = NULL,
+    sandbox_extensions = NULL,
+    allow_bypass = NULL,
+
+    #' @description Create a new SandboxConfig.
+    #' @param enabled Logical. Default TRUE.
+    #' @param user_policy Named list or NULL.
+    #' @param add_current_working_directory Logical or NULL.
+    #' @param sandbox_mcp_servers Logical or NULL.
+    #' @param sandbox_lsp_servers Logical or NULL.
+    #' @param sandbox_extensions Logical or NULL.
+    #' @param allow_bypass Logical or NULL.
+    initialize = function(enabled = TRUE, user_policy = NULL,
+                          add_current_working_directory = NULL,
+                          sandbox_mcp_servers = NULL, sandbox_lsp_servers = NULL,
+                          sandbox_extensions = NULL, allow_bypass = NULL) {
+      self$enabled <- enabled
+      self$user_policy <- user_policy
+      self$add_current_working_directory <- add_current_working_directory
+      self$sandbox_mcp_servers <- sandbox_mcp_servers
+      self$sandbox_lsp_servers <- sandbox_lsp_servers
+      self$sandbox_extensions <- sandbox_extensions
+      self$allow_bypass <- allow_bypass
+    },
+
+    #' @description Convert to a wire list (camelCase keys).
+    to_list = function() {
+      result <- list(enabled = isTRUE(self$enabled))
+      if (!is.null(self$user_policy)) result$userPolicy <- self$user_policy
+      if (!is.null(self$add_current_working_directory)) {
+        result$addCurrentWorkingDirectory <- self$add_current_working_directory
+      }
+      if (!is.null(self$sandbox_mcp_servers)) result$sandboxMcpServers <- self$sandbox_mcp_servers
+      if (!is.null(self$sandbox_lsp_servers)) result$sandboxLspServers <- self$sandbox_lsp_servers
+      if (!is.null(self$sandbox_extensions)) result$sandboxExtensions <- self$sandbox_extensions
+      if (!is.null(self$allow_bypass)) result$allowBypass <- self$allow_bypass
+      result
+    }
+  )
+)
+
+#' ImageGenerationConfig
+#'
+#' Non-persisted image generation opt-in (wire key \code{imageGeneration}).
+#'
+#' @field enabled Logical or NULL. Opt in to image generation.
+#' @field watermark Logical or NULL. Request a visible "Made with AI" label.
+#' @field save_to_disk Logical or NULL. Save generated images under the session state directory.
+#' @export
+ImageGenerationConfig <- R6::R6Class(
+  "ImageGenerationConfig",
+  public = list(
+    enabled = NULL,
+    watermark = NULL,
+    save_to_disk = NULL,
+
+    #' @description Create a new ImageGenerationConfig.
+    #' @param enabled Logical or NULL.
+    #' @param watermark Logical or NULL.
+    #' @param save_to_disk Logical or NULL.
+    initialize = function(enabled = NULL, watermark = NULL, save_to_disk = NULL) {
+      self$enabled <- enabled
+      self$watermark <- watermark
+      self$save_to_disk <- save_to_disk
+    },
+
+    #' @description Convert to a wire list (camelCase keys).
+    to_list = function() {
+      result <- empty_json_object()
+      if (!is.null(self$enabled)) result$enabled <- self$enabled
+      if (!is.null(self$watermark)) result$watermark <- self$watermark
+      if (!is.null(self$save_to_disk)) result$saveToDisk <- self$save_to_disk
+      result
+    }
+  )
+)
+
+#' AutopilotOptions
+#'
+#' Autopilot continuation options (wire key \code{autopilot}).
+#'
+#' @field continuation_enabled Logical or NULL. Whether autopilot may continue automatically.
+#' @field max_continues Integer or NULL. Maximum automatic continuations.
+#' @export
+AutopilotOptions <- R6::R6Class(
+  "AutopilotOptions",
+  public = list(
+    continuation_enabled = NULL,
+    max_continues = NULL,
+
+    #' @description Create new AutopilotOptions.
+    #' @param continuation_enabled Logical or NULL.
+    #' @param max_continues Integer or NULL.
+    initialize = function(continuation_enabled = NULL, max_continues = NULL) {
+      self$continuation_enabled <- continuation_enabled
+      self$max_continues <- max_continues
+    },
+
+    #' @description Convert to a wire list (camelCase keys).
+    to_list = function() {
+      result <- empty_json_object()
+      if (!is.null(self$continuation_enabled)) result$continuationEnabled <- self$continuation_enabled
+      if (!is.null(self$max_continues)) result$maxContinues <- as.integer(self$max_continues)
+      result
+    }
+  )
+)
+
+#' GitHubTokenProviderArgs
+#'
+#' Arguments passed to a \code{github_token_provider} callback when the runtime
+#' sends a \code{gitHubToken.getToken} request.
+#'
+#' @field host Character. GitHub host the token is for.
+#' @field session_id Character or NULL. Session receiving the token.
+#' @field reason Character. "initial" or "refresh".
+#' @export
+GitHubTokenProviderArgs <- R6::R6Class(
+  "GitHubTokenProviderArgs",
+  public = list(
+    host = NULL,
+    session_id = NULL,
+    reason = NULL,
+
+    #' @description Create new GitHubTokenProviderArgs.
+    #' @param host Character.
+    #' @param session_id Character or NULL.
+    #' @param reason Character.
+    initialize = function(host = NULL, session_id = NULL, reason = NULL) {
+      self$host <- host
+      self$session_id <- session_id
+      self$reason <- reason
+    }
+  )
+)
+
+#' MessageSource
+#'
+#' Message source values for the \code{source} option of \code{session$send()}:
+#' \code{MessageSource$USER}, \code{MessageSource$SYSTEM}, or
+#' \code{MessageSource$agent(agent_id)} (which builds \code{"agent-<id>"}).
+#'
+#' @export
+MessageSource <- list(
+  USER = "user",
+  SYSTEM = "system",
+  agent = function(agent_id) paste0("agent-", agent_id)
+)
+
+#' Empty JSON object (encodes as \code{{}} rather than \code{[]}).
+#' @keywords internal
+empty_json_object <- function() {
+  structure(list(), names = character(0))
+}
+
+#' Convert an R6 config object with \code{to_list()} to its wire list; pass lists through.
+#' @keywords internal
+config_to_wire <- function(x) {
+  if (inherits(x, "R6") && is.function(x$to_list)) x$to_list() else x
+}
+
+#' Map client info (ClientInfo or named list) to the \code{connect} wire shape.
+#' Empty fields are dropped; returns NULL when no field is set.
+#' @keywords internal
+client_info_to_wire <- function(info) {
+  if (is.null(info)) return(NULL)
+  if (is.atomic(info)) info <- as.list(info)
+  pick <- function(snake, camel) {
+    value <- info[[snake]]
+    if (is.null(value)) value <- info[[camel]]
+    if (is.null(value) || length(value) == 0) return(NULL)
+    value <- as.character(value[[1]])
+    if (is.na(value) || !nzchar(value)) return(NULL)
+    value
+  }
+  wire <- list()
+  application_name <- pick("application_name", "applicationName")
+  application_version <- pick("application_version", "applicationVersion")
+  integration_name <- pick("integration_name", "integrationName")
+  integration_version <- pick("integration_version", "integrationVersion")
+  if (!is.null(application_name)) wire$editorName <- application_name
+  if (!is.null(application_version)) wire$editorVersion <- application_version
+  if (!is.null(integration_name)) wire$extensionName <- integration_name
+  if (!is.null(integration_version)) wire$extensionVersion <- integration_version
+  if (length(wire) == 0) NULL else wire
+}
+
+#' Build the \code{capi} create/resume object (only set fields); NULL when empty.
+#' @keywords internal
+build_capi_options <- function(auto_tier = NULL, enable_web_socket_responses = NULL) {
+  capi <- list()
+  if (!is.null(auto_tier)) capi$autoTier <- auto_tier
+  if (!is.null(enable_web_socket_responses)) {
+    capi$enableWebSocketResponses <- enable_web_socket_responses
+  }
+  if (length(capi) == 0) NULL else capi
+}
+
+#' Convert feature flags to a JSON object (an empty input still encodes as \code{{}}).
+#' @keywords internal
+feature_flags_to_wire <- function(flags) {
+  flags <- as.list(flags)
+  if (length(flags) == 0) return(empty_json_object())
+  flags
+}
+
+#' Apply the session options shared by session.create and session.resume.
+#' @keywords internal
+add_common_session_options <- function(payload, ask_user_variant = NULL, sandbox_config = NULL,
+                                       feature_flags = NULL, allowed_models = NULL,
+                                       auth_client_id_metadata_url = NULL,
+                                       agent_directories = NULL, hook_directories = NULL,
+                                       interactive_user = NULL,
+                                       excluded_managed_settings = NULL,
+                                       enforce_managed_model_defaults = NULL,
+                                       image_generation = NULL, autopilot = NULL) {
+  if (!is.null(ask_user_variant)) payload$askUserVariant <- ask_user_variant
+  if (!is.null(sandbox_config)) payload$sandboxConfig <- config_to_wire(sandbox_config)
+  if (!is.null(feature_flags)) payload$featureFlags <- feature_flags_to_wire(feature_flags)
+  if (!is.null(allowed_models)) payload$allowedModels <- as.list(allowed_models)
+  if (!is.null(auth_client_id_metadata_url)) {
+    payload$authClientIdMetadataUrl <- auth_client_id_metadata_url
+  }
+  if (!is.null(agent_directories)) payload$agentDirectories <- as.list(agent_directories)
+  if (!is.null(hook_directories)) payload$hookDirectories <- as.list(hook_directories)
+  if (!is.null(interactive_user)) payload$interactiveUser <- interactive_user
+  if (!is.null(excluded_managed_settings)) {
+    payload$excludedManagedSettings <- as.list(excluded_managed_settings)
+  }
+  if (!is.null(enforce_managed_model_defaults)) {
+    payload$enforceManagedModelDefaults <- enforce_managed_model_defaults
+  }
+  if (!is.null(image_generation)) payload$imageGeneration <- config_to_wire(image_generation)
+  if (!is.null(autopilot)) payload$autopilot <- config_to_wire(autopilot)
+  payload
+}
+
+#' Normalize a \code{github_token_provider} result to the wire shape.
+#' Accepts camelCase or snake_case names; \code{kind} defaults to "token".
+#' @keywords internal
+github_token_result_to_wire <- function(result) {
+  if (is.null(result)) stop("GitHub token provider returned no result")
+  result <- config_to_wire(result)
+  if (!is.list(result)) stop("GitHub token provider must return a list")
+  kind <- result[["kind"]] %||% "token"
+  if (identical(kind, "cancelled")) return(list(kind = "cancelled"))
+  wire <- list(kind = kind)
+  access_token <- result[["accessToken"]] %||% result[["access_token"]]
+  if (!is.null(access_token)) wire$accessToken <- access_token
+  token_type <- result[["tokenType"]] %||% result[["token_type"]]
+  if (!is.null(token_type)) wire$tokenType <- token_type
+  expires_in <- result[["expiresIn"]] %||% result[["expires_in"]]
+  if (!is.null(expires_in)) wire$expiresIn <- expires_in
+  wire
+}

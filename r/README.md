@@ -432,6 +432,126 @@ response <- session$send_and_wait(
 )
 ```
 
+## What's New in v2.6.0
+
+The v2.6.0 upstream sync adds the options below. Session options are named parameters of
+`client$create_session()` and, unless marked *create only*, `client$resume_session()`.
+Every new option defaults to `NULL` and is left off the wire when unset.
+
+- **Client info** — `CopilotClient$new(client_info = ClientInfo$new(...))`; sent on the `connect` handshake before `ping` (older CLIs without `connect` are tolerated).
+- **Auto routing tier (experimental)** — `auto_tier` (`"efficiency"`, `"balance"`, `"intelligence"`, `"fast"`), sent with `enable_web_socket_responses` inside `capi`; switch later with `session$set_auto_tier(tier)` (`NULL` restores default routing).
+- **Ask-user variant** — `ask_user_variant` (`"legacy"` or `"elicitation"`).
+- **GitHub token provider** — `github_token_provider = function(args)` answers `gitHubToken.getToken` requests (`args$host`, `args$session_id`, `args$reason`); mutually exclusive with `github_token`.
+- **Sandbox config** — `sandbox_config = SandboxConfig$new(...)`, including the opt-in `allow_bypass`.
+- **Feature flags** — `feature_flags = list(my_flag = TRUE)` (sent whenever provided, even when empty).
+- **Session detach** — `session$destroy()` now sends `session.detach` (falling back to `session.destroy` on older CLIs), so the session can still be resumed.
+- **Message source** — `source` on `session$send()` / `send_and_wait()`: `MessageSource$USER`, `MessageSource$SYSTEM`, or `MessageSource$agent("id")`.
+- **Managed settings** — `client$clear_managed_settings_cache()`, `session$get_managed_settings()`, `session$recheck_policy_helper()`.
+- **Model allowlist** — `allowed_models`.
+- **OAuth client metadata URL** — `auth_client_id_metadata_url`.
+- **Max output tokens override** — `model_capabilities = list(limits = list(max_output_tokens = 4096))`; `ModelLimits` gains `max_output_tokens`.
+- **Structured output** — `response_schema` on `send()` / `send_and_wait()`, plus `session$send_and_wait_structured(prompt, schema)`.
+- **Session name & directories** — `name` (*create only*), `agent_directories`, `hook_directories`.
+- **Runtime toggles** — `interactive_user`, `excluded_managed_settings`, `enforce_managed_model_defaults`; `trust_working_directory` (`"session"`/`"user"`) and `refresh_custom_instructions` (*create only*); `allow_transcript_recovery` (*resume only*).
+- **Image generation config** — `image_generation = ImageGenerationConfig$new(enabled, watermark, save_to_disk)`.
+- **Autopilot options** — `autopilot = AutopilotOptions$new(continuation_enabled, max_continues)`.
+- **Sub-agent lifecycle hooks** — `hooks$on_subagent_start`, `hooks$on_subagent_stop`.
+- **BYOK provider** — `provider` gains `model_provider` and `api_key_command`.
+
+### Client info & auto routing
+
+```r
+client <- CopilotClient$new(
+  client_info = ClientInfo$new(application_name = "my-app", application_version = "1.2.0")
+)
+session <- client$create_session(model = "auto", auto_tier = "balance")
+result <- session$set_auto_tier("intelligence")
+cat(result$status)
+session$set_auto_tier(NULL)  # back to default Auto routing
+```
+
+### GitHub token provider
+
+```r
+session <- client$create_session(
+  github_token_provider = function(args) {
+    list(kind = "token", accessToken = fetch_github_token(args$host), expiresIn = 3600)
+  }
+)
+```
+
+### Sandbox, feature flags & runtime toggles
+
+```r
+session <- client$create_session(
+  name = "nightly-triage",
+  sandbox_config = SandboxConfig$new(enabled = TRUE, allow_bypass = TRUE),
+  feature_flags = list(my_flag = TRUE),
+  allowed_models = c("gpt-5", "claude-sonnet-4.6"),
+  ask_user_variant = "elicitation",
+  trust_working_directory = "session",
+  interactive_user = FALSE,
+  agent_directories = c("./agents"),
+  hook_directories = c("./hooks"),
+  image_generation = ImageGenerationConfig$new(enabled = TRUE, save_to_disk = FALSE),
+  autopilot = AutopilotOptions$new(continuation_enabled = TRUE, max_continues = 5)
+)
+session$destroy()  # sends session.detach; the session can be resumed later
+resumed <- client$resume_session(session$session_id, allow_transcript_recovery = TRUE)
+```
+
+### Structured output & message source
+
+```r
+schema <- list(
+  type = "object",
+  properties = list(answer = list(type = "integer")),
+  required = list("answer"),
+  additionalProperties = FALSE
+)
+result <- session$send_and_wait_structured("What is 2+2?", schema)
+cat(result$answer)
+
+session$send("Nightly build finished", source = MessageSource$agent("build-bot"))
+```
+
+### Sub-agent hooks
+
+```r
+session <- client$create_session(hooks = list(
+  on_subagent_start = function(input, context) {
+    list(additionalContext = paste("You are running as", input$agentName))
+  },
+  on_subagent_stop = function(input, context) {
+    if (!nzchar(input$response)) list(decision = "block", reason = "Summarize your findings.")
+  }
+))
+```
+
+### Managed settings & BYOK provider
+
+```r
+client$clear_managed_settings_cache()
+settings <- session$get_managed_settings()
+session$recheck_policy_helper()
+
+session <- client$create_session(
+  model = "llama3",
+  provider = list(
+    type = "openai",
+    base_url = "http://localhost:11434/v1",
+    model_provider = "ollama",
+    api_key_command = "cat ~/.config/ollama-key"
+  ),
+  model_capabilities = list(limits = list(max_output_tokens = 4096))
+)
+```
+
+### Parity notes
+
+- External-tool cancellation is N/A: this SDK runs tools on the `tool.call` request path.
+- Experimental host-integration callbacks (skill provider, installation confirmation, extension launch provider, Entra/Kerberos auth callbacks) are not yet available in this SDK.
+
 ## Recent Features (v2.4–v2.5)
 
 Recent upstream syncs added session options for parity with `@github/copilot-sdk`. All of the following are named parameters of `client$create_session()` (lifecycle hooks are passed inside the `hooks = list(...)` argument).

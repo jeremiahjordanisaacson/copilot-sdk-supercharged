@@ -15,9 +15,31 @@ use tokio::sync::Mutex;
 
 use crate::jsonrpc::{JsonRpcClient, NotificationHandler, RequestHandler};
 use crate::sdk_protocol_version::get_sdk_protocol_version;
-use crate::session::CopilotSession;
+use crate::session::{CopilotSession, GitHubTokenRegistration, GitHubTokenRegistry};
 use crate::types::*;
 use crate::CopilotError;
+
+/// Moves the Auto routing tier and WebSocket transport options into the `capi` wire object.
+fn insert_capi_options(
+    params: &mut Value,
+    auto_tier: Option<AutoTier>,
+    enable_web_socket_responses: Option<bool>,
+) {
+    let mut capi = serde_json::Map::new();
+    if let Some(tier) = auto_tier {
+        if let Ok(value) = serde_json::to_value(tier) {
+            capi.insert("autoTier".to_string(), value);
+        }
+    }
+    if let Some(enabled) = enable_web_socket_responses {
+        capi.insert("enableWebSocketResponses".to_string(), Value::Bool(enabled));
+    }
+    if !capi.is_empty() {
+        if let Some(obj) = params.as_object_mut() {
+            obj.insert("capi".to_string(), Value::Object(capi));
+        }
+    }
+}
 
 // ============================================================================
 // CopilotClient
@@ -71,6 +93,7 @@ pub struct CopilotClient {
     models_cache: Arc<Mutex<Option<Vec<ModelInfo>>>>,
     lifecycle_handlers: Arc<Mutex<Vec<(u64, Arc<dyn Fn(SessionLifecycleEvent) + Send + Sync>)>>>,
     next_lifecycle_handler_id: Arc<Mutex<u64>>,
+    github_token_providers: GitHubTokenRegistry,
 }
 
 impl CopilotClient {
@@ -91,6 +114,7 @@ impl CopilotClient {
             models_cache: Arc::new(Mutex::new(None)),
             lifecycle_handlers: Arc::new(Mutex::new(Vec::new())),
             next_lifecycle_handler_id: Arc::new(Mutex::new(0)),
+            github_token_providers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -148,6 +172,9 @@ impl CopilotClient {
             self.start_cli_tcp().await?;
         }
 
+        // Declare the application identity (if any) before the protocol handshake
+        self.send_client_info().await?;
+
         // Verify protocol version
         self.verify_protocol_version().await?;
 
@@ -196,6 +223,12 @@ impl CopilotClient {
             sessions.clear();
         }
 
+        // Drop all GitHub token provider registrations
+        {
+            let mut providers = self.github_token_providers.lock().await;
+            providers.clear();
+        }
+
         // Stop the JSON-RPC client
         {
             let mut rpc = self.rpc_client.lock().await;
@@ -238,6 +271,12 @@ impl CopilotClient {
             sessions.clear();
         }
 
+        // Drop all GitHub token provider registrations
+        {
+            let mut providers = self.github_token_providers.lock().await;
+            providers.clear();
+        }
+
         // Drop RPC client
         {
             let mut rpc = self.rpc_client.lock().await;
@@ -274,6 +313,12 @@ impl CopilotClient {
         &self,
         mut config: SessionConfig,
     ) -> Result<Arc<CopilotSession>, CopilotError> {
+        if config.github_token.is_some() && config.github_token_provider.is_some() {
+            return Err(CopilotError::Configuration(
+                "github_token and github_token_provider are mutually exclusive".to_string(),
+            ));
+        }
+
         self.ensure_connected().await?;
 
         let rpc = self.get_rpc_client().await?;
@@ -283,25 +328,117 @@ impl CopilotClient {
             config.mcp_auth_handler = Some(true);
         }
 
-        let params = serde_json::to_value(&config)
+        let mut params = serde_json::to_value(&config)
             .map_err(|e| CopilotError::Serialization(e.to_string()))?;
+        insert_capi_options(
+            &mut params,
+            config.auto_tier,
+            config.enable_web_socket_responses,
+        );
 
-        let response = rpc.request("session.create", params, None).await?;
-        let session_id = response
-            .get("sessionId")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CopilotError::Protocol("Missing sessionId in response".to_string()))?
-            .to_string();
-        let workspace_path = response
-            .get("workspacePath")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        let registration_id = self
+            .register_github_token_provider(
+                config.github_token_provider.as_ref(),
+                config.session_id.clone(),
+                &mut params,
+            )
+            .await;
+
+        self.open_session(rpc, "session.create", params, registration_id)
+            .await
+    }
+
+    /// Resumes an existing conversation session by its ID.
+    pub async fn resume_session(
+        &self,
+        config: ResumeSessionConfig,
+    ) -> Result<Arc<CopilotSession>, CopilotError> {
+        if config.github_token.is_some() && config.github_token_provider.is_some() {
+            return Err(CopilotError::Configuration(
+                "github_token and github_token_provider are mutually exclusive".to_string(),
+            ));
+        }
+
+        self.ensure_connected().await?;
+
+        let rpc = self.get_rpc_client().await?;
+
+        let mut params = serde_json::to_value(&config)
+            .map_err(|e| CopilotError::Serialization(e.to_string()))?;
+        insert_capi_options(
+            &mut params,
+            config.auto_tier,
+            config.enable_web_socket_responses,
+        );
+
+        let registration_id = self
+            .register_github_token_provider(
+                config.github_token_provider.as_ref(),
+                Some(config.session_id.clone()),
+                &mut params,
+            )
+            .await;
+
+        self.open_session(rpc, "session.resume", params, registration_id)
+            .await
+    }
+
+    /// Sends `session.create` / `session.resume` and tracks the resulting session.
+    ///
+    /// A GitHub token provider registration is dropped if the request fails, and
+    /// otherwise bound to the returned session (which removes it on destroy).
+    async fn open_session(
+        &self,
+        rpc: Arc<JsonRpcClient>,
+        method: &str,
+        params: Value,
+        github_token_registration: Option<String>,
+    ) -> Result<Arc<CopilotSession>, CopilotError> {
+        let opened = rpc.request(method, params, None).await.and_then(|response| {
+            let session_id = response
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    CopilotError::Protocol("Missing sessionId in response".to_string())
+                })?
+                .to_string();
+            let workspace_path = response
+                .get("workspacePath")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            Ok((session_id, workspace_path))
+        });
+        let (session_id, workspace_path) = match opened {
+            Ok(opened) => opened,
+            Err(e) => {
+                if let Some(registration_id) = github_token_registration {
+                    let mut providers = self.github_token_providers.lock().await;
+                    providers.remove(&registration_id);
+                }
+                return Err(e);
+            }
+        };
 
         let session = Arc::new(CopilotSession::new(
             session_id.clone(),
             rpc.clone(),
             workspace_path,
         ));
+
+        if let Some(registration_id) = github_token_registration {
+            {
+                let mut providers = self.github_token_providers.lock().await;
+                if let Some(registration) = providers.get_mut(&registration_id) {
+                    registration.session_id = Some(session_id.clone());
+                }
+            }
+            session
+                .set_github_token_registration(
+                    registration_id,
+                    Arc::clone(&self.github_token_providers),
+                )
+                .await;
+        }
 
         {
             let mut sessions = self.sessions.lock().await;
@@ -311,41 +448,33 @@ impl CopilotClient {
         Ok(session)
     }
 
-    /// Resumes an existing conversation session by its ID.
-    pub async fn resume_session(
+    /// Registers a session's GitHub token provider and adds its registration ID to
+    /// the request params (`gitHubTokenProviderRegistrationId`).
+    async fn register_github_token_provider(
         &self,
-        config: ResumeSessionConfig,
-    ) -> Result<Arc<CopilotSession>, CopilotError> {
-        self.ensure_connected().await?;
-
-        let rpc = self.get_rpc_client().await?;
-
-        let params = serde_json::to_value(&config)
-            .map_err(|e| CopilotError::Serialization(e.to_string()))?;
-
-        let response = rpc.request("session.resume", params, None).await?;
-        let session_id = response
-            .get("sessionId")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CopilotError::Protocol("Missing sessionId in response".to_string()))?
-            .to_string();
-        let workspace_path = response
-            .get("workspacePath")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        let session = Arc::new(CopilotSession::new(
-            session_id.clone(),
-            rpc.clone(),
-            workspace_path,
-        ));
-
+        provider: Option<&GitHubTokenProviderFn>,
+        session_id: Option<String>,
+        params: &mut Value,
+    ) -> Option<String> {
+        let provider = provider?.clone();
+        let registration_id = uuid::Uuid::new_v4().to_string();
         {
-            let mut sessions = self.sessions.lock().await;
-            sessions.insert(session_id, Arc::clone(&session));
+            let mut providers = self.github_token_providers.lock().await;
+            providers.insert(
+                registration_id.clone(),
+                GitHubTokenRegistration {
+                    provider,
+                    session_id,
+                },
+            );
         }
-
-        Ok(session)
+        if let Some(obj) = params.as_object_mut() {
+            obj.insert(
+                "gitHubTokenProviderRegistrationId".to_string(),
+                Value::String(registration_id.clone()),
+            );
+        }
+        Some(registration_id)
     }
 
     /// Gets the last session ID.
@@ -451,6 +580,14 @@ impl CopilotClient {
             .request("auth.getStatus", serde_json::json!({}), None)
             .await?;
         serde_json::from_value(response).map_err(|e| CopilotError::Serialization(e.to_string()))
+    }
+
+    /// Clears the runtime's cached managed (enterprise) settings (`managedSettings.clearCache`).
+    pub async fn clear_managed_settings_cache(&self) -> Result<(), CopilotError> {
+        let rpc = self.get_rpc_client().await?;
+        rpc.request("managedSettings.clearCache", serde_json::json!({}), None)
+            .await?;
+        Ok(())
     }
 
     /// Lists available models with their metadata.
@@ -854,6 +991,32 @@ impl CopilotClient {
         }
     }
 
+    /// Sends the `connect` handshake carrying `client_info` (skipped when unset or all-empty).
+    ///
+    /// Older CLIs without `connect` answer -32601 / "Unhandled method connect"; that is ignored.
+    async fn send_client_info(&self) -> Result<(), CopilotError> {
+        let client_info = match self
+            .options
+            .client_info
+            .as_ref()
+            .and_then(|info| info.to_wire())
+        {
+            Some(client_info) => client_info,
+            None => return Ok(()),
+        };
+        let rpc = self.get_rpc_client().await?;
+        let params = serde_json::json!({ "clientInfo": client_info });
+        match rpc.request("connect", params, None).await {
+            Ok(_) => Ok(()),
+            Err(CopilotError::JsonRpc { code, message, .. })
+                if code == -32601 || message.contains("Unhandled method connect") =>
+            {
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     // ========================================================================
     // Internal: Connection Handlers
     // ========================================================================
@@ -1081,6 +1244,55 @@ impl CopilotClient {
         });
         rpc_client
             .set_request_handler("hooks.invoke", hooks_handler)
+            .await;
+
+        // Set up gitHubToken.getToken handler (session GitHub token providers)
+        let github_token_providers = Arc::clone(&self.github_token_providers);
+        let github_token_handler: RequestHandler = Arc::new(move |params: Value| {
+            let providers = Arc::clone(&github_token_providers);
+            Box::pin(async move {
+                let registration_id = params
+                    .get("registrationId")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| CopilotError::Protocol("Missing registrationId".to_string()))?;
+                let host = params
+                    .get("host")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| CopilotError::Protocol("Missing host".to_string()))?;
+                let reason = params
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| CopilotError::Protocol("Missing reason".to_string()))?;
+
+                let registration = {
+                    let providers = providers.lock().await;
+                    providers.get(registration_id).cloned()
+                };
+                let registration = registration.ok_or_else(|| {
+                    CopilotError::NoHandler(format!(
+                        "No GitHub token provider registered for registration ID \"{}\"",
+                        registration_id
+                    ))
+                })?;
+
+                let args = GitHubTokenProviderArgs {
+                    host: host.to_string(),
+                    session_id: params
+                        .get("sessionId")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .or(registration.session_id),
+                    reason: reason.to_string(),
+                };
+                let result = (registration.provider.0)(args).await.map_err(|e| {
+                    CopilotError::SessionError(format!("GitHub token provider failed: {}", e))
+                })?;
+                serde_json::to_value(result)
+                    .map_err(|e| CopilotError::Serialization(e.to_string()))
+            })
+        });
+        rpc_client
+            .set_request_handler("gitHubToken.getToken", github_token_handler)
             .await;
     }
 }

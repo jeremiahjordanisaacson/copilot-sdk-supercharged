@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.*;
@@ -141,10 +142,36 @@ public class JsonRpcClient {
             if (result instanceof Map) {
                 return (Map<String, Object>) result;
             }
+            if (result == null) {
+                // Void methods (e.g. managedSettings.clearCache) answer with a null result.
+                return new HashMap<>();
+            }
             return Map.of("result", result);
         } finally {
             pendingRequests.remove(requestId);
         }
+    }
+
+    /**
+     * Returns whether a request failed because the server does not implement the method
+     * (JSON-RPC error -32601 or an "Unhandled method" message), e.g. an older CLI.
+     *
+     * @param error the failure thrown by {@link #request}
+     * @param method the requested method name
+     * @return true if the failure is a method-not-found error
+     */
+    public static boolean isMethodNotFound(Throwable error, String method) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof JsonRpcException) {
+                JsonRpcException rpcError = (JsonRpcException) current;
+                if (rpcError.code == -32601) return true;
+                String message = rpcError.getMessage();
+                return message != null && message.contains("Unhandled method " + method);
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private void sendMessage(Map<String, Object> message) throws JsonProcessingException, IOException {

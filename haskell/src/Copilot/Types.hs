@@ -74,6 +74,44 @@ module Copilot.Types
   , attachmentGitHubFile
   , attachmentGitHubSnippet
 
+    -- * v2.6.0 upstream-sync feature types & constants
+  , CopilotClientInfo (..)
+  , defaultClientInfo
+  , clientInfoToWire
+  , autoTierEfficiency
+  , autoTierBalance
+  , autoTierIntelligence
+  , autoTierFast
+  , askUserVariantLegacy
+  , askUserVariantElicitation
+  , trustWorkingDirectorySession
+  , trustWorkingDirectoryUser
+  , MessageSource
+  , messageSourceUser
+  , messageSourceSystem
+  , messageSourceAgent
+  , modelProviderOpenAI
+  , modelProviderAnthropic
+  , modelProviderAzureOpenAI
+  , modelProviderOllama
+  , modelProviderLmStudio
+  , modelProviderFoundryLocal
+  , modelProviderLlamaCpp
+  , GitHubTokenProviderArgs (..)
+  , GitHubTokenGrant (..)
+  , GitHubTokenProviderResult (..)
+  , GitHubTokenProvider
+  , SandboxConfig (..)
+  , defaultSandboxConfig
+  , ImageGenerationConfig (..)
+  , defaultImageGenerationConfig
+  , AutopilotConfig (..)
+  , defaultAutopilotConfig
+  , ModelLimitsOverride (..)
+  , defaultModelLimitsOverride
+  , modelCapabilitiesWithLimits
+  , structuredResponseFormat
+
     -- * Response format & image types
   , ResponseFormat (..)
   , ImageOptions (..)
@@ -117,6 +155,10 @@ module Copilot.Types
   , SessionEndHookOutput (..)
   , ErrorOccurredHookInput (..)
   , ErrorOccurredHookOutput (..)
+  , SubagentStartHookInput (..)
+  , SubagentStartHookOutput (..)
+  , SubagentStopHookInput (..)
+  , SubagentStopHookOutput (..)
   , SessionHooks (..)
   , defaultSessionHooks
 

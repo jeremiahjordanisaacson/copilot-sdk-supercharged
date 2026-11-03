@@ -279,7 +279,7 @@ let ``CopilotClient NegotiatedProtocolVersion is None before start`` () =
 
 [<Fact>]
 let ``MessageOptions record creates correctly`` () =
-    let opts = { Prompt = "hello"; Attachments = None; Mode = None; AgentMode = None; DisplayPrompt = None; RequestHeaders = None }
+    let opts = { Prompt = "hello"; Attachments = None; Mode = None; AgentMode = None; DisplayPrompt = None; RequestHeaders = None; Source = None; ResponseSchema = None }
     opts.Prompt |> should equal "hello"
     opts.Attachments |> should equal None
     opts.Mode |> should equal None
@@ -287,7 +287,7 @@ let ``MessageOptions record creates correctly`` () =
 [<Fact>]
 let ``MessageOptions with attachments`` () =
     let attachment = { Type = "file"; Path = Some "./test.fs"; Url = None; Content = None }
-    let opts = { Prompt = "review"; Attachments = Some [attachment]; Mode = None; AgentMode = None; DisplayPrompt = None; RequestHeaders = None }
+    let opts = { Prompt = "review"; Attachments = Some [attachment]; Mode = None; AgentMode = None; DisplayPrompt = None; RequestHeaders = None; Source = None; ResponseSchema = None }
     opts.Attachments |> Option.get |> List.length |> should equal 1
 
 // ---------------------------------------------------------------------------
@@ -332,3 +332,77 @@ let ``GetAuthStatusResponse deserializes from JSON`` () =
     let auth = JsonSerializer.Deserialize<GetAuthStatusResponse>(json, opts)
     auth.Authenticated |> should equal true
     auth.User |> should equal (Some "octocat")
+
+// ---------------------------------------------------------------------------
+// v2.6.0 feature tests
+// ---------------------------------------------------------------------------
+
+[<Fact>]
+let ``CopilotClientInfo toWire maps to editor and extension keys`` () =
+    let info = { CopilotClientInfo.empty with ApplicationName = Some "MyApp"; IntegrationVersion = Some "1.2.3" }
+    let wire = CopilotClientInfo.toWire info |> Option.get
+    wire.["editorName"] |> should equal (box "MyApp")
+    wire.["extensionVersion"] |> should equal (box "1.2.3")
+    wire.ContainsKey("editorVersion") |> should equal false
+
+[<Fact>]
+let ``CopilotClientInfo toWire returns None when all fields are empty`` () =
+    let info = { CopilotClientInfo.empty with ApplicationName = Some "" }
+    CopilotClientInfo.toWire info |> should equal None
+
+[<Fact>]
+let ``MessageSource helpers build source strings`` () =
+    MessageSource.User |> should equal "user"
+    MessageSource.System |> should equal "system"
+    MessageSource.agent "reviewer" |> should equal "agent-reviewer"
+
+[<Fact>]
+let ``SandboxConfig toWire omits unset flags`` () =
+    let wire = SandboxConfig.toWire { SandboxConfig.create true with AllowBypass = Some true }
+    wire.["enabled"] |> should equal (box true)
+    wire.["allowBypass"] |> should equal (box true)
+    wire.ContainsKey("sandboxMcpServers") |> should equal false
+
+[<Fact>]
+let ``GitHubTokenProviderResult toWire serializes token and cancelled`` () =
+    let token =
+        GitHubTokenProviderResult.toWire (
+            GitHubTokenGranted { AccessToken = "gho_x"; TokenType = None; ExpiresIn = 3600 })
+    token.["kind"] |> should equal (box "token")
+    token.["expiresIn"] |> should equal (box 3600)
+    token.ContainsKey("tokenType") |> should equal false
+    let cancelled = GitHubTokenProviderResult.toWire GitHubTokenCancelled
+    cancelled.["kind"] |> should equal (box "cancelled")
+
+[<Fact>]
+let ``ModelLimitsOverride toCapabilities uses snake_case limits`` () =
+    let caps =
+        ModelLimitsOverride.toCapabilities
+            { MaxPromptTokens = None; MaxOutputTokens = Some 8192; MaxContextWindowTokens = None }
+    let json = JsonSerializer.Serialize(caps)
+    json |> should haveSubstring "\"max_output_tokens\":8192"
+
+[<Fact>]
+let ``MessageOptions responseFormatFor builds a json_schema response format`` () =
+    let schema = JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()
+    let json = JsonSerializer.Serialize(MessageOptions.responseFormatFor schema)
+    json |> should haveSubstring "\"type\":\"json_schema\""
+    json |> should haveSubstring "\"name\":\"response\""
+    json |> should haveSubstring "\"strict\":true"
+
+[<Fact>]
+let ``SubagentHooks parseStopInput reads stop fields`` () =
+    let payload =
+        """{"timestamp":1,"cwd":"/w","transcriptPath":"/t","agentName":"explore","agentType":"explore","stopReason":"end_turn","response":"done"}"""
+    let input = SubagentHooks.parseStopInput (JsonDocument.Parse(payload).RootElement.Clone())
+    input.AgentName |> should equal "explore"
+    input.Response |> should equal "done"
+    input.StopReason |> should equal "end_turn"
+    input.Timestamp |> should equal (Some 1L)
+
+[<Fact>]
+let ``ResumeSessionConfig create leaves new options unset`` () =
+    let config = ResumeSessionConfig.create "s1"
+    config.SessionId |> should equal "s1"
+    config.AutoTier |> should equal None
+    config.AllowTranscriptRecovery |> should equal None

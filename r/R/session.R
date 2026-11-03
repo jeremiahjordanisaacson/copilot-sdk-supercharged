@@ -37,6 +37,7 @@ CopilotSession <- R6::R6Class(
       private$exit_plan_mode_handler <- NULL
       private$trace_context_provider <- NULL
       private$hooks <- NULL
+      private$disconnect_callbacks <- list()
     },
 
     #' @description Send a message to this session.
@@ -49,23 +50,32 @@ CopilotSession <- R6::R6Class(
     #' @param request_headers Named list or NULL. Extra HTTP headers for this message.
     #' @param response_format Character or NULL. Response format ("text", "image", or "json_object").
     #' @param image_options List or NULL. Image generation options (from \code{image_options()}).
+    #' @param source Character or NULL. Message source: \code{MessageSource$USER},
+    #'   \code{MessageSource$SYSTEM}, or \code{MessageSource$agent(id)}.
+    #' @param response_schema Named list or NULL. JSON Schema for a structured response; sent as
+    #'   a \code{json_schema} \code{responseFormat} (takes precedence over \code{response_format}).
     #'
     #' @return Character. The message ID of the response.
     send = function(prompt, attachments = NULL, mode = NULL,
                     agent_mode = NULL, display_prompt = NULL, request_headers = NULL,
-                    response_format = NULL, image_options = NULL) {
+                    response_format = NULL, image_options = NULL,
+                    source = NULL, response_schema = NULL) {
       agent_mode <- agent_mode %||% private$default_agent_mode
       display_prompt <- display_prompt %||% private$default_display_prompt
       payload <- list(
         sessionId = self$session_id,
         prompt = prompt
       )
+      if (!is.null(source)) payload$source <- source
       if (!is.null(attachments)) payload$attachments <- attachments
       if (!is.null(mode)) payload$mode <- mode
       if (!is.null(agent_mode)) payload$agentMode <- agent_mode
       if (!is.null(display_prompt)) payload$displayPrompt <- display_prompt
       if (!is.null(request_headers)) payload$requestHeaders <- request_headers
       if (!is.null(response_format)) payload$responseFormat <- response_format
+      if (!is.null(response_schema)) {
+        payload$responseFormat <- structured_response_format(response_schema)
+      }
       if (!is.null(image_options)) payload$imageOptions <- image_options
 
       response <- private$client$request("session.send", payload)
@@ -84,13 +94,15 @@ CopilotSession <- R6::R6Class(
     #' @param response_format Character or NULL. Response format ("text", "image", or "json_object").
     #' @param image_options List or NULL. Image generation options (from \code{image_options()}).
     #' @param timeout Numeric. Timeout in seconds (default 60).
+    #' @param source Character or NULL. Message source (see \code{MessageSource}).
+    #' @param response_schema Named list or NULL. JSON Schema for a structured response.
     #'
     #' @return The last assistant.message SessionEvent, or NULL if none received.
     send_and_wait = function(prompt, attachments = NULL, mode = NULL,
                              agent_mode = NULL, display_prompt = NULL,
                              request_headers = NULL,
                              response_format = NULL, image_options = NULL,
-                             timeout = 60) {
+                             timeout = 60, source = NULL, response_schema = NULL) {
       last_assistant_message <- NULL
       error_event <- NULL
       idle_received <- FALSE
@@ -115,7 +127,8 @@ CopilotSession <- R6::R6Class(
       self$send(prompt = prompt, attachments = attachments, mode = mode,
                 agent_mode = agent_mode, display_prompt = display_prompt,
                 request_headers = request_headers,
-                response_format = response_format, image_options = image_options)
+                response_format = response_format, image_options = image_options,
+                source = source, response_schema = response_schema)
 
       # Poll until idle or timeout
       start_time <- proc.time()[["elapsed"]]
@@ -133,6 +146,41 @@ CopilotSession <- R6::R6Class(
       }
 
       last_assistant_message
+    },
+
+    #' @description Send a message with a JSON Schema and return the parsed structured result.
+    #'
+    #' Sets \code{response_schema}, waits via \code{send_and_wait()}, and parses the final
+    #' assistant message content as JSON.
+    #'
+    #' @param prompt Character. The prompt/message text.
+    #' @param response_schema Named list. JSON Schema describing the expected result
+    #'   (use \code{list(...)} for JSON arrays such as \code{required}).
+    #' @param attachments List or NULL. Optional attachments.
+    #' @param mode Character or NULL. Processing mode.
+    #' @param agent_mode Character or NULL. Agent mode for this message.
+    #' @param display_prompt Character or NULL. Alternate prompt text to display.
+    #' @param request_headers Named list or NULL. Extra HTTP headers for this message.
+    #' @param source Character or NULL. Message source (see \code{MessageSource}).
+    #' @param timeout Numeric. Timeout in seconds (default 60).
+    #'
+    #' @return The parsed JSON result (named list / list).
+    send_and_wait_structured = function(prompt, response_schema, attachments = NULL,
+                                        mode = NULL, agent_mode = NULL,
+                                        display_prompt = NULL, request_headers = NULL,
+                                        source = NULL, timeout = 60) {
+      if (is.null(response_schema)) stop("response_schema is required")
+      event <- self$send_and_wait(
+        prompt = prompt, attachments = attachments, mode = mode,
+        agent_mode = agent_mode, display_prompt = display_prompt,
+        request_headers = request_headers, timeout = timeout,
+        source = source, response_schema = response_schema
+      )
+      content <- if (is.null(event)) NULL else event$data[["content"]]
+      if (!is.character(content) || length(content) != 1 || !nzchar(trimws(content))) {
+        stop("The requested run completed without a structured assistant response")
+      }
+      jsonlite::fromJSON(content, simplifyVector = FALSE)
     },
 
     #' @description Subscribe to events from this session.
@@ -342,7 +390,9 @@ CopilotSession <- R6::R6Class(
         userPromptTransformed = private$hooks$on_user_prompt_transformed,
         sessionStart = private$hooks$on_session_start,
         sessionEnd = private$hooks$on_session_end,
-        errorOccurred = private$hooks$on_error_occurred
+        errorOccurred = private$hooks$on_error_occurred,
+        subagentStart = private$hooks$on_subagent_start,
+        subagentStop = private$hooks$on_subagent_stop
       )
 
       handler <- handler_map[[hook_type]]
@@ -375,14 +425,67 @@ CopilotSession <- R6::R6Class(
     },
 
     #' @description Destroy this session and release resources.
+    #'
+    #' Sends \code{session.detach} (falling back to \code{session.destroy} on CLIs that
+    #' do not implement it). Session state on disk is preserved for later resume.
     destroy = function() {
-      private$client$request("session.destroy", list(sessionId = self$session_id))
+      params <- list(sessionId = self$session_id)
+      tryCatch(
+        private$client$request("session.detach", params),
+        json_rpc_error = function(e) {
+          if (!identical(as.integer(e$code), -32601L)) stop(e)
+          private$client$request("session.destroy", params)
+        }
+      )
       private$event_handlers <- list()
       private$tool_handlers <- list()
       private$permission_handler <- NULL
       private$user_input_handler <- NULL
       private$hooks <- NULL
+      callbacks <- private$disconnect_callbacks
+      private$disconnect_callbacks <- list()
+      for (callback in callbacks) {
+        tryCatch(callback(), error = function(e) NULL)
+      }
       invisible(NULL)
+    },
+
+    #' @description Register a callback run once when this session is destroyed.
+    #' @param callback Function with no arguments.
+    #' @keywords internal
+    register_disconnect_callback = function(callback) {
+      private$disconnect_callbacks <- c(private$disconnect_callbacks, list(callback))
+      invisible(NULL)
+    },
+
+    #' @description Change the experimental Auto routing preference without changing the model.
+    #' @param auto_tier Character ("efficiency", "balance", "intelligence", "fast") or NULL to
+    #'   return to the provider's default Auto routing (sent as JSON null).
+    #' @return Named list (status, effectiveAutoTier, pendingAutoTier, activatingAutoTier,
+    #'   supersededAutoTier).
+    set_auto_tier = function(auto_tier) {
+      private$client$request(
+        "session.model.switchAutoTier",
+        list(sessionId = self$session_id, autoTier = auto_tier)
+      )
+    },
+
+    #' @description Get the managed (enterprise) settings resolved for this session.
+    #' @return Named list with the resolved managed settings.
+    get_managed_settings = function() {
+      private$client$request(
+        "session.managedSettings.get",
+        list(sessionId = self$session_id)
+      )
+    },
+
+    #' @description Re-run the managed-settings policy helper for this session.
+    #' @return Named list with the refreshed managed settings.
+    recheck_policy_helper = function() {
+      private$client$request(
+        "session.managedSettings.recheckPolicyHelper",
+        list(sessionId = self$session_id)
+      )
     },
 
     #' @description Abort the currently processing message.
@@ -405,6 +508,7 @@ CopilotSession <- R6::R6Class(
     commands = NULL,
     default_agent_mode = NULL,
     default_display_prompt = NULL,
+    disconnect_callbacks = NULL,
 
     handle_elicitation_request = function(data) {
       request_id <- data$requestId

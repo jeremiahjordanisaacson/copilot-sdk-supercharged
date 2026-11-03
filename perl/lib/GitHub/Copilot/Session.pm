@@ -40,6 +40,7 @@ sub new {
         _hooks             => undef,
         _exit_plan_mode_handler => undef,
         _trace_context_provider => undef,
+        _destroy_callbacks => [],
     }, $class;
 
     return $self;
@@ -68,6 +69,8 @@ sub send {
     my $agent_mode;
     my $display_prompt;
     my $request_headers;
+    my $source;
+    my $response_schema;
 
     if (ref($options) && blessed($options)) {
         $attachments     = $options->attachments;
@@ -77,6 +80,8 @@ sub send {
         $agent_mode      = $options->agent_mode      if $options->can('agent_mode');
         $display_prompt  = $options->display_prompt   if $options->can('display_prompt');
         $request_headers = $options->request_headers  if $options->can('request_headers');
+        $source          = $options->source           if $options->can('source');
+        $response_schema = $options->response_schema  if $options->can('response_schema');
     } else {
         $attachments     = $options->{attachments};
         $mode            = $options->{mode};
@@ -85,15 +90,27 @@ sub send {
         $agent_mode      = $options->{agent_mode};
         $display_prompt  = $options->{display_prompt};
         $request_headers = $options->{request_headers};
+        $source          = $options->{source};
+        $response_schema = $options->{response_schema};
     }
 
     my %payload = (
         sessionId => $self->{session_id},
         prompt    => $prompt,
     );
+    # Message provenance: 'user', 'system' or 'agent-<id>' (see MessageSource)
+    $payload{source}         = $source          if defined $source;
     $payload{attachments}    = $attachments     if defined $attachments;
     $payload{mode}           = $mode            if defined $mode;
-    $payload{responseFormat} = $response_format if defined $response_format;
+    if (defined $response_schema) {
+        # Structured output takes precedence over the legacy string response format.
+        $payload{responseFormat} = {
+            type       => 'json_schema',
+            jsonSchema => { name => 'response', strict => \1, schema => $response_schema },
+        };
+    } elsif (defined $response_format) {
+        $payload{responseFormat} = $response_format;
+    }
     $payload{imageOptions}   = $image_options   if defined $image_options;
     # Per-message overrides (upstream sync)
     $payload{agentMode}      = $agent_mode      if defined $agent_mode;
@@ -170,6 +187,37 @@ sub send_and_wait {
     }
 
     return $last_assistant_message;
+}
+
+# Send a message requesting structured output and wait until the session is idle.
+# Sets response_schema, waits via send_and_wait, and returns the final assistant
+# content decoded from JSON. $options may be a MessageOptions object, an options
+# hashref, or a prompt string.
+sub send_and_wait_structured {
+    my ($self, $options, $schema, $timeout) = @_;
+    croak "schema is required" unless defined $schema;
+
+    my %opts;
+    if (blessed($options)) {
+        for my $field (qw(prompt attachments mode response_format image_options
+                          request_headers agent_mode display_prompt source)) {
+            next unless $options->can($field);
+            my $value = $options->$field;
+            $opts{$field} = $value if defined $value;
+        }
+    } elsif (ref($options) eq 'HASH') {
+        %opts = %$options;
+    } else {
+        %opts = (prompt => $options);
+    }
+    $opts{response_schema} = $schema;
+
+    my $event = $self->send_and_wait(\%opts, $timeout);
+    my $content = $event ? $event->data->{content} : undef;
+    croak "The requested run completed without a structured assistant response"
+        unless defined $content && $content =~ /\S/;
+
+    return JSON::PP->new->allow_nonref->decode($content);
 }
 
 # --------------------------------------------------------------------------
@@ -299,6 +347,8 @@ sub _handle_hooks_invoke {
         sessionStart         => $self->{_hooks}{on_session_start},
         sessionEnd           => $self->{_hooks}{on_session_end},
         errorOccurred        => $self->{_hooks}{on_error_occurred},
+        subagentStart        => $self->{_hooks}{on_subagent_start},
+        subagentStop         => $self->{_hooks}{on_subagent_stop},
     );
 
     my $handler = $handler_map{$hook_type};
@@ -353,6 +403,12 @@ sub register_trace_context_provider {
     $self->{_trace_context_provider} = $provider;
 }
 
+# Internal: register a callback run once after destroy() releases the session.
+sub _on_destroy {
+    my ($self, $callback) = @_;
+    push @{ $self->{_destroy_callbacks} }, $callback if ref($callback) eq 'CODE';
+}
+
 sub get_metadata {
     my ($self) = @_;
 
@@ -362,6 +418,43 @@ sub get_metadata {
     );
 
     return $response;
+}
+
+# --------------------------------------------------------------------------
+# Auto routing tier and managed settings
+# --------------------------------------------------------------------------
+
+# Change the Auto routing preference without changing the selected model
+# (experimental). Pass undef to return to the provider's default routing.
+# Returns the result hashref (status, effectiveAutoTier, pendingAutoTier,
+# activatingAutoTier, supersededAutoTier).
+sub set_auto_tier {
+    my ($self, $auto_tier) = @_;
+
+    return $self->{_client}->request(
+        'session.model.switchAutoTier',
+        { sessionId => $self->{session_id}, autoTier => $auto_tier },
+    );
+}
+
+# Managed (enterprise policy) settings in effect for this session.
+sub get_managed_settings {
+    my ($self) = @_;
+
+    return $self->{_client}->request(
+        'session.managedSettings.get',
+        { sessionId => $self->{session_id} },
+    );
+}
+
+# Ask the runtime to re-run the managed-settings policy helper for this session.
+sub recheck_policy_helper {
+    my ($self) = @_;
+
+    return $self->{_client}->request(
+        'session.managedSettings.recheckPolicyHelper',
+        { sessionId => $self->{session_id} },
+    );
 }
 
 # --------------------------------------------------------------------------
@@ -390,10 +483,23 @@ sub get_messages {
 sub destroy {
     my ($self) = @_;
 
-    $self->{_client}->request(
-        'session.destroy',
-        { sessionId => $self->{session_id} },
-    );
+    # Detach (preserving on-disk state); fall back to session.destroy on CLIs
+    # that do not implement session.detach.
+    my $detached = eval {
+        $self->{_client}->request(
+            'session.detach',
+            { sessionId => $self->{session_id} },
+        );
+        1;
+    };
+    if (!$detached) {
+        my $err = $@;
+        die $err unless $err =~ /JSON-RPC Error -32601\b/;
+        $self->{_client}->request(
+            'session.destroy',
+            { sessionId => $self->{session_id} },
+        );
+    }
 
     $self->{_event_handlers}     = [];
     $self->{_tool_handlers}      = {};
@@ -402,6 +508,12 @@ sub destroy {
     $self->{_hooks}              = undef;
     $self->{_exit_plan_mode_handler} = undef;
     $self->{_trace_context_provider} = undef;
+
+    my @callbacks = @{ $self->{_destroy_callbacks} || [] };
+    $self->{_destroy_callbacks} = [];
+    for my $callback (@callbacks) {
+        eval { $callback->() };
+    }
 }
 
 sub abort {
@@ -434,6 +546,9 @@ Returns the workspace path (undef if infinite sessions disabled).
 =head2 send($options)
 
 Send a message. $options is a MessageOptions object or hashref with 'prompt' key.
+Optional keys include C<source> ('user', 'system' or 'agent-<id>'; see
+GitHub::Copilot::Types::MessageSource) and C<response_schema> (a JSON Schema
+hashref, sent as a C<json_schema> responseFormat).
 Returns the messageId string.
 
 =head2 send_and_wait($options, $timeout)
@@ -442,6 +557,25 @@ Send a message and block until the session becomes idle. Returns the last
 assistant.message SessionEvent, or undef if none received.
 
 $timeout is in seconds (default: 60).
+
+=head2 send_and_wait_structured($options, $schema, $timeout)
+
+Send a message with C<response_schema> set to $schema, wait via send_and_wait,
+and return the final assistant content decoded from JSON. Dies if the run
+completed without assistant content.
+
+=head2 set_auto_tier($auto_tier)
+
+Change the Auto routing preference (C<session.model.switchAutoTier>);
+undef returns to the default routing. Returns the result hashref.
+
+=head2 get_managed_settings()
+
+Return the managed settings in effect for this session.
+
+=head2 recheck_policy_helper()
+
+Re-run the managed-settings policy helper for this session.
 
 =head2 on($handler)
 
@@ -466,7 +600,8 @@ Retrieve session metadata. Returns a hashref of session metadata.
 
 =head2 destroy()
 
-Destroy the session and release resources.
+Detach the session (C<session.detach>, falling back to C<session.destroy> on
+older CLIs) and release resources. On-disk state is preserved for resume.
 
 =head2 abort()
 

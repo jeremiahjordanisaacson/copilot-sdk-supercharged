@@ -48,6 +48,20 @@ std::string CopilotSession::send(const MessageOptions& options) {
     if (options.responseFormat) {
         params["responseFormat"] = responseFormatToString(*options.responseFormat);
     }
+    if (options.responseSchema) {
+        // Structured output supersedes the legacy string responseFormat.
+        params["responseFormat"] = {
+            {"type", "json_schema"},
+            {"jsonSchema", {
+                {"name", "response"},
+                {"strict", true},
+                {"schema", *options.responseSchema}
+            }}
+        };
+    }
+    if (options.source) {
+        params["source"] = *options.source;
+    }
     if (options.imageOptions) {
         params["imageOptions"] = *options.imageOptions;
     }
@@ -107,6 +121,24 @@ std::optional<SessionEvent> CopilotSession::sendAndWait(const MessageOptions& op
         off(handlerId);
         throw;
     }
+}
+
+nlohmann::json CopilotSession::sendAndWaitStructured(const MessageOptions& options,
+                                                     const nlohmann::json& responseSchema,
+                                                     int timeoutMs) {
+    MessageOptions structured = options;
+    structured.responseSchema = responseSchema;
+
+    auto response = sendAndWait(structured, timeoutMs);
+    if (!response || !response->data.contains("content") || !response->data["content"].is_string()) {
+        throw std::runtime_error("The requested run completed without a structured assistant response.");
+    }
+
+    const std::string content = response->data["content"].get<std::string>();
+    if (content.find_first_not_of(" \t\r\n") == std::string::npos) {
+        throw std::runtime_error("The requested run completed without a structured assistant response.");
+    }
+    return nlohmann::json::parse(content);
 }
 
 // ============================================================================
@@ -300,6 +332,14 @@ nlohmann::json CopilotSession::handleHooksInvoke(const std::string& hookType,
             auto hookInput = input.get<ErrorOccurredHookInput>();
             auto result = hooks->onErrorOccurred(hookInput, sessionId);
             if (result) return *result;
+        } else if (hookType == "subagentStart" && hooks->onSubagentStart) {
+            auto hookInput = input.get<SubagentStartHookInput>();
+            auto result = hooks->onSubagentStart(hookInput, sessionId);
+            if (result) return *result;
+        } else if (hookType == "subagentStop" && hooks->onSubagentStop) {
+            auto hookInput = input.get<SubagentStopHookInput>();
+            auto result = hooks->onSubagentStop(hookInput, sessionId);
+            if (result) return *result;
         }
     } catch (...) {
         // Hook handler error, return null
@@ -328,13 +368,35 @@ nlohmann::json CopilotSession::getMetadata() {
     return result;
 }
 
+nlohmann::json CopilotSession::setAutoTier(const std::optional<std::string>& autoTier) {
+    nlohmann::json params = {{"sessionId", sessionId}};
+    params["autoTier"] = autoTier ? nlohmann::json(*autoTier) : nlohmann::json(nullptr);
+    return client_->request("session.model.switchAutoTier", params);
+}
+
+nlohmann::json CopilotSession::getManagedSettings() {
+    return client_->request("session.managedSettings.get", {{"sessionId", sessionId}});
+}
+
+nlohmann::json CopilotSession::recheckPolicyHelper() {
+    return client_->request("session.managedSettings.recheckPolicyHelper", {{"sessionId", sessionId}});
+}
+
 void CopilotSession::destroy() {
-    client_->request("session.destroy", {{"sessionId", sessionId}});
+    try {
+        client_->request("session.detach", {{"sessionId", sessionId}});
+    } catch (const std::exception& e) {
+        // Older CLIs do not implement session.detach; fall back to session.destroy.
+        if (!isMethodNotFoundError(e)) throw;
+        client_->request("session.destroy", {{"sessionId", sessionId}});
+    }
 
     // Clear all handlers
+    std::function<void()> onDisconnected;
     {
         std::lock_guard<std::mutex> lock(handlerMutex_);
         handlers_.clear();
+        onDisconnected.swap(onDisconnected_);
     }
     {
         std::lock_guard<std::mutex> lock(toolMutex_);
@@ -351,6 +413,10 @@ void CopilotSession::destroy() {
     {
         std::lock_guard<std::mutex> lock(exitPlanModeMutex_);
         exitPlanModeHandler_ = nullptr;
+    }
+
+    if (onDisconnected) {
+        onDisconnected();
     }
 }
 

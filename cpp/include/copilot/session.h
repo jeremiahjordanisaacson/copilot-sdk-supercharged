@@ -44,6 +44,28 @@ public:
     /// @throws std::runtime_error on timeout or session error.
     std::optional<SessionEvent> sendAndWait(const MessageOptions& options, int timeoutMs = 60000);
 
+    /// Sends a message requesting structured output that conforms to `responseSchema`
+    /// (a JSON Schema), waits via sendAndWait(), and returns the final assistant
+    /// content parsed as JSON.
+    /// @throws std::runtime_error if the run completes without assistant content,
+    ///         nlohmann::json::parse_error if the content is not valid JSON.
+    nlohmann::json sendAndWaitStructured(const MessageOptions& options,
+                                         const nlohmann::json& responseSchema,
+                                         int timeoutMs = 60000);
+
+    /// Changes the Auto routing preference without changing the selected model
+    /// (`session.model.switchAutoTier`). Pass std::nullopt to return to the
+    /// provider's default Auto routing. Returns the runtime's acknowledgement
+    /// (status, effectiveAutoTier, pendingAutoTier, ...). Experimental.
+    nlohmann::json setAutoTier(const std::optional<std::string>& autoTier);
+
+    /// Returns the effective managed settings for this session (`session.managedSettings.get`).
+    nlohmann::json getManagedSettings();
+
+    /// Re-runs the managed-settings policy helper for this session
+    /// (`session.managedSettings.recheckPolicyHelper`).
+    nlohmann::json recheckPolicyHelper();
+
     /// Subscribe to all events from this session.
     /// @return An ID that can be passed to off() to unsubscribe.
     uint64_t on(SessionEventHandler handler);
@@ -62,6 +84,8 @@ public:
     nlohmann::json getMetadata();
 
     /// Destroy this session and release resources.
+    /// Sends `session.detach` (falling back to `session.destroy` on older CLIs);
+    /// on-disk session state is preserved so the session can be resumed later.
     void destroy();
 
     /// Abort the currently processing message.
@@ -139,6 +163,10 @@ private:
     // Exit plan mode handler
     mutable std::mutex exitPlanModeMutex_;
     ExitPlanModeHandler exitPlanModeHandler_;
+
+    // Invoked once after a successful destroy() (e.g. to drop a GitHub token
+    // provider registration). Guarded by handlerMutex_.
+    std::function<void()> onDisconnected_;
 };
 
 } // namespace copilot

@@ -16,6 +16,7 @@ Namespace GitHub.Copilot.SDK
 
         Private ReadOnly _pendingRequests As New ConcurrentDictionary(Of Integer, TaskCompletionSource(Of JsonElement))
         Private ReadOnly _notificationHandlers As New ConcurrentDictionary(Of String, List(Of Action(Of JsonElement)))
+        Private ReadOnly _requestHandlers As New ConcurrentDictionary(Of String, Func(Of JsonElement, Task(Of Object)))
         Private ReadOnly _inputStream As Stream
         Private ReadOnly _outputStream As Stream
         Private ReadOnly _reader As StreamReader
@@ -119,6 +120,17 @@ Namespace GitHub.Copilot.SDK
                                                 End Sub)
         End Function
 
+        ''' <summary>
+        ''' Registers a handler for incoming server-to-client requests of the given method.
+        ''' The handler's return value is sent back as the JSON-RPC result; an exception is
+        ''' sent back as a JSON-RPC error.
+        ''' </summary>
+        ''' <param name="method">Request method name to handle.</param>
+        ''' <param name="handler">Callback invoked with the params element.</param>
+        Public Sub OnRequest(method As String, handler As Func(Of JsonElement, Task(Of Object)))
+            _requestHandlers(method) = handler
+        End Sub
+
         ' ----- internal helpers -----
 
         Private Async Function WriteMessageAsync(json As String) As Task
@@ -141,7 +153,9 @@ Namespace GitHub.Copilot.SDK
                         Dim doc = JsonDocument.Parse(line)
                         Dim root = doc.RootElement
 
-                        If root.TryGetProperty("id", Nothing) Then
+                        If root.TryGetProperty("method", Nothing) AndAlso root.TryGetProperty("id", Nothing) Then
+                            HandleRequest(root)
+                        ElseIf root.TryGetProperty("id", Nothing) Then
                             HandleResponse(root)
                         Else
                             HandleNotification(root)
@@ -178,7 +192,14 @@ Namespace GitHub.Copilot.SDK
                 If errorProp.TryGetProperty("message", msgProp) Then
                     message = msgProp.GetString()
                 End If
-                tcs.TrySetException(New JsonRpcException(message))
+                Dim code = 0
+                Dim codeProp As JsonElement = Nothing
+                If errorProp.ValueKind = JsonValueKind.Object AndAlso
+                   errorProp.TryGetProperty("code", codeProp) AndAlso
+                   codeProp.ValueKind = JsonValueKind.Number Then
+                    code = codeProp.GetInt32()
+                End If
+                tcs.TrySetException(New JsonRpcException(message) With {.Code = code})
             Else
                 Dim resultProp As JsonElement = Nothing
                 If root.TryGetProperty("result", resultProp) Then

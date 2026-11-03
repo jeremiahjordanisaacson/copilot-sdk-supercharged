@@ -16,6 +16,7 @@ import {
     CopilotClient,
     approveAll,
     type CopilotSession,
+    type ResumeSessionConfig,
     type SessionConfig,
     type Tool,
 } from "copilot-sdk-supercharged";
@@ -30,15 +31,26 @@ import {
 
 import type {
     AuditReport,
+    AutoTier,
     CopilotSolidityClientOptions,
     GasReport,
     GeneratedTestSuite,
+    GitHubTokenProvider,
+    ModelSwitchAutoTierResult,
     SoliditySessionConfig,
     SolidityMessageOptions,
     SolidityUpstreamSessionOptions,
     SessionEventEnvelope,
     TestFramework,
 } from "./types.js";
+
+/** Session options accepted by {@link CopilotSolidityClient.createSession} and `resumeSession`. */
+export type SoliditySessionOptions = Partial<SoliditySessionConfig> & SolidityUpstreamSessionOptions;
+
+/** Minimal JSON-RPC connection surface used for methods without a typed wrapper. */
+interface RawRpcConnection {
+    sendRequest(method: string, params?: unknown): Promise<unknown>;
+}
 
 // ---------------------------------------------------------------------------
 // Solidity system prompt
@@ -93,6 +105,15 @@ export class CopilotSolidityClient {
         await this.client.stop();
     }
 
+    /**
+     * Force-refresh enterprise managed settings for every account
+     * (`managedSettings.clearCache`). The next session resolution re-fetches
+     * the account's org policy instead of serving a cached response.
+     */
+    async clearManagedSettingsCache(): Promise<void> {
+        await this.client.rpc.managedSettings.clearCache();
+    }
+
     // -----------------------------------------------------------------------
     // Foreground session management
     // -----------------------------------------------------------------------
@@ -142,14 +163,56 @@ export class CopilotSolidityClient {
         return (this.client as any).request("auth.getStatus", {});
     }
 
-    /** Resume a previously created session by ID. */
-    async resumeSession(sessionId: string): Promise<unknown> {
-        return (this.client as any).request("session.resume", { sessionId });
+    /**
+     * Resume a previously created session by ID.
+     *
+     * Without `config`, issues the raw "session.resume" RPC. With `config`, the
+     * session is resumed through the base SDK with the Solidity tools and the
+     * resume options are forwarded (autoTier, askUserVariant, sandboxConfig,
+     * featureFlags, allowedModels, allowTranscriptRecovery, gitHubTokenProvider, ...).
+     */
+    async resumeSession(sessionId: string): Promise<unknown>;
+    async resumeSession(sessionId: string, config: SoliditySessionOptions): Promise<CopilotSession>;
+    async resumeSession(sessionId: string, config?: SoliditySessionOptions): Promise<unknown> {
+        if (config === undefined) {
+            return (this.client as any).request("session.resume", { sessionId });
+        }
+        assertGitHubTokenOptions(config);
+
+        const resumeConfig: ResumeSessionConfig = {
+            ...config,
+            tools: this.buildSessionTools(config),
+            onPermissionRequest: config.onPermissionRequest ?? approveAll,
+            systemMessage: config.systemMessage ?? {
+                mode: "append" as const,
+                content: SOLIDITY_SYSTEM_PROMPT,
+            },
+            ...this.buildUpstreamSessionOptions(config, "resume"),
+        };
+
+        return this.client.resumeSession(sessionId, resumeConfig);
     }
 
     /** Delete a session by ID. */
     async deleteSession(sessionId: string): Promise<void> {
         await (this.client as any).request("session.delete", { sessionId });
+    }
+
+    /**
+     * Release a session by ID without deleting its on-disk state, so it can be
+     * resumed later. Sends "session.detach" and falls back to the legacy
+     * "session.destroy" when the runtime predates it (JSON-RPC -32601).
+     */
+    async detachSession(sessionId: string): Promise<void> {
+        const connection = this.rawConnection();
+        try {
+            await connection.sendRequest("session.detach", { sessionId });
+        } catch (error) {
+            if (!isMethodNotFound(error)) {
+                throw error;
+            }
+            await connection.sendRequest("session.destroy", { sessionId });
+        }
     }
 
     /** List all known sessions. */
@@ -188,41 +251,48 @@ export class CopilotSolidityClient {
      * Any extra tools or config from `config` are merged on top.
      */
     async createSession(
-        config: Partial<SoliditySessionConfig> & SolidityUpstreamSessionOptions = {},
+        config: SoliditySessionOptions = {},
     ): Promise<CopilotSession> {
-        const builtInTools = createSolidityTools({
-            solidityVersion: this.solidityVersion,
-            defaultTestFramework: this.defaultTestFramework,
-        });
-
-        const allTools: Tool[] = [
-            ...builtInTools,
-            ...(config.solidityTools ?? []),
-            ...(config.tools ?? []),
-        ];
+        assertGitHubTokenOptions(config);
 
         const sessionConfig: SessionConfig = {
             ...config,
-            tools: allTools,
+            tools: this.buildSessionTools(config),
             onPermissionRequest: config.onPermissionRequest ?? approveAll,
             systemMessage: config.systemMessage ?? {
                 mode: "append" as const,
                 content: SOLIDITY_SYSTEM_PROMPT,
             },
-            ...this.buildUpstreamSessionOptions(config),
+            ...this.buildUpstreamSessionOptions(config, "create"),
         };
 
         return this.client.createSession(sessionConfig);
     }
 
+    /** Built-in Solidity tools followed by any caller-supplied tools. */
+    private buildSessionTools(config: SoliditySessionOptions): Tool[] {
+        const builtInTools = createSolidityTools({
+            solidityVersion: this.solidityVersion,
+            defaultTestFramework: this.defaultTestFramework,
+        });
+
+        return [
+            ...builtInTools,
+            ...(config.solidityTools ?? []),
+            ...(config.tools ?? []),
+        ];
+    }
+
     /**
      * Build the upstream-sync session options forwarded to the base SDK:
      * citations, excluded built-in agents, spending limits, session memory,
-     * OTLP telemetry protocol, WebSocket transport, experiment assignments,
-     * and the MCP OAuth host token handler signal.
+     * OTLP telemetry protocol, CAPI options (autoTier / WebSocket transport),
+     * experiment assignments, the MCP OAuth host token handler signal, and
+     * the v2.6.0 create/resume options.
      */
     private buildUpstreamSessionOptions(
-        options: SolidityUpstreamSessionOptions,
+        options: SolidityUpstreamSessionOptions & { capi?: object },
+        mode: "create" | "resume" = "create",
     ): Record<string, unknown> {
         const params: Record<string, unknown> = {};
         if (options.enableCitations !== undefined)
@@ -234,8 +304,13 @@ export class CopilotSolidityClient {
         if (options.memory !== undefined) params.memory = options.memory;
         if (options.otlpProtocol !== undefined)
             params.otlpProtocol = options.otlpProtocol;
+        // autoTier and enableWebSocketResponses travel under `capi`; the runtime
+        // schema only accepts enableWebSocketResponses there.
+        const capi: Record<string, unknown> = { ...(options.capi ?? {}) };
+        if (options.autoTier !== undefined) capi.autoTier = options.autoTier;
         if (options.enableWebSocketResponses !== undefined)
-            params.enableWebSocketResponses = options.enableWebSocketResponses;
+            capi.enableWebSocketResponses = options.enableWebSocketResponses;
+        if (Object.keys(capi).length > 0) params.capi = capi;
         if (options.expAssignments !== undefined)
             params.expAssignments = options.expAssignments;
         if (options.bearerTokenProvider !== undefined)
@@ -271,16 +346,53 @@ export class CopilotSolidityClient {
         if (options.contentExclusion !== undefined)
             params.contentExclusion = options.contentExclusion;
         if (options.onMcpAuthRequest !== undefined) params.mcpAuthHandler = true;
+        // --- v2.6.0 create/resume options ---
+        if (options.askUserVariant !== undefined)
+            params.askUserVariant = options.askUserVariant;
+        if (options.gitHubTokenProvider !== undefined)
+            params.gitHubTokenProvider = wrapGitHubTokenProvider(options.gitHubTokenProvider);
+        if (options.sandboxConfig !== undefined)
+            params.sandboxConfig = options.sandboxConfig;
+        if (options.featureFlags !== undefined)
+            params.featureFlags = options.featureFlags;
+        if (options.allowedModels !== undefined)
+            params.allowedModels = options.allowedModels;
+        if (options.authClientIdMetadataUrl !== undefined)
+            params.authClientIdMetadataUrl = options.authClientIdMetadataUrl;
+        if (options.agentDirectories !== undefined)
+            params.agentDirectories = options.agentDirectories;
+        if (options.hookDirectories !== undefined)
+            params.hookDirectories = options.hookDirectories;
+        if (options.interactiveUser !== undefined)
+            params.interactiveUser = options.interactiveUser;
+        if (options.excludedManagedSettings !== undefined)
+            params.excludedManagedSettings = options.excludedManagedSettings;
+        if (options.enforceManagedModelDefaults !== undefined)
+            params.enforceManagedModelDefaults = options.enforceManagedModelDefaults;
+        if (options.imageGeneration !== undefined)
+            params.imageGeneration = options.imageGeneration;
+        if (options.autopilot !== undefined) params.autopilot = options.autopilot;
+        if (mode === "create") {
+            if (options.name !== undefined) params.name = options.name;
+            if (options.trustWorkingDirectory !== undefined)
+                params.trustWorkingDirectory = options.trustWorkingDirectory;
+            if (options.refreshCustomInstructions !== undefined)
+                params.refreshCustomInstructions = options.refreshCustomInstructions;
+        } else if (options.allowTranscriptRecovery !== undefined) {
+            params.allowTranscriptRecovery = options.allowTranscriptRecovery;
+        }
         return params;
     }
 
     /**
      * Send a message to a session, forwarding upstream message options
-     * (agent mode, display prompt, and per-message request headers).
+     * (agent mode, display prompt, per-message request headers, message
+     * source, and structured-output schema).
      */
     async sendMessage(
         session: CopilotSession,
         options: SolidityMessageOptions,
+        timeout?: number,
     ): Promise<SessionEventEnvelope | undefined> {
         const sendOptions: Record<string, unknown> = { prompt: options.prompt };
         if (options.attachments !== undefined)
@@ -291,12 +403,64 @@ export class CopilotSolidityClient {
             sendOptions.displayPrompt = options.displayPrompt;
         if (options.requestHeaders !== undefined)
             sendOptions.requestHeaders = options.requestHeaders;
-        if (options.responseFormat !== undefined)
+        if (options.source !== undefined) sendOptions.source = options.source;
+        // A JSON Schema takes over `responseFormat` (json_schema) from the legacy string format.
+        if (options.responseSchema !== undefined)
+            sendOptions.responseSchema = options.responseSchema;
+        else if (options.responseFormat !== undefined)
             sendOptions.responseFormat = options.responseFormat;
         const response = await session.sendAndWait(
             sendOptions as unknown as Parameters<CopilotSession["sendAndWait"]>[0],
+            timeout,
         );
         return response as SessionEventEnvelope | undefined;
+    }
+
+    /**
+     * Send a message with a JSON Schema for a structured response, wait for the
+     * turn to finish, and return the final assistant content parsed as JSON.
+     *
+     * @throws Error if the run completes without assistant content
+     */
+    async sendAndWaitStructured<T = unknown>(
+        session: CopilotSession,
+        promptOrOptions: string | SolidityMessageOptions,
+        responseSchema: Record<string, unknown>,
+        timeout?: number,
+    ): Promise<T> {
+        const options: SolidityMessageOptions =
+            typeof promptOrOptions === "string" ? { prompt: promptOrOptions } : promptOrOptions;
+        const response = await this.sendMessage(session, { ...options, responseSchema }, timeout);
+        const content = response?.data?.content;
+        if (typeof content !== "string" || content.trim() === "") {
+            throw new Error("The requested run completed without a structured assistant response.");
+        }
+        return JSON.parse(content) as T;
+    }
+
+    /**
+     * Change a session's Auto routing preference without changing its model
+     * (`session.model.switchAutoTier`). Pass `null` to return to the provider's
+     * default Auto routing. Experimental.
+     */
+    async setAutoTier(
+        session: CopilotSession,
+        autoTier: AutoTier | null,
+    ): Promise<ModelSwitchAutoTierResult> {
+        return session.rpc.model.switchAutoTier({ autoTier });
+    }
+
+    /** Return a session's effective managed settings (`session.managedSettings.get`). */
+    async getManagedSettings(session: CopilotSession): Promise<unknown> {
+        return session.rpc.managedSettings.get();
+    }
+
+    /**
+     * Re-run the managed-settings policy helper for a session
+     * (`session.managedSettings.recheckPolicyHelper`) and return the snapshot.
+     */
+    async recheckPolicyHelper(session: CopilotSession): Promise<unknown> {
+        return session.rpc.managedSettings.recheckPolicyHelper();
     }
 
     // -----------------------------------------------------------------------
@@ -326,7 +490,7 @@ export class CopilotSolidityClient {
                 timestamp: new Date().toISOString(),
             });
         } finally {
-            await session.destroy();
+            await this.releaseSession(session);
         }
     }
 
@@ -350,7 +514,7 @@ export class CopilotSolidityClient {
                 timestamp: new Date().toISOString(),
             });
         } finally {
-            await session.destroy();
+            await this.releaseSession(session);
         }
     }
 
@@ -375,7 +539,7 @@ export class CopilotSolidityClient {
                 summary: raw,
             });
         } finally {
-            await session.destroy();
+            await this.releaseSession(session);
         }
     }
 
@@ -404,8 +568,39 @@ export class CopilotSolidityClient {
             const raw = response?.data?.content ?? "";
             return parseJsonResponse<unknown[]>(raw, []);
         } finally {
-            await session.destroy();
+            await this.releaseSession(session);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Session release (session.detach with legacy fallback)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Release a helper session: the base SDK's `disconnect()` sends
+     * "session.detach"; runtimes without it (-32601) get "session.destroy".
+     */
+    private async releaseSession(session: CopilotSession): Promise<void> {
+        try {
+            await session.disconnect();
+        } catch (error) {
+            if (!isMethodNotFound(error)) {
+                throw error;
+            }
+            await this.rawConnection().sendRequest("session.destroy", {
+                sessionId: session.sessionId,
+            });
+        }
+    }
+
+    /** The base client's JSON-RPC connection (for methods without a typed wrapper). */
+    private rawConnection(): RawRpcConnection {
+        const connection = (this.client as unknown as { connection?: RawRpcConnection })
+            .connection;
+        if (!connection) {
+            throw new Error("Client is not connected. Call start() first.");
+        }
+        return connection;
     }
 
     // -----------------------------------------------------------------------
@@ -436,6 +631,43 @@ export class CopilotSolidityClient {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/** True for a JSON-RPC "method not found" error (-32601) from an older runtime. */
+function isMethodNotFound(error: unknown): boolean {
+    const e = error as { code?: unknown; message?: unknown } | null | undefined;
+    if (e?.code === -32601) return true;
+    return typeof e?.message === "string" && /method not found|unhandled method/i.test(e.message);
+}
+
+/** `gitHubToken` and `gitHubTokenProvider` are mutually exclusive. */
+function assertGitHubTokenOptions(config: {
+    gitHubToken?: string;
+    gitHubTokenProvider?: unknown;
+}): void {
+    if (config.gitHubToken !== undefined && config.gitHubTokenProvider !== undefined) {
+        throw new Error("gitHubToken and gitHubTokenProvider are mutually exclusive");
+    }
+}
+
+/**
+ * Wrap a GitHub token provider so every answer to the runtime's
+ * `gitHubToken.getToken` request is a well-formed result. The base client
+ * registers the provider under a unique registration ID, sends
+ * `gitHubTokenProviderRegistrationId` on create/resume, routes
+ * `gitHubToken.getToken` requests to it, and drops the registration when
+ * the session is disconnected or the client stops.
+ */
+function wrapGitHubTokenProvider(provider: GitHubTokenProvider): GitHubTokenProvider {
+    return async (args) => {
+        const result = await provider(args);
+        if (result?.kind === "token" || result?.kind === "cancelled") {
+            return result;
+        }
+        throw new Error(
+            'gitHubToken.getToken: provider must return { kind: "token", accessToken, expiresIn } or { kind: "cancelled" }',
+        );
+    };
+}
 
 function buildAuditPrompt(
     sourceCode: string,

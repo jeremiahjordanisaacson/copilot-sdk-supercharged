@@ -43,7 +43,11 @@
     test_client_state_disconnected/1,
     test_session_subscribe_unsubscribe/1,
     test_jsonrpc_content_length_framing/1,
-    test_tool_handler_receives_args/1
+    test_tool_handler_receives_args/1,
+    test_client_info_wire/1,
+    test_message_source/1,
+    test_v2_6_wire_helpers/1,
+    test_subagent_hook_types/1
 ]).
 
 %% ---------------------------------------------------------------------------
@@ -62,7 +66,11 @@ groups() ->
             test_tool_result_failure,
             test_permission_result,
             test_user_input_response,
-            test_image_options
+            test_image_options,
+            test_client_info_wire,
+            test_message_source,
+            test_v2_6_wire_helpers,
+            test_subagent_hook_types
         ]},
         {tools, [parallel], [
             test_define_tool_basic,
@@ -151,6 +159,56 @@ test_image_options(_Config) ->
     <<"1024x1024">> = maps:get(<<"size">>, Opts),
     <<"hd">>        = maps:get(<<"quality">>, Opts),
     false           = maps:is_key(<<"style">>, Opts),
+    ok.
+
+test_client_info_wire(_Config) ->
+    Wire = copilot_types:client_info(#{
+        application_name    => <<"my-app">>,
+        application_version => <<"1.2.3">>,
+        integration_name    => <<>>
+    }),
+    <<"my-app">> = maps:get(<<"editorName">>, Wire),
+    <<"1.2.3">>  = maps:get(<<"editorVersion">>, Wire),
+    false        = maps:is_key(<<"extensionName">>, Wire),
+    0 = map_size(copilot_types:client_info(#{application_name => <<>>})),
+    0 = map_size(copilot_types:client_info(undefined)),
+    ok.
+
+test_message_source(_Config) ->
+    <<"user">>      = copilot_types:message_source(user),
+    <<"system">>    = copilot_types:message_source(system),
+    <<"agent-abc">> = copilot_types:message_source({agent, <<"abc">>}),
+    ok.
+
+test_v2_6_wire_helpers(_Config) ->
+    Sandbox = copilot_types:sandbox_config(#{enabled => true, allow_bypass => true}),
+    true = maps:get(<<"enabled">>, Sandbox),
+    true = maps:get(<<"allowBypass">>, Sandbox),
+    Images = copilot_types:image_generation(#{enabled => true, save_to_disk => false}),
+    false = maps:get(<<"saveToDisk">>, Images),
+    Autopilot = copilot_types:autopilot_options(#{max_continues => 3}),
+    3 = maps:get(<<"maxContinues">>, Autopilot),
+    Provider = copilot_types:provider_config(#{
+        base_url        => <<"http://localhost:11434/v1">>,
+        model_provider  => <<"ollama">>,
+        api_key_command => <<"print-key">>
+    }),
+    <<"ollama">>    = maps:get(<<"modelProvider">>, Provider),
+    <<"print-key">> = maps:get(<<"apiKeyCommand">>, Provider),
+    Caps = copilot_types:model_capabilities(#{limits => #{max_output_tokens => 4096}}),
+    4096 = maps:get(<<"max_output_tokens">>, maps:get(<<"limits">>, Caps)),
+    Format = copilot_types:response_format_json_schema(#{<<"type">> => <<"object">>}),
+    <<"json_schema">> = maps:get(<<"type">>, Format),
+    <<"response">> = maps:get(<<"name">>, maps:get(<<"jsonSchema">>, Format)),
+    Token = copilot_types:github_token_result(#{kind => token, access_token => <<"t">>,
+                                                expires_in => 3600}),
+    <<"t">> = maps:get(<<"accessToken">>, Token),
+    3600    = maps:get(<<"expiresIn">>, Token),
+    ok.
+
+test_subagent_hook_types(_Config) ->
+    <<"subagentStart">> = copilot_types:hook_type(subagent_start),
+    <<"subagentStop">>  = copilot_types:hook_type(subagent_stop),
     ok.
 
 %% ---------------------------------------------------------------------------

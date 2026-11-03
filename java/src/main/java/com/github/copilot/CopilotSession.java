@@ -3,6 +3,8 @@
  *--------------------------------------------------------------------------------------------*/
 package com.github.copilot;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.copilot.Types.*;
 import com.github.copilot.internal.JsonRpcClient;
 
@@ -10,6 +12,10 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -34,16 +40,27 @@ import java.util.concurrent.atomic.AtomicReference;
  * }</pre>
  */
 public class CopilotSession {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    /** Runs host-owned external tool handlers off the JSON-RPC reader thread. */
+    private static final ExecutorService EXTERNAL_TOOL_EXECUTOR = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "copilot-external-tool");
+        t.setDaemon(true);
+        return t;
+    });
+
     private final String sessionId;
     private final JsonRpcClient client;
     private final String workspacePath;
     private final CopyOnWriteArrayList<SessionEventHandler> eventHandlers = new CopyOnWriteArrayList<>();
     private final ConcurrentHashMap<String, CopyOnWriteArrayList<SessionEventHandler>> typedEventHandlers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ToolHandler> toolHandlers = new ConcurrentHashMap<>();
+    /** In-flight external tool calls keyed by request ID, cancelled on {@code external_tool.completed}. */
+    private final ConcurrentHashMap<String, PendingExternalTool> pendingExternalTools = new ConcurrentHashMap<>();
     private volatile PermissionHandler permissionHandler;
     private volatile UserInputHandler userInputHandler;
     private volatile SessionHooks hooks;
     private volatile ExitPlanModeHandler exitPlanModeHandler;
+    private volatile Runnable onDestroyed;
 
     CopilotSession(String sessionId, JsonRpcClient client, String workspacePath) {
         this.sessionId = sessionId;
@@ -119,6 +136,66 @@ public class CopilotSession {
     }
 
     /**
+     * Sends a prompt requesting structured output and returns the parsed JSON response
+     * (default 60s timeout).
+     *
+     * @param prompt the message prompt
+     * @param schema the JSON Schema the response must satisfy
+     * @return the final assistant content parsed as JSON
+     * @throws Exception if the request fails, times out, or no structured content is returned
+     */
+    public JsonNode sendAndWaitStructured(String prompt, Map<String, Object> schema) throws Exception {
+        return sendAndWaitStructured(new MessageOptions(prompt), schema, 60_000);
+    }
+
+    /**
+     * Sends a prompt requesting structured output and returns the parsed JSON response.
+     *
+     * @param prompt the message prompt
+     * @param schema the JSON Schema the response must satisfy
+     * @param timeoutMs timeout in milliseconds
+     * @return the final assistant content parsed as JSON
+     * @throws Exception if the request fails, times out, or no structured content is returned
+     */
+    public JsonNode sendAndWaitStructured(String prompt, Map<String, Object> schema, long timeoutMs) throws Exception {
+        return sendAndWaitStructured(new MessageOptions(prompt), schema, timeoutMs);
+    }
+
+    /**
+     * Sends a message requesting structured output and returns the parsed JSON response
+     * (default 60s timeout).
+     *
+     * @param options the message options
+     * @param schema the JSON Schema the response must satisfy
+     * @return the final assistant content parsed as JSON
+     * @throws Exception if the request fails, times out, or no structured content is returned
+     */
+    public JsonNode sendAndWaitStructured(MessageOptions options, Map<String, Object> schema) throws Exception {
+        return sendAndWaitStructured(options, schema, 60_000);
+    }
+
+    /**
+     * Sends a message with {@code responseSchema} set to {@code schema}, waits via
+     * {@link #sendAndWait(MessageOptions, long)}, and returns the final assistant content parsed as JSON.
+     * The caller's options are not modified.
+     *
+     * @param options the message options
+     * @param schema the JSON Schema the response must satisfy
+     * @param timeoutMs timeout in milliseconds
+     * @return the final assistant content parsed as JSON
+     * @throws Exception if the request fails, times out, or no structured content is returned
+     */
+    public JsonNode sendAndWaitStructured(MessageOptions options, Map<String, Object> schema, long timeoutMs) throws Exception {
+        if (schema == null) throw new IllegalArgumentException("schema is required");
+        SessionEvent response = sendAndWait(new MessageOptions(options).responseSchema(schema), timeoutMs);
+        Object content = response != null && response.data != null ? response.data.get("content") : null;
+        if (!(content instanceof String) || ((String) content).trim().isEmpty()) {
+            throw new IllegalStateException("The requested run completed without a structured assistant response.");
+        }
+        return MAPPER.readTree((String) content);
+    }
+
+    /**
      * Subscribes to all events from this session.
      *
      * @param handler the event handler
@@ -173,19 +250,68 @@ public class CopilotSession {
         return client.request("session.getMetadata", Map.of("sessionId", sessionId));
     }
 
-    /** Destroys this session and releases resources. */
+    /**
+     * Destroys this session and releases resources. Sends {@code session.detach} (falling back to
+     * {@code session.destroy} on older runtimes); on-disk session state is preserved for resume.
+     */
     public void destroy() throws Exception {
-        client.request("session.destroy", Map.of("sessionId", sessionId));
+        Map<String, Object> params = Map.of("sessionId", sessionId);
+        try {
+            client.request("session.detach", params);
+        } catch (Exception e) {
+            if (!JsonRpcClient.isMethodNotFound(e, "session.detach")) throw e;
+            client.request("session.destroy", params);
+        }
+        cancelPendingExternalTools();
         eventHandlers.clear();
         typedEventHandlers.clear();
         toolHandlers.clear();
         permissionHandler = null;
         exitPlanModeHandler = null;
+        Runnable callback = onDestroyed;
+        onDestroyed = null;
+        if (callback != null) callback.run();
     }
 
     /** Aborts the currently processing message. */
     public void abort() throws Exception {
         client.request("session.abort", Map.of("sessionId", sessionId));
+    }
+
+    /**
+     * Changes the Auto routing preference without changing the selected model (experimental).
+     * The runtime commits it on a later turn that uses the {@code auto} model.
+     *
+     * @param autoTier the routing preference (see {@link Types.AutoTier}), or null to return to default routing
+     * @return the acknowledgement ({@code status}, {@code effectiveAutoTier}, {@code pendingAutoTier},
+     *         {@code activatingAutoTier}, {@code supersededAutoTier})
+     * @throws Exception if the request fails
+     */
+    public Map<String, Object> setAutoTier(String autoTier) throws Exception {
+        Map<String, Object> params = new HashMap<>();
+        params.put("sessionId", sessionId);
+        params.put("autoTier", autoTier);
+        return client.request("session.model.switchAutoTier", params);
+    }
+
+    /**
+     * Returns the session's effective enterprise managed settings snapshot.
+     *
+     * @return the managed settings snapshot
+     * @throws Exception if the request fails
+     */
+    public Map<String, Object> getManagedSettings() throws Exception {
+        return client.request("session.managedSettings.get", Map.of("sessionId", sessionId));
+    }
+
+    /**
+     * Runs a fresh Policy Helper evaluation and returns the resulting managed settings snapshot.
+     *
+     * @return the managed settings snapshot after the recheck settles
+     * @throws Exception if the request fails
+     */
+    public Map<String, Object> recheckPolicyHelper() throws Exception {
+        return client.request("session.managedSettings.recheckPolicyHelper", Map.of("sessionId", sessionId));
     }
 
     // --- Internal methods ---
@@ -213,6 +339,11 @@ public class CopilotSession {
 
     void registerExitPlanModeHandler(ExitPlanModeHandler handler) {
         this.exitPlanModeHandler = handler;
+    }
+
+    /** Registers a callback run once after this session is successfully destroyed. */
+    void registerOnDestroyed(Runnable callback) {
+        this.onDestroyed = callback;
     }
 
     ExitPlanModeResponse handleExitPlanModeRequest(Map<String, Object> params) throws Exception {
@@ -253,7 +384,112 @@ public class CopilotSession {
         SessionEvent event = new SessionEvent();
         event.type = (String) eventMap.get("type");
         event.data = (Map<String, Object>) eventMap.getOrDefault("data", Map.of());
+        handleBroadcastEvent(event);
         dispatchEvent(event);
+    }
+
+    /**
+     * Services host-owned external tool requests. {@code external_tool.requested} runs the registered
+     * handler off the reader thread and answers via {@code session.tools.handlePendingToolCall};
+     * {@code external_tool.completed} cancels the in-flight handler so no result is sent for it.
+     */
+    private void handleBroadcastEvent(SessionEvent event) {
+        if (event.data == null) return;
+        if ("external_tool.requested".equals(event.type)) {
+            Object requestId = event.data.get("requestId");
+            Object toolName = event.data.get("toolName");
+            if (!(requestId instanceof String) || !(toolName instanceof String)) return;
+            ToolHandler handler = toolHandlers.get((String) toolName);
+            if (handler == null) return;
+            Object toolCallId = event.data.get("toolCallId");
+            startExternalTool((String) requestId, toolCallId instanceof String ? (String) toolCallId : null,
+                (String) toolName, event.data.get("arguments"), handler);
+        } else if ("external_tool.completed".equals(event.type)) {
+            Object requestId = event.data.get("requestId");
+            if (requestId instanceof String) cancelExternalTool((String) requestId);
+        }
+    }
+
+    private void startExternalTool(String requestId, String toolCallId, String toolName, Object arguments,
+                                   ToolHandler handler) {
+        PendingExternalTool pending = new PendingExternalTool();
+        if (pendingExternalTools.putIfAbsent(requestId, pending) != null) return;
+        try {
+            pending.future = EXTERNAL_TOOL_EXECUTOR.submit(
+                () -> runExternalTool(requestId, toolCallId, toolName, arguments, handler, pending));
+            // A completion that raced the submit must still interrupt the handler.
+            if (pending.cancelled) pending.cancel();
+        } catch (RejectedExecutionException e) {
+            pendingExternalTools.remove(requestId, pending);
+        }
+    }
+
+    private void runExternalTool(String requestId, String toolCallId, String toolName, Object arguments,
+                                 ToolHandler handler, PendingExternalTool pending) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("sessionId", sessionId);
+        response.put("requestId", requestId);
+        try {
+            if (pending.cancelled) return;
+            Object result = handler.handle(arguments, new ToolInvocation(sessionId, toolCallId, toolName, arguments));
+            if (!claimExternalTool(requestId, pending)) return;
+            response.put("result", toExternalToolResult(result));
+        } catch (Exception e) {
+            if (!claimExternalTool(requestId, pending)) return;
+            response.put("error", e.getMessage() != null ? e.getMessage() : e.toString());
+        } finally {
+            pendingExternalTools.remove(requestId, pending);
+        }
+        try {
+            client.request("session.tools.handlePendingToolCall", response);
+        } catch (Exception ignored) {
+            // Connection lost or RPC error: nothing more to report.
+        }
+    }
+
+    /** Claims the right to answer a request; fails once the call was cancelled or completed elsewhere. */
+    private boolean claimExternalTool(String requestId, PendingExternalTool pending) {
+        return !pending.cancelled && pendingExternalTools.remove(requestId, pending);
+    }
+
+    private void cancelExternalTool(String requestId) {
+        PendingExternalTool pending = pendingExternalTools.remove(requestId);
+        if (pending != null) pending.cancel();
+    }
+
+    private void cancelPendingExternalTools() {
+        for (String requestId : new ArrayList<>(pendingExternalTools.keySet())) {
+            cancelExternalTool(requestId);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object toExternalToolResult(Object result) {
+        if (result == null) return "";
+        if (result instanceof String) return result;
+        if (result instanceof Map && ((Map<?, ?>) result).containsKey("textResultForLlm")) return result;
+        if (result instanceof ToolResultObject) {
+            Map<String, Object> wire = MAPPER.convertValue(result, Map.class);
+            wire.values().removeIf(Objects::isNull);
+            return wire;
+        }
+        try {
+            return MAPPER.writeValueAsString(result);
+        } catch (Exception e) {
+            return String.valueOf(result);
+        }
+    }
+
+    /** An in-flight external tool call that can be cancelled by request ID. */
+    private static final class PendingExternalTool {
+        volatile Future<?> future;
+        volatile boolean cancelled;
+
+        void cancel() {
+            cancelled = true;
+            Future<?> running = future;
+            if (running != null) running.cancel(true);
+        }
     }
 
     PermissionRequestResult handlePermissionRequest(Object request) throws Exception {

@@ -170,6 +170,369 @@ module GitHubAttachment =
     let GitHubSnippet = "GitHubSnippet"
 
 // ---------------------------------------------------------------------------
+// v2.6.0 upstream-sync feature types (parity with @github/copilot-sdk)
+// ---------------------------------------------------------------------------
+
+/// Identity of the application embedding the SDK. When any field is set, the
+/// client sends a `connect` request with `clientInfo` before the handshake.
+type CopilotClientInfo =
+    { /// Host application name (wire: editorName).
+      ApplicationName: string option
+      /// Host application version (wire: editorVersion).
+      ApplicationVersion: string option
+      /// Integration/extension name (wire: extensionName).
+      IntegrationName: string option
+      /// Integration/extension version (wire: extensionVersion).
+      IntegrationVersion: string option }
+
+module CopilotClientInfo =
+    /// Client info with every field unset.
+    let empty : CopilotClientInfo =
+        { ApplicationName = None
+          ApplicationVersion = None
+          IntegrationName = None
+          IntegrationVersion = None }
+
+    /// Build the `connect` clientInfo payload, dropping empty fields.
+    /// Returns None when no field carries a non-empty value.
+    let toWire (info: CopilotClientInfo) : IDictionary<string, obj> option =
+        let wire = Dictionary<string, obj>()
+        let add (key: string) (value: string option) =
+            match value with
+            | Some v when not (String.IsNullOrEmpty v) -> wire.[key] <- box v
+            | _ -> ()
+        add "editorName" info.ApplicationName
+        add "editorVersion" info.ApplicationVersion
+        add "extensionName" info.IntegrationName
+        add "extensionVersion" info.IntegrationVersion
+        if wire.Count > 0 then Some (wire :> IDictionary<string, obj>) else None
+
+/// Auto-routing tier preference (experimental).
+module AutoTier =
+    [<Literal>]
+    let Efficiency = "efficiency"
+    [<Literal>]
+    let Balance = "balance"
+    [<Literal>]
+    let Intelligence = "intelligence"
+    [<Literal>]
+    let Fast = "fast"
+
+/// Ask-user tool variant ("legacy" or "elicitation").
+module AskUserVariant =
+    [<Literal>]
+    let Legacy = "legacy"
+    [<Literal>]
+    let Elicitation = "elicitation"
+
+/// Working-directory trust scope used on session creation.
+module TrustWorkingDirectory =
+    [<Literal>]
+    let Session = "session"
+    [<Literal>]
+    let User = "user"
+
+/// Origin of a message sent with `session.send`.
+[<RequireQualifiedAccess>]
+module MessageSource =
+    /// The message comes from the user.
+    [<Literal>]
+    let User = "user"
+    /// The message is a system message.
+    [<Literal>]
+    let System = "system"
+    /// The message comes from another agent ("agent-<id>").
+    let agent (agentId: string) = "agent-" + agentId
+
+/// Product serving a BYOK model (ProviderConfig.ModelProvider).
+module ModelProvider =
+    [<Literal>]
+    let OpenAI = "openai"
+    [<Literal>]
+    let Anthropic = "anthropic"
+    [<Literal>]
+    let AzureOpenAI = "azure_openai"
+    [<Literal>]
+    let Ollama = "ollama"
+    [<Literal>]
+    let LmStudio = "lm_studio"
+    [<Literal>]
+    let FoundryLocal = "foundry_local"
+    [<Literal>]
+    let LlamaCpp = "llama_cpp"
+
+/// Arguments passed to a session's GitHub token provider.
+type GitHubTokenProviderArgs =
+    { /// GitHub host the token is requested for.
+      Host: string
+      /// Session the token is requested for, when known.
+      SessionId: string option
+      /// "initial" or "refresh".
+      Reason: string }
+
+/// A GitHub token granted by a provider.
+type GitHubTokenGrant =
+    { AccessToken: string
+      TokenType: string option
+      /// Remaining lifetime in seconds.
+      ExpiresIn: int }
+
+/// Result returned by a GitHub token provider.
+type GitHubTokenProviderResult =
+    | GitHubTokenGranted of GitHubTokenGrant
+    | GitHubTokenCancelled
+
+module GitHubTokenProviderResult =
+    /// Build the `gitHubToken.getToken` JSON-RPC result.
+    let toWire (result: GitHubTokenProviderResult) : IDictionary<string, obj> =
+        let wire = Dictionary<string, obj>()
+        match result with
+        | GitHubTokenGranted grant ->
+            wire.["kind"] <- box "token"
+            wire.["accessToken"] <- box grant.AccessToken
+            grant.TokenType |> Option.iter (fun t -> wire.["tokenType"] <- box t)
+            wire.["expiresIn"] <- box grant.ExpiresIn
+        | GitHubTokenCancelled ->
+            wire.["kind"] <- box "cancelled"
+        wire :> IDictionary<string, obj>
+
+/// Supplies GitHub tokens for one session (mutually exclusive with GitHubToken).
+type GitHubTokenProvider = GitHubTokenProviderArgs -> Async<GitHubTokenProviderResult>
+
+/// Sandbox configuration for a session.
+type SandboxConfig =
+    { /// Whether sandboxing is enabled.
+      Enabled: bool
+      /// User-managed policy fragment merged into the base policy.
+      UserPolicy: IDictionary<string, obj> option
+      /// Auto-add the working directory to read/write paths.
+      AddCurrentWorkingDirectory: bool option
+      /// Confine MCP servers launched by the session.
+      SandboxMcpServers: bool option
+      /// Confine language servers launched by the session.
+      SandboxLspServers: bool option
+      /// Confine extension processes launched by the session.
+      SandboxExtensions: bool option
+      /// Opt in to letting the agent request an individual command outside the
+      /// sandbox through the normal permission flow.
+      AllowBypass: bool option }
+
+module SandboxConfig =
+    /// Sandbox config with only `Enabled` set.
+    let create (enabled: bool) : SandboxConfig =
+        { Enabled = enabled
+          UserPolicy = None
+          AddCurrentWorkingDirectory = None
+          SandboxMcpServers = None
+          SandboxLspServers = None
+          SandboxExtensions = None
+          AllowBypass = None }
+
+    /// Build the camelCase JSON-RPC wire payload.
+    let toWire (config: SandboxConfig) : IDictionary<string, obj> =
+        let wire = Dictionary<string, obj>()
+        wire.["enabled"] <- box config.Enabled
+        config.UserPolicy |> Option.iter (fun v -> wire.["userPolicy"] <- box v)
+        config.AddCurrentWorkingDirectory |> Option.iter (fun v -> wire.["addCurrentWorkingDirectory"] <- box v)
+        config.SandboxMcpServers |> Option.iter (fun v -> wire.["sandboxMcpServers"] <- box v)
+        config.SandboxLspServers |> Option.iter (fun v -> wire.["sandboxLspServers"] <- box v)
+        config.SandboxExtensions |> Option.iter (fun v -> wire.["sandboxExtensions"] <- box v)
+        config.AllowBypass |> Option.iter (fun v -> wire.["allowBypass"] <- box v)
+        wire :> IDictionary<string, obj>
+
+/// Session-level image generation configuration.
+type ImageGenerationConfig =
+    { Enabled: bool option
+      Watermark: bool option
+      SaveToDisk: bool option }
+
+module ImageGenerationConfig =
+    /// Build the camelCase JSON-RPC wire payload.
+    let toWire (config: ImageGenerationConfig) : IDictionary<string, obj> =
+        let wire = Dictionary<string, obj>()
+        config.Enabled |> Option.iter (fun v -> wire.["enabled"] <- box v)
+        config.Watermark |> Option.iter (fun v -> wire.["watermark"] <- box v)
+        config.SaveToDisk |> Option.iter (fun v -> wire.["saveToDisk"] <- box v)
+        wire :> IDictionary<string, obj>
+
+/// Autopilot continuation options.
+type AutopilotConfig =
+    { ContinuationEnabled: bool option
+      MaxContinues: int option }
+
+module AutopilotConfig =
+    /// Build the camelCase JSON-RPC wire payload.
+    let toWire (config: AutopilotConfig) : IDictionary<string, obj> =
+        let wire = Dictionary<string, obj>()
+        config.ContinuationEnabled |> Option.iter (fun v -> wire.["continuationEnabled"] <- box v)
+        config.MaxContinues |> Option.iter (fun v -> wire.["maxContinues"] <- box v)
+        wire :> IDictionary<string, obj>
+
+/// Token-limit overrides for the model capabilities override (`limits`).
+type ModelLimitsOverride =
+    { MaxPromptTokens: int option
+      MaxOutputTokens: int option
+      MaxContextWindowTokens: int option }
+
+module ModelLimitsOverride =
+    /// Build a `ModelCapabilities` override containing these limits
+    /// (snake_case wire keys such as `max_output_tokens`).
+    let toCapabilities (limits: ModelLimitsOverride) : IDictionary<string, obj> =
+        let wire = Dictionary<string, obj>()
+        limits.MaxPromptTokens |> Option.iter (fun v -> wire.["max_prompt_tokens"] <- box v)
+        limits.MaxOutputTokens |> Option.iter (fun v -> wire.["max_output_tokens"] <- box v)
+        limits.MaxContextWindowTokens |> Option.iter (fun v -> wire.["max_context_window_tokens"] <- box v)
+        let caps = Dictionary<string, obj>()
+        caps.["limits"] <- box wire
+        caps :> IDictionary<string, obj>
+
+/// BYOK model provider configuration.
+type ProviderConfig =
+    { /// Provider type ("openai", "azure", or "anthropic").
+      ProviderType: string option
+      /// Wire API ("completions" or "responses").
+      WireApi: string option
+      /// API endpoint URL.
+      BaseUrl: string
+      /// Static API key.
+      ApiKey: string option
+      /// Command whose stdout is used as the API key before each request.
+      ApiKeyCommand: string option
+      /// Bearer token sent in the Authorization header.
+      BearerToken: string option
+      /// Product serving the model (see the ModelProvider module).
+      ModelProvider: string option
+      /// Azure API version (Azure providers only).
+      AzureApiVersion: string option }
+
+module ProviderConfig =
+    /// Provider config pointing at baseUrl with every other field unset.
+    let create (baseUrl: string) : ProviderConfig =
+        { ProviderType = None
+          WireApi = None
+          BaseUrl = baseUrl
+          ApiKey = None
+          ApiKeyCommand = None
+          BearerToken = None
+          ModelProvider = None
+          AzureApiVersion = None }
+
+    /// Build the camelCase JSON-RPC wire payload.
+    let toWire (config: ProviderConfig) : IDictionary<string, obj> =
+        let wire = Dictionary<string, obj>()
+        config.ProviderType |> Option.iter (fun v -> wire.["type"] <- box v)
+        config.WireApi |> Option.iter (fun v -> wire.["wireApi"] <- box v)
+        wire.["baseUrl"] <- box config.BaseUrl
+        config.ApiKey |> Option.iter (fun v -> wire.["apiKey"] <- box v)
+        config.ApiKeyCommand |> Option.iter (fun v -> wire.["apiKeyCommand"] <- box v)
+        config.BearerToken |> Option.iter (fun v -> wire.["bearerToken"] <- box v)
+        config.ModelProvider |> Option.iter (fun v -> wire.["modelProvider"] <- box v)
+        config.AzureApiVersion
+        |> Option.iter (fun v ->
+            let azure = Dictionary<string, obj>()
+            azure.["apiVersion"] <- box v
+            wire.["azure"] <- box azure)
+        wire :> IDictionary<string, obj>
+
+/// Input for the hook fired before a sub-agent's first turn (hook type "subagentStart").
+type SubagentStartHookInput =
+    { /// Hook timestamp (epoch milliseconds), when provided.
+      Timestamp: int64 option
+      /// Working directory, when provided.
+      Cwd: string option
+      TranscriptPath: string
+      AgentName: string
+      AgentDisplayName: string option
+      AgentDescription: string option
+      /// Raw hook payload as sent by the runtime.
+      Raw: JsonElement }
+
+/// Output for the sub-agent start hook; context is prepended to the child's prompt.
+type SubagentStartHookOutput =
+    { AdditionalContext: string option }
+
+/// Input for the hook fired after a sub-agent completes a turn (hook type "subagentStop").
+type SubagentStopHookInput =
+    { Timestamp: int64 option
+      Cwd: string option
+      TranscriptPath: string
+      AgentName: string
+      AgentDisplayName: string option
+      AgentDescription: string option
+      AgentId: string option
+      AgentType: string
+      /// Always "end_turn".
+      StopReason: string
+      /// The sub-agent's last assistant message.
+      Response: string
+      Raw: JsonElement }
+
+/// Output for the sub-agent stop hook. `Decision = Some "block"` with a reason
+/// continues the child; otherwise `ModifiedResponse` rewrites the reported response.
+type SubagentStopHookOutput =
+    { Decision: string option
+      Reason: string option
+      ModifiedResponse: string option }
+
+/// Hook invoked before a sub-agent starts.
+type SubagentStartHandler = SubagentStartHookInput -> Async<SubagentStartHookOutput option>
+
+/// Hook invoked after a sub-agent stops.
+type SubagentStopHandler = SubagentStopHookInput -> Async<SubagentStopHookOutput option>
+
+module SubagentHooks =
+    let private tryString (elem: JsonElement) (name: string) =
+        match elem.TryGetProperty(name) with
+        | true, v when v.ValueKind = JsonValueKind.String -> Some (v.GetString())
+        | _ -> None
+
+    let private tryInt64 (elem: JsonElement) (name: string) =
+        match elem.TryGetProperty(name) with
+        | true, v when v.ValueKind = JsonValueKind.Number ->
+            match v.TryGetInt64() with
+            | true, n -> Some n
+            | _ -> None
+        | _ -> None
+
+    /// Parse a "subagentStart" hook payload.
+    let parseStartInput (elem: JsonElement) : SubagentStartHookInput =
+        { Timestamp = tryInt64 elem "timestamp"
+          Cwd = tryString elem "cwd"
+          TranscriptPath = tryString elem "transcriptPath" |> Option.defaultValue ""
+          AgentName = tryString elem "agentName" |> Option.defaultValue ""
+          AgentDisplayName = tryString elem "agentDisplayName"
+          AgentDescription = tryString elem "agentDescription"
+          Raw = elem }
+
+    /// Parse a "subagentStop" hook payload.
+    let parseStopInput (elem: JsonElement) : SubagentStopHookInput =
+        { Timestamp = tryInt64 elem "timestamp"
+          Cwd = tryString elem "cwd"
+          TranscriptPath = tryString elem "transcriptPath" |> Option.defaultValue ""
+          AgentName = tryString elem "agentName" |> Option.defaultValue ""
+          AgentDisplayName = tryString elem "agentDisplayName"
+          AgentDescription = tryString elem "agentDescription"
+          AgentId = tryString elem "agentId"
+          AgentType = tryString elem "agentType" |> Option.defaultValue ""
+          StopReason = tryString elem "stopReason" |> Option.defaultValue "end_turn"
+          Response = tryString elem "response" |> Option.defaultValue ""
+          Raw = elem }
+
+    /// Build the wire output for a sub-agent start hook.
+    let startOutputToWire (output: SubagentStartHookOutput) : IDictionary<string, obj> =
+        let wire = Dictionary<string, obj>()
+        output.AdditionalContext |> Option.iter (fun v -> wire.["additionalContext"] <- box v)
+        wire :> IDictionary<string, obj>
+
+    /// Build the wire output for a sub-agent stop hook.
+    let stopOutputToWire (output: SubagentStopHookOutput) : IDictionary<string, obj> =
+        let wire = Dictionary<string, obj>()
+        output.Decision |> Option.iter (fun v -> wire.["decision"] <- box v)
+        output.Reason |> Option.iter (fun v -> wire.["reason"] <- box v)
+        output.ModifiedResponse |> Option.iter (fun v -> wire.["modifiedResponse"] <- box v)
+        wire :> IDictionary<string, obj>
+
+// ---------------------------------------------------------------------------
 // Client options
 // ---------------------------------------------------------------------------
 
@@ -214,7 +577,9 @@ type CopilotClientOptions =
       /// Directories to search for built-in plugins.
       BuiltinPluginDirectories: string list option
       /// Run the CLI in-process via the FFI transport instead of spawning a process.
-      InProcess: bool option }
+      InProcess: bool option
+      /// Identity of the embedding application, sent with `connect` at startup.
+      ClientInfo: CopilotClientInfo option }
 
 module CopilotClientOptions =
     /// Default client options (stdio, auto-start, info log level).
@@ -238,7 +603,8 @@ module CopilotClientOptions =
           RequestHandler = None
           BearerTokenProvider = None
           BuiltinPluginDirectories = None
-          InProcess = None }
+          InProcess = None
+          ClientInfo = None }
 
 // ---------------------------------------------------------------------------
 // MCP server configuration
@@ -315,7 +681,34 @@ type MessageOptions =
       /// Alternate prompt text shown to the user (the model still sees Prompt).
       DisplayPrompt: string option
       /// Per-message request headers forwarded with the turn.
-      RequestHeaders: IDictionary<string, string> option }
+      RequestHeaders: IDictionary<string, string> option
+      /// Message origin: MessageSource.User, MessageSource.System, or MessageSource.agent id.
+      Source: string option
+      /// JSON Schema for structured output (sent as a json_schema responseFormat).
+      ResponseSchema: JsonElement option }
+
+module MessageOptions =
+    /// Message options carrying only a prompt.
+    let create (prompt: string) : MessageOptions =
+        { Prompt = prompt
+          Attachments = None
+          Mode = None
+          AgentMode = None
+          DisplayPrompt = None
+          RequestHeaders = None
+          Source = None
+          ResponseSchema = None }
+
+    /// Build the structured-output `responseFormat` payload for a JSON Schema.
+    let responseFormatFor (schema: JsonElement) : IDictionary<string, obj> =
+        let jsonSchema = Dictionary<string, obj>()
+        jsonSchema.["name"] <- box "response"
+        jsonSchema.["strict"] <- box true
+        jsonSchema.["schema"] <- box schema
+        let format = Dictionary<string, obj>()
+        format.["type"] <- box "json_schema"
+        format.["jsonSchema"] <- box jsonSchema
+        format :> IDictionary<string, obj>
 
 // ---------------------------------------------------------------------------
 // Elicitation handling
@@ -419,7 +812,48 @@ type SessionConfig =
       /// Enable content-exclusion enforcement.
       ContentExclusion: bool option
       /// Reasoning effort hint for the model ("low", "medium", "high").
-      ReasoningEffort: string option }
+      ReasoningEffort: string option
+      // --- v2.6.0 upstream-sync session options ---
+      /// Auto-routing tier (see AutoTier; experimental). Sent under "capi".
+      AutoTier: string option
+      /// Ask-user tool variant (see AskUserVariant).
+      AskUserVariant: string option
+      /// Per-session GitHub token provider (mutually exclusive with GitHubToken).
+      GitHubTokenProvider: GitHubTokenProvider option
+      /// Sandbox configuration.
+      SandboxConfig: SandboxConfig option
+      /// Runtime feature flags (sent even when empty).
+      FeatureFlags: IDictionary<string, bool> option
+      /// Restrict the models this session may use.
+      AllowedModels: string list option
+      /// OAuth client ID metadata document URL.
+      AuthClientIdMetadataUrl: string option
+      /// Human-readable session name.
+      Name: string option
+      /// Directories to load custom agents from.
+      AgentDirectories: string list option
+      /// Directories to load hook definitions from.
+      HookDirectories: string list option
+      /// Whether an interactive user is present.
+      InteractiveUser: bool option
+      /// Managed settings to exclude.
+      ExcludedManagedSettings: string list option
+      /// Enforce managed model defaults.
+      EnforceManagedModelDefaults: bool option
+      /// Trust scope for the working directory (see TrustWorkingDirectory).
+      TrustWorkingDirectory: string option
+      /// Re-read custom instruction files.
+      RefreshCustomInstructions: bool option
+      /// Session-level image generation configuration.
+      ImageGeneration: ImageGenerationConfig option
+      /// Autopilot continuation options.
+      Autopilot: AutopilotConfig option
+      /// Hook invoked before a sub-agent starts ("subagentStart").
+      OnSubagentStart: SubagentStartHandler option
+      /// Hook invoked after a sub-agent stops ("subagentStop").
+      OnSubagentStop: SubagentStopHandler option
+      /// BYOK model provider configuration.
+      Provider: ProviderConfig option }
 
 module SessionConfig =
     /// Approve all permission requests automatically.
@@ -470,7 +904,27 @@ module SessionConfig =
           ToolSearch = None
           ExperimentalMode = None
           ContentExclusion = None
-          ReasoningEffort = None }
+          ReasoningEffort = None
+          AutoTier = None
+          AskUserVariant = None
+          GitHubTokenProvider = None
+          SandboxConfig = None
+          FeatureFlags = None
+          AllowedModels = None
+          AuthClientIdMetadataUrl = None
+          Name = None
+          AgentDirectories = None
+          HookDirectories = None
+          InteractiveUser = None
+          ExcludedManagedSettings = None
+          EnforceManagedModelDefaults = None
+          TrustWorkingDirectory = None
+          RefreshCustomInstructions = None
+          ImageGeneration = None
+          Autopilot = None
+          OnSubagentStart = None
+          OnSubagentStop = None
+          Provider = None }
 
 // ---------------------------------------------------------------------------
 // Resume session configuration
@@ -485,7 +939,70 @@ type ResumeSessionConfig =
       /// Model override for the resumed session.
       Model: string option
       /// Directories to search for instruction files.
-      InstructionDirectories: string list option }
+      InstructionDirectories: string list option
+      // --- v2.6.0 upstream-sync session options ---
+      /// Auto-routing tier (see AutoTier; experimental). Sent under "capi".
+      AutoTier: string option
+      /// Ask-user tool variant (see AskUserVariant).
+      AskUserVariant: string option
+      /// Per-session GitHub token provider.
+      GitHubTokenProvider: GitHubTokenProvider option
+      /// Sandbox configuration.
+      SandboxConfig: SandboxConfig option
+      /// Runtime feature flags (sent even when empty).
+      FeatureFlags: IDictionary<string, bool> option
+      /// Restrict the models this session may use.
+      AllowedModels: string list option
+      /// OAuth client ID metadata document URL.
+      AuthClientIdMetadataUrl: string option
+      /// Directories to load custom agents from.
+      AgentDirectories: string list option
+      /// Directories to load hook definitions from.
+      HookDirectories: string list option
+      /// Whether an interactive user is present.
+      InteractiveUser: bool option
+      /// Managed settings to exclude.
+      ExcludedManagedSettings: string list option
+      /// Enforce managed model defaults.
+      EnforceManagedModelDefaults: bool option
+      /// Allow recovering the session from its transcript.
+      AllowTranscriptRecovery: bool option
+      /// Session-level image generation configuration.
+      ImageGeneration: ImageGenerationConfig option
+      /// Autopilot continuation options.
+      Autopilot: AutopilotConfig option
+      /// Hook invoked before a sub-agent starts ("subagentStart").
+      OnSubagentStart: SubagentStartHandler option
+      /// Hook invoked after a sub-agent stops ("subagentStop").
+      OnSubagentStop: SubagentStopHandler option
+      /// BYOK model provider configuration.
+      Provider: ProviderConfig option }
+
+module ResumeSessionConfig =
+    /// Resume configuration for sessionId with approveAll and every option unset.
+    let create (sessionId: string) : ResumeSessionConfig =
+        { SessionId = sessionId
+          OnPermissionRequest = SessionConfig.approveAll
+          Model = None
+          InstructionDirectories = None
+          AutoTier = None
+          AskUserVariant = None
+          GitHubTokenProvider = None
+          SandboxConfig = None
+          FeatureFlags = None
+          AllowedModels = None
+          AuthClientIdMetadataUrl = None
+          AgentDirectories = None
+          HookDirectories = None
+          InteractiveUser = None
+          ExcludedManagedSettings = None
+          EnforceManagedModelDefaults = None
+          AllowTranscriptRecovery = None
+          ImageGeneration = None
+          Autopilot = None
+          OnSubagentStart = None
+          OnSubagentStop = None
+          Provider = None }
 
 // ---------------------------------------------------------------------------
 // Tool definition
@@ -695,3 +1212,27 @@ type GetAuthStatusResponse =
       Authenticated: bool
       [<JsonPropertyName("user")>]
       User: string option }
+
+// ---------------------------------------------------------------------------
+// Wire helpers
+// ---------------------------------------------------------------------------
+
+/// Helpers for building JSON-RPC params that omit unset optional keys.
+module internal WireJson =
+    open System.Text.Json.Nodes
+
+    /// Serialize a value (anonymous record, dictionary, ...) into a JsonObject.
+    let toObject (value: obj) : JsonObject =
+        match JsonSerializer.SerializeToNode(value) with
+        | :? JsonObject as o -> o
+        | _ -> JsonObject()
+
+    /// Serialize value into target under key (overwriting any existing key).
+    let set (target: JsonObject) (key: string) (value: obj) =
+        target.[key] <- JsonSerializer.SerializeToNode(value)
+
+    /// Set key only when the option carries a value.
+    let setOpt (target: JsonObject) (key: string) (value: 'T option) =
+        match value with
+        | Some v -> set target key (box v)
+        | None -> ()

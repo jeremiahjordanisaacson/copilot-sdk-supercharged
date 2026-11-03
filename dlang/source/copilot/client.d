@@ -14,12 +14,28 @@ import std.process : Pid, spawnProcess, kill, wait,
 import std.exception : enforce;
 import std.format : format;
 import std.stdio : File, stderr;
+import std.uuid : randomUUID;
 import core.sync.mutex : Mutex;
 
 import copilot.types;
 import copilot.jsonrpc;
 import copilot.session;
 import copilot.tools : ToolBinding;
+
+/// A session's GitHub token provider in the client-level registry.
+private struct GitHubTokenRegistration
+{
+    GitHubTokenProvider provider;
+    string sessionId;
+}
+
+/// Read a string member of a JSON object (null when absent or not a string).
+private string jsonString(JSONValue obj, string key) @safe
+{
+    if (obj.type != JSONType.object) return null;
+    auto p = key in obj;
+    return (p !is null && (*p).type == JSONType.string) ? (*p).str : null;
+}
 
 // ---------------------------------------------------------------------------
 // CopilotClient
@@ -49,6 +65,8 @@ final class CopilotClient
         bool _isExternal = false;
         Mutex _sessionsMutex;
         CopilotSession[string] _sessions;
+        Mutex _tokenProvidersMutex;
+        GitHubTokenRegistration[string] _gitHubTokenProviders;
     }
 
     /// Construct a client with the given options.
@@ -56,6 +74,7 @@ final class CopilotClient
     {
         _opts = opts;
         _sessionsMutex = new Mutex();
+        _tokenProvidersMutex = new Mutex();
 
         if (!_opts.cliUrl.isNull)
             _isExternal = true;
@@ -83,6 +102,9 @@ final class CopilotClient
         }
         _started = true;
 
+        // Declare the embedding application's identity before other requests.
+        _sendClientInfo();
+
         // Set up session filesystem if configured.
         if (!_opts.sessionFs.isNull)
         {
@@ -102,6 +124,7 @@ final class CopilotClient
         foreach (ref s; _sessions)
             s.markStopped();
         _sessions = null;
+        _clearGitHubTokenProviders();
 
         if (_rpc !is null)
         {
@@ -129,6 +152,7 @@ final class CopilotClient
         foreach (ref s; _sessions)
             s.markStopped();
         _sessions = null;
+        _clearGitHubTokenProviders();
 
         if (_rpc !is null)
         {
@@ -157,12 +181,21 @@ final class CopilotClient
     CopilotSession createSession(SessionConfig config = SessionConfig.init) @trusted
     {
         enforce(_started, "client not started");
+        enforce(config.gitHubToken.isNull || config.gitHubTokenProvider is null,
+            "gitHubToken and gitHubTokenProvider are mutually exclusive");
 
-        auto result = _rpc.request("session.create", config.toJson());
+        auto params = config.toJson();
+        auto registrationId = _registerGitHubTokenProvider(config.gitHubTokenProvider, params);
+        scope (failure) _unregisterGitHubTokenProvider(registrationId);
+
+        auto result = _rpc.request("session.create", params);
         auto info = SessionInfo.fromJson(result);
         enforce(info.sessionId.length > 0, "server returned empty sessionId");
+        _assignGitHubTokenProvider(registrationId, info.sessionId);
 
         auto session = new CopilotSession(info.sessionId, _rpc);
+        session.configureHooks(config.onSubagentStart, config.onSubagentStop);
+        session.setReleaseHandler(&_releaseSession);
 
         // Register tool handlers if tools were provided.
         // (The config.tools array carries the schema; the caller registers
@@ -192,11 +225,18 @@ final class CopilotClient
     {
         enforce(_started, "client not started");
 
-        auto result = _rpc.request("session.resume", config.toJson());
+        auto params = config.toJson();
+        auto registrationId = _registerGitHubTokenProvider(config.gitHubTokenProvider, params);
+        scope (failure) _unregisterGitHubTokenProvider(registrationId);
+
+        auto result = _rpc.request("session.resume", params);
         auto info = SessionInfo.fromJson(result);
         string sid = info.sessionId.length > 0 ? info.sessionId : config.sessionId;
+        _assignGitHubTokenProvider(registrationId, sid);
 
         auto session = new CopilotSession(sid, _rpc);
+        session.configureHooks(config.onSubagentStart, config.onSubagentStop);
+        session.setReleaseHandler(&_releaseSession);
 
         _sessionsMutex.lock();
         scope(exit) _sessionsMutex.unlock();
@@ -260,6 +300,13 @@ final class CopilotClient
     {
         enforce(_started, "client not started");
         return _rpc.request("auth.getStatus");
+    }
+
+    /// Clear the runtime's managed-settings cache (`managedSettings.clearCache`).
+    JSONValue clearManagedSettingsCache() @trusted
+    {
+        enforce(_started, "client not started");
+        return _rpc.request("managedSettings.clearCache", JSONValue(string[string].init));
     }
 
     /// Get the last session ID, or null if none.
@@ -356,6 +403,7 @@ final class CopilotClient
 
         _rpc = new JsonRpcClient(_childStdout, _childStdin);
         _rpc.onNotification(&_onNotification);
+        _registerRequestHandlers();
         _rpc.start();
     }
 
@@ -396,5 +444,149 @@ final class CopilotClient
 
         if (session !is null)
             session.dispatchEvent(event);
+    }
+
+    // ------------------------------------------------------------------
+    // v2.6.0: client info, GitHub token providers, hooks
+    // ------------------------------------------------------------------
+
+    /// Declare the embedding application's identity via `connect`. Older
+    /// runtimes without `connect` are tolerated.
+    private void _sendClientInfo() @trusted
+    {
+        auto info = _opts.clientInfo.toWire();
+        if (info.type != JSONType.object) return;
+
+        auto params = JSONValue(string[string].init);
+        params["clientInfo"] = info;
+        try
+        {
+            _rpc.request("connect", params);
+        }
+        catch (JsonRpcError e)
+        {
+            import std.algorithm.searching : canFind;
+            if (e.code != methodNotFoundCode && !e.msg.canFind("Unhandled method connect"))
+                throw e;
+        }
+    }
+
+    /// Register handlers for server-to-client requests.
+    private void _registerRequestHandlers() @trusted
+    {
+        _rpc.onRequest("gitHubToken.getToken", &_onGitHubTokenRequest);
+        _rpc.onRequest("hooks.invoke", &_onHooksInvoke);
+    }
+
+    /// Store a session's GitHub token provider and add its registration ID
+    /// to the request params. Returns null when no provider is configured.
+    private string _registerGitHubTokenProvider(GitHubTokenProvider provider,
+        ref JSONValue params) @trusted
+    {
+        if (provider is null) return null;
+        auto id = randomUUID().toString();
+        _tokenProvidersMutex.lock();
+        scope(exit) _tokenProvidersMutex.unlock();
+        _gitHubTokenProviders[id] = GitHubTokenRegistration(provider, null);
+        params["gitHubTokenProviderRegistrationId"] = id;
+        return id;
+    }
+
+    /// Drop a registration (e.g. when session creation fails).
+    private void _unregisterGitHubTokenProvider(string registrationId) @trusted
+    {
+        if (registrationId is null) return;
+        _tokenProvidersMutex.lock();
+        scope(exit) _tokenProvidersMutex.unlock();
+        _gitHubTokenProviders.remove(registrationId);
+    }
+
+    /// Bind a registration to the session ID returned by the runtime.
+    private void _assignGitHubTokenProvider(string registrationId, string sessionId) @trusted
+    {
+        if (registrationId is null) return;
+        _tokenProvidersMutex.lock();
+        scope(exit) _tokenProvidersMutex.unlock();
+        auto p = registrationId in _gitHubTokenProviders;
+        if (p !is null)
+            p.sessionId = sessionId;
+    }
+
+    /// Drop every registration owned by a released session.
+    private void _releaseSession(string sessionId) @trusted
+    {
+        _tokenProvidersMutex.lock();
+        scope(exit) _tokenProvidersMutex.unlock();
+        string[] stale;
+        foreach (id, ref reg; _gitHubTokenProviders)
+            if (reg.sessionId == sessionId)
+                stale ~= id;
+        foreach (id; stale)
+            _gitHubTokenProviders.remove(id);
+    }
+
+    /// Drop every registration (client stop).
+    private void _clearGitHubTokenProviders() @trusted
+    {
+        _tokenProvidersMutex.lock();
+        scope(exit) _tokenProvidersMutex.unlock();
+        _gitHubTokenProviders = null;
+    }
+
+    /// Handle `gitHubToken.getToken` by calling the registered provider.
+    private JSONValue _onGitHubTokenRequest(JSONValue params) @trusted
+    {
+        auto registrationId = jsonString(params, "registrationId");
+        GitHubTokenRegistration reg;
+        bool found = false;
+        {
+            _tokenProvidersMutex.lock();
+            scope(exit) _tokenProvidersMutex.unlock();
+            auto p = registrationId in _gitHubTokenProviders;
+            if (p !is null)
+            {
+                reg = *p;
+                found = true;
+            }
+        }
+        enforce(found, format!`No GitHub token provider registered for registration ID "%s"`(
+            registrationId));
+
+        GitHubTokenProviderArgs args;
+        args.host = jsonString(params, "host");
+        auto sid = jsonString(params, "sessionId");
+        if (sid.length > 0)
+            args.sessionId = sid;
+        else if (reg.sessionId.length > 0)
+            args.sessionId = reg.sessionId;
+        args.reason = jsonString(params, "reason");
+        return reg.provider(args).toJson();
+    }
+
+    /// Handle `hooks.invoke` by dispatching to the target session.
+    private JSONValue _onHooksInvoke(JSONValue params) @trusted
+    {
+        auto sid = jsonString(params, "sessionId");
+        CopilotSession session;
+        {
+            _sessionsMutex.lock();
+            scope(exit) _sessionsMutex.unlock();
+            auto ps = sid in _sessions;
+            if (ps !is null) session = *ps;
+        }
+        enforce(session !is null, "Session not found: " ~ sid);
+
+        JSONValue input = JSONValue(null);
+        if (params.type == JSONType.object)
+        {
+            auto pInput = "input" in params;
+            if (pInput !is null) input = *pInput;
+        }
+
+        auto output = session.handleHooksInvoke(jsonString(params, "hookType"), input);
+        auto reply = JSONValue(string[string].init);
+        if (output.type != JSONType.null_)
+            reply["output"] = output;
+        return reply;
     }
 }

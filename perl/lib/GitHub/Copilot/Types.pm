@@ -437,13 +437,25 @@ has request_headers => (is => 'ro', default => sub { undef });
 has agent_mode      => (is => 'ro', default => sub { undef });
 # Display-only prompt shown to the user, distinct from the model prompt
 has display_prompt  => (is => 'ro', default => sub { undef });
+# Message provenance: 'user', 'system' or 'agent-<id>' (see MessageSource)
+has source          => (is => 'ro', default => sub { undef });
+# JSON Schema hashref requesting structured output (takes precedence over response_format)
+has response_schema => (is => 'ro', default => sub { undef });
 
 sub TO_JSON {
     my ($self) = @_;
     my %h = (prompt => $self->prompt);
+    $h{source}         = $self->source          if defined $self->source;
     $h{attachments}    = $self->attachments     if defined $self->attachments;
     $h{mode}           = $self->mode            if defined $self->mode;
-    $h{responseFormat} = $self->response_format if defined $self->response_format;
+    if (defined $self->response_schema) {
+        $h{responseFormat} = {
+            type       => 'json_schema',
+            jsonSchema => { name => 'response', strict => \1, schema => $self->response_schema },
+        };
+    } elsif (defined $self->response_format) {
+        $h{responseFormat} = $self->response_format;
+    }
     $h{imageOptions}   = $self->image_options   if defined $self->image_options;
     $h{requestHeaders} = $self->request_headers if defined $self->request_headers;
     $h{agentMode}      = $self->agent_mode      if defined $self->agent_mode;
@@ -638,9 +650,51 @@ has on_mcp_auth_request     => (is => 'ro', default => sub { undef });
 has on_post_tool_use        => (is => 'ro', default => sub { undef });
 # Pre-MCP-tool-call hook (code ref)
 has on_pre_mcp_tool_call    => (is => 'ro', default => sub { undef });
+# --- v2.6.0 upstream-sync options (parity with @github/copilot-sdk) ---
+# Auto routing preference when the model is 'auto' (experimental; see AutoTier).
+# Sent inside the capi object together with enable_web_socket_responses.
+has auto_tier               => (is => 'ro', default => sub { undef });
+# Ask-user prompt variant: 'legacy' or 'elicitation' (see AskUserVariant)
+has ask_user_variant        => (is => 'ro', default => sub { undef });
+# GitHub token provider (code ref receiving GitHubTokenProviderArgs); mutually
+# exclusive with github_token
+has github_token_provider   => (is => 'ro', default => sub { undef });
+# Sandbox configuration (SandboxConfig object or wire hashref)
+has sandbox_config          => (is => 'ro', default => sub { undef });
+# Runtime feature flags (hashref of name => boolean); sent even when empty
+has feature_flags           => (is => 'ro', default => sub { undef });
+# Model allowlist (arrayref of model ids)
+has allowed_models          => (is => 'ro', default => sub { undef });
+# OAuth client ID metadata document URL
+has auth_client_id_metadata_url => (is => 'ro', default => sub { undef });
+# Human-readable session name (create only)
+has name                    => (is => 'ro', default => sub { undef });
+# Directories to load custom agents from (arrayref of strings)
+has agent_directories       => (is => 'ro', default => sub { undef });
+# Directories to load hooks from (arrayref of strings)
+has hook_directories        => (is => 'ro', default => sub { undef });
+# Whether an interactive user is present
+has interactive_user        => (is => 'ro', default => sub { undef });
+# Managed settings to ignore (arrayref of strings)
+has excluded_managed_settings => (is => 'ro', default => sub { undef });
+# Enforce managed model defaults
+has enforce_managed_model_defaults => (is => 'ro', default => sub { undef });
+# Working-directory trust: 'session' or 'user' (create only)
+has trust_working_directory => (is => 'ro', default => sub { undef });
+# Refresh custom instructions on session start (create only)
+has refresh_custom_instructions => (is => 'ro', default => sub { undef });
+# Allow recovering the conversation from the transcript (resume only)
+has allow_transcript_recovery => (is => 'ro', default => sub { undef });
+# Session-level image generation config (ImageGenerationConfig object or hashref)
+has image_generation        => (is => 'ro', default => sub { undef });
+# Autopilot continuation options (AutopilotOptions object or hashref)
+has autopilot               => (is => 'ro', default => sub { undef });
 
+# Serialize to session.create params; pass (resume => 1) for session.resume, which
+# omits create-only fields (name, trustWorkingDirectory, refreshCustomInstructions)
+# and adds resume-only ones (allowTranscriptRecovery).
 sub to_wire {
-    my ($self) = @_;
+    my ($self, %opts) = @_;
     my %payload;
 
     $payload{sessionId}       = $self->session_id       if defined $self->session_id;
@@ -708,9 +762,7 @@ sub to_wire {
     if (defined $self->otlp_protocol) {
         $payload{otlpProtocol} = $self->otlp_protocol;
     }
-    if (defined $self->enable_web_socket_responses) {
-        $payload{enableWebSocketResponses} = $self->enable_web_socket_responses ? \1 : \0;
-    }
+    # enable_web_socket_responses is sent inside the capi object (see below).
     if (defined $self->exp_assignments) {
         $payload{expAssignments} = $self->exp_assignments;
     }
@@ -731,6 +783,38 @@ sub to_wire {
     $payload{mcpAuthHandler} = \1 if defined $self->on_mcp_auth_request;
     $payload{onPostToolUse}  = \1 if defined $self->on_post_tool_use;
     $payload{onPreMcpToolCall} = \1 if defined $self->on_pre_mcp_tool_call;
+
+    # --- v2.6.0 upstream-sync options (parity with @github/copilot-sdk) ---
+    my %capi;
+    $capi{autoTier} = $self->auto_tier if defined $self->auto_tier;
+    $capi{enableWebSocketResponses} = $self->enable_web_socket_responses ? \1 : \0
+        if defined $self->enable_web_socket_responses;
+    $payload{capi} = \%capi if %capi;
+    $payload{askUserVariant}          = $self->ask_user_variant            if defined $self->ask_user_variant;
+    $payload{sandboxConfig}           = $self->sandbox_config              if defined $self->sandbox_config;
+    if (defined $self->feature_flags) {
+        my $flags = $self->feature_flags;
+        $payload{featureFlags} = { map { $_ => ($flags->{$_} ? \1 : \0) } keys %$flags };
+    }
+    $payload{allowedModels}           = $self->allowed_models              if defined $self->allowed_models;
+    $payload{authClientIdMetadataUrl} = $self->auth_client_id_metadata_url if defined $self->auth_client_id_metadata_url;
+    $payload{agentDirectories}        = $self->agent_directories           if defined $self->agent_directories;
+    $payload{hookDirectories}         = $self->hook_directories            if defined $self->hook_directories;
+    $payload{interactiveUser}         = $self->interactive_user ? \1 : \0  if defined $self->interactive_user;
+    $payload{excludedManagedSettings} = $self->excluded_managed_settings   if defined $self->excluded_managed_settings;
+    $payload{enforceManagedModelDefaults} = $self->enforce_managed_model_defaults ? \1 : \0
+        if defined $self->enforce_managed_model_defaults;
+    $payload{imageGeneration}         = $self->image_generation            if defined $self->image_generation;
+    $payload{autopilot}               = $self->autopilot                   if defined $self->autopilot;
+    if ($opts{resume}) {
+        $payload{allowTranscriptRecovery} = $self->allow_transcript_recovery ? \1 : \0
+            if defined $self->allow_transcript_recovery;
+    } else {
+        $payload{name}                  = $self->name                    if defined $self->name;
+        $payload{trustWorkingDirectory} = $self->trust_working_directory if defined $self->trust_working_directory;
+        $payload{refreshCustomInstructions} = $self->refresh_custom_instructions ? \1 : \0
+            if defined $self->refresh_custom_instructions;
+    }
 
     $payload{requestPermission} = \1 if defined $self->on_permission_request;
     $payload{requestUserInput}  = \1 if defined $self->on_user_input_request;
@@ -885,6 +969,8 @@ sub TO_JSON {
 #   on_session_start        => sub { ... }
 #   on_session_end          => sub { ... }
 #   on_error_occurred       => sub { ... }
+#   on_subagent_start       => sub { ... }
+#   on_subagent_stop        => sub { ... }
 #
 # The mapping to wire hookType strings is:
 #   preToolUse           => on_pre_tool_use
@@ -894,6 +980,14 @@ sub TO_JSON {
 #   sessionStart         => on_session_start
 #   sessionEnd           => on_session_end
 #   errorOccurred        => on_error_occurred
+#   subagentStart        => on_subagent_start
+#   subagentStop         => on_subagent_stop
+#
+# subagentStart input: base hook fields plus transcriptPath, agentName,
+# agentDisplayName, agentDescription; output: { additionalContext => ... }.
+# subagentStop input: the start fields plus agentId, agentType, stopReason
+# ('end_turn') and response; output: { decision => 'block'|'allow', reason => ...,
+# modifiedResponse => ... }.
 
 # ============================================================================
 # SessionFsConfig - configuration for a session filesystem provider
@@ -1064,6 +1158,255 @@ use constant {
     GITHUB_ISSUE        => 'github_issue',
     GITHUB_FILE         => 'github_file',
 };
+
+# ============================================================================
+# v2.6.0 upstream-sync types & constants (parity with @github/copilot-sdk)
+# ============================================================================
+
+# ClientInfo - identity of the integrating application. When any field is set,
+# the client sends it on the `connect` handshake (as editorName / editorVersion /
+# extensionName / extensionVersion) so the runtime attributes its telemetry to it.
+package GitHub::Copilot::Types::ClientInfo;
+use Moo;
+
+has application_name    => (is => 'ro', default => sub { undef });
+has application_version => (is => 'ro', default => sub { undef });
+has integration_name    => (is => 'ro', default => sub { undef });
+has integration_version => (is => 'ro', default => sub { undef });
+
+# Returns the wire hashref with only non-empty fields, or undef when all are empty.
+sub to_wire {
+    my ($self) = @_;
+    my %h;
+    $h{editorName}       = $self->application_name    if defined $self->application_name    && length $self->application_name;
+    $h{editorVersion}    = $self->application_version if defined $self->application_version && length $self->application_version;
+    $h{extensionName}    = $self->integration_name    if defined $self->integration_name    && length $self->integration_name;
+    $h{extensionVersion} = $self->integration_version if defined $self->integration_version && length $self->integration_version;
+    return %h ? \%h : undef;
+}
+
+# AutoTier - Auto routing preference when the session model is 'auto' (experimental).
+package GitHub::Copilot::Types::AutoTier;
+
+use constant {
+    EFFICIENCY   => 'efficiency',
+    BALANCE      => 'balance',
+    INTELLIGENCE => 'intelligence',
+    FAST         => 'fast',
+};
+
+# AskUserVariant - wire shape used for ask-user prompts.
+package GitHub::Copilot::Types::AskUserVariant;
+
+use constant {
+    LEGACY      => 'legacy',
+    ELICITATION => 'elicitation',
+};
+
+# WorkingDirectoryTrust - scope of the trust granted at session creation.
+package GitHub::Copilot::Types::WorkingDirectoryTrust;
+
+use constant {
+    SESSION => 'session',
+    USER    => 'user',
+};
+
+# ModelProvider - BYOK provider families for ProviderConfig->model_provider.
+package GitHub::Copilot::Types::ModelProvider;
+
+use constant {
+    OPENAI        => 'openai',
+    ANTHROPIC     => 'anthropic',
+    AZURE_OPENAI  => 'azure_openai',
+    OLLAMA        => 'ollama',
+    LM_STUDIO     => 'lm_studio',
+    FOUNDRY_LOCAL => 'foundry_local',
+    LLAMA_CPP     => 'llama_cpp',
+};
+
+# MessageSource - message provenance for MessageOptions->source.
+package GitHub::Copilot::Types::MessageSource;
+
+use constant {
+    USER   => 'user',
+    SYSTEM => 'system',
+};
+
+# Build the 'agent-<id>' source. Callable as MessageSource->agent($id) or
+# GitHub::Copilot::Types::MessageSource::agent($id).
+sub agent {
+    my $agent_id = @_ > 1 ? $_[1] : $_[0];
+    return 'agent-' . $agent_id;
+}
+
+# ProviderConfig - custom API provider configuration (BYOK).
+package GitHub::Copilot::Types::ProviderConfig;
+use Moo;
+
+has type            => (is => 'ro', default => sub { undef });
+has wire_api        => (is => 'ro', default => sub { undef });
+has base_url        => (is => 'ro', default => sub { undef });
+has api_key         => (is => 'ro', default => sub { undef });
+has bearer_token    => (is => 'ro', default => sub { undef });
+# Azure options hashref, e.g. { apiVersion => '2024-10-21' }
+has azure           => (is => 'ro', default => sub { undef });
+# Provider family (see ModelProvider): openai, anthropic, azure_openai, ollama,
+# lm_studio, foundry_local, llama_cpp
+has model_provider  => (is => 'ro', default => sub { undef });
+# Command whose stdout is used as the API key
+has api_key_command => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{type}          = $self->type            if defined $self->type;
+    $h{wireApi}       = $self->wire_api        if defined $self->wire_api;
+    $h{baseUrl}       = $self->base_url        if defined $self->base_url;
+    $h{apiKey}        = $self->api_key         if defined $self->api_key;
+    $h{bearerToken}   = $self->bearer_token    if defined $self->bearer_token;
+    $h{azure}         = $self->azure           if defined $self->azure;
+    $h{modelProvider} = $self->model_provider  if defined $self->model_provider;
+    $h{apiKeyCommand} = $self->api_key_command if defined $self->api_key_command;
+    return \%h;
+}
+
+# GitHubTokenProviderArgs - arguments passed to a github_token_provider code ref.
+package GitHub::Copilot::Types::GitHubTokenProviderArgs;
+use Moo;
+
+# Effective GitHub host the token is for
+has host       => (is => 'ro', default => sub { undef });
+# Session receiving the token (undef before a cloud session has an id)
+has session_id => (is => 'ro', default => sub { undef });
+# 'initial' or 'refresh'
+has reason     => (is => 'ro', default => sub { undef });
+
+# GitHubTokenResult - value returned by a github_token_provider: a token or a
+# cancellation. Providers may also return a plain hashref.
+package GitHub::Copilot::Types::GitHubTokenResult;
+use Moo;
+
+has kind         => (is => 'ro', default => sub { 'token' });
+has access_token => (is => 'ro', default => sub { undef });
+has token_type   => (is => 'ro', default => sub { undef });
+# Remaining token lifetime in seconds
+has expires_in   => (is => 'ro', default => sub { undef });
+
+sub token {
+    my ($class, %args) = @_;
+    return $class->new(%args, kind => 'token');
+}
+
+sub cancelled {
+    my ($class) = @_;
+    return $class->new(kind => 'cancelled');
+}
+
+sub TO_JSON {
+    my ($self) = @_;
+    return { kind => 'cancelled' } if $self->kind eq 'cancelled';
+    my %h = (
+        kind        => 'token',
+        accessToken => $self->access_token,
+        expiresIn   => (defined $self->expires_in ? $self->expires_in + 0 : undef),
+    );
+    $h{tokenType} = $self->token_type if defined $self->token_type;
+    return \%h;
+}
+
+# SandboxConfig - session sandbox configuration. allow_bypass opts in to letting
+# the agent request that an individual command run outside the sandbox through
+# the normal permission flow.
+package GitHub::Copilot::Types::SandboxConfig;
+use Moo;
+
+has enabled                       => (is => 'ro', default => sub { 0 });
+# User-managed policy fragment (hashref) merged into the base policy
+has user_policy                   => (is => 'ro', default => sub { undef });
+has add_current_working_directory => (is => 'ro', default => sub { undef });
+has sandbox_mcp_servers           => (is => 'ro', default => sub { undef });
+has sandbox_lsp_servers           => (is => 'ro', default => sub { undef });
+has sandbox_extensions            => (is => 'ro', default => sub { undef });
+has allow_bypass                  => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h = (enabled => $self->enabled ? \1 : \0);
+    $h{userPolicy}                 = $self->user_policy if defined $self->user_policy;
+    $h{addCurrentWorkingDirectory} = $self->add_current_working_directory ? \1 : \0
+        if defined $self->add_current_working_directory;
+    $h{sandboxMcpServers} = $self->sandbox_mcp_servers ? \1 : \0 if defined $self->sandbox_mcp_servers;
+    $h{sandboxLspServers} = $self->sandbox_lsp_servers ? \1 : \0 if defined $self->sandbox_lsp_servers;
+    $h{sandboxExtensions} = $self->sandbox_extensions  ? \1 : \0 if defined $self->sandbox_extensions;
+    $h{allowBypass}       = $self->allow_bypass        ? \1 : \0 if defined $self->allow_bypass;
+    return \%h;
+}
+
+# ImageGenerationConfig - session-level image generation configuration.
+package GitHub::Copilot::Types::ImageGenerationConfig;
+use Moo;
+
+has enabled      => (is => 'ro', default => sub { undef });
+has watermark    => (is => 'ro', default => sub { undef });
+has save_to_disk => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{enabled}    = $self->enabled      ? \1 : \0 if defined $self->enabled;
+    $h{watermark}  = $self->watermark    ? \1 : \0 if defined $self->watermark;
+    $h{saveToDisk} = $self->save_to_disk ? \1 : \0 if defined $self->save_to_disk;
+    return \%h;
+}
+
+# AutopilotOptions - runtime-owned Autopilot continuation options.
+package GitHub::Copilot::Types::AutopilotOptions;
+use Moo;
+
+has continuation_enabled => (is => 'ro', default => sub { undef });
+has max_continues        => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{continuationEnabled} = $self->continuation_enabled ? \1 : \0 if defined $self->continuation_enabled;
+    $h{maxContinues}        = $self->max_continues + 0              if defined $self->max_continues;
+    return \%h;
+}
+
+# ModelLimitsOverride - limit overrides for SessionConfig->model_capabilities.
+# Wire keys are snake_case (max_prompt_tokens, max_output_tokens, max_context_window_tokens).
+package GitHub::Copilot::Types::ModelLimitsOverride;
+use Moo;
+
+has max_prompt_tokens         => (is => 'ro', default => sub { undef });
+has max_output_tokens         => (is => 'ro', default => sub { undef });
+has max_context_window_tokens => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{max_prompt_tokens}         = $self->max_prompt_tokens + 0         if defined $self->max_prompt_tokens;
+    $h{max_output_tokens}         = $self->max_output_tokens + 0         if defined $self->max_output_tokens;
+    $h{max_context_window_tokens} = $self->max_context_window_tokens + 0 if defined $self->max_context_window_tokens;
+    return \%h;
+}
+
+# ModelCapabilitiesOverride - per-property model capability overrides
+# (SessionConfig->model_capabilities). limits may be a ModelLimitsOverride or hashref.
+package GitHub::Copilot::Types::ModelCapabilitiesOverride;
+use Moo;
+
+has supports => (is => 'ro', default => sub { undef });
+has limits   => (is => 'ro', default => sub { undef });
+
+sub TO_JSON {
+    my ($self) = @_;
+    my %h;
+    $h{supports} = $self->supports if defined $self->supports;
+    $h{limits}   = $self->limits   if defined $self->limits;
+    return \%h;
+}
 
 1;
 

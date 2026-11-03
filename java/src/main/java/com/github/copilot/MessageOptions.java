@@ -21,6 +21,10 @@ public class MessageOptions {
     private String agentMode;
     /** Prompt text to display in the UI, when it differs from the model prompt. */
     private String displayPrompt;
+    /** Message provenance: {@code "user"}, {@code "system"}, or {@code "agent-<id>"} (see {@link Types.MessageSource}). */
+    private String source;
+    /** JSON Schema for structured output; sent as a {@code json_schema} response format when set. */
+    private Map<String, Object> responseSchema;
 
     /**
      * Creates message options for the given prompt.
@@ -31,6 +35,20 @@ public class MessageOptions {
         this.prompt = prompt;
     }
 
+    /** Copies every option from {@code other}. */
+    MessageOptions(MessageOptions other) {
+        this.prompt = other.prompt;
+        this.attachments = other.attachments;
+        this.mode = other.mode;
+        this.responseFormat = other.responseFormat;
+        this.imageOptions = other.imageOptions;
+        this.requestHeaders = other.requestHeaders;
+        this.agentMode = other.agentMode;
+        this.displayPrompt = other.displayPrompt;
+        this.source = other.source;
+        this.responseSchema = other.responseSchema;
+    }
+
     public MessageOptions prompt(String prompt) { this.prompt = prompt; return this; }
     public MessageOptions attachments(List<Map<String, Object>> attachments) { this.attachments = attachments; return this; }
     public MessageOptions mode(String mode) { this.mode = mode; return this; }
@@ -39,6 +57,8 @@ public class MessageOptions {
     public MessageOptions requestHeaders(Map<String, String> headers) { this.requestHeaders = headers; return this; }
     public MessageOptions agentMode(String agentMode) { this.agentMode = agentMode; return this; }
     public MessageOptions displayPrompt(String displayPrompt) { this.displayPrompt = displayPrompt; return this; }
+    public MessageOptions source(String source) { this.source = source; return this; }
+    public MessageOptions responseSchema(Map<String, Object> schema) { this.responseSchema = schema; return this; }
 
     public String getPrompt() { return prompt; }
     public List<Map<String, Object>> getAttachments() { return attachments; }
@@ -48,4 +68,6 @@ public class MessageOptions {
     public Map<String, String> getRequestHeaders() { return requestHeaders; }
     public String getAgentMode() { return agentMode; }
     public String getDisplayPrompt() { return displayPrompt; }
+    public String getSource() { return source; }
+    public Map<String, Object> getResponseSchema() { return responseSchema; }
 }

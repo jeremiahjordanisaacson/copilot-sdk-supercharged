@@ -20,13 +20,19 @@
 -export([
     start_link/4,
     stop/1,
+    disconnect/1,
     send/2,
     send_and_wait/2,
     send_and_wait/3,
+    send_and_wait_structured/3,
+    send_and_wait_structured/4,
     subscribe/2,
     unsubscribe/2,
     get_messages/1,
     abort/1,
+    set_auto_tier/2,
+    get_managed_settings/1,
+    recheck_policy_helper/1,
     handle_event/3,
     set_ready/1,
     session_id/1,
@@ -71,6 +77,16 @@ start_link(SessionId, Rpc, WorkspacePath, Config) ->
 stop(Pid) ->
     gen_server:stop(Pid, normal, 5000).
 
+%% @doc Detach from the session on the server (`session.detach`, falling back
+%% to `session.destroy` on older CLIs) and stop the session process. Session
+%% state on disk is preserved, so the session can be resumed later.
+-spec disconnect(pid()) -> ok | {error, term()}.
+disconnect(Pid) ->
+    case gen_server:call(Pid, detach) of
+        ok               -> stop(Pid);
+        {error, _} = Err -> Err
+    end.
+
 -spec send(pid(), map()) -> {ok, binary()} | {error, term()}.
 send(Pid, Options) ->
     gen_server:call(Pid, {send, Options}).
@@ -82,6 +98,36 @@ send_and_wait(Pid, Options) ->
 -spec send_and_wait(pid(), map(), timeout()) -> {ok, map()} | {error, term()}.
 send_and_wait(Pid, Options, Timeout) ->
     gen_server:call(Pid, {send_and_wait, Options, Timeout}, Timeout + 5000).
+
+%% @doc Send a prompt (binary) or message options map with a JSON Schema
+%% (structured output), wait for the session to go idle, and return the final
+%% assistant content decoded as JSON.
+-spec send_and_wait_structured(pid(), map() | binary(), map()) -> {ok, term()} | {error, term()}.
+send_and_wait_structured(Pid, PromptOrOptions, Schema) ->
+    send_and_wait_structured(Pid, PromptOrOptions, Schema, ?DEFAULT_WAIT_TIMEOUT).
+
+-spec send_and_wait_structured(pid(), map() | binary(), map(), timeout()) ->
+    {ok, term()} | {error, term()}.
+send_and_wait_structured(Pid, Prompt, Schema, Timeout) when is_binary(Prompt) ->
+    send_and_wait_structured(Pid, #{prompt => Prompt}, Schema, Timeout);
+send_and_wait_structured(Pid, Options, Schema, Timeout) when is_map(Options) ->
+    case send_and_wait(Pid, Options#{response_schema => Schema}, Timeout) of
+        {ok, #{data := Data}} when is_map(Data) ->
+            case maps:get(<<"content">>, Data, <<>>) of
+                Content when is_binary(Content), Content =/= <<>> ->
+                    try
+                        {ok, jsx:decode(Content, [return_maps])}
+                    catch
+                        _:_ -> {error, {invalid_structured_response, Content}}
+                    end;
+                _ ->
+                    {error, no_structured_response}
+            end;
+        {ok, _} ->
+            {error, no_structured_response};
+        {error, _} = Err ->
+            Err
+    end.
 
 -spec subscribe(pid(), pid()) -> reference().
 subscribe(Pid, Subscriber) ->
@@ -98,6 +144,22 @@ get_messages(Pid) ->
 -spec abort(pid()) -> ok | {error, term()}.
 abort(Pid) ->
     gen_server:call(Pid, abort).
+
+%% @doc Change the Auto routing preference (`session.model.switchAutoTier`).
+%% Pass `null` (or `undefined`) to return to the default Auto routing.
+-spec set_auto_tier(pid(), binary() | null | undefined) -> {ok, map()} | {error, term()}.
+set_auto_tier(Pid, AutoTier) ->
+    gen_server:call(Pid, {set_auto_tier, AutoTier}).
+
+%% @doc Read the session's effective managed settings (`session.managedSettings.get`).
+-spec get_managed_settings(pid()) -> {ok, map()} | {error, term()}.
+get_managed_settings(Pid) ->
+    gen_server:call(Pid, get_managed_settings).
+
+%% @doc Re-run the managed policy helper (`session.managedSettings.recheckPolicyHelper`).
+-spec recheck_policy_helper(pid()) -> {ok, map()} | {error, term()}.
+recheck_policy_helper(Pid) ->
+    gen_server:call(Pid, recheck_policy_helper).
 
 -spec handle_event(pid(), binary(), map()) -> ok.
 handle_event(Pid, EventType, EventData) ->
@@ -143,18 +205,8 @@ init({SessionId, Rpc, WorkspacePath, Config}) ->
     }}.
 
 handle_call({send, Options}, _From, #state{rpc = Rpc, session_id = SessionId} = State) ->
-    Req = #{
-        <<"sessionId">> => SessionId,
-        <<"prompt">>    => maps:get(prompt, Options, <<>>)
-    },
-    Req1 = maybe_add(<<"attachments">>, attachments, Options, Req),
-    Req2 = maybe_add(<<"mode">>, mode, Options, Req1),
-    Req3 = maybe_add(<<"agentMode">>, agent_mode, Options, Req2),
-    Req4 = maybe_add(<<"displayPrompt">>, display_prompt, Options, Req3),
-    Req5 = maybe_add(<<"responseFormat">>, response_format, Options, Req4),
-    Req6 = maybe_add(<<"imageOptions">>, image_options, Options, Req5),
-    Req7 = maybe_add(<<"requestHeaders">>, request_headers, Options, Req6),
-    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req7) of
+    Req = build_send_params(Options, SessionId),
+    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req) of
         {ok, #{<<"messageId">> := MsgId}} ->
             {reply, {ok, MsgId}, State};
         {ok, _} ->
@@ -165,18 +217,8 @@ handle_call({send, Options}, _From, #state{rpc = Rpc, session_id = SessionId} = 
 
 handle_call({send_and_wait, Options, Timeout}, From, State) ->
     #state{rpc = Rpc, session_id = SessionId} = State,
-    Req = #{
-        <<"sessionId">> => SessionId,
-        <<"prompt">>    => maps:get(prompt, Options, <<>>)
-    },
-    Req1 = maybe_add(<<"attachments">>, attachments, Options, Req),
-    Req2 = maybe_add(<<"mode">>, mode, Options, Req1),
-    Req3 = maybe_add(<<"agentMode">>, agent_mode, Options, Req2),
-    Req4 = maybe_add(<<"displayPrompt">>, display_prompt, Options, Req3),
-    Req5 = maybe_add(<<"responseFormat">>, response_format, Options, Req4),
-    Req6 = maybe_add(<<"imageOptions">>, image_options, Options, Req5),
-    Req7 = maybe_add(<<"requestHeaders">>, request_headers, Options, Req6),
-    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req7) of
+    Req = build_send_params(Options, SessionId),
+    case copilot_jsonrpc:request(Rpc, <<"session.send">>, Req) of
         {ok, _} ->
             TimerRef = erlang:send_after(Timeout, self(), {wait_timeout, From}),
             Waiting = [{From, TimerRef, undefined} | State#state.waiting],
@@ -200,6 +242,38 @@ handle_call(abort, _From, #state{rpc = Rpc, session_id = SessionId} = State) ->
         {ok, _} -> {reply, ok, State};
         Err     -> {reply, Err, State}
     end;
+
+handle_call(detach, _From, #state{rpc = Rpc, session_id = SessionId} = State) ->
+    Params = #{<<"sessionId">> => SessionId},
+    Reply = case copilot_jsonrpc:request(Rpc, <<"session.detach">>, Params) of
+        {error, #{<<"code">> := -32601}} ->
+            %% Older CLI without session.detach: fall back to session.destroy.
+            detach_reply(copilot_jsonrpc:request(Rpc, <<"session.destroy">>, Params));
+        Other ->
+            detach_reply(Other)
+    end,
+    {reply, Reply, State};
+
+handle_call({set_auto_tier, AutoTier}, _From,
+            #state{rpc = Rpc, session_id = SessionId} = State) ->
+    Tier = case AutoTier of
+        undefined -> null;
+        _         -> AutoTier
+    end,
+    Result = copilot_jsonrpc:request(Rpc, <<"session.model.switchAutoTier">>,
+                                     #{<<"sessionId">> => SessionId,
+                                       <<"autoTier">>  => Tier}),
+    {reply, Result, State};
+
+handle_call(get_managed_settings, _From, #state{rpc = Rpc, session_id = SessionId} = State) ->
+    Result = copilot_jsonrpc:request(Rpc, <<"session.managedSettings.get">>,
+                                     #{<<"sessionId">> => SessionId}),
+    {reply, Result, State};
+
+handle_call(recheck_policy_helper, _From, #state{rpc = Rpc, session_id = SessionId} = State) ->
+    Result = copilot_jsonrpc:request(Rpc, <<"session.managedSettings.recheckPolicyHelper">>,
+                                     #{<<"sessionId">> => SessionId}),
+    {reply, Result, State};
 
 handle_call(session_id, _From, #state{session_id = Id} = State) ->
     {reply, Id, State};
@@ -287,6 +361,36 @@ maybe_add(JsonKey, MapKey, Options, Acc) ->
         Value     -> Acc#{JsonKey => Value}
     end.
 
+build_send_params(Options, SessionId) ->
+    Req = #{
+        <<"sessionId">> => SessionId,
+        <<"prompt">>    => maps:get(prompt, Options, <<>>)
+    },
+    Req1 = maybe_add(<<"attachments">>, attachments, Options, Req),
+    Req2 = maybe_add(<<"mode">>, mode, Options, Req1),
+    Req3 = maybe_add(<<"agentMode">>, agent_mode, Options, Req2),
+    Req4 = maybe_add(<<"displayPrompt">>, display_prompt, Options, Req3),
+    Req5 = maybe_add(<<"responseFormat">>, response_format, Options, Req4),
+    Req6 = maybe_add(<<"imageOptions">>, image_options, Options, Req5),
+    Req7 = maybe_add(<<"requestHeaders">>, request_headers, Options, Req6),
+    %% Message provenance: user | system | {agent, Id} | binary
+    Req8 = case maps:get(source, Options, undefined) of
+        undefined -> Req7;
+        Source    -> Req7#{<<"source">> => copilot_types:message_source(Source)}
+    end,
+    %% Structured output: a JSON Schema replaces the legacy responseFormat value.
+    case maps:get(response_schema, Options, undefined) of
+        undefined -> Req8;
+        Schema    -> Req8#{<<"responseFormat">> => copilot_types:response_format_json_schema(Schema)}
+    end.
+
+detach_reply({ok, #{<<"success">> := false} = Resp}) ->
+    {error, {detach_failed, maps:get(<<"error">>, Resp, <<"Unknown error">>)}};
+detach_reply({ok, _}) ->
+    ok;
+detach_reply({error, _} = Err) ->
+    Err.
+
 maybe_invoke_hook(<<"tool.execution_start">>, Data, #state{hooks = Hooks})
   when Hooks =/= undefined ->
     case maps:get(on_pre_tool_use, Hooks, undefined) of
@@ -318,6 +422,19 @@ maybe_invoke_hook(<<"session.shutdown">>, Data, #state{hooks = Hooks})
 maybe_invoke_hook(<<"session.error">>, Data, #state{hooks = Hooks})
   when Hooks =/= undefined ->
     case maps:get(on_error_occurred, Hooks, undefined) of
+        undefined -> ok;
+        Hook      -> catch Hook(Data)
+    end;
+%% Sub-agent lifecycle hooks (hook types subagentStart / subagentStop).
+maybe_invoke_hook(<<"subagent.started">>, Data, #state{hooks = Hooks})
+  when Hooks =/= undefined ->
+    case maps:get(on_subagent_start, Hooks, undefined) of
+        undefined -> ok;
+        Hook      -> catch Hook(Data)
+    end;
+maybe_invoke_hook(<<"subagent.completed">>, Data, #state{hooks = Hooks})
+  when Hooks =/= undefined ->
+    case maps:get(on_subagent_stop, Hooks, undefined) of
         undefined -> ok;
         Hook      -> catch Hook(Data)
     end;

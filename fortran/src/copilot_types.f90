@@ -30,6 +30,17 @@ module copilot_types
   public :: SECTION_PREAMBLE, SECTION_IDENTITY, SECTION_TOOL_INSTRUCTIONS, SECTION_PRESERVE
   public :: GITHUB_COMMIT, GITHUB_RELEASE, GITHUB_ACTIONS_JOB, GITHUB_REPOSITORY
   public :: GITHUB_FILE_DIFF, GITHUB_TREE_COMPARISON, GITHUB_URL, GITHUB_FILE, GITHUB_SNIPPET
+  ! --- v2.6.0 upstream-sync surface (parity with @github/copilot-sdk) ---
+  public :: copilot_client_info, sandbox_config, image_generation_config
+  public :: autopilot_options, model_limits_override, byok_provider_config
+  public :: github_token_provider_args, github_token_result
+  public :: github_token_provider_interface
+  public :: subagent_start_input, subagent_stop_input
+  public :: subagent_start_output, subagent_stop_output
+  public :: subagent_start_hook_interface, subagent_stop_hook_interface
+  public :: MESSAGE_SOURCE_USER, MESSAGE_SOURCE_SYSTEM, message_source_agent
+  public :: AUTO_TIER_EFFICIENCY, AUTO_TIER_BALANCE, AUTO_TIER_INTELLIGENCE, AUTO_TIER_FAST
+  public :: ASK_USER_VARIANT_LEGACY, ASK_USER_VARIANT_ELICITATION
 
   ! --------------------------------------------------------------------------
   ! Connection state enum
@@ -63,6 +74,20 @@ module copilot_types
   character(len=*), parameter :: GITHUB_URL             = 'GitHubUrl'
   character(len=*), parameter :: GITHUB_FILE            = 'GitHubFile'
   character(len=*), parameter :: GITHUB_SNIPPET         = 'GitHubSnippet'
+
+  !> Message provenance for send_options%source ('agent-<id>' via message_source_agent).
+  character(len=*), parameter :: MESSAGE_SOURCE_USER   = 'user'
+  character(len=*), parameter :: MESSAGE_SOURCE_SYSTEM = 'system'
+
+  !> Auto model routing preferences for session_config%auto_tier (experimental).
+  character(len=*), parameter :: AUTO_TIER_EFFICIENCY   = 'efficiency'
+  character(len=*), parameter :: AUTO_TIER_BALANCE      = 'balance'
+  character(len=*), parameter :: AUTO_TIER_INTELLIGENCE = 'intelligence'
+  character(len=*), parameter :: AUTO_TIER_FAST         = 'fast'
+
+  !> Ask-user tool variants for session_config%ask_user_variant.
+  character(len=*), parameter :: ASK_USER_VARIANT_LEGACY      = 'legacy'
+  character(len=*), parameter :: ASK_USER_VARIANT_ELICITATION = 'elicitation'
 
   type :: copilot_connection_state
     integer :: value = COPILOT_STATE_DISCONNECTED

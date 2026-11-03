@@ -68,6 +68,9 @@ class CopilotSession internal constructor(
     @Volatile
     private var exitPlanModeHandler: ExitPlanModeHandler? = null
 
+    @Volatile
+    private var onDestroyed: (() -> Unit)? = null
+
     /**
      * Sends a message to this session.
      *
@@ -131,6 +134,43 @@ class CopilotSession internal constructor(
     }
 
     /**
+     * Sends a message with [MessageOptions.responseSchema] set to [schema], waits via [sendAndWait],
+     * and returns the final assistant content parsed as JSON. The caller's options are not modified.
+     *
+     * @param options The message options
+     * @param schema JSON Schema the response must satisfy
+     * @param timeoutMs Timeout in milliseconds (default: 60000)
+     * @return The structured response parsed as a [JsonElement]
+     * @throws IllegalStateException If the run completes without assistant content
+     */
+    suspend fun sendAndWaitStructured(
+        options: MessageOptions,
+        schema: Map<String, Any?>,
+        timeoutMs: Long = 60_000L
+    ): JsonElement {
+        val response = sendAndWait(options.copy(responseSchema = schema), timeoutMs)
+        val content = response?.data?.get("content")?.jsonPrimitive?.contentOrNull
+        if (content.isNullOrBlank()) {
+            throw IllegalStateException("The requested run completed without a structured assistant response.")
+        }
+        return json.parseToJsonElement(content)
+    }
+
+    /**
+     * Sends [prompt] requesting structured output and returns the parsed JSON response.
+     *
+     * @param prompt The message prompt
+     * @param schema JSON Schema the response must satisfy
+     * @param timeoutMs Timeout in milliseconds (default: 60000)
+     * @return The structured response parsed as a [JsonElement]
+     */
+    suspend fun sendAndWaitStructured(
+        prompt: String,
+        schema: Map<String, Any?>,
+        timeoutMs: Long = 60_000L
+    ): JsonElement = sendAndWaitStructured(MessageOptions(prompt = prompt), schema, timeoutMs)
+
+    /**
      * Subscribes to all events from this session.
      *
      * @param handler A callback function that receives all session events
@@ -184,15 +224,22 @@ class CopilotSession internal constructor(
     }
 
     /**
-     * Destroys this session and releases all associated resources.
+     * Detaches this session and releases all associated resources.
      *
-     * After calling this method, the session can no longer be used.
+     * Sends `session.detach` (falling back to `session.destroy` on older runtimes); on-disk session
+     * state is preserved. After calling this method, the session can no longer be used.
      * To continue the conversation, use [CopilotClient.resumeSession].
      */
     suspend fun destroy() {
-        client.request("session.destroy", buildJsonObject {
+        val params = buildJsonObject {
             put("sessionId", sessionId)
-        })
+        }
+        try {
+            client.request("session.detach", params)
+        } catch (e: JsonRpcException) {
+            if (!isMethodNotFound(e, "session.detach")) throw e
+            client.request("session.destroy", params)
+        }
         eventHandlers.clear()
         typedEventHandlers.clear()
         toolHandlers.clear()
@@ -201,6 +248,9 @@ class CopilotSession internal constructor(
         elicitationHandler = null
         exitPlanModeHandler = null
         hooks = null
+        val callback = onDestroyed
+        onDestroyed = null
+        callback?.invoke()
     }
 
     /**
@@ -212,6 +262,42 @@ class CopilotSession internal constructor(
         client.request("session.abort", buildJsonObject {
             put("sessionId", sessionId)
         })
+    }
+
+    /**
+     * Changes the Auto routing preference without changing the selected model (experimental).
+     * The runtime commits it on a later turn that uses the `auto` model.
+     *
+     * @param autoTier Routing preference (see [AutoTier]), or null to return to default routing
+     * @return The acknowledgement (`status`, `effectiveAutoTier`, `pendingAutoTier`,
+     *   `activatingAutoTier`, `supersededAutoTier`)
+     */
+    suspend fun setAutoTier(autoTier: String?): JsonObject {
+        val result = client.request("session.model.switchAutoTier", buildJsonObject {
+            put("sessionId", sessionId)
+            put("autoTier", autoTier)
+        })
+        return result as? JsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
+     * Returns the session's effective enterprise managed settings snapshot.
+     */
+    suspend fun getManagedSettings(): JsonObject {
+        val result = client.request("session.managedSettings.get", buildJsonObject {
+            put("sessionId", sessionId)
+        })
+        return result as? JsonObject ?: JsonObject(emptyMap())
+    }
+
+    /**
+     * Runs a fresh Policy Helper evaluation and returns the resulting managed settings snapshot.
+     */
+    suspend fun recheckPolicyHelper(): JsonObject {
+        val result = client.request("session.managedSettings.recheckPolicyHelper", buildJsonObject {
+            put("sessionId", sessionId)
+        })
+        return result as? JsonObject ?: JsonObject(emptyMap())
     }
 
     // ========================================================================
@@ -273,6 +359,14 @@ class CopilotSession internal constructor(
      */
     internal fun registerExitPlanModeHandler(handler: ExitPlanModeHandler?) {
         this.exitPlanModeHandler = handler
+    }
+
+    /**
+     * Registers a callback run once after this session is successfully destroyed.
+     * @suppress
+     */
+    internal fun registerOnDestroyed(callback: () -> Unit) {
+        this.onDestroyed = callback
     }
 
     /**

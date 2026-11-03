@@ -64,6 +64,7 @@ class CopilotSession(
   @volatile private var userInputHandler: Option[UserInputHandler] = None
   @volatile private var hooks: Option[SessionHooks] = None
   @volatile private var exitPlanModeHandler: Option[ExitPlanModeHandler] = None
+  @volatile private var onDestroyed: Option[() => Unit] = None
 
   // -------------------------------------------------------------------------
   // Sending Messages
@@ -134,6 +135,33 @@ class CopilotSession(
     // Clean up on completion
     resultFuture.andThen { case _ => unsubscribe() }
 
+  /**
+   * Sends a message with `responseSchema` set to `schema`, waits via [[sendAndWait]], and returns
+   * the final assistant content parsed as JSON. The caller's options are not modified.
+   *
+   * @param options The message options
+   * @param schema  JSON Schema the response must satisfy
+   * @param timeout Maximum time to wait (default: 60 seconds)
+   * @return A Future with the structured response parsed as JSON; fails when no content is returned
+   */
+  def sendAndWaitStructured(
+    options: MessageOptions,
+    schema: JsonObject,
+    timeout: FiniteDuration = 60.seconds
+  ): Future[Json] =
+    sendAndWait(options.copy(responseSchema = Some(schema)), timeout).flatMap { response =>
+      response.flatMap(_.data.hcursor.get[String]("content").toOption).filter(_.trim.nonEmpty) match
+        case None =>
+          Future.failed(new IllegalStateException(
+            "The requested run completed without a structured assistant response."
+          ))
+        case Some(content) =>
+          parse(content) match
+            case Right(json) => Future.successful(json)
+            case Left(err) =>
+              Future.failed(new RuntimeException(s"Structured response is not valid JSON: ${err.message}", err))
+    }
+
   // -------------------------------------------------------------------------
   // Event Subscriptions
   // -------------------------------------------------------------------------
@@ -192,13 +220,18 @@ class CopilotSession(
   // -------------------------------------------------------------------------
 
   /**
-   * Destroys this session and releases all associated resources.
+   * Detaches this session and releases all associated resources.
    *
-   * After calling this, the session can no longer be used. To continue the conversation,
-   * use [[CopilotClient.resumeSession]] with the session ID.
+   * Sends `session.detach` (falling back to `session.destroy` on older runtimes); on-disk session
+   * state is preserved. After calling this, the session can no longer be used. To continue the
+   * conversation, use [[CopilotClient.resumeSession]] with the session ID.
    */
   def destroy(): Future[Unit] =
-    connection.sendRequest("session.destroy", Json.obj("sessionId" -> sessionId.asJson)).map { _ =>
+    val params = Json.obj("sessionId" -> sessionId.asJson)
+    connection.sendRequest("session.detach", params).recoverWith {
+      case ex: JsonRpcException if isMethodNotFound(ex, "session.detach") =>
+        connection.sendRequest("session.destroy", params)
+    }.map { _ =>
       eventHandlers.clear()
       typedEventHandlers.clear()
       toolHandlers.clear()
@@ -206,6 +239,9 @@ class CopilotSession(
       userInputHandler = None
       hooks = None
       exitPlanModeHandler = None
+      val callback = onDestroyed
+      onDestroyed = None
+      callback.foreach(f => f())
     }
 
   /**
@@ -215,6 +251,28 @@ class CopilotSession(
    */
   def abort(): Future[Unit] =
     connection.sendRequest("session.abort", Json.obj("sessionId" -> sessionId.asJson)).map(_ => ())
+
+  /**
+   * Changes the Auto routing preference without changing the selected model (experimental).
+   * The runtime commits it on a later turn that uses the `auto` model.
+   *
+   * @param autoTier Routing preference (see [[AutoTier]]), or None to return to default routing
+   * @return A Future with the acknowledgement (`status`, `effectiveAutoTier`, `pendingAutoTier`,
+   *         `activatingAutoTier`, `supersededAutoTier`)
+   */
+  def setAutoTier(autoTier: Option[String]): Future[Json] =
+    connection.sendRequest("session.model.switchAutoTier", Json.obj(
+      "sessionId" -> sessionId.asJson,
+      "autoTier" -> autoTier.asJson
+    ))
+
+  /** Returns the session's effective enterprise managed settings snapshot. */
+  def getManagedSettings(): Future[Json] =
+    connection.sendRequest("session.managedSettings.get", Json.obj("sessionId" -> sessionId.asJson))
+
+  /** Runs a fresh Policy Helper evaluation and returns the resulting managed settings snapshot. */
+  def recheckPolicyHelper(): Future[Json] =
+    connection.sendRequest("session.managedSettings.recheckPolicyHelper", Json.obj("sessionId" -> sessionId.asJson))
 
   // -------------------------------------------------------------------------
   // Tool Registration (internal)
@@ -244,6 +302,10 @@ class CopilotSession(
   /** Registers an exit plan mode handler. */
   private[copilot] def registerExitPlanModeHandler(handler: ExitPlanModeHandler): Unit =
     exitPlanModeHandler = Some(handler)
+
+  /** Registers a callback run once after this session is successfully destroyed. */
+  private[copilot] def registerOnDestroyed(callback: () => Unit): Unit =
+    onDestroyed = Some(callback)
 
   // -------------------------------------------------------------------------
   // Event Dispatch (internal)
@@ -360,6 +422,24 @@ class CopilotSession(
               case None => Future.successful(None)
               case Some(handler) =>
                 input.as[ErrorOccurredHookInput] match
+                  case Left(_) => Future.successful(None)
+                  case Right(parsed) =>
+                    handler(parsed, invocation).map(_.map(_.asJson)).recover { case _ => None }
+
+          case "subagentStart" =>
+            h.onSubagentStart match
+              case None => Future.successful(None)
+              case Some(handler) =>
+                input.as[SubagentStartHookInput] match
+                  case Left(_) => Future.successful(None)
+                  case Right(parsed) =>
+                    handler(parsed, invocation).map(_.map(_.asJson)).recover { case _ => None }
+
+          case "subagentStop" =>
+            h.onSubagentStop match
+              case None => Future.successful(None)
+              case Some(handler) =>
+                input.as[SubagentStopHookInput] match
                   case Left(_) => Future.successful(None)
                   case Right(parsed) =>
                     handler(parsed, invocation).map(_.map(_.asJson)).recover { case _ => None }

@@ -2,6 +2,7 @@
 
 # Copyright (c) Microsoft Corporation. All rights reserved.
 
+require "json"
 require "thread"
 
 module Copilot
@@ -58,6 +59,8 @@ module Copilot
       @exit_plan_mode_handler_lock = Mutex.new
 
       @trace_context_provider = nil
+
+      @destroy_callbacks = []
     end
 
     # Send a message to this session.
@@ -67,15 +70,28 @@ module Copilot
     # @param mode            [String, nil]       "enqueue" (default) or "immediate"
     # @param response_format [String, nil]       desired response format ("text", "image", "json_object")
     # @param image_options   [ImageOptions, nil] options for image generation
+    # @param source          [String, nil]       message provenance: "user", "system", or
+    #   "agent-<id>" (see {MessageSource})
+    # @param response_schema [Hash, nil]         JSON Schema requesting structured output; sent as
+    #   +responseFormat: { type: "json_schema", jsonSchema: { name: "response", strict: true, schema: } }+
+    #   and takes precedence over +response_format+
     # @return [String] the message ID
-    def send(prompt:, attachments: nil, mode: nil, agent_mode: nil, display_prompt: nil, request_headers: nil, response_format: nil, image_options: nil)
+    def send(prompt:, attachments: nil, mode: nil, agent_mode: nil, display_prompt: nil, request_headers: nil, response_format: nil, image_options: nil, source: nil, response_schema: nil)
       payload = { sessionId: @session_id, prompt: prompt }
+      payload[:source] = source if source
       payload[:attachments] = attachments if attachments
       payload[:mode] = mode if mode
       payload[:agentMode] = agent_mode if agent_mode
       payload[:displayPrompt] = display_prompt if display_prompt
       payload[:requestHeaders] = request_headers if request_headers
-      payload[:responseFormat] = response_format if response_format
+      if response_schema
+        payload[:responseFormat] = {
+          type: "json_schema",
+          jsonSchema: { name: "response", strict: true, schema: response_schema },
+        }
+      elsif response_format
+        payload[:responseFormat] = response_format
+      end
       payload[:imageOptions] = image_options.to_h if image_options
 
       # Inject trace context if provider is available
@@ -107,11 +123,13 @@ module Copilot
     # @param mode            [String, nil]       delivery mode
     # @param response_format [String, nil]       desired response format ("text", "image", "json_object")
     # @param image_options   [ImageOptions, nil] options for image generation
+    # @param source          [String, nil]       message provenance (see {MessageSource})
+    # @param response_schema [Hash, nil]         JSON Schema requesting structured output
     # @param timeout         [Numeric]           seconds to wait (default 60)
     # @return [SessionEvent, nil] the final assistant.message event, or nil
     # @raise [Timeout::Error] if the timeout expires before session.idle
     # @raise [RuntimeError] if the session emits a session.error event
-    def send_and_wait(prompt:, attachments: nil, mode: nil, agent_mode: nil, display_prompt: nil, request_headers: nil, response_format: nil, image_options: nil, timeout: 60)
+    def send_and_wait(prompt:, attachments: nil, mode: nil, agent_mode: nil, display_prompt: nil, request_headers: nil, response_format: nil, image_options: nil, source: nil, response_schema: nil, timeout: 60)
       idle_mutex = Mutex.new
       idle_cv    = ConditionVariable.new
       idle_fired = false
@@ -144,7 +162,8 @@ module Copilot
         self.send(prompt: prompt, attachments: attachments, mode: mode,
                   agent_mode: agent_mode, display_prompt: display_prompt,
                   request_headers: request_headers,
-                  response_format: response_format, image_options: image_options)
+                  response_format: response_format, image_options: image_options,
+                  source: source, response_schema: response_schema)
 
         idle_mutex.synchronize do
           unless idle_fired
@@ -162,6 +181,37 @@ module Copilot
       ensure
         unsub.call
       end
+    end
+
+    # Send a message requesting structured output and wait until the session is idle.
+    #
+    # Sets +response_schema+ on the message, waits via {#send_and_wait}, and returns the
+    # final assistant content parsed as JSON.
+    #
+    # @param prompt_or_options [String, Hash, MessageOptions] the prompt text, or message
+    #   options accepted by {#send_and_wait} (e.g. +{ prompt:, attachments: }+)
+    # @param schema  [Hash]    JSON Schema the response must satisfy
+    # @param timeout [Numeric] seconds to wait (default 60)
+    # @return [Object] the parsed JSON value (usually a Hash)
+    # @raise [RuntimeError] if the run completed without assistant content
+    # @raise [JSON::ParserError] if the content is not valid JSON
+    def send_and_wait_structured(prompt_or_options, schema, timeout = 60)
+      options =
+        case prompt_or_options
+        when Hash then prompt_or_options.transform_keys(&:to_sym)
+        when Struct then prompt_or_options.to_h.compact
+        else { prompt: prompt_or_options.to_s }
+        end
+      options = options.reject { |key, _| key == :response_schema || key == :timeout }
+
+      event = send_and_wait(**options, response_schema: schema, timeout: timeout)
+      data = event&.data
+      content = data.is_a?(Hash) ? data["content"] : nil
+      if content.nil? || content.to_s.strip.empty?
+        raise "The requested run completed without a structured assistant response"
+      end
+
+      JSON.parse(content)
     end
 
     # Subscribe to events from this session.
@@ -217,9 +267,44 @@ module Copilot
       @rpc_client.request("session.getMetadata", { sessionId: @session_id })
     end
 
+    # Change the Auto routing preference without changing the selected model
+    # (experimental). The runtime records the request and commits it on a later
+    # turn that uses the "auto" model.
+    #
+    # @param auto_tier [String, nil] "efficiency", "balance", "intelligence" or "fast"
+    #   (see {AutoTier}); nil returns to the provider's default Auto routing
+    # @return [Hash] the result (status, effectiveAutoTier, pendingAutoTier,
+    #   activatingAutoTier, supersededAutoTier)
+    def set_auto_tier(auto_tier)
+      @rpc_client.request("session.model.switchAutoTier", { sessionId: @session_id, autoTier: auto_tier })
+    end
+
+    # Retrieve the managed (enterprise policy) settings in effect for this session.
+    #
+    # @return [Hash] the managed settings
+    def get_managed_settings
+      @rpc_client.request("session.managedSettings.get", { sessionId: @session_id })
+    end
+
+    # Ask the runtime to re-run the managed-settings policy helper for this session.
+    #
+    # @return [Hash] the raw result
+    def recheck_policy_helper
+      @rpc_client.request("session.managedSettings.recheckPolicyHelper", { sessionId: @session_id })
+    end
+
     # Destroy this session and release associated resources.
+    #
+    # Sends +session.detach+ (falling back to +session.destroy+ on older CLIs), so
+    # on-disk session state is preserved and the session can be resumed later.
     def destroy
-      @rpc_client.request("session.destroy", { sessionId: @session_id })
+      begin
+        @rpc_client.request("session.detach", { sessionId: @session_id })
+      rescue JsonRpcError => e
+        raise unless e.code == -32601
+
+        @rpc_client.request("session.destroy", { sessionId: @session_id })
+      end
       @event_handlers_lock.synchronize do
         @event_handlers.clear
         @typed_event_handlers.clear
@@ -230,6 +315,14 @@ module Copilot
       @hooks_lock.synchronize { @hooks = nil }
       @exit_plan_mode_handler_lock.synchronize { @exit_plan_mode_handler = nil }
       @trace_context_provider = nil
+
+      callbacks = @destroy_callbacks.dup
+      @destroy_callbacks.clear
+      callbacks.each do |callback|
+        callback.call
+      rescue StandardError
+        # ignore cleanup errors
+      end
     end
 
     # Abort the currently processing message.
@@ -341,6 +434,12 @@ module Copilot
     end
 
     # @api private
+    # Registers a callback run once after {#destroy} releases the session.
+    def _on_destroy(&callback)
+      @destroy_callbacks << callback if callback
+    end
+
+    # @api private
     def _handle_hooks_invoke(hook_type, input_data)
       hooks = @hooks_lock.synchronize { @hooks }
       return nil unless hooks
@@ -353,6 +452,8 @@ module Copilot
         "sessionStart"        => hooks.on_session_start,
         "sessionEnd"          => hooks.on_session_end,
         "errorOccurred"       => hooks.on_error_occurred,
+        "subagentStart"       => hooks.on_subagent_start,
+        "subagentStop"        => hooks.on_subagent_stop,
       }
 
       handler = handler_map[hook_type]

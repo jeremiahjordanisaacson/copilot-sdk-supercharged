@@ -636,23 +636,30 @@ ModelSupports <- R6::R6Class(
 
 #' ModelLimits
 #'
-#' Model limits.
+#' Model limits. When used as a model capabilities override, the wire keys are
+#' snake_case (\code{max_prompt_tokens}, \code{max_context_window_tokens},
+#' \code{max_output_tokens}).
 #'
 #' @field max_prompt_tokens Numeric or NULL.
 #' @field max_context_window_tokens Numeric or NULL.
+#' @field max_output_tokens Numeric or NULL. Maximum output tokens override.
 #' @export
 ModelLimits <- R6::R6Class(
   "ModelLimits",
   public = list(
     max_prompt_tokens = NULL,
     max_context_window_tokens = NULL,
+    max_output_tokens = NULL,
 
     #' @description Create a new ModelLimits.
     #' @param max_prompt_tokens Numeric or NULL.
     #' @param max_context_window_tokens Numeric or NULL.
-    initialize = function(max_prompt_tokens = NULL, max_context_window_tokens = NULL) {
+    #' @param max_output_tokens Numeric or NULL.
+    initialize = function(max_prompt_tokens = NULL, max_context_window_tokens = NULL,
+                          max_output_tokens = NULL) {
       self$max_prompt_tokens <- max_prompt_tokens
       self$max_context_window_tokens <- max_context_window_tokens
+      self$max_output_tokens <- max_output_tokens
     },
 
     #' @description Convert to list.
@@ -662,6 +669,7 @@ ModelLimits <- R6::R6Class(
       if (!is.null(self$max_context_window_tokens)) {
         result$max_context_window_tokens <- self$max_context_window_tokens
       }
+      if (!is.null(self$max_output_tokens)) result$max_output_tokens <- self$max_output_tokens
       result
     }
   )
@@ -1093,7 +1101,8 @@ model_info_from_list <- function(obj) {
   )
   limits <- ModelLimits$new(
     max_prompt_tokens = limits_obj$max_prompt_tokens,
-    max_context_window_tokens = limits_obj$max_context_window_tokens
+    max_context_window_tokens = limits_obj$max_context_window_tokens,
+    max_output_tokens = limits_obj[["max_output_tokens"]]
   )
   capabilities <- ModelCapabilities$new(supports = supports, limits = limits)
 
@@ -1485,6 +1494,8 @@ Tool <- R6::R6Class(
 #' @field response_format Character or NULL. Response format ("text", "image", or "json_object").
 #' @field image_options List or NULL. Image generation options (from \code{image_options()}).
 #' @field request_headers Named list or NULL. Custom HTTP headers for outbound model requests.
+#' @field source Character or NULL. Message source (see \code{MessageSource}).
+#' @field response_schema Named list or NULL. JSON Schema for a structured response.
 #' @export
 MessageOptions <- R6::R6Class(
   "MessageOptions",
@@ -1495,6 +1506,8 @@ MessageOptions <- R6::R6Class(
     response_format = NULL,
     image_options = NULL,
     request_headers = NULL,
+    source = NULL,
+    response_schema = NULL,
 
     #' @description Create new MessageOptions.
     #' @param prompt Character. The prompt text.
@@ -1503,29 +1516,49 @@ MessageOptions <- R6::R6Class(
     #' @param response_format Character or NULL. One of RESPONSE_FORMATS.
     #' @param image_options List or NULL. Image generation options.
     #' @param request_headers Named list or NULL. Custom HTTP headers for outbound model requests.
+    #' @param source Character or NULL. Message source ("user", "system", or "agent-<id>").
+    #' @param response_schema Named list or NULL. JSON Schema for a structured response.
     initialize = function(prompt, attachments = NULL, mode = NULL,
                           response_format = NULL, image_options = NULL,
-                          request_headers = NULL) {
+                          request_headers = NULL, source = NULL, response_schema = NULL) {
       self$prompt <- prompt
       self$attachments <- attachments
       self$mode <- mode
       self$response_format <- response_format
       self$image_options <- image_options
       self$request_headers <- request_headers
+      self$source <- source
+      self$response_schema <- response_schema
     },
 
     #' @description Convert to list.
     to_list = function() {
       result <- list(prompt = self$prompt)
+      if (!is.null(self$source)) result$source <- self$source
       if (!is.null(self$attachments)) result$attachments <- self$attachments
       if (!is.null(self$mode)) result$mode <- self$mode
       if (!is.null(self$response_format)) result$responseFormat <- self$response_format
+      if (!is.null(self$response_schema)) {
+        result$responseFormat <- structured_response_format(self$response_schema)
+      }
       if (!is.null(self$image_options)) result$imageOptions <- self$image_options
       if (!is.null(self$request_headers)) result$requestHeaders <- self$request_headers
       result
     }
   )
 )
+
+#' Build the structured-output \code{responseFormat} wire object for a JSON Schema.
+#'
+#' @param schema Named list. JSON Schema describing the expected response.
+#' @return Named list: \code{list(type = "json_schema", jsonSchema = list(name, strict, schema))}.
+#' @keywords internal
+structured_response_format <- function(schema) {
+  list(
+    type = "json_schema",
+    jsonSchema = list(name = "response", strict = TRUE, schema = schema)
+  )
+}
 
 
 # ---------------------------------------------------------------------------

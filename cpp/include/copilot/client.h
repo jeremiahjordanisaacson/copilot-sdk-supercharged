@@ -102,6 +102,9 @@ public:
     /// Sets the session filesystem provider configuration.
     void setSessionFsProvider(const SessionFsConfig& config = {});
 
+    /// Clears the runtime's managed-settings cache (`managedSettings.clearCache`).
+    void clearManagedSettingsCache();
+
     /// Subscribe to all session lifecycle events. Returns unsubscribe function.
     std::function<void()> onLifecycle(SessionLifecycleHandler handler);
 
@@ -112,6 +115,7 @@ private:
     void ensureConnected();
     void startCLIServer();
     void connectToServer();
+    void sendConnectHandshake();
     void verifyProtocolVersion();
     void setupHandlers();
 
@@ -123,6 +127,13 @@ private:
     std::pair<nlohmann::json, std::optional<JsonRpcError>> handleUserInputRequest(const nlohmann::json& params);
     std::pair<nlohmann::json, std::optional<JsonRpcError>> handleHooksInvoke(const nlohmann::json& params);
     std::pair<nlohmann::json, std::optional<JsonRpcError>> handleExitPlanModeRequest(const nlohmann::json& params);
+    std::pair<nlohmann::json, std::optional<JsonRpcError>> handleGitHubTokenGetToken(const nlohmann::json& params);
+
+    // GitHub token provider registry (gitHubToken.getToken)
+    std::string registerGitHubTokenProvider(const GitHubTokenProvider& provider, const std::string& sessionId);
+    void assignGitHubTokenProviderSession(const std::string& registrationId, const std::string& sessionId);
+    void unregisterGitHubTokenProvider(const std::string& registrationId);
+    void clearGitHubTokenProviders();
 
     ToolResultObject executeToolCall(ToolHandler handler, const ToolInvocation& invocation);
     ToolResultObject normalizeToolResult(const nlohmann::json& result);
@@ -158,6 +169,14 @@ private:
     // Models cache
     mutable std::mutex modelsCacheMutex_;
     std::optional<std::vector<ModelInfo>> modelsCache_;
+
+    // GitHub token providers keyed by registration ID
+    struct GitHubTokenRegistration {
+        GitHubTokenProvider provider;
+        std::string sessionId; // empty until the session ID is known
+    };
+    mutable std::mutex gitHubTokenProvidersMutex_;
+    std::map<std::string, GitHubTokenRegistration> gitHubTokenProviders_;
 
     // Lifecycle handlers
     struct LifecycleEntry {

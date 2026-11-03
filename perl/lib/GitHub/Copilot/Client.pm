@@ -11,7 +11,7 @@ use File::Spec;
 use File::Basename;
 use Cwd qw(abs_path);
 use JSON::PP;
-use Scalar::Util qw(blessed);
+use Scalar::Util qw(blessed weaken);
 use POSIX ();
 use File::Path qw(make_path remove_tree);
 use Errno ();
@@ -79,6 +79,12 @@ sub new {
     my $request_handler       = $args{request_handler};
     # BYOK: code ref returning a bearer token (receives ProviderTokenArgs)
     my $bearer_token_provider = $args{bearer_token_provider};
+    # Identity of the integrating application (ClientInfo object or hashref with
+    # application_name / application_version / integration_name / integration_version)
+    my $client_info = $args{client_info};
+    if (ref($client_info) eq 'HASH') {
+        $client_info = GitHub::Copilot::Types::ClientInfo->new(%$client_info);
+    }
 
     # Default use_logged_in_user: false when github_token provided, true otherwise
     if (!defined $use_logged_in_user) {
@@ -131,12 +137,15 @@ sub new {
         session_fs         => $session_fs,
         request_handler       => $request_handler,
         bearer_token_provider => $bearer_token_provider,
+        client_info        => $client_info,
         env                => $args{env},
         _process_pid       => undef,
         _client            => undef,
         _state             => 'disconnected',
         _sessions          => {},
         _models_cache      => undef,
+        # registration id => { provider => CODE, session_id => ... }
+        _github_token_providers => {},
         on_get_trace_context => $args{on_get_trace_context},
     }, $class;
 
@@ -156,6 +165,7 @@ sub start {
     eval {
         $self->_start_cli_server();
         $self->_setup_handlers();
+        $self->_send_client_info();
         $self->_verify_protocol_version();
 
         # Register session filesystem provider if configured
@@ -183,6 +193,7 @@ sub stop {
         }
     }
     $self->{_sessions} = {};
+    $self->{_github_token_providers} = {};
 
     # Stop JSON-RPC client
     if ($self->{_client}) {
@@ -253,7 +264,16 @@ sub create_session {
     $payload->{requestHandler}       = \1 if defined $self->{request_handler};
     $payload->{bearerTokenProvider}  = \1 if defined $self->{bearer_token_provider};
 
-    my $response = $self->{_client}->request('session.create', $payload);
+    my $registration_id = $self->_register_github_token_provider($config, $config->session_id);
+    $payload->{gitHubTokenProviderRegistrationId} = $registration_id if defined $registration_id;
+
+    my $response;
+    my $ok = eval { $response = $self->{_client}->request('session.create', $payload); 1 };
+    if (!$ok) {
+        my $err = $@;
+        delete $self->{_github_token_providers}{$registration_id} if defined $registration_id;
+        die $err;
+    }
 
     my $session_id     = $response->{sessionId};
     my $workspace_path = $response->{workspacePath};
@@ -315,6 +335,16 @@ sub create_session {
     #   preserve), GitHubAttachment (GitHubCommit / github_commit),
     #   ProviderTokenArgs. Client options: request_handler
     #   (CopilotRequestHandler), bearer_token_provider.
+    #
+    # v2.6.0 upstream sync adds: capi (auto_tier + enable_web_socket_responses),
+    # askUserVariant, gitHubTokenProviderRegistrationId (github_token_provider),
+    # sandboxConfig (allow_bypass), featureFlags, allowedModels,
+    # authClientIdMetadataUrl, name, agentDirectories, hookDirectories,
+    # interactiveUser, excludedManagedSettings, enforceManagedModelDefaults,
+    # trustWorkingDirectory, refreshCustomInstructions, imageGeneration
+    # (save_to_disk) and autopilot (max_continues).
+
+    $self->_attach_github_token_provider($session, $registration_id);
 
     $self->{_sessions}{$session_id} = $session;
     return $session;
@@ -326,10 +356,19 @@ sub resume_session {
 
     $self->_ensure_connected();
 
-    my $payload = $config->to_wire();
+    my $payload = $config->to_wire(resume => 1);
     $payload->{sessionId} = $session_id;
 
-    my $response = $self->{_client}->request('session.resume', $payload);
+    my $registration_id = $self->_register_github_token_provider($config, $session_id);
+    $payload->{gitHubTokenProviderRegistrationId} = $registration_id if defined $registration_id;
+
+    my $response;
+    my $ok = eval { $response = $self->{_client}->request('session.resume', $payload); 1 };
+    if (!$ok) {
+        my $err = $@;
+        delete $self->{_github_token_providers}{$registration_id} if defined $registration_id;
+        die $err;
+    }
 
     my $resumed_id     = $response->{sessionId};
     my $workspace_path = $response->{workspacePath};
@@ -362,6 +401,8 @@ sub resume_session {
     if ($self->{on_get_trace_context}) {
         $session->register_trace_context_provider($self->{on_get_trace_context});
     }
+
+    $self->_attach_github_token_provider($session, $registration_id);
 
     $self->{_sessions}{$resumed_id} = $session;
     return $session;
@@ -465,6 +506,13 @@ sub get_session_metadata {
     my ($self, $session_id) = @_;
     $self->_ensure_connected();
     return $self->{_client}->request('session.getMetadata', { sessionId => $session_id });
+}
+
+# Clear the runtime's cached managed (enterprise policy) settings so they are re-read.
+sub clear_managed_settings_cache {
+    my ($self) = @_;
+    $self->_ensure_connected();
+    return $self->{_client}->request('managedSettings.clearCache', {});
 }
 
 # --------------------------------------------------------------------------
@@ -597,6 +645,12 @@ sub _setup_handlers {
     $self->{_client}->set_request_handler('exitPlanMode.request', sub {
         my ($params) = @_;
         return $self->_handle_exit_plan_mode_request($params);
+    });
+
+    # Handle gitHubToken.getToken from server (sessions with a github_token_provider)
+    $self->{_client}->set_request_handler('gitHubToken.getToken', sub {
+        my ($params) = @_;
+        return $self->_handle_github_token_request($params);
     });
 
     # Handle sessionFs.* provider callbacks from the server. When a sessionFs
@@ -797,6 +851,122 @@ sub _handle_exit_plan_mode_request {
     }
 
     return $result;
+}
+
+# --------------------------------------------------------------------------
+# Internal: GitHub token provider (gitHubToken.getToken)
+# --------------------------------------------------------------------------
+
+my $REGISTRATION_COUNTER = 0;
+
+# Random RFC 4122 version-4 style UUID for provider registrations.
+sub _generate_registration_id {
+    $REGISTRATION_COUNTER++;
+    my @r = map { int(rand(0x10000)) } 1 .. 8;
+    $r[3] = ($r[3] & 0x0fff) | 0x4000;
+    $r[4] = ($r[4] & 0x3fff) | 0x8000;
+    $r[7] = ($r[7] + $REGISTRATION_COUNTER) & 0xffff;
+    return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', @r);
+}
+
+# Validate a session's github_token_provider and store it in the client-level
+# registry. Returns the opaque registration id sent on the wire, or undef.
+sub _register_github_token_provider {
+    my ($self, $config, $session_id) = @_;
+
+    my $provider = $config->can('github_token_provider') ? $config->github_token_provider : undef;
+    return undef unless defined $provider;
+
+    croak "github_token and github_token_provider are mutually exclusive"
+        if $config->can('github_token') && defined $config->github_token;
+    croak "github_token_provider must be a code reference"
+        unless ref($provider) eq 'CODE';
+
+    my $registration_id = _generate_registration_id();
+    $self->{_github_token_providers}{$registration_id} = {
+        provider   => $provider,
+        session_id => $session_id,
+    };
+    return $registration_id;
+}
+
+# Bind a registration to its session and release it when the session is destroyed.
+sub _attach_github_token_provider {
+    my ($self, $session, $registration_id) = @_;
+    return unless defined $registration_id;
+
+    if (my $entry = $self->{_github_token_providers}{$registration_id}) {
+        $entry->{session_id} = $session->session_id;
+    }
+
+    my $weak_self = $self;
+    weaken($weak_self);
+    $session->_on_destroy(sub {
+        delete $weak_self->{_github_token_providers}{$registration_id} if $weak_self;
+    });
+}
+
+sub _handle_github_token_request {
+    my ($self, $params) = @_;
+
+    my $registration_id = $params->{registrationId} // '';
+    my $registration = $self->{_github_token_providers}{$registration_id};
+    croak "No GitHub token provider registered for registration ID \"$registration_id\""
+        unless $registration;
+
+    my $args = GitHub::Copilot::Types::GitHubTokenProviderArgs->new(
+        host       => $params->{host},
+        session_id => $params->{sessionId} // $registration->{session_id},
+        reason     => $params->{reason},
+    );
+    return _normalize_github_token_result($registration->{provider}->($args));
+}
+
+# Accepts a GitHubTokenResult or a hashref with camelCase or snake_case keys.
+sub _normalize_github_token_result {
+    my ($result) = @_;
+
+    return $result->TO_JSON() if blessed($result) && $result->can('TO_JSON');
+    croak "github_token_provider must return a GitHubTokenResult or a hashref"
+        unless ref($result) eq 'HASH';
+
+    my $kind = $result->{kind} // 'token';
+    return { kind => 'cancelled' } if $kind eq 'cancelled';
+
+    my $expires_in = $result->{expiresIn} // $result->{expires_in};
+    my $token_type = $result->{tokenType} // $result->{token_type};
+    my %wire = (
+        kind        => 'token',
+        accessToken => $result->{accessToken} // $result->{access_token},
+        expiresIn   => (defined $expires_in ? $expires_in + 0 : undef),
+    );
+    $wire{tokenType} = $token_type if defined $token_type;
+    return \%wire;
+}
+
+# --------------------------------------------------------------------------
+# Internal: client info (`connect` handshake)
+# --------------------------------------------------------------------------
+
+# Declare the integrating application's identity before the protocol-version
+# ping. Skipped when no client_info field is set; older CLIs that do not
+# implement `connect` are tolerated.
+sub _send_client_info {
+    my ($self) = @_;
+
+    my $info = $self->{client_info};
+    my $wire = (blessed($info) && $info->can('to_wire')) ? $info->to_wire : undef;
+    return unless $wire;
+
+    my $ok = eval {
+        $self->{_client}->request('connect', { clientInfo => $wire });
+        1;
+    };
+    if (!$ok) {
+        my $err = $@;
+        die $err unless $err =~ /JSON-RPC Error -32601\b/ || $err =~ /Unhandled method connect/;
+    }
+    return;
 }
 
 # --------------------------------------------------------------------------
@@ -1067,6 +1237,11 @@ Arguments:
     github_token       - GitHub token for authentication
     use_logged_in_user - Use logged-in user auth (default: 1, or 0 if github_token set)
     env                - Environment variables hashref
+    client_info        - Identity of the integrating application: a
+                         GitHub::Copilot::Types::ClientInfo or a hashref with
+                         application_name, application_version, integration_name,
+                         integration_version. Sent on the C<connect> handshake when
+                         any field is set.
 
 =head2 start()
 
@@ -1099,6 +1274,11 @@ Ping the server. Returns a PingResponse object.
 =head2 list_models()
 
 List available models. Returns arrayref of ModelInfo objects. Results are cached.
+
+=head2 clear_managed_settings_cache()
+
+Clear the runtime's cached managed (enterprise policy) settings
+(C<managedSettings.clearCache>).
 
 =head2 get_state()
 

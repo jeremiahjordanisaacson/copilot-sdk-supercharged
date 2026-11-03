@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
     CopilotSolidityClient,
+    MessageSource,
     createAuditTool,
     createGasOptimizationTool,
     createTestGenerationTool,
@@ -181,6 +182,72 @@ describe("CopilotSolidityClient", () => {
         expect(client.getGasOptimizationTool().name).toBe("solidity_gas_optimize");
         expect(client.getTestGenerationTool().name).toBe("solidity_generate_tests");
         expect(client.getSecurityCheckTool().name).toBe("solidity_security_check");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// v2.6.0 upstream-sync surface
+// ---------------------------------------------------------------------------
+
+describe("v2.6.0 upstream-sync surface", () => {
+    it("builds message sources", () => {
+        expect(MessageSource.user).toBe("user");
+        expect(MessageSource.system).toBe("system");
+        expect(MessageSource.agent("auditor")).toBe("agent-auditor");
+    });
+
+    it("exposes the new client operations", () => {
+        const client = new CopilotSolidityClient();
+        expect(typeof client.setAutoTier).toBe("function");
+        expect(typeof client.sendAndWaitStructured).toBe("function");
+        expect(typeof client.clearManagedSettingsCache).toBe("function");
+        expect(typeof client.getManagedSettings).toBe("function");
+        expect(typeof client.recheckPolicyHelper).toBe("function");
+        expect(typeof client.detachSession).toBe("function");
+    });
+
+    it("moves autoTier and enableWebSocketResponses under capi", () => {
+        const client = new CopilotSolidityClient();
+        const params = (client as any).buildUpstreamSessionOptions(
+            { autoTier: "fast", enableWebSocketResponses: false, featureFlags: {} },
+            "create",
+        );
+        expect(params.capi).toEqual({ autoTier: "fast", enableWebSocketResponses: false });
+        expect(params.enableWebSocketResponses).toBeUndefined();
+        expect(params.featureFlags).toEqual({});
+    });
+
+    it("omits capi and unset options", () => {
+        const client = new CopilotSolidityClient();
+        const params = (client as any).buildUpstreamSessionOptions({}, "create");
+        expect(params).toEqual({});
+    });
+
+    it("forwards create-only and resume-only options by mode", () => {
+        const client = new CopilotSolidityClient();
+        const options = {
+            name: "audit",
+            trustWorkingDirectory: "session",
+            allowTranscriptRecovery: false,
+        };
+        const create = (client as any).buildUpstreamSessionOptions(options, "create");
+        expect(create.name).toBe("audit");
+        expect(create.trustWorkingDirectory).toBe("session");
+        expect(create.allowTranscriptRecovery).toBeUndefined();
+
+        const resume = (client as any).buildUpstreamSessionOptions(options, "resume");
+        expect(resume.name).toBeUndefined();
+        expect(resume.allowTranscriptRecovery).toBe(false);
+    });
+
+    it("rejects gitHubToken together with gitHubTokenProvider", async () => {
+        const client = new CopilotSolidityClient();
+        await expect(
+            client.createSession({
+                gitHubToken: "ghp_example",
+                gitHubTokenProvider: () => ({ kind: "cancelled" as const }),
+            }),
+        ).rejects.toThrow(/mutually exclusive/);
     });
 });
 

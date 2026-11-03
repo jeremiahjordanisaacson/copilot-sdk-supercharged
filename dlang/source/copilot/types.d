@@ -77,6 +77,9 @@ struct CopilotClientOptions
 
     /// Enable remote session support (Mission Control); adds the --remote CLI flag.
     bool remote = false;
+
+    /// Identity of the embedding application, declared via `connect` on start.
+    ClientInfo clientInfo;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +248,8 @@ enum HookType : string
     sessionEnd          = "sessionEnd",
     errorOccurred       = "errorOccurred",
     preMcpToolCall      = "preMcpToolCall",
+    subagentStart       = "subagentStart",
+    subagentStop        = "subagentStop",
 }
 
 /// GitHub-anchored attachment type identifiers.
@@ -261,6 +266,510 @@ enum GitHubAttachmentType : string
 }
 
 // ---------------------------------------------------------------------------
+// v2.6.0 upstream-sync types (parity with @github/copilot-sdk)
+// ---------------------------------------------------------------------------
+
+/// Identity of the application embedding the SDK, declared on the `connect`
+/// handshake so the runtime attributes its telemetry to a consistent surface.
+/// Empty fields are omitted; when every field is empty `connect` is skipped.
+struct ClientInfo
+{
+    /// Application using the SDK, e.g. "acme-portal" (wire: editorName).
+    string applicationName;
+
+    /// Version of the application (wire: editorVersion).
+    string applicationVersion;
+
+    /// Specific integration within the application (wire: extensionName).
+    string integrationName;
+
+    /// Version of the integration (wire: extensionVersion).
+    string integrationVersion;
+
+    /// Wire shape for `connect`; JSON null when every field is empty.
+    JSONValue toWire() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        bool any = false;
+        if (applicationName.length > 0) { obj["editorName"] = applicationName; any = true; }
+        if (applicationVersion.length > 0) { obj["editorVersion"] = applicationVersion; any = true; }
+        if (integrationName.length > 0) { obj["extensionName"] = integrationName; any = true; }
+        if (integrationVersion.length > 0) { obj["extensionVersion"] = integrationVersion; any = true; }
+        return any ? obj : JSONValue(null);
+    }
+}
+
+/// Auto routing tiers (experimental); see `SessionConfig.autoTier` and
+/// `CopilotSession.setAutoTier`.
+enum AutoTier : string
+{
+    efficiency   = "efficiency",
+    balance      = "balance",
+    intelligence = "intelligence",
+    fast         = "fast",
+}
+
+/// Variants of the ask-user tool; see `SessionConfig.askUserVariant`.
+enum AskUserVariant : string
+{
+    legacy      = "legacy",
+    elicitation = "elicitation",
+}
+
+/// Scopes for trusting the working directory; see `SessionConfig.trustWorkingDirectory`.
+enum TrustWorkingDirectory : string
+{
+    session = "session",
+    user    = "user",
+}
+
+/// Products that can serve a BYOK provider's model; see `ProviderConfig.modelProvider`.
+enum ModelProvider : string
+{
+    openai       = "openai",
+    anthropic    = "anthropic",
+    azureOpenai  = "azure_openai",
+    ollama       = "ollama",
+    lmStudio     = "lm_studio",
+    foundryLocal = "foundry_local",
+    llamaCpp     = "llama_cpp",
+}
+
+/// Origin of a sent message (`MessageOptions.source`): "user", "system",
+/// or "agent-<id>".
+struct MessageSource
+{
+    enum string user = "user";
+    enum string system = "system";
+
+    /// Source for a message sent on behalf of the agent with the given ID.
+    static string agent(string agentId) @safe pure nothrow
+    {
+        return "agent-" ~ agentId;
+    }
+}
+
+/// Sandbox configuration for a session (`sandboxConfig`).
+struct SandboxConfig
+{
+    /// Whether sandboxing is enabled for the session.
+    bool enabled = false;
+
+    /// User-managed policy fragment merged into the auto-discovered base policy.
+    JSONValue userPolicy;
+
+    /// Auto-add the working directory to the read/write paths (runtime default: true).
+    Nullable!bool addCurrentWorkingDirectory;
+
+    /// Confine launched MCP servers (runtime default: true; false opts out).
+    Nullable!bool sandboxMcpServers;
+
+    /// Confine launched language servers (runtime default: true; false opts out).
+    Nullable!bool sandboxLspServers;
+
+    /// Confine launched extension processes (runtime default: true; false opts out).
+    Nullable!bool sandboxExtensions;
+
+    /// Opt in to letting the agent request that an individual command run
+    /// outside the sandbox, approved or denied through the normal permission flow.
+    Nullable!bool allowBypass;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["enabled"] = enabled;
+        if (userPolicy.type == JSONType.object)
+            obj["userPolicy"] = userPolicy;
+        if (!addCurrentWorkingDirectory.isNull)
+            obj["addCurrentWorkingDirectory"] = addCurrentWorkingDirectory.get;
+        if (!sandboxMcpServers.isNull)
+            obj["sandboxMcpServers"] = sandboxMcpServers.get;
+        if (!sandboxLspServers.isNull)
+            obj["sandboxLspServers"] = sandboxLspServers.get;
+        if (!sandboxExtensions.isNull)
+            obj["sandboxExtensions"] = sandboxExtensions.get;
+        if (!allowBypass.isNull)
+            obj["allowBypass"] = allowBypass.get;
+        return obj;
+    }
+}
+
+/// Image generation configuration (`imageGeneration`, experimental).
+struct ImageGenerationConfig
+{
+    /// Opt in to image generation through an authorized Copilot image model.
+    Nullable!bool enabled;
+
+    /// Request a visible "Made with AI" label on generated images.
+    Nullable!bool watermark;
+
+    /// Save generated images under the session-state directory (runtime default: true).
+    Nullable!bool saveToDisk;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        if (!enabled.isNull)
+            obj["enabled"] = enabled.get;
+        if (!watermark.isNull)
+            obj["watermark"] = watermark.get;
+        if (!saveToDisk.isNull)
+            obj["saveToDisk"] = saveToDisk.get;
+        return obj;
+    }
+}
+
+/// Autopilot continuation options (`autopilot`).
+struct AutopilotConfig
+{
+    /// Whether autopilot may continue without user input.
+    Nullable!bool continuationEnabled;
+
+    /// Maximum number of automatic continuations.
+    Nullable!int maxContinues;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        if (!continuationEnabled.isNull)
+            obj["continuationEnabled"] = continuationEnabled.get;
+        if (!maxContinues.isNull)
+            obj["maxContinues"] = maxContinues.get;
+        return obj;
+    }
+}
+
+/// Token limits for a model capabilities override (`modelCapabilities.limits`).
+/// Wire keys are snake_case.
+struct ModelLimitsOverride
+{
+    /// Maximum prompt tokens (wire: max_prompt_tokens).
+    Nullable!long maxPromptTokens;
+
+    /// Maximum context window tokens (wire: max_context_window_tokens).
+    Nullable!long maxContextWindowTokens;
+
+    /// Maximum output tokens (wire: max_output_tokens).
+    Nullable!long maxOutputTokens;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        if (!maxPromptTokens.isNull)
+            obj["max_prompt_tokens"] = maxPromptTokens.get;
+        if (!maxContextWindowTokens.isNull)
+            obj["max_context_window_tokens"] = maxContextWindowTokens.get;
+        if (!maxOutputTokens.isNull)
+            obj["max_output_tokens"] = maxOutputTokens.get;
+        return obj;
+    }
+
+    /// A `modelCapabilities` override object carrying these limits, suitable
+    /// for `SessionConfig.modelCapabilities`.
+    JSONValue toModelCapabilities() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["limits"] = toJson();
+        return obj;
+    }
+}
+
+/// Arguments passed to a `GitHubTokenProvider`.
+struct GitHubTokenProviderArgs
+{
+    /// Effective GitHub host the token is for.
+    string host;
+
+    /// Session receiving the token (null before a cloud session has an ID).
+    Nullable!string sessionId;
+
+    /// Why the runtime needs a credential: "initial" or "refresh".
+    string reason;
+}
+
+/// Result of a `GitHubTokenProvider`: a token or a cancellation.
+struct GitHubTokenProviderResult
+{
+    /// "token" or "cancelled".
+    string kind = "cancelled";
+
+    /// GitHub access token (kind "token").
+    string accessToken;
+
+    /// OAuth token type; bearer when null.
+    Nullable!string tokenType;
+
+    /// Remaining token lifetime in seconds (kind "token").
+    long expiresIn;
+
+    /// Build a token result.
+    static GitHubTokenProviderResult token(string accessToken, long expiresIn,
+        string tokenType = null) @safe
+    {
+        GitHubTokenProviderResult r;
+        r.kind = "token";
+        r.accessToken = accessToken;
+        r.expiresIn = expiresIn;
+        if (tokenType !is null)
+            r.tokenType = tokenType;
+        return r;
+    }
+
+    /// Build a cancellation result.
+    static GitHubTokenProviderResult cancelled() @safe
+    {
+        return GitHubTokenProviderResult.init;
+    }
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        obj["kind"] = kind;
+        if (kind == "token")
+        {
+            obj["accessToken"] = accessToken;
+            obj["expiresIn"] = expiresIn;
+            if (!tokenType.isNull)
+                obj["tokenType"] = tokenType.get;
+        }
+        return obj;
+    }
+}
+
+/// Supplies GitHub tokens on demand for a session (`gitHubToken.getToken`).
+/// Mutually exclusive with a per-session `gitHubToken`.
+alias GitHubTokenProvider = GitHubTokenProviderResult delegate(GitHubTokenProviderArgs args);
+
+/// Input for the hook fired before a sub-agent's first turn (`subagentStart`).
+/// Session metadata belongs to the parent session.
+struct SubagentStartHookInput
+{
+    /// Runtime session ID associated with the hook (the parent session).
+    string sessionId;
+
+    /// Time the hook fired (Unix epoch milliseconds).
+    long timestamp;
+
+    /// Working directory of the session.
+    string workingDirectory;
+
+    /// Path to the sub-agent's transcript.
+    string transcriptPath;
+
+    /// Name of the sub-agent.
+    string agentName;
+
+    /// Display name of the sub-agent, when known.
+    Nullable!string agentDisplayName;
+
+    /// Description of the sub-agent, when known.
+    Nullable!string agentDescription;
+
+    static SubagentStartHookInput fromJson(JSONValue v) @safe
+    {
+        SubagentStartHookInput input;
+        input.sessionId = jsonStr(v, "sessionId");
+        input.timestamp = jsonLong(v, "timestamp");
+        input.workingDirectory = jsonStr(v, "workingDirectory");
+        input.transcriptPath = jsonStr(v, "transcriptPath");
+        input.agentName = jsonStr(v, "agentName");
+        input.agentDisplayName = jsonOptStr(v, "agentDisplayName");
+        input.agentDescription = jsonOptStr(v, "agentDescription");
+        return input;
+    }
+}
+
+/// Output for the `subagentStart` hook; `additionalContext` is prepended to
+/// the sub-agent's initial prompt.
+struct SubagentStartHookOutput
+{
+    Nullable!string additionalContext;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        if (!additionalContext.isNull)
+            obj["additionalContext"] = additionalContext.get;
+        return obj;
+    }
+}
+
+/// Input for the hook fired after a sub-agent completes a turn (`subagentStop`).
+struct SubagentStopHookInput
+{
+    /// Runtime session ID associated with the hook (the parent session).
+    string sessionId;
+
+    /// Time the hook fired (Unix epoch milliseconds).
+    long timestamp;
+
+    /// Working directory of the session.
+    string workingDirectory;
+
+    /// Path to the sub-agent's transcript.
+    string transcriptPath;
+
+    /// Name of the sub-agent.
+    string agentName;
+
+    /// Display name of the sub-agent, when known.
+    Nullable!string agentDisplayName;
+
+    /// Description of the sub-agent, when known.
+    Nullable!string agentDescription;
+
+    /// Sub-agent instance ID, when available.
+    Nullable!string agentId;
+
+    /// Sub-agent type.
+    string agentType;
+
+    /// Why the sub-agent stopped ("end_turn").
+    string stopReason;
+
+    /// The sub-agent's last assistant message, before any hook rewrite.
+    string response;
+
+    static SubagentStopHookInput fromJson(JSONValue v) @safe
+    {
+        SubagentStopHookInput input;
+        input.sessionId = jsonStr(v, "sessionId");
+        input.timestamp = jsonLong(v, "timestamp");
+        input.workingDirectory = jsonStr(v, "workingDirectory");
+        input.transcriptPath = jsonStr(v, "transcriptPath");
+        input.agentName = jsonStr(v, "agentName");
+        input.agentDisplayName = jsonOptStr(v, "agentDisplayName");
+        input.agentDescription = jsonOptStr(v, "agentDescription");
+        input.agentId = jsonOptStr(v, "agentId");
+        input.agentType = jsonStr(v, "agentType");
+        input.stopReason = jsonStr(v, "stopReason");
+        input.response = jsonStr(v, "response");
+        return input;
+    }
+}
+
+/// Output for the `subagentStop` hook: `decision` "block" with a non-empty
+/// `reason` continues the sub-agent; otherwise `modifiedResponse` replaces
+/// the response reported to the parent.
+struct SubagentStopHookOutput
+{
+    /// "block" or "allow".
+    Nullable!string decision;
+
+    /// Follow-up instruction when blocking.
+    Nullable!string reason;
+
+    /// Replacement for the response reported to the parent.
+    Nullable!string modifiedResponse;
+
+    JSONValue toJson() const @safe
+    {
+        auto obj = JSONValue(string[string].init);
+        if (!decision.isNull)
+            obj["decision"] = decision.get;
+        if (!reason.isNull)
+            obj["reason"] = reason.get;
+        if (!modifiedResponse.isNull)
+            obj["modifiedResponse"] = modifiedResponse.get;
+        return obj;
+    }
+}
+
+/// Handler for the `subagentStart` hook.
+alias SubagentStartHandler = SubagentStartHookOutput delegate(SubagentStartHookInput input);
+
+/// Handler for the `subagentStop` hook.
+alias SubagentStopHandler = SubagentStopHookOutput delegate(SubagentStopHookInput input);
+
+/// Read a string member of a JSON object (null when absent or not a string).
+private string jsonStr(const ref JSONValue v, string key) @safe
+{
+    if (v.type != JSONType.object) return null;
+    auto p = key in v;
+    return (p !is null && (*p).type == JSONType.string) ? (*p).str : null;
+}
+
+/// Read an optional string member of a JSON object.
+private Nullable!string jsonOptStr(const ref JSONValue v, string key) @safe
+{
+    if (v.type != JSONType.object) return Nullable!string.init;
+    auto p = key in v;
+    if (p !is null && (*p).type == JSONType.string)
+        return Nullable!string((*p).str);
+    return Nullable!string.init;
+}
+
+/// Read an integral member of a JSON object (0 when absent).
+private long jsonLong(const ref JSONValue v, string key) @safe
+{
+    if (v.type != JSONType.object) return 0;
+    auto p = key in v;
+    if (p is null) return 0;
+    if ((*p).type == JSONType.integer) return (*p).integer;
+    if ((*p).type == JSONType.uinteger) return cast(long) (*p).uinteger;
+    if ((*p).type == JSONType.float_) return cast(long) (*p).floating;
+    return 0;
+}
+
+/// Serialize a string list as a JSON array.
+private JSONValue stringListJson(const string[] items) @safe
+{
+    JSONValue[] arr;
+    foreach (s; items) arr ~= JSONValue(s);
+    return JSONValue(arr);
+}
+
+/// Build the `capi` object (auto routing tier + WebSocket responses);
+/// JSON null when neither is set.
+private JSONValue capiJson(const Nullable!string autoTier, bool webSocketResponses) @safe
+{
+    if (autoTier.isNull && !webSocketResponses)
+        return JSONValue(null);
+    auto obj = JSONValue(string[string].init);
+    if (!autoTier.isNull)
+        obj["autoTier"] = autoTier.get;
+    if (webSocketResponses)
+        obj["enableWebSocketResponses"] = true;
+    return obj;
+}
+
+/// Serialize the v2.6.0 options shared by `session.create` and `session.resume`.
+private void putSharedSessionOptions(T)(ref JSONValue obj, ref const T cfg) @safe
+{
+    if (!cfg.askUserVariant.isNull)
+        obj["askUserVariant"] = cfg.askUserVariant.get;
+    if (!cfg.sandboxConfig.isNull)
+        obj["sandboxConfig"] = cfg.sandboxConfig.get.toJson();
+    if (!cfg.featureFlags.isNull)
+    {
+        auto flags = JSONValue(string[string].init);
+        foreach (key, enabled; cfg.featureFlags.get)
+            flags[key] = enabled;
+        obj["featureFlags"] = flags;
+    }
+    if (cfg.allowedModels.length > 0)
+        obj["allowedModels"] = stringListJson(cfg.allowedModels);
+    if (!cfg.authClientIdMetadataUrl.isNull)
+        obj["authClientIdMetadataUrl"] = cfg.authClientIdMetadataUrl.get;
+    if (cfg.agentDirectories.length > 0)
+        obj["agentDirectories"] = stringListJson(cfg.agentDirectories);
+    if (cfg.hookDirectories.length > 0)
+        obj["hookDirectories"] = stringListJson(cfg.hookDirectories);
+    if (cfg.interactiveUser)
+        obj["interactiveUser"] = true;
+    if (cfg.excludedManagedSettings.length > 0)
+        obj["excludedManagedSettings"] = stringListJson(cfg.excludedManagedSettings);
+    if (cfg.enforceManagedModelDefaults)
+        obj["enforceManagedModelDefaults"] = true;
+    if (!cfg.imageGeneration.isNull)
+        obj["imageGeneration"] = cfg.imageGeneration.get.toJson();
+    if (!cfg.autopilot.isNull)
+        obj["autopilot"] = cfg.autopilot.get.toJson();
+    if (cfg.onSubagentStart !is null || cfg.onSubagentStop !is null)
+        obj["hooks"] = true;
+}
+
+// ---------------------------------------------------------------------------
 // Session configuration
 // ---------------------------------------------------------------------------
 
@@ -270,11 +779,19 @@ struct ProviderConfig
     Nullable!string model;
     Nullable!string baseUrl;
 
+    /// Product serving the model (see `ModelProvider`), e.g. "ollama".
+    Nullable!string modelProvider;
+
+    /// Command whose stdout is used as the API key; run before each request.
+    Nullable!string apiKeyCommand;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
         if (!model.isNull) obj["model"] = model.get;
         if (!baseUrl.isNull) obj["baseUrl"] = baseUrl.get;
+        if (!modelProvider.isNull) obj["modelProvider"] = modelProvider.get;
+        if (!apiKeyCommand.isNull) obj["apiKeyCommand"] = apiKeyCommand.get;
         return obj;
     }
 }
@@ -396,6 +913,67 @@ struct SessionConfig
     /// Enable content exclusion.
     bool contentExclusion = false;
 
+    // --- v2.6.0 upstream-sync options (parity with @github/copilot-sdk) ---
+
+    /// Auto routing tier (experimental; see `AutoTier`). Sent under `capi`
+    /// together with `enableWebSocketResponses`.
+    Nullable!string autoTier;
+
+    /// Ask-user tool variant ("legacy" or "elicitation"; see `AskUserVariant`).
+    Nullable!string askUserVariant;
+
+    /// Supplies GitHub tokens on demand; mutually exclusive with `gitHubToken`.
+    GitHubTokenProvider gitHubTokenProvider;
+
+    /// Sandbox configuration.
+    Nullable!SandboxConfig sandboxConfig;
+
+    /// Runtime feature-flag overrides; sent whenever set, even if empty.
+    Nullable!(bool[string]) featureFlags;
+
+    /// Restrict the models this session may use.
+    string[] allowedModels;
+
+    /// OAuth client ID metadata document URL used for MCP authorization.
+    Nullable!string authClientIdMetadataUrl;
+
+    /// Human-readable session name.
+    Nullable!string name;
+
+    /// Additional directories to load custom agents from.
+    string[] agentDirectories;
+
+    /// Additional directories to load hooks from.
+    string[] hookDirectories;
+
+    /// Whether an interactive user is present.
+    bool interactiveUser = false;
+
+    /// Managed settings to exclude for this session.
+    string[] excludedManagedSettings;
+
+    /// Enforce managed model defaults.
+    bool enforceManagedModelDefaults = false;
+
+    /// Trust the working directory for this "session" or for the "user"
+    /// (see `TrustWorkingDirectory`).
+    Nullable!string trustWorkingDirectory;
+
+    /// Re-read custom instructions when the session is created.
+    bool refreshCustomInstructions = false;
+
+    /// Image generation configuration (experimental).
+    Nullable!ImageGenerationConfig imageGeneration;
+
+    /// Autopilot continuation options.
+    Nullable!AutopilotConfig autopilot;
+
+    /// Hook fired before a sub-agent's first turn.
+    SubagentStartHandler onSubagentStart;
+
+    /// Hook fired after a sub-agent completes a turn.
+    SubagentStopHandler onSubagentStop;
+
     JSONValue toJson() const @safe
     {
         auto obj = JSONValue(string[string].init);
@@ -510,8 +1088,11 @@ struct SessionConfig
         if (!otlpProtocol.isNull)
             obj["otlpProtocol"] = otlpProtocol.get;
 
-        if (enableWebSocketResponses)
-            obj["enableWebSocketResponses"] = true;
+        // The runtime accepts the auto routing tier and WebSocket responses
+        // only under `capi`.
+        auto capi = capiJson(autoTier, enableWebSocketResponses);
+        if (capi.type == JSONType.object)
+            obj["capi"] = capi;
 
         if (expAssignments.type == JSONType.object)
             obj["expAssignments"] = expAssignments;
@@ -554,6 +1135,17 @@ struct SessionConfig
         if (contentExclusion)
             obj["contentExclusion"] = true;
 
+        putSharedSessionOptions(obj, this);
+
+        if (!name.isNull)
+            obj["name"] = name.get;
+
+        if (!trustWorkingDirectory.isNull)
+            obj["trustWorkingDirectory"] = trustWorkingDirectory.get;
+
+        if (refreshCustomInstructions)
+            obj["refreshCustomInstructions"] = true;
+
         return obj;
     }
 }
@@ -572,6 +1164,59 @@ struct ResumeSessionConfig
 
     /// Directories containing instruction files for the session.
     string[] instructionDirectories;
+
+    // --- v2.6.0 upstream-sync options (parity with @github/copilot-sdk) ---
+
+    /// Auto routing tier (experimental; see `AutoTier`). Sent under `capi`.
+    Nullable!string autoTier;
+
+    /// Ask-user tool variant ("legacy" or "elicitation"; see `AskUserVariant`).
+    Nullable!string askUserVariant;
+
+    /// Supplies GitHub tokens on demand for the resumed session.
+    GitHubTokenProvider gitHubTokenProvider;
+
+    /// Sandbox configuration.
+    Nullable!SandboxConfig sandboxConfig;
+
+    /// Runtime feature-flag overrides; sent whenever set, even if empty.
+    Nullable!(bool[string]) featureFlags;
+
+    /// Restrict the models this session may use.
+    string[] allowedModels;
+
+    /// OAuth client ID metadata document URL used for MCP authorization.
+    Nullable!string authClientIdMetadataUrl;
+
+    /// Additional directories to load custom agents from.
+    string[] agentDirectories;
+
+    /// Additional directories to load hooks from.
+    string[] hookDirectories;
+
+    /// Whether an interactive user is present.
+    bool interactiveUser = false;
+
+    /// Managed settings to exclude for this session.
+    string[] excludedManagedSettings;
+
+    /// Enforce managed model defaults.
+    bool enforceManagedModelDefaults = false;
+
+    /// Allow recovering the session from its transcript when state is missing.
+    bool allowTranscriptRecovery = false;
+
+    /// Image generation configuration (experimental).
+    Nullable!ImageGenerationConfig imageGeneration;
+
+    /// Autopilot continuation options.
+    Nullable!AutopilotConfig autopilot;
+
+    /// Hook fired before a sub-agent's first turn.
+    SubagentStartHandler onSubagentStart;
+
+    /// Hook fired after a sub-agent completes a turn.
+    SubagentStopHandler onSubagentStop;
 
     JSONValue toJson() const @safe
     {
@@ -593,6 +1238,15 @@ struct ResumeSessionConfig
             foreach (s; instructionDirectories) arr ~= JSONValue(s);
             obj["instructionDirectories"] = JSONValue(arr);
         }
+
+        auto capi = capiJson(autoTier, false);
+        if (capi.type == JSONType.object)
+            obj["capi"] = capi;
+
+        putSharedSessionOptions(obj, this);
+
+        if (allowTranscriptRecovery)
+            obj["allowTranscriptRecovery"] = true;
         return obj;
     }
 }
@@ -667,6 +1321,14 @@ struct MessageOptions
 
     /// Additional HTTP headers sent with this message request.
     string[string] requestHeaders;
+
+    /// Origin of the message: `MessageSource.user`, `MessageSource.system`,
+    /// or `MessageSource.agent(id)`.
+    Nullable!string source;
+
+    /// JSON Schema the final assistant response must satisfy (structured
+    /// output). When set, it replaces any legacy `responseFormat` string.
+    JSONValue responseSchema;
 }
 
 // ---------------------------------------------------------------------------

@@ -73,6 +73,12 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Provider invoked per turn to supply the current W3C <see cref="TraceContext"/>.</summary>
         Public Property OnGetTraceContext As TraceContextProvider
 
+        ''' <summary>
+        ''' Identity of the integrating application, declared to the runtime via the
+        ''' <c>connect</c> handshake before the protocol check (omitted when unset or all-empty).
+        ''' </summary>
+        Public Property ClientInfo As CopilotClientInfo
+
     End Class
 
     ' -----------------------------------------------------------------------
@@ -225,6 +231,73 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Enable content exclusion policy enforcement.</summary>
         Public Property ContentExclusion As Boolean? = Nothing
 
+        ' --- v2.6.0 session options (parity with @github/copilot-sdk) ---
+
+        ''' <summary>Session name (create only).</summary>
+        Public Property Name As String
+
+        ''' <summary>
+        ''' Auto routing tier ("efficiency", "balance", "intelligence", "fast"; experimental).
+        ''' Sent as <c>capi.autoTier</c>.
+        ''' </summary>
+        Public Property AutoTier As String
+
+        ''' <summary>Ask-user variant ("legacy" or "elicitation").</summary>
+        Public Property AskUserVariant As String
+
+        ''' <summary>
+        ''' Acquires GitHub tokens on demand (answers <c>gitHubToken.getToken</c> requests).
+        ''' </summary>
+        Public Property GitHubTokenProvider As Func(Of GitHubTokenProviderArgs, Task(Of GitHubTokenProviderResult))
+
+        ''' <summary>Sandbox configuration for the session.</summary>
+        Public Property SandboxConfig As SandboxConfig
+
+        ''' <summary>Runtime feature flags (sent whenever set, even when empty).</summary>
+        Public Property FeatureFlags As Dictionary(Of String, Boolean)
+
+        ''' <summary>Model allowlist for the session.</summary>
+        Public Property AllowedModels As List(Of String)
+
+        ''' <summary>URL of the OAuth client ID metadata document.</summary>
+        Public Property AuthClientIdMetadataUrl As String
+
+        ''' <summary>Directories to load custom agents from.</summary>
+        Public Property AgentDirectories As List(Of String)
+
+        ''' <summary>Directories to load hook definitions from.</summary>
+        Public Property HookDirectories As List(Of String)
+
+        ''' <summary>Whether an interactive user is present.</summary>
+        Public Property InteractiveUser As Boolean? = Nothing
+
+        ''' <summary>Managed settings to exclude for this session.</summary>
+        Public Property ExcludedManagedSettings As List(Of String)
+
+        ''' <summary>Enforce managed model defaults.</summary>
+        Public Property EnforceManagedModelDefaults As Boolean? = Nothing
+
+        ''' <summary>Working-directory trust scope ("session" or "user"; create only).</summary>
+        Public Property TrustWorkingDirectory As String
+
+        ''' <summary>Re-read custom instruction files (create only).</summary>
+        Public Property RefreshCustomInstructions As Boolean? = Nothing
+
+        ''' <summary>Session-level image generation configuration.</summary>
+        Public Property ImageGeneration As ImageGenerationConfig
+
+        ''' <summary>Autopilot continuation options.</summary>
+        Public Property Autopilot As AutopilotOptions
+
+        ''' <summary>BYOK provider configuration.</summary>
+        Public Property Provider As ProviderConfig
+
+        ''' <summary>Hook invoked before a sub-agent's first turn (hook type "subagentStart").</summary>
+        Public Property OnSubagentStart As Func(Of SubagentStartHookInput, Task(Of SubagentStartHookOutput))
+
+        ''' <summary>Hook invoked after a sub-agent completes a turn (hook type "subagentStop").</summary>
+        Public Property OnSubagentStop As Func(Of SubagentStopHookInput, Task(Of SubagentStopHookOutput))
+
     End Class
 
     ''' <summary>
@@ -259,6 +332,67 @@ Namespace GitHub.Copilot.SDK
         ''' <summary>Directories to search for instruction files.</summary>
         Public Property InstructionDirectories As List(Of String)
 
+        ' --- v2.6.0 session options (parity with @github/copilot-sdk) ---
+
+        ''' <summary>Auto routing tier (experimental). Sent as <c>capi.autoTier</c>.</summary>
+        Public Property AutoTier As String
+
+        ''' <summary>Stream responses over WebSockets. Sent as <c>capi.enableWebSocketResponses</c>.</summary>
+        Public Property EnableWebSocketResponses As Boolean? = Nothing
+
+        ''' <summary>Ask-user variant ("legacy" or "elicitation").</summary>
+        Public Property AskUserVariant As String
+
+        ''' <summary>
+        ''' Acquires GitHub tokens on demand (answers <c>gitHubToken.getToken</c> requests).
+        ''' </summary>
+        Public Property GitHubTokenProvider As Func(Of GitHubTokenProviderArgs, Task(Of GitHubTokenProviderResult))
+
+        ''' <summary>Sandbox configuration for the session.</summary>
+        Public Property SandboxConfig As SandboxConfig
+
+        ''' <summary>Runtime feature flags (sent whenever set, even when empty).</summary>
+        Public Property FeatureFlags As Dictionary(Of String, Boolean)
+
+        ''' <summary>Model allowlist for the session.</summary>
+        Public Property AllowedModels As List(Of String)
+
+        ''' <summary>URL of the OAuth client ID metadata document.</summary>
+        Public Property AuthClientIdMetadataUrl As String
+
+        ''' <summary>Directories to load custom agents from.</summary>
+        Public Property AgentDirectories As List(Of String)
+
+        ''' <summary>Directories to load hook definitions from.</summary>
+        Public Property HookDirectories As List(Of String)
+
+        ''' <summary>Whether an interactive user is present.</summary>
+        Public Property InteractiveUser As Boolean? = Nothing
+
+        ''' <summary>Managed settings to exclude for this session.</summary>
+        Public Property ExcludedManagedSettings As List(Of String)
+
+        ''' <summary>Enforce managed model defaults.</summary>
+        Public Property EnforceManagedModelDefaults As Boolean? = Nothing
+
+        ''' <summary>Allow recovering the session from its transcript (resume only).</summary>
+        Public Property AllowTranscriptRecovery As Boolean? = Nothing
+
+        ''' <summary>Session-level image generation configuration.</summary>
+        Public Property ImageGeneration As ImageGenerationConfig
+
+        ''' <summary>Autopilot continuation options.</summary>
+        Public Property Autopilot As AutopilotOptions
+
+        ''' <summary>BYOK provider configuration.</summary>
+        Public Property Provider As ProviderConfig
+
+        ''' <summary>Hook invoked before a sub-agent's first turn (hook type "subagentStart").</summary>
+        Public Property OnSubagentStart As Func(Of SubagentStartHookInput, Task(Of SubagentStartHookOutput))
+
+        ''' <summary>Hook invoked after a sub-agent completes a turn (hook type "subagentStop").</summary>
+        Public Property OnSubagentStop As Func(Of SubagentStopHookInput, Task(Of SubagentStopHookOutput))
+
     End Class
 
     ' -----------------------------------------------------------------------
@@ -287,6 +421,25 @@ Namespace GitHub.Copilot.SDK
 
         ''' <summary>Per-message request headers forwarded with the turn.</summary>
         Public Property RequestHeaders As Dictionary(Of String, String)
+
+        ''' <summary>
+        ''' Message provenance: "user", "system" or "agent-&lt;id&gt;" (see <see cref="MessageSource"/>).
+        ''' Omitted when Nothing.
+        ''' </summary>
+        Public Property Source As String
+
+        ''' <summary>
+        ''' JSON Schema (e.g. a Dictionary(Of String, Object) or JsonElement) requesting structured
+        ''' output. Sent as a <c>json_schema</c> <c>responseFormat</c>.
+        ''' </summary>
+        Public Property ResponseSchema As Object
+
+        ''' <summary>Returns a shallow copy of these options with <see cref="ResponseSchema"/> replaced.</summary>
+        Friend Function WithResponseSchema(schema As Object) As MessageOptions
+            Dim copy = DirectCast(MemberwiseClone(), MessageOptions)
+            copy.ResponseSchema = schema
+            Return copy
+        End Function
 
     End Class
 
@@ -383,6 +536,14 @@ Namespace GitHub.Copilot.SDK
 
         <JsonPropertyName("requestHeaders")>
         Public Property RequestHeaders As Dictionary(Of String, String)
+
+        <JsonPropertyName("source")>
+        <JsonIgnore(Condition:=JsonIgnoreCondition.WhenWritingNull)>
+        Public Property Source As String
+
+        <JsonPropertyName("responseFormat")>
+        <JsonIgnore(Condition:=JsonIgnoreCondition.WhenWritingNull)>
+        Public Property ResponseFormat As Object
 
     End Class
 
@@ -1028,5 +1189,411 @@ Namespace GitHub.Copilot.SDK
     ''' Delegate that supplies the current W3C <see cref="TraceContext"/> for a session turn.
     ''' </summary>
     Public Delegate Function TraceContextProvider() As Task(Of TraceContext)
+
+    ' -----------------------------------------------------------------------
+    '  v2.6.0 feature types (parity with @github/copilot-sdk)
+    ' -----------------------------------------------------------------------
+
+    ''' <summary>
+    ''' Identity of the application integrating the SDK, sent on the <c>connect</c> handshake.
+    ''' Empty fields are omitted; an all-empty identity skips <c>connect</c>.
+    ''' </summary>
+    Public Class CopilotClientInfo
+
+        ''' <summary>Name of the application using the SDK (wire: editorName).</summary>
+        Public Property ApplicationName As String
+
+        ''' <summary>Version of the application (wire: editorVersion).</summary>
+        Public Property ApplicationVersion As String
+
+        ''' <summary>Name of an integration within the application (wire: extensionName).</summary>
+        Public Property IntegrationName As String
+
+        ''' <summary>Version of the integration (wire: extensionVersion).</summary>
+        Public Property IntegrationVersion As String
+
+        ''' <summary>Build the <c>clientInfo</c> wire payload (only non-empty fields).</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object)
+            If Not String.IsNullOrEmpty(ApplicationName) Then d("editorName") = ApplicationName
+            If Not String.IsNullOrEmpty(ApplicationVersion) Then d("editorVersion") = ApplicationVersion
+            If Not String.IsNullOrEmpty(IntegrationName) Then d("extensionName") = IntegrationName
+            If Not String.IsNullOrEmpty(IntegrationVersion) Then d("extensionVersion") = IntegrationVersion
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Auto routing tier values for <see cref="SessionConfig.AutoTier"/> (experimental).
+    ''' </summary>
+    Public NotInheritable Class AutoTier
+        Public Const Efficiency As String = "efficiency"
+        Public Const Balance As String = "balance"
+        Public Const Intelligence As String = "intelligence"
+        Public Const Fast As String = "fast"
+
+        Private Sub New()
+        End Sub
+    End Class
+
+    ''' <summary>
+    ''' Ask-user variant values for <see cref="SessionConfig.AskUserVariant"/>.
+    ''' </summary>
+    Public NotInheritable Class AskUserVariant
+        Public Const Legacy As String = "legacy"
+        Public Const Elicitation As String = "elicitation"
+
+        Private Sub New()
+        End Sub
+    End Class
+
+    ''' <summary>
+    ''' Working-directory trust values for <see cref="SessionConfig.TrustWorkingDirectory"/>.
+    ''' </summary>
+    Public NotInheritable Class WorkingDirectoryTrust
+        Public Const Session As String = "session"
+        Public Const User As String = "user"
+
+        Private Sub New()
+        End Sub
+    End Class
+
+    ''' <summary>
+    ''' Message provenance values for <see cref="MessageOptions.Source"/>.
+    ''' </summary>
+    Public NotInheritable Class MessageSource
+        ''' <summary>A message typed by the user.</summary>
+        Public Const User As String = "user"
+
+        ''' <summary>Application-generated context.</summary>
+        Public Const [System] As String = "system"
+
+        ''' <summary>A message originating from the identified agent ("agent-&lt;id&gt;").</summary>
+        Public Shared Function Agent(agentId As String) As String
+            If String.IsNullOrEmpty(agentId) Then
+                Throw New ArgumentException("An agent id is required.", NameOf(agentId))
+            End If
+            Return "agent-" & agentId
+        End Function
+
+        Private Sub New()
+        End Sub
+    End Class
+
+    ''' <summary>
+    ''' Arguments passed to a <see cref="SessionConfig.GitHubTokenProvider"/>.
+    ''' </summary>
+    Public Class GitHubTokenProviderArgs
+
+        ''' <summary>GitHub host the token is requested for.</summary>
+        Public Property Host As String
+
+        ''' <summary>Session receiving the token (may be Nothing before a session id is assigned).</summary>
+        Public Property SessionId As String
+
+        ''' <summary>Why the token is requested: "initial" or "refresh".</summary>
+        Public Property Reason As String
+
+    End Class
+
+    ''' <summary>
+    ''' Result returned by a GitHub token provider: a token or a cancellation.
+    ''' </summary>
+    Public Class GitHubTokenProviderResult
+
+        ''' <summary>"token" or "cancelled".</summary>
+        Public Property Kind As String = "token"
+
+        ''' <summary>GitHub access token.</summary>
+        Public Property AccessToken As String
+
+        ''' <summary>OAuth token type (defaults to bearer when omitted).</summary>
+        Public Property TokenType As String
+
+        ''' <summary>Remaining token lifetime in seconds.</summary>
+        Public Property ExpiresIn As Integer? = Nothing
+
+        ''' <summary>Creates a token result.</summary>
+        Public Shared Function Token(accessToken As String, expiresIn As Integer, Optional tokenType As String = Nothing) As GitHubTokenProviderResult
+            Return New GitHubTokenProviderResult With {
+                .Kind = "token",
+                .AccessToken = accessToken,
+                .ExpiresIn = expiresIn,
+                .TokenType = tokenType
+            }
+        End Function
+
+        ''' <summary>Creates a cancellation result.</summary>
+        Public Shared Function Cancelled() As GitHubTokenProviderResult
+            Return New GitHubTokenProviderResult With {.Kind = "cancelled"}
+        End Function
+
+        ''' <summary>Build the camelCase JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object) From {{"kind", Kind}}
+            If Kind <> "cancelled" Then
+                d("accessToken") = AccessToken
+                If Not String.IsNullOrEmpty(TokenType) Then d("tokenType") = TokenType
+                If ExpiresIn.HasValue Then d("expiresIn") = ExpiresIn.Value
+            End If
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Sandbox configuration for a session.
+    ''' </summary>
+    Public Class SandboxConfig
+
+        ''' <summary>Whether sandboxing is enabled for the session.</summary>
+        Public Property Enabled As Boolean
+
+        ''' <summary>User-managed policy fragment merged into the base policy (opaque object).</summary>
+        Public Property UserPolicy As Dictionary(Of String, Object)
+
+        ''' <summary>Auto-add the current working directory to the read/write paths.</summary>
+        Public Property AddCurrentWorkingDirectory As Boolean? = Nothing
+
+        ''' <summary>Confine MCP servers launched by the session.</summary>
+        Public Property SandboxMcpServers As Boolean? = Nothing
+
+        ''' <summary>Confine language servers launched by the session.</summary>
+        Public Property SandboxLspServers As Boolean? = Nothing
+
+        ''' <summary>Confine extension processes launched by the session.</summary>
+        Public Property SandboxExtensions As Boolean? = Nothing
+
+        ''' <summary>
+        ''' Opt in to letting the agent request that an individual command run outside the
+        ''' sandbox, approved or denied through the normal permission flow.
+        ''' </summary>
+        Public Property AllowBypass As Boolean? = Nothing
+
+        ''' <summary>Build the camelCase JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object) From {{"enabled", Enabled}}
+            If UserPolicy IsNot Nothing Then d("userPolicy") = UserPolicy
+            If AddCurrentWorkingDirectory.HasValue Then d("addCurrentWorkingDirectory") = AddCurrentWorkingDirectory.Value
+            If SandboxMcpServers.HasValue Then d("sandboxMcpServers") = SandboxMcpServers.Value
+            If SandboxLspServers.HasValue Then d("sandboxLspServers") = SandboxLspServers.Value
+            If SandboxExtensions.HasValue Then d("sandboxExtensions") = SandboxExtensions.Value
+            If AllowBypass.HasValue Then d("allowBypass") = AllowBypass.Value
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Session-level image generation configuration.
+    ''' </summary>
+    Public Class ImageGenerationConfig
+
+        ''' <summary>Opt in to image generation.</summary>
+        Public Property Enabled As Boolean? = Nothing
+
+        ''' <summary>Request a visible "Made with AI" label on generated images.</summary>
+        Public Property Watermark As Boolean? = Nothing
+
+        ''' <summary>Save generated images under the session-state directory.</summary>
+        Public Property SaveToDisk As Boolean? = Nothing
+
+        ''' <summary>Build the camelCase JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object)
+            If Enabled.HasValue Then d("enabled") = Enabled.Value
+            If Watermark.HasValue Then d("watermark") = Watermark.Value
+            If SaveToDisk.HasValue Then d("saveToDisk") = SaveToDisk.Value
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Autopilot continuation options.
+    ''' </summary>
+    Public Class AutopilotOptions
+
+        ''' <summary>Enable runtime-owned automatic continuation in Autopilot mode.</summary>
+        Public Property ContinuationEnabled As Boolean? = Nothing
+
+        ''' <summary>Maximum automatic continuations (zero allows none).</summary>
+        Public Property MaxContinues As Integer? = Nothing
+
+        ''' <summary>Build the camelCase JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object)
+            If ContinuationEnabled.HasValue Then d("continuationEnabled") = ContinuationEnabled.Value
+            If MaxContinues.HasValue Then d("maxContinues") = MaxContinues.Value
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' BYOK (bring your own key) provider configuration.
+    ''' </summary>
+    Public Class ProviderConfig
+
+        ''' <summary>Provider type ("openai", "azure" or "anthropic").</summary>
+        Public Property Type As String
+
+        ''' <summary>API format ("completions" or "responses").</summary>
+        Public Property WireApi As String
+
+        ''' <summary>API endpoint URL.</summary>
+        Public Property BaseUrl As String
+
+        ''' <summary>Static API key.</summary>
+        Public Property ApiKey As String
+
+        ''' <summary>Bearer token sent as the Authorization header.</summary>
+        Public Property BearerToken As String
+
+        ''' <summary>
+        ''' Product serving the model: "openai", "anthropic", "azure_openai", "ollama",
+        ''' "lm_studio", "foundry_local" or "llama_cpp".
+        ''' </summary>
+        Public Property ModelProvider As String
+
+        ''' <summary>Command whose stdout is used as the API key (run before each request).</summary>
+        Public Property ApiKeyCommand As String
+
+        ''' <summary>Build the camelCase JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object)
+            If Not String.IsNullOrEmpty(Type) Then d("type") = Type
+            If Not String.IsNullOrEmpty(WireApi) Then d("wireApi") = WireApi
+            If Not String.IsNullOrEmpty(BaseUrl) Then d("baseUrl") = BaseUrl
+            If Not String.IsNullOrEmpty(ApiKey) Then d("apiKey") = ApiKey
+            If Not String.IsNullOrEmpty(BearerToken) Then d("bearerToken") = BearerToken
+            If Not String.IsNullOrEmpty(ModelProvider) Then d("modelProvider") = ModelProvider
+            If Not String.IsNullOrEmpty(ApiKeyCommand) Then d("apiKeyCommand") = ApiKeyCommand
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Token limits for a model capabilities override. Place <see cref="ToWire"/> under the
+    ''' "limits" key of <see cref="SessionConfig.ModelCapabilities"/>. Wire keys are snake_case.
+    ''' </summary>
+    Public Class ModelCapabilitiesLimits
+
+        ''' <summary>Maximum prompt/input tokens (wire: max_prompt_tokens).</summary>
+        Public Property MaxPromptTokens As Integer? = Nothing
+
+        ''' <summary>Maximum output/completion tokens (wire: max_output_tokens).</summary>
+        Public Property MaxOutputTokens As Integer? = Nothing
+
+        ''' <summary>Maximum context window tokens (wire: max_context_window_tokens).</summary>
+        Public Property MaxContextWindowTokens As Integer? = Nothing
+
+        ''' <summary>Build the snake_case JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object)
+            If MaxPromptTokens.HasValue Then d("max_prompt_tokens") = MaxPromptTokens.Value
+            If MaxOutputTokens.HasValue Then d("max_output_tokens") = MaxOutputTokens.Value
+            If MaxContextWindowTokens.HasValue Then d("max_context_window_tokens") = MaxContextWindowTokens.Value
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Input for the sub-agent start hook (fired before a sub-agent's first turn).
+    ''' </summary>
+    Public Class SubagentStartHookInput
+
+        ''' <summary>Runtime session id (the parent session for sub-agent hooks).</summary>
+        <JsonPropertyName("sessionId")>
+        Public Property SessionId As String
+
+        ''' <summary>Unix epoch milliseconds at which the hook fired.</summary>
+        <JsonPropertyName("timestamp")>
+        Public Property Timestamp As Long? = Nothing
+
+        <JsonPropertyName("workingDirectory")>
+        Public Property WorkingDirectory As String
+
+        <JsonPropertyName("transcriptPath")>
+        Public Property TranscriptPath As String
+
+        <JsonPropertyName("agentName")>
+        Public Property AgentName As String
+
+        <JsonPropertyName("agentDisplayName")>
+        Public Property AgentDisplayName As String
+
+        <JsonPropertyName("agentDescription")>
+        Public Property AgentDescription As String
+
+    End Class
+
+    ''' <summary>
+    ''' Output for the sub-agent start hook.
+    ''' </summary>
+    Public Class SubagentStartHookOutput
+
+        ''' <summary>Context prepended to the sub-agent's initial prompt.</summary>
+        Public Property AdditionalContext As String
+
+        ''' <summary>Build the camelCase JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object)
+            If AdditionalContext IsNot Nothing Then d("additionalContext") = AdditionalContext
+            Return d
+        End Function
+
+    End Class
+
+    ''' <summary>
+    ''' Input for the sub-agent stop hook (fired after a sub-agent completes a turn).
+    ''' </summary>
+    Public Class SubagentStopHookInput
+        Inherits SubagentStartHookInput
+
+        <JsonPropertyName("agentId")>
+        Public Property AgentId As String
+
+        <JsonPropertyName("agentType")>
+        Public Property AgentType As String
+
+        ''' <summary>Why the sub-agent stopped ("end_turn").</summary>
+        <JsonPropertyName("stopReason")>
+        Public Property StopReason As String
+
+        ''' <summary>The sub-agent's last assistant message.</summary>
+        <JsonPropertyName("response")>
+        Public Property Response As String
+
+    End Class
+
+    ''' <summary>
+    ''' Output for the sub-agent stop hook. "block" with a reason continues the sub-agent;
+    ''' otherwise <see cref="ModifiedResponse"/> replaces the response reported to the parent.
+    ''' </summary>
+    Public Class SubagentStopHookOutput
+
+        ''' <summary>"block" or "allow".</summary>
+        Public Property Decision As String
+
+        ''' <summary>Instruction required when the stop is blocked.</summary>
+        Public Property Reason As String
+
+        ''' <summary>Replacement for the sub-agent's final response.</summary>
+        Public Property ModifiedResponse As String
+
+        ''' <summary>Build the camelCase JSON-RPC wire payload.</summary>
+        Public Function ToWire() As Dictionary(Of String, Object)
+            Dim d As New Dictionary(Of String, Object)
+            If Decision IsNot Nothing Then d("decision") = Decision
+            If Reason IsNot Nothing Then d("reason") = Reason
+            If ModifiedResponse IsNot Nothing Then d("modifiedResponse") = ModifiedResponse
+            Return d
+        End Function
+
+    End Class
 
 End Namespace

@@ -6,7 +6,9 @@
 #include "copilot/sdk_protocol_version.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 
@@ -22,6 +24,59 @@
 #endif
 
 namespace copilot {
+
+namespace {
+
+/// Generates a random UUID-like (version 4) identifier for GitHub token provider registrations.
+std::string generateRegistrationId() {
+    static std::mutex mtx;
+    static std::mt19937_64 gen{std::random_device{}()};
+    std::uniform_int_distribution<uint64_t> dist;
+
+    uint64_t a = 0;
+    uint64_t b = 0;
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        a = dist(gen);
+        b = dist(gen);
+    }
+
+    char buf[40];
+    std::snprintf(buf, sizeof(buf), "%08x-%04x-4%03x-%04x-%012llx",
+                  static_cast<unsigned>(a >> 32),
+                  static_cast<unsigned>((a >> 16) & 0xFFFFu),
+                  static_cast<unsigned>(a & 0x0FFFu),
+                  static_cast<unsigned>(((b >> 48) & 0x3FFFu) | 0x8000u),
+                  static_cast<unsigned long long>(b & 0xFFFFFFFFFFFFULL));
+    return std::string(buf);
+}
+
+/// Adds the v2.6.0 session options shared by session.create and session.resume.
+template <typename Config>
+void appendSharedSessionParams(nlohmann::json& params, const Config& config) {
+    if (config.modelCapabilities) params["modelCapabilities"] = *config.modelCapabilities;
+
+    // CAPI-specific options live under `capi` (the runtime only accepts them there).
+    nlohmann::json capi = nlohmann::json::object();
+    if (config.autoTier) capi["autoTier"] = *config.autoTier;
+    if (config.enableWebSocketResponses) capi["enableWebSocketResponses"] = *config.enableWebSocketResponses;
+    if (!capi.empty()) params["capi"] = capi;
+
+    if (config.askUserVariant) params["askUserVariant"] = *config.askUserVariant;
+    if (config.sandboxConfig) params["sandboxConfig"] = *config.sandboxConfig;
+    if (config.featureFlags) params["featureFlags"] = *config.featureFlags;
+    if (config.allowedModels) params["allowedModels"] = *config.allowedModels;
+    if (config.authClientIdMetadataUrl) params["authClientIdMetadataUrl"] = *config.authClientIdMetadataUrl;
+    if (config.agentDirectories) params["agentDirectories"] = *config.agentDirectories;
+    if (config.hookDirectories) params["hookDirectories"] = *config.hookDirectories;
+    if (config.interactiveUser) params["interactiveUser"] = *config.interactiveUser;
+    if (config.excludedManagedSettings) params["excludedManagedSettings"] = *config.excludedManagedSettings;
+    if (config.enforceManagedModelDefaults) params["enforceManagedModelDefaults"] = *config.enforceManagedModelDefaults;
+    if (config.imageGeneration) params["imageGeneration"] = *config.imageGeneration;
+    if (config.autopilot) params["autopilot"] = *config.autopilot;
+}
+
+} // namespace
 
 // ============================================================================
 // Construction / Destruction
@@ -75,6 +130,7 @@ void CopilotClient::start() {
             startCLIServer();
         }
         connectToServer();
+        sendConnectHandshake();
         verifyProtocolVersion();
         state_ = ConnectionState::Connected;
     } catch (...) {
@@ -107,6 +163,8 @@ std::vector<std::string> CopilotClient::stop() {
         std::lock_guard<std::mutex> lock(sessionsMutex_);
         sessions_.clear();
     }
+
+    clearGitHubTokenProviders();
 
     // Stop JSON-RPC client
     if (rpcClient_) {
@@ -152,6 +210,8 @@ void CopilotClient::forceStop() {
         std::lock_guard<std::mutex> lock(sessionsMutex_);
         sessions_.clear();
     }
+
+    clearGitHubTokenProviders();
 
     // Stop JSON-RPC client
     if (rpcClient_) {
@@ -204,16 +264,43 @@ void CopilotClient::ensureConnected() {
 }
 
 std::shared_ptr<CopilotSession> CopilotClient::createSession(const SessionConfig& config) {
+    if (config.gitHubToken && config.gitHubTokenProvider) {
+        throw std::invalid_argument("gitHubToken and gitHubTokenProvider are mutually exclusive");
+    }
+
     ensureConnected();
 
     auto params = buildCreateSessionParams(config);
-    auto result = rpcClient_->request("session.create", params);
+
+    std::string gitHubTokenRegistrationId;
+    if (config.gitHubTokenProvider) {
+        gitHubTokenRegistrationId =
+            registerGitHubTokenProvider(config.gitHubTokenProvider, config.sessionId.value_or(""));
+        params["gitHubTokenProviderRegistrationId"] = gitHubTokenRegistrationId;
+    }
+
+    nlohmann::json result;
+    try {
+        result = rpcClient_->request("session.create", params);
+    } catch (...) {
+        if (!gitHubTokenRegistrationId.empty()) {
+            unregisterGitHubTokenProvider(gitHubTokenRegistrationId);
+        }
+        throw;
+    }
 
     std::string sid = result.value("sessionId", "");
     std::string wp = result.value("workspacePath", "");
 
     auto session = std::shared_ptr<CopilotSession>(
         new CopilotSession(sid, rpcClient_.get(), wp));
+
+    if (!gitHubTokenRegistrationId.empty()) {
+        assignGitHubTokenProviderSession(gitHubTokenRegistrationId, sid);
+        session->onDisconnected_ = [this, gitHubTokenRegistrationId]() {
+            unregisterGitHubTokenProvider(gitHubTokenRegistrationId);
+        };
+    }
 
     session->registerTools(config.tools);
     if (config.onPermissionRequest) {
@@ -239,16 +326,42 @@ std::shared_ptr<CopilotSession> CopilotClient::createSession(const SessionConfig
 
 std::shared_ptr<CopilotSession> CopilotClient::resumeSession(
     const std::string& sessionId, const ResumeSessionConfig& config) {
+    if (config.gitHubToken && config.gitHubTokenProvider) {
+        throw std::invalid_argument("gitHubToken and gitHubTokenProvider are mutually exclusive");
+    }
+
     ensureConnected();
 
     auto params = buildResumeSessionParams(sessionId, config);
-    auto result = rpcClient_->request("session.resume", params);
+
+    std::string gitHubTokenRegistrationId;
+    if (config.gitHubTokenProvider) {
+        gitHubTokenRegistrationId = registerGitHubTokenProvider(config.gitHubTokenProvider, sessionId);
+        params["gitHubTokenProviderRegistrationId"] = gitHubTokenRegistrationId;
+    }
+
+    nlohmann::json result;
+    try {
+        result = rpcClient_->request("session.resume", params);
+    } catch (...) {
+        if (!gitHubTokenRegistrationId.empty()) {
+            unregisterGitHubTokenProvider(gitHubTokenRegistrationId);
+        }
+        throw;
+    }
 
     std::string sid = result.value("sessionId", "");
     std::string wp = result.value("workspacePath", "");
 
     auto session = std::shared_ptr<CopilotSession>(
         new CopilotSession(sid, rpcClient_.get(), wp));
+
+    if (!gitHubTokenRegistrationId.empty()) {
+        assignGitHubTokenProviderSession(gitHubTokenRegistrationId, sid.empty() ? sessionId : sid);
+        session->onDisconnected_ = [this, gitHubTokenRegistrationId]() {
+            unregisterGitHubTokenProvider(gitHubTokenRegistrationId);
+        };
+    }
 
     session->registerTools(config.tools);
     if (config.onPermissionRequest) {
@@ -392,6 +505,15 @@ void CopilotClient::setSessionFsProvider(const SessionFsConfig& config) {
 }
 
 // ============================================================================
+// Managed Settings
+// ============================================================================
+
+void CopilotClient::clearManagedSettingsCache() {
+    if (!rpcClient_) throw std::runtime_error("Client not connected");
+    rpcClient_->request("managedSettings.clearCache", nlohmann::json::object());
+}
+
+// ============================================================================
 // Lifecycle Event Subscriptions
 // ============================================================================
 
@@ -425,6 +547,27 @@ std::function<void()> CopilotClient::onLifecycle(const std::string& eventType,
 // ============================================================================
 // Protocol Version Verification
 // ============================================================================
+
+void CopilotClient::sendConnectHandshake() {
+    if (!options_.clientInfo) return;
+
+    // Map the public identity onto the connect wire shape, dropping empty fields.
+    const auto& info = *options_.clientInfo;
+    nlohmann::json wire = nlohmann::json::object();
+    if (info.applicationName && !info.applicationName->empty()) wire["editorName"] = *info.applicationName;
+    if (info.applicationVersion && !info.applicationVersion->empty()) wire["editorVersion"] = *info.applicationVersion;
+    if (info.integrationName && !info.integrationName->empty()) wire["extensionName"] = *info.integrationName;
+    if (info.integrationVersion && !info.integrationVersion->empty()) wire["extensionVersion"] = *info.integrationVersion;
+    if (wire.empty()) return;
+
+    try {
+        rpcClient_->request("connect", {{"clientInfo", wire}});
+    } catch (const std::exception& e) {
+        // Older CLIs without `connect` keep their default attribution; the ping
+        // handshake that follows still verifies the protocol version.
+        if (!isMethodNotFoundError(e)) throw;
+    }
+}
 
 void CopilotClient::verifyProtocolVersion() {
     auto response = ping();
@@ -679,6 +822,10 @@ void CopilotClient::setupHandlers() {
     // exitPlanMode.request - request
     rpcClient_->setRequestHandler("exitPlanMode.request",
         [this](const nlohmann::json& params) { return handleExitPlanModeRequest(params); });
+
+    // gitHubToken.getToken - request (session GitHub token providers)
+    rpcClient_->setRequestHandler("gitHubToken.getToken",
+        [this](const nlohmann::json& params) { return handleGitHubTokenGetToken(params); });
 }
 
 // ============================================================================
@@ -891,6 +1038,74 @@ CopilotClient::handleExitPlanModeRequest(const nlohmann::json& params) {
     }
 }
 
+std::pair<nlohmann::json, std::optional<JsonRpcError>>
+CopilotClient::handleGitHubTokenGetToken(const nlohmann::json& params) {
+    std::string registrationId = params.value("registrationId", "");
+
+    GitHubTokenProvider provider;
+    std::string registeredSessionId;
+    {
+        std::lock_guard<std::mutex> lock(gitHubTokenProvidersMutex_);
+        auto it = gitHubTokenProviders_.find(registrationId);
+        if (it != gitHubTokenProviders_.end()) {
+            provider = it->second.provider;
+            registeredSessionId = it->second.sessionId;
+        }
+    }
+
+    if (!provider) {
+        return {nullptr, JsonRpcError{-32603,
+            "No GitHub token provider registered for registration ID \"" + registrationId + "\""}};
+    }
+
+    GitHubTokenProviderArgs args;
+    args.host = params.value("host", "");
+    args.reason = params.value("reason", "initial");
+    if (params.contains("sessionId") && params["sessionId"].is_string()) {
+        args.sessionId = params["sessionId"].get<std::string>();
+    } else if (!registeredSessionId.empty()) {
+        args.sessionId = registeredSessionId;
+    }
+
+    try {
+        nlohmann::json result = provider(args);
+        return {result, std::nullopt};
+    } catch (const std::exception& e) {
+        return {nullptr, JsonRpcError{-32603, e.what()}};
+    }
+}
+
+// ============================================================================
+// GitHub Token Provider Registry
+// ============================================================================
+
+std::string CopilotClient::registerGitHubTokenProvider(const GitHubTokenProvider& provider,
+                                                       const std::string& sessionId) {
+    std::string registrationId = generateRegistrationId();
+    std::lock_guard<std::mutex> lock(gitHubTokenProvidersMutex_);
+    gitHubTokenProviders_[registrationId] = GitHubTokenRegistration{provider, sessionId};
+    return registrationId;
+}
+
+void CopilotClient::assignGitHubTokenProviderSession(const std::string& registrationId,
+                                                     const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(gitHubTokenProvidersMutex_);
+    auto it = gitHubTokenProviders_.find(registrationId);
+    if (it != gitHubTokenProviders_.end()) {
+        it->second.sessionId = sessionId;
+    }
+}
+
+void CopilotClient::unregisterGitHubTokenProvider(const std::string& registrationId) {
+    std::lock_guard<std::mutex> lock(gitHubTokenProvidersMutex_);
+    gitHubTokenProviders_.erase(registrationId);
+}
+
+void CopilotClient::clearGitHubTokenProviders() {
+    std::lock_guard<std::mutex> lock(gitHubTokenProvidersMutex_);
+    gitHubTokenProviders_.clear();
+}
+
 // ============================================================================
 // Tool Execution
 // ============================================================================
@@ -969,7 +1184,6 @@ nlohmann::json CopilotClient::buildCreateSessionParams(const SessionConfig& conf
     if (config.sessionLimits) params["sessionLimits"] = *config.sessionLimits;
     if (config.memory) params["memory"] = *config.memory;
     if (config.otlpProtocol) params["otlpProtocol"] = *config.otlpProtocol;
-    if (config.enableWebSocketResponses) params["enableWebSocketResponses"] = *config.enableWebSocketResponses;
     if (config.expAssignments) params["expAssignments"] = *config.expAssignments;
     if (config.onMcpAuthRequest) params["mcpAuthHandler"] = true;
 
@@ -983,6 +1197,12 @@ nlohmann::json CopilotClient::buildCreateSessionParams(const SessionConfig& conf
     if (config.toolSearch) params["toolSearch"] = *config.toolSearch;
     if (config.experimentalMode) params["experimentalMode"] = *config.experimentalMode;
     if (config.contentExclusion) params["contentExclusion"] = *config.contentExclusion;
+
+    // --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
+    appendSharedSessionParams(params, config);
+    if (config.name) params["name"] = *config.name;
+    if (config.trustWorkingDirectory) params["trustWorkingDirectory"] = *config.trustWorkingDirectory;
+    if (config.refreshCustomInstructions) params["refreshCustomInstructions"] = *config.refreshCustomInstructions;
 
     return params;
 }
@@ -1011,6 +1231,10 @@ nlohmann::json CopilotClient::buildResumeSessionParams(const std::string& sessio
     if (config.skillDirectories) params["skillDirectories"] = *config.skillDirectories;
     if (config.disabledSkills) params["disabledSkills"] = *config.disabledSkills;
     if (config.infiniteSessions) params["infiniteSessions"] = *config.infiniteSessions;
+
+    // --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
+    appendSharedSessionParams(params, config);
+    if (config.allowTranscriptRecovery) params["allowTranscriptRecovery"] = *config.allowTranscriptRecovery;
 
     return params;
 }

@@ -70,9 +70,7 @@ type E2ETests(fixture: ProxyFixture) =
 
             let! reply =
                 session.SendAndWaitAsync(
-                    { Prompt = "Hello, Copilot!"
-                      Attachments = None
-                      Mode = None },
+                    MessageOptions.create "Hello, Copilot!",
                     timeout = TimeSpan.FromSeconds(30.0))
 
             reply |> should not' (equal None)
@@ -125,9 +123,7 @@ type E2ETests(fixture: ProxyFixture) =
 
             let! reply1 =
                 session.SendAndWaitAsync(
-                    { Prompt = "Hello, Copilot!"
-                      Attachments = None
-                      Mode = None },
+                    MessageOptions.create "Hello, Copilot!",
                     timeout = TimeSpan.FromSeconds(30.0))
 
             reply1 |> should not' (equal None)
@@ -136,9 +132,7 @@ type E2ETests(fixture: ProxyFixture) =
 
             let! reply2 =
                 session.SendAndWaitAsync(
-                    { Prompt = "Follow up question"
-                      Attachments = None
-                      Mode = None },
+                    MessageOptions.create "Follow up question",
                     timeout = TimeSpan.FromSeconds(30.0))
 
             reply2 |> should not' (equal None)
@@ -170,10 +164,7 @@ type E2ETests(fixture: ProxyFixture) =
             use client2 = makeClient ()
             do! client2.StartAsync()
 
-            let resumeConfig =
-                { SessionId = originalId
-                  OnPermissionRequest = SessionConfig.approveAll
-                  Model = None }
+            let resumeConfig = ResumeSessionConfig.create originalId
 
             let! resumed =
                 client2.ResumeSessionAsync(resumeConfig)
@@ -411,9 +402,7 @@ type E2ETests(fixture: ProxyFixture) =
 
             let! reply =
                 session.SendAndWaitAsync(
-                    { Prompt = "Use the test_tool"
-                      Attachments = None
-                      Mode = None },
+                    MessageOptions.create "Use the test_tool",
                     timeout = TimeSpan.FromSeconds(30.0))
 
             reply |> should not' (equal None)
@@ -452,10 +441,7 @@ type E2ETests(fixture: ProxyFixture) =
                     | _ -> ())
 
             let! _msgId =
-                session.SendAsync(
-                    { Prompt = "Hello, streaming!"
-                      Attachments = None
-                      Mode = None })
+                session.SendAsync(MessageOptions.create "Hello, streaming!")
 
             idleEvent.Wait(TimeSpan.FromSeconds(30.0)) |> ignore
 
@@ -486,9 +472,7 @@ type E2ETests(fixture: ProxyFixture) =
 
             let! reply =
                 session.SendAndWaitAsync(
-                    { Prompt = "Hello!"
-                      Attachments = None
-                      Mode = None },
+                    MessageOptions.create "Hello!",
                     timeout = TimeSpan.FromSeconds(30.0))
 
             reply |> should not' (equal None)
@@ -526,9 +510,7 @@ type E2ETests(fixture: ProxyFixture) =
 
             let! reply =
                 session.SendAndWaitAsync(
-                    { Prompt = "Hello with SessionFs!"
-                      Attachments = None
-                      Mode = None },
+                    MessageOptions.create "Hello with SessionFs!",
                     timeout = TimeSpan.FromSeconds(30.0))
 
             reply |> should not' (equal None)
@@ -620,9 +602,7 @@ type E2ETests(fixture: ProxyFixture) =
             for i in 1..5 do
                 let! _reply =
                     session.SendAndWaitAsync(
-                        { Prompt = sprintf "Message number %d with enough content to fill context" i
-                          Attachments = None
-                          Mode = None },
+                        MessageOptions.create (sprintf "Message number %d with enough content to fill context" i),
                         timeout = TimeSpan.FromSeconds(30.0))
                 ()
 

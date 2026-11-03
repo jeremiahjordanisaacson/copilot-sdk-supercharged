@@ -6,7 +6,7 @@
  */
 
 // Client
-export { CopilotSolidityClient } from "./client.js";
+export { CopilotSolidityClient, type SoliditySessionOptions } from "./client.js";
 
 // Tools
 export {
@@ -50,7 +50,28 @@ export type {
     ToolDeferMode,
     SystemMessageSectionName,
     GitHubAttachmentType,
+    // v2.6.0 upstream-sync types
+    AskUserVariant,
+    AutoTier,
+    AutopilotOptions,
+    ByokProviderOptions,
+    CopilotClientInfo,
+    GitHubTokenProvider,
+    GitHubTokenProviderArgs,
+    GitHubTokenProviderResult,
+    ImageGenerationOptions,
+    ModelLimitsOverride,
+    ModelSwitchAutoTierResult,
+    ProviderConfigModelProvider,
+    SandboxConfig,
+    SubagentStartHandler,
+    SubagentStartHookInput,
+    SubagentStartHookOutput,
+    SubagentStopHandler,
+    SubagentStopHookInput,
+    SubagentStopHookOutput,
+    WorkingDirectoryTrust,
 } from "./types.js";
 
 // Upstream-sync feature constants
-export { ToolDefer, SystemMessageSection, GitHubAttachment } from "./types.js";
+export { ToolDefer, SystemMessageSection, GitHubAttachment, MessageSource } from "./types.js";

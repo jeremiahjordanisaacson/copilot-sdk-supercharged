@@ -287,6 +287,7 @@ let config = SessionConfig {
 | `client.get_status()` | Get CLI version and protocol info |
 | `client.get_auth_status()` | Get authentication status |
 | `client.list_models()` | List available models (cached) |
+| `client.clear_managed_settings_cache()` | Clear cached managed settings |
 | `client.get_state()` | Get current connection state |
 | `client.on_lifecycle(handler)` | Subscribe to lifecycle events |
 
@@ -296,6 +297,7 @@ let config = SessionConfig {
 |---|---|
 | `session.send(options)` | Send a message (async, non-blocking) |
 | `session.send_and_wait(options, timeout)` | Send and wait for idle |
+| `session.send_and_wait_structured(options, schema, timeout)` | Send with a JSON Schema and return the parsed JSON reply |
 | `session.on(handler)` | Subscribe to all events |
 | `session.on_event(type, handler)` | Subscribe to specific event type |
 | `session.register_tool(name, handler)` | Register a tool handler |
@@ -303,7 +305,10 @@ let config = SessionConfig {
 | `session.register_user_input_handler(h)` | Register user input handler |
 | `session.register_hooks_handler(h)` | Register hooks handler |
 | `session.get_messages()` | Get session history |
-| `session.destroy()` | Destroy the session |
+| `session.set_auto_tier(tier)` | Change the Auto routing tier (experimental) |
+| `session.get_managed_settings()` | Get managed settings for the session |
+| `session.recheck_policy_helper()` | Re-run the managed-settings policy helper |
+| `session.destroy()` | Detach the session (state stays resumable) |
 | `session.abort()` | Abort current processing |
 | `session.session_id()` | Get session ID |
 | `session.workspace_path()` | Get workspace path |
@@ -324,6 +329,7 @@ let config = SessionConfig {
 | `env` | `Option<HashMap>` | `None` | Environment variables |
 | `github_token` | `Option<String>` | `None` | GitHub auth token |
 | `use_logged_in_user` | `Option<bool>` | `None` | Use stored OAuth |
+| `client_info` | `Option<CopilotClientInfo>` | `None` | App identity sent on the `connect` handshake |
 
 ## Connection Modes
 
@@ -396,6 +402,193 @@ let response = session.send_and_wait(MessageOptions {
     ..Default::default()
 }, 60_000).await?;
 ```
+
+## What's New in v2.6.0
+
+Parity with upstream `@github/copilot-sdk` (Copilot CLI 1.0.106). Every new option is an `Option` that defaults to `None` and is left off the wire, so existing code keeps working unchanged.
+
+- **Client info** — `CopilotClientOptions::client_info` (`CopilotClientInfo`) is declared on a `connect` handshake sent before `ping`. Older CLIs without `connect` are tolerated.
+- **Auto routing tier** (experimental) — `auto_tier: Option<AutoTier>` (`Efficiency`/`Balance`/`Intelligence`/`Fast`) on `SessionConfig` and `ResumeSessionConfig`, sent as `capi.autoTier`. `enable_web_socket_responses` is now sent as `capi.enableWebSocketResponses`. To change the tier on a live session, call `session.set_auto_tier(Some(tier))`; pass `None` to go back to default routing.
+- **Ask-user variant** — `ask_user_variant: Option<AskUserVariant>` (`Legacy` / `Elicitation`).
+- **GitHub token provider** — `github_token_provider: Option<GitHubTokenProviderFn>` answers the runtime's `gitHubToken.getToken` callbacks. You can't set it together with `github_token`.
+- **Sandbox** — `sandbox_config: Option<SandboxConfig>`, including the opt-in `allow_bypass`. With `allow_bypass`, the agent can ask to run a single command outside the sandbox; the request goes through the normal permission flow.
+- **Feature flags** — `feature_flags: Option<HashMap<String, bool>>`. It's sent whenever it's `Some`, even if the map is empty.
+- **Session detach** — `session.destroy()` now sends `session.detach`. On older CLIs it falls back to `session.destroy`. The session's state on disk is kept, so you can still `resume_session` it.
+- **Message source** — `MessageOptions::source: Option<MessageSource>` (`MessageSource::User`, `MessageSource::System`, `MessageSource::agent("id")`).
+- **Managed settings** — `client.clear_managed_settings_cache()`, `session.get_managed_settings()`, `session.recheck_policy_helper()`.
+- **Model allowlist** — `allowed_models: Option<Vec<String>>`.
+- **OAuth client metadata URL** — `auth_client_id_metadata_url: Option<String>`.
+- **Max output tokens** — `ModelLimits::max_output_tokens`. To override it, set `"limits": { "max_output_tokens": N }` in `model_capabilities`.
+- **Structured output** — `MessageOptions::response_schema` plus `session.send_and_wait_structured(prompt_or_options, schema, timeout)`.
+- **Session name & directories** — `name` (create only), `agent_directories`, `hook_directories`.
+- **Runtime toggles** — `interactive_user`, `excluded_managed_settings`, `enforce_managed_model_defaults`. Create-only: `trust_working_directory` (`TrustWorkingDirectory::Session` / `User`) and `refresh_custom_instructions`. Resume-only: `allow_transcript_recovery`.
+- **Image generation** — `image_generation: Option<ImageGenerationConfig>` (`enabled`, `watermark`, `save_to_disk`).
+- **Autopilot** — `autopilot: Option<AutopilotOptions>` (`continuation_enabled`, `max_continues`).
+- **Sub-agent hooks** — `hook_types::SUBAGENT_START` / `hook_types::SUBAGENT_STOP` with `SubagentStartHookInput`/`SubagentStartHookOutput` and `SubagentStopHookInput`/`SubagentStopHookOutput`.
+- **BYOK provider** — `ProviderConfig::model_provider` (`"openai"`, `"anthropic"`, `"azure_openai"`, `"ollama"`, `"lm_studio"`, `"foundry_local"`, `"llama_cpp"`) and `api_key_command`. `ProviderConfig` now implements `Default`.
+
+Identify your application on the connection:
+
+```rust
+let client = CopilotClient::new(CopilotClientOptions {
+    client_info: Some(CopilotClientInfo {
+        application_name: Some("acme-portal".into()),
+        application_version: Some("2.4.0".into()),
+        ..Default::default()
+    }),
+    ..Default::default()
+});
+```
+
+Combine the new session options, then adjust Auto routing on the live session:
+
+```rust
+use std::collections::HashMap;
+
+let config = SessionConfig {
+    name: Some("nightly-triage".into()),
+    model: Some("auto".into()),
+    auto_tier: Some(AutoTier::Balance),
+    ask_user_variant: Some(AskUserVariant::Elicitation),
+    allowed_models: Some(vec!["gpt-5".into(), "claude-sonnet-4.5".into()]),
+    feature_flags: Some(HashMap::from([("my_flag".to_string(), true)])),
+    sandbox_config: Some(SandboxConfig {
+        enabled: true,
+        allow_bypass: Some(true),
+        ..Default::default()
+    }),
+    image_generation: Some(ImageGenerationConfig {
+        enabled: Some(true),
+        save_to_disk: Some(false),
+        ..Default::default()
+    }),
+    autopilot: Some(AutopilotOptions {
+        continuation_enabled: Some(true),
+        max_continues: Some(5),
+    }),
+    agent_directories: Some(vec!["./agents".into()]),
+    hook_directories: Some(vec!["./hooks".into()]),
+    trust_working_directory: Some(TrustWorkingDirectory::Session),
+    interactive_user: Some(false),
+    ..Default::default()
+};
+let session = client.create_session(config).await?;
+
+// `None` returns to the provider's default Auto routing.
+let ack = session.set_auto_tier(Some(AutoTier::Intelligence)).await?;
+println!("auto tier request: {}", ack["status"]);
+```
+
+Supply GitHub tokens per session through a provider callback:
+
+```rust
+let config = SessionConfig {
+    github_token_provider: Some(GitHubTokenProviderFn::new(
+        |args: GitHubTokenProviderArgs| async move {
+            // args.host, args.session_id, and args.reason ("initial" | "refresh")
+            let access_token = fetch_token_for_host(&args.host).await?;
+            Ok(GitHubTokenProviderResult::Token {
+                access_token,
+                token_type: None,
+                expires_in: 8 * 60 * 60,
+            })
+        },
+    )),
+    ..Default::default()
+};
+```
+
+Request structured output and tag a message's source:
+
+```rust
+let reply = session
+    .send_and_wait_structured(
+        "List three primary colors",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "colors": { "type": "array", "items": { "type": "string" } } },
+            "required": ["colors"]
+        }),
+        None,
+    )
+    .await?;
+println!("{}", reply["colors"]);
+
+session.send(MessageOptions {
+    prompt: "Review complete: 2 issues found".into(),
+    source: Some(MessageSource::agent("reviewer")),
+    ..Default::default()
+}).await?;
+```
+
+Managed settings, and resuming with transcript recovery:
+
+```rust
+client.clear_managed_settings_cache().await?;
+let settings = session.get_managed_settings().await?;
+let policy = session.recheck_policy_helper().await?;
+
+let resumed = client.resume_session(ResumeSessionConfig {
+    session_id: "abc-123".into(),
+    allow_transcript_recovery: Some(true),
+    auto_tier: Some(AutoTier::Fast),
+    ..Default::default()
+}).await?;
+```
+
+Handle sub-agent lifecycle hooks (set `hooks: Some(true)` on the session config):
+
+```rust
+use std::sync::Arc;
+
+session.register_hooks_handler(Arc::new(|hook_type, input, _session_id| {
+    Box::pin(async move {
+        match hook_type.as_str() {
+            hook_types::SUBAGENT_START => {
+                let start: SubagentStartHookInput = serde_json::from_value(input)
+                    .map_err(|e| CopilotError::Serialization(e.to_string()))?;
+                let output = SubagentStartHookOutput {
+                    additional_context: Some(format!("You are running as {}", start.agent_name)),
+                };
+                Ok(serde_json::to_value(output).ok())
+            }
+            hook_types::SUBAGENT_STOP => {
+                let stop: SubagentStopHookInput = serde_json::from_value(input)
+                    .map_err(|e| CopilotError::Serialization(e.to_string()))?;
+                let output = SubagentStopHookOutput {
+                    modified_response: Some(stop.response.trim().to_string()),
+                    ..Default::default()
+                };
+                Ok(serde_json::to_value(output).ok())
+            }
+            _ => Ok(None),
+        }
+    })
+})).await;
+```
+
+BYOK with a key command and a max-output-tokens override:
+
+```rust
+let config = SessionConfig {
+    provider: Some(ProviderConfig {
+        base_url: "http://localhost:11434/v1".into(),
+        model_provider: Some("ollama".into()),
+        api_key_command: Some("op read op://dev/ollama/api-key".into()),
+        ..Default::default()
+    }),
+    model_capabilities: Some(HashMap::from([(
+        "limits".to_string(),
+        serde_json::json!({ "max_output_tokens": 8192 }),
+    )])),
+    ..Default::default()
+};
+```
+
+### Parity notes
+
+- External-tool cancellation doesn't apply to this SDK because it receives tool calls on the `tool.call` request path.
+- Experimental host-integration callbacks (skill provider, installation confirmation, extension launch provider, Entra/Kerberos auth callbacks) aren't available in this SDK yet.
 
 ## Recent Features (v2.4–v2.5)
 

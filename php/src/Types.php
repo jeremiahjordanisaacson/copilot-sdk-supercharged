@@ -409,6 +409,11 @@ class AzureProviderOptions
 
 class ProviderConfig
 {
+    /**
+     * @param string|null $modelProvider Provider family: "openai", "anthropic", "azure_openai",
+     *        "ollama", "lm_studio", "foundry_local" or "llama_cpp" (see ModelProvider)
+     * @param string|null $apiKeyCommand Command whose stdout is used as the API key
+     */
     public function __construct(
         public readonly string $baseUrl,
         public readonly ?string $type = null,
@@ -416,6 +421,8 @@ class ProviderConfig
         public readonly ?string $apiKey = null,
         public readonly ?string $bearerToken = null,
         public readonly ?AzureProviderOptions $azure = null,
+        public readonly ?string $modelProvider = null,
+        public readonly ?string $apiKeyCommand = null,
     ) {}
 
     public function toArray(): array
@@ -435,6 +442,12 @@ class ProviderConfig
         }
         if ($this->azure !== null) {
             $result['azure'] = $this->azure->toArray();
+        }
+        if ($this->modelProvider !== null) {
+            $result['modelProvider'] = $this->modelProvider;
+        }
+        if ($this->apiKeyCommand !== null) {
+            $result['apiKeyCommand'] = $this->apiKeyCommand;
         }
         return $result;
     }
@@ -792,6 +805,322 @@ class GitHubAttachment
 }
 
 // ============================================================================
+// v2.6.0 upstream-sync feature types (parity with @github/copilot-sdk)
+// ============================================================================
+
+/**
+ * Wire helpers shared by the session config serializers.
+ *
+ * @internal
+ */
+final class WireFormat
+{
+    /**
+     * Unwrap typed config objects (toArray()) and encode arrays as JSON objects,
+     * so an empty map serializes as {} rather than [].
+     */
+    public static function toObject(mixed $value): mixed
+    {
+        if (is_object($value) && method_exists($value, 'toArray')) {
+            $value = $value->toArray();
+        }
+        if (is_array($value)) {
+            return (object) $value;
+        }
+        return $value;
+    }
+}
+
+/**
+ * Identity of the integrating application. When any field is set, the client sends
+ * it on the `connect` handshake (as editorName/editorVersion/extensionName/extensionVersion)
+ * so the runtime attributes its telemetry to your application.
+ */
+class ClientInfo
+{
+    public function __construct(
+        public readonly ?string $applicationName = null,
+        public readonly ?string $applicationVersion = null,
+        public readonly ?string $integrationName = null,
+        public readonly ?string $integrationVersion = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            applicationName: $data['applicationName'] ?? null,
+            applicationVersion: $data['applicationVersion'] ?? null,
+            integrationName: $data['integrationName'] ?? null,
+            integrationVersion: $data['integrationVersion'] ?? null,
+        );
+    }
+
+    /**
+     * @return array<string,string>|null Wire shape with only non-empty fields, or null when all are empty
+     */
+    public function toWire(): ?array
+    {
+        $wire = [];
+        if ($this->applicationName !== null && $this->applicationName !== '') {
+            $wire['editorName'] = $this->applicationName;
+        }
+        if ($this->applicationVersion !== null && $this->applicationVersion !== '') {
+            $wire['editorVersion'] = $this->applicationVersion;
+        }
+        if ($this->integrationName !== null && $this->integrationName !== '') {
+            $wire['extensionName'] = $this->integrationName;
+        }
+        if ($this->integrationVersion !== null && $this->integrationVersion !== '') {
+            $wire['extensionVersion'] = $this->integrationVersion;
+        }
+        return $wire === [] ? null : $wire;
+    }
+}
+
+/**
+ * Auto routing preference used when the session model is "auto" (experimental).
+ */
+final class AutoTier
+{
+    public const EFFICIENCY = 'efficiency';
+    public const BALANCE = 'balance';
+    public const INTELLIGENCE = 'intelligence';
+    public const FAST = 'fast';
+}
+
+/**
+ * Wire shape used for ask-user prompts.
+ */
+final class AskUserVariant
+{
+    public const LEGACY = 'legacy';
+    public const ELICITATION = 'elicitation';
+}
+
+/**
+ * Scope of the working-directory trust granted at session creation.
+ */
+final class WorkingDirectoryTrust
+{
+    public const SESSION = 'session';
+    public const USER = 'user';
+}
+
+/**
+ * BYOK provider families accepted by ProviderConfig::$modelProvider.
+ */
+final class ModelProvider
+{
+    public const OPENAI = 'openai';
+    public const ANTHROPIC = 'anthropic';
+    public const AZURE_OPENAI = 'azure_openai';
+    public const OLLAMA = 'ollama';
+    public const LM_STUDIO = 'lm_studio';
+    public const FOUNDRY_LOCAL = 'foundry_local';
+    public const LLAMA_CPP = 'llama_cpp';
+}
+
+/**
+ * Message provenance for MessageOptions::$source.
+ */
+final class MessageSource
+{
+    public const USER = 'user';
+    public const SYSTEM = 'system';
+
+    /**
+     * Build the "agent-<id>" source for a message produced by an identified agent.
+     */
+    public static function agent(string $agentId): string
+    {
+        return 'agent-' . $agentId;
+    }
+}
+
+/**
+ * Arguments passed to a session's gitHubTokenProvider callback.
+ */
+class GitHubTokenProviderArgs
+{
+    /**
+     * @param string $host Effective GitHub host the token is for
+     * @param string|null $sessionId Session receiving the token (null before a cloud session has an id)
+     * @param string $reason "initial" or "refresh"
+     */
+    public function __construct(
+        public readonly string $host,
+        public readonly ?string $sessionId,
+        public readonly string $reason,
+    ) {}
+}
+
+/**
+ * Result returned by a gitHubTokenProvider: a token or a cancellation.
+ * Providers may also return the wire array directly.
+ */
+class GitHubTokenResult
+{
+    public function __construct(
+        public readonly string $kind,
+        public readonly ?string $accessToken = null,
+        public readonly ?string $tokenType = null,
+        public readonly ?int $expiresIn = null,
+    ) {}
+
+    /**
+     * @param int $expiresIn Remaining token lifetime in seconds
+     */
+    public static function token(string $accessToken, int $expiresIn, ?string $tokenType = null): self
+    {
+        return new self('token', $accessToken, $tokenType, $expiresIn);
+    }
+
+    public static function cancelled(): self
+    {
+        return new self('cancelled');
+    }
+
+    public function toArray(): array
+    {
+        if ($this->kind === 'cancelled') {
+            return ['kind' => 'cancelled'];
+        }
+        $result = [
+            'kind' => 'token',
+            'accessToken' => $this->accessToken,
+            'expiresIn' => $this->expiresIn,
+        ];
+        if ($this->tokenType !== null) {
+            $result['tokenType'] = $this->tokenType;
+        }
+        return $result;
+    }
+}
+
+/**
+ * Session sandbox configuration. $allowBypass opts in to letting the agent request
+ * that an individual command run outside the sandbox through the normal permission flow.
+ */
+class SandboxConfig
+{
+    /**
+     * @param array<string,mixed>|null $userPolicy Policy fragment merged into the base policy
+     */
+    public function __construct(
+        public readonly bool $enabled,
+        public readonly ?array $userPolicy = null,
+        public readonly ?bool $addCurrentWorkingDirectory = null,
+        public readonly ?bool $sandboxMcpServers = null,
+        public readonly ?bool $sandboxLspServers = null,
+        public readonly ?bool $sandboxExtensions = null,
+        public readonly ?bool $allowBypass = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = ['enabled' => $this->enabled];
+        if ($this->userPolicy !== null) {
+            $result['userPolicy'] = (object) $this->userPolicy;
+        }
+        if ($this->addCurrentWorkingDirectory !== null) {
+            $result['addCurrentWorkingDirectory'] = $this->addCurrentWorkingDirectory;
+        }
+        if ($this->sandboxMcpServers !== null) {
+            $result['sandboxMcpServers'] = $this->sandboxMcpServers;
+        }
+        if ($this->sandboxLspServers !== null) {
+            $result['sandboxLspServers'] = $this->sandboxLspServers;
+        }
+        if ($this->sandboxExtensions !== null) {
+            $result['sandboxExtensions'] = $this->sandboxExtensions;
+        }
+        if ($this->allowBypass !== null) {
+            $result['allowBypass'] = $this->allowBypass;
+        }
+        return $result;
+    }
+}
+
+/**
+ * Session-level image generation configuration.
+ */
+class ImageGenerationConfig
+{
+    public function __construct(
+        public readonly ?bool $enabled = null,
+        public readonly ?bool $watermark = null,
+        public readonly ?bool $saveToDisk = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [];
+        if ($this->enabled !== null) {
+            $result['enabled'] = $this->enabled;
+        }
+        if ($this->watermark !== null) {
+            $result['watermark'] = $this->watermark;
+        }
+        if ($this->saveToDisk !== null) {
+            $result['saveToDisk'] = $this->saveToDisk;
+        }
+        return $result;
+    }
+}
+
+/**
+ * Runtime-owned Autopilot continuation options.
+ */
+class AutopilotOptions
+{
+    public function __construct(
+        public readonly ?bool $continuationEnabled = null,
+        public readonly ?int $maxContinues = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [];
+        if ($this->continuationEnabled !== null) {
+            $result['continuationEnabled'] = $this->continuationEnabled;
+        }
+        if ($this->maxContinues !== null) {
+            $result['maxContinues'] = $this->maxContinues;
+        }
+        return $result;
+    }
+}
+
+/**
+ * Limit overrides for the SessionConfig::$modelCapabilities array, e.g.
+ * `['limits' => (new ModelLimitsOverride(maxOutputTokens: 4096))->toArray()]`.
+ * Wire keys are snake_case (max_prompt_tokens, max_output_tokens, max_context_window_tokens).
+ */
+class ModelLimitsOverride
+{
+    public function __construct(
+        public readonly ?int $maxPromptTokens = null,
+        public readonly ?int $maxOutputTokens = null,
+        public readonly ?int $maxContextWindowTokens = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [];
+        if ($this->maxPromptTokens !== null) {
+            $result['max_prompt_tokens'] = $this->maxPromptTokens;
+        }
+        if ($this->maxOutputTokens !== null) {
+            $result['max_output_tokens'] = $this->maxOutputTokens;
+        }
+        if ($this->maxContextWindowTokens !== null) {
+            $result['max_context_window_tokens'] = $this->maxContextWindowTokens;
+        }
+        return $result;
+    }
+}
+
+// ============================================================================
 // Session Configuration
 // ============================================================================
 
@@ -894,6 +1223,41 @@ class SessionConfig
         public readonly ?bool $contentExclusion = null,
         /** @var callable|null $onMcpAuthRequest MCP OAuth host-token handler fn(ProviderTokenArgs): string */
         public /* readonly */ $onMcpAuthRequest = null,
+        // --- v2.6.0 upstream-sync options ---
+        /** Auto routing preference when the model is "auto" (experimental; see AutoTier). Sent inside `capi`. */
+        public readonly ?string $autoTier = null,
+        /** Ask-user prompt variant: "legacy" or "elicitation" (see AskUserVariant). */
+        public readonly ?string $askUserVariant = null,
+        /** @var callable|null $gitHubTokenProvider fn(GitHubTokenProviderArgs): GitHubTokenResult|array. Mutually exclusive with $gitHubToken. */
+        public /* readonly */ $gitHubTokenProvider = null,
+        /** Sandbox configuration (SandboxConfig or wire array). */
+        public readonly SandboxConfig|array|null $sandboxConfig = null,
+        /** @var array<string,bool>|null $featureFlags Runtime feature flags (sent even when empty) */
+        public readonly ?array $featureFlags = null,
+        /** @var string[]|null $allowedModels Model allowlist for this session */
+        public readonly ?array $allowedModels = null,
+        /** OAuth client ID metadata document URL. */
+        public readonly ?string $authClientIdMetadataUrl = null,
+        /** Human-readable session name. */
+        public readonly ?string $name = null,
+        /** @var string[]|null $agentDirectories Directories to load custom agents from */
+        public readonly ?array $agentDirectories = null,
+        /** @var string[]|null $hookDirectories Directories to load hooks from */
+        public readonly ?array $hookDirectories = null,
+        /** Whether an interactive user is present. */
+        public readonly ?bool $interactiveUser = null,
+        /** @var string[]|null $excludedManagedSettings Managed settings to ignore */
+        public readonly ?array $excludedManagedSettings = null,
+        /** Enforce managed model defaults. */
+        public readonly ?bool $enforceManagedModelDefaults = null,
+        /** Working-directory trust: "session" or "user" (see WorkingDirectoryTrust). */
+        public readonly ?string $trustWorkingDirectory = null,
+        /** Refresh custom instructions on session start. */
+        public readonly ?bool $refreshCustomInstructions = null,
+        /** Session-level image generation configuration (ImageGenerationConfig or wire array). */
+        public readonly ImageGenerationConfig|array|null $imageGeneration = null,
+        /** Autopilot continuation options (AutopilotOptions or wire array). */
+        public readonly AutopilotOptions|array|null $autopilot = null,
     ) {}
 
     public function toServerParams(): array
@@ -991,9 +1355,7 @@ class SessionConfig
         if ($this->otlpProtocol !== null) {
             $params['otlpProtocol'] = $this->otlpProtocol;
         }
-        if ($this->enableWebSocketResponses !== null) {
-            $params['enableWebSocketResponses'] = $this->enableWebSocketResponses;
-        }
+        // enableWebSocketResponses is sent inside the `capi` object (see below).
         if ($this->expAssignments !== null) {
             $params['expAssignments'] = $this->expAssignments;
         }
@@ -1040,6 +1402,62 @@ class SessionConfig
         // Signal to the runtime that an MCP OAuth host-token handler is registered.
         if ($this->onMcpAuthRequest !== null) {
             $params['mcpAuthHandler'] = true;
+        }
+        // --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
+        $capi = [];
+        if ($this->autoTier !== null) {
+            $capi['autoTier'] = $this->autoTier;
+        }
+        if ($this->enableWebSocketResponses !== null) {
+            $capi['enableWebSocketResponses'] = $this->enableWebSocketResponses;
+        }
+        if ($capi !== []) {
+            $params['capi'] = $capi;
+        }
+        if ($this->askUserVariant !== null) {
+            $params['askUserVariant'] = $this->askUserVariant;
+        }
+        if ($this->sandboxConfig !== null) {
+            $params['sandboxConfig'] = WireFormat::toObject($this->sandboxConfig);
+        }
+        if ($this->featureFlags !== null) {
+            $params['featureFlags'] = WireFormat::toObject($this->featureFlags);
+        }
+        if ($this->allowedModels !== null) {
+            $params['allowedModels'] = $this->allowedModels;
+        }
+        if ($this->authClientIdMetadataUrl !== null) {
+            $params['authClientIdMetadataUrl'] = $this->authClientIdMetadataUrl;
+        }
+        if ($this->name !== null) {
+            $params['name'] = $this->name;
+        }
+        if ($this->agentDirectories !== null) {
+            $params['agentDirectories'] = $this->agentDirectories;
+        }
+        if ($this->hookDirectories !== null) {
+            $params['hookDirectories'] = $this->hookDirectories;
+        }
+        if ($this->interactiveUser !== null) {
+            $params['interactiveUser'] = $this->interactiveUser;
+        }
+        if ($this->excludedManagedSettings !== null) {
+            $params['excludedManagedSettings'] = $this->excludedManagedSettings;
+        }
+        if ($this->enforceManagedModelDefaults !== null) {
+            $params['enforceManagedModelDefaults'] = $this->enforceManagedModelDefaults;
+        }
+        if ($this->trustWorkingDirectory !== null) {
+            $params['trustWorkingDirectory'] = $this->trustWorkingDirectory;
+        }
+        if ($this->refreshCustomInstructions !== null) {
+            $params['refreshCustomInstructions'] = $this->refreshCustomInstructions;
+        }
+        if ($this->imageGeneration !== null) {
+            $params['imageGeneration'] = WireFormat::toObject($this->imageGeneration);
+        }
+        if ($this->autopilot !== null) {
+            $params['autopilot'] = WireFormat::toObject($this->autopilot);
         }
         return $params;
     }
@@ -1102,6 +1520,39 @@ class ResumeSessionConfig
         /** @var string[]|null $instructionDirectories Instruction directories for prompt customization */
         public readonly ?array $instructionDirectories = null,
         public readonly ?bool $disableResume = null,
+        // --- v2.6.0 upstream-sync options ---
+        /** Stream responses over the WebSocket transport. Sent inside `capi`. */
+        public readonly ?bool $enableWebSocketResponses = null,
+        /** Auto routing preference when the model is "auto" (experimental; see AutoTier). Sent inside `capi`. */
+        public readonly ?string $autoTier = null,
+        /** Ask-user prompt variant: "legacy" or "elicitation" (see AskUserVariant). */
+        public readonly ?string $askUserVariant = null,
+        /** @var callable|null $gitHubTokenProvider fn(GitHubTokenProviderArgs): GitHubTokenResult|array. Mutually exclusive with $gitHubToken. */
+        public /* readonly */ $gitHubTokenProvider = null,
+        /** Sandbox configuration (SandboxConfig or wire array). */
+        public readonly SandboxConfig|array|null $sandboxConfig = null,
+        /** @var array<string,bool>|null $featureFlags Runtime feature flags (sent even when empty) */
+        public readonly ?array $featureFlags = null,
+        /** @var string[]|null $allowedModels Model allowlist for this session */
+        public readonly ?array $allowedModels = null,
+        /** OAuth client ID metadata document URL. */
+        public readonly ?string $authClientIdMetadataUrl = null,
+        /** @var string[]|null $agentDirectories Directories to load custom agents from */
+        public readonly ?array $agentDirectories = null,
+        /** @var string[]|null $hookDirectories Directories to load hooks from */
+        public readonly ?array $hookDirectories = null,
+        /** Whether an interactive user is present. */
+        public readonly ?bool $interactiveUser = null,
+        /** @var string[]|null $excludedManagedSettings Managed settings to ignore */
+        public readonly ?array $excludedManagedSettings = null,
+        /** Enforce managed model defaults. */
+        public readonly ?bool $enforceManagedModelDefaults = null,
+        /** Allow recovering the conversation from the transcript when resuming. */
+        public readonly ?bool $allowTranscriptRecovery = null,
+        /** Session-level image generation configuration (ImageGenerationConfig or wire array). */
+        public readonly ImageGenerationConfig|array|null $imageGeneration = null,
+        /** Autopilot continuation options (AutopilotOptions or wire array). */
+        public readonly AutopilotOptions|array|null $autopilot = null,
     ) {}
 
     public function toServerParams(string $sessionId): array
@@ -1182,6 +1633,56 @@ class ResumeSessionConfig
         }
         if ($this->disableResume !== null) {
             $params['disableResume'] = $this->disableResume;
+        }
+        // --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
+        $capi = [];
+        if ($this->autoTier !== null) {
+            $capi['autoTier'] = $this->autoTier;
+        }
+        if ($this->enableWebSocketResponses !== null) {
+            $capi['enableWebSocketResponses'] = $this->enableWebSocketResponses;
+        }
+        if ($capi !== []) {
+            $params['capi'] = $capi;
+        }
+        if ($this->askUserVariant !== null) {
+            $params['askUserVariant'] = $this->askUserVariant;
+        }
+        if ($this->sandboxConfig !== null) {
+            $params['sandboxConfig'] = WireFormat::toObject($this->sandboxConfig);
+        }
+        if ($this->featureFlags !== null) {
+            $params['featureFlags'] = WireFormat::toObject($this->featureFlags);
+        }
+        if ($this->allowedModels !== null) {
+            $params['allowedModels'] = $this->allowedModels;
+        }
+        if ($this->authClientIdMetadataUrl !== null) {
+            $params['authClientIdMetadataUrl'] = $this->authClientIdMetadataUrl;
+        }
+        if ($this->agentDirectories !== null) {
+            $params['agentDirectories'] = $this->agentDirectories;
+        }
+        if ($this->hookDirectories !== null) {
+            $params['hookDirectories'] = $this->hookDirectories;
+        }
+        if ($this->interactiveUser !== null) {
+            $params['interactiveUser'] = $this->interactiveUser;
+        }
+        if ($this->excludedManagedSettings !== null) {
+            $params['excludedManagedSettings'] = $this->excludedManagedSettings;
+        }
+        if ($this->enforceManagedModelDefaults !== null) {
+            $params['enforceManagedModelDefaults'] = $this->enforceManagedModelDefaults;
+        }
+        if ($this->allowTranscriptRecovery !== null) {
+            $params['allowTranscriptRecovery'] = $this->allowTranscriptRecovery;
+        }
+        if ($this->imageGeneration !== null) {
+            $params['imageGeneration'] = WireFormat::toObject($this->imageGeneration);
+        }
+        if ($this->autopilot !== null) {
+            $params['autopilot'] = WireFormat::toObject($this->autopilot);
         }
         return $params;
     }
@@ -1390,6 +1891,9 @@ class MessageOptions
      * @param array<string,string>|null $requestHeaders Custom HTTP headers for outbound model requests
      * @param string|null $agentMode Agent-mode override for this message
      * @param string|null $displayPrompt Alternate prompt text shown to the user (the model still sees $prompt)
+     * @param string|null $source Message provenance: "user", "system" or "agent-<id>" (see MessageSource)
+     * @param array<string,mixed>|object|null $responseSchema JSON Schema requesting structured output;
+     *        sent as a json_schema responseFormat and takes precedence over $responseFormat
      */
     public function __construct(
         public readonly string $prompt,
@@ -1400,11 +1904,16 @@ class MessageOptions
         public readonly ?array $requestHeaders = null,
         public readonly ?string $agentMode = null,
         public readonly ?string $displayPrompt = null,
+        public readonly ?string $source = null,
+        public readonly array|object|null $responseSchema = null,
     ) {}
 
     public function toArray(): array
     {
         $result = ['prompt' => $this->prompt];
+        if ($this->source !== null) {
+            $result['source'] = $this->source;
+        }
         if ($this->attachments !== null) {
             $result['attachments'] = array_map(
                 fn($a) => $a->toArray(),
@@ -1414,7 +1923,16 @@ class MessageOptions
         if ($this->mode !== null) {
             $result['mode'] = $this->mode;
         }
-        if ($this->responseFormat !== null) {
+        if ($this->responseSchema !== null) {
+            $result['responseFormat'] = [
+                'type' => 'json_schema',
+                'jsonSchema' => [
+                    'name' => 'response',
+                    'strict' => true,
+                    'schema' => $this->responseSchema,
+                ],
+            ];
+        } elseif ($this->responseFormat !== null) {
             $result['responseFormat'] = $this->responseFormat;
         }
         if ($this->imageOptions !== null) {
@@ -1725,6 +2243,10 @@ class SessionHooks
      * @param callable|null $onSessionEnd fn(SessionEndHookInput, array{sessionId:string}): ?SessionEndHookOutput
      * @param callable|null $onErrorOccurred fn(ErrorOccurredHookInput, array{sessionId:string}): ?ErrorOccurredHookOutput
      * @param callable|null $onPreMcpToolCall fn(array, array{sessionId:string}): mixed Pre-MCP-tool-call hook
+     * @param callable|null $onSubagentStart fn(array $input, array{sessionId:string}): SubagentStartHookOutput|array|null
+     *        ("subagentStart"; see SubagentStartHookInput::fromArray())
+     * @param callable|null $onSubagentStop fn(array $input, array{sessionId:string}): SubagentStopHookOutput|array|null
+     *        ("subagentStop"; see SubagentStopHookInput::fromArray())
      */
     public function __construct(
         public /* readonly */ $onPreToolUse = null,
@@ -1735,6 +2257,8 @@ class SessionHooks
         public /* readonly */ $onSessionEnd = null,
         public /* readonly */ $onErrorOccurred = null,
         public /* readonly */ $onPreMcpToolCall = null,
+        public /* readonly */ $onSubagentStart = null,
+        public /* readonly */ $onSubagentStop = null,
     ) {}
 
     public function hasAnyHandler(): bool
@@ -1746,7 +2270,122 @@ class SessionHooks
             || $this->onSessionStart !== null
             || $this->onSessionEnd !== null
             || $this->onErrorOccurred !== null
-            || $this->onPreMcpToolCall !== null;
+            || $this->onPreMcpToolCall !== null
+            || $this->onSubagentStart !== null
+            || $this->onSubagentStop !== null;
+    }
+}
+
+/**
+ * Input for the "subagentStart" hook (session metadata belongs to the parent session).
+ */
+class SubagentStartHookInput
+{
+    public function __construct(
+        public readonly mixed $timestamp,
+        public readonly string $transcriptPath,
+        public readonly string $agentName,
+        public readonly ?string $agentDisplayName = null,
+        public readonly ?string $agentDescription = null,
+        public readonly ?string $sessionId = null,
+        public readonly ?string $workingDirectory = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            timestamp: $data['timestamp'] ?? null,
+            transcriptPath: $data['transcriptPath'] ?? '',
+            agentName: $data['agentName'] ?? '',
+            agentDisplayName: $data['agentDisplayName'] ?? null,
+            agentDescription: $data['agentDescription'] ?? null,
+            sessionId: $data['sessionId'] ?? null,
+            workingDirectory: $data['workingDirectory'] ?? null,
+        );
+    }
+}
+
+/**
+ * Output for the "subagentStart" hook: context prepended to the subagent's initial prompt.
+ */
+class SubagentStartHookOutput
+{
+    public function __construct(
+        public readonly ?string $additionalContext = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [];
+        if ($this->additionalContext !== null) {
+            $result['additionalContext'] = $this->additionalContext;
+        }
+        return $result;
+    }
+}
+
+/**
+ * Input for the "subagentStop" hook, sent after a subagent turn completes.
+ */
+class SubagentStopHookInput
+{
+    public function __construct(
+        public readonly mixed $timestamp,
+        public readonly string $transcriptPath,
+        public readonly string $agentName,
+        public readonly string $agentType,
+        public readonly string $stopReason,
+        public readonly string $response,
+        public readonly ?string $agentId = null,
+        public readonly ?string $agentDisplayName = null,
+        public readonly ?string $agentDescription = null,
+        public readonly ?string $sessionId = null,
+        public readonly ?string $workingDirectory = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            timestamp: $data['timestamp'] ?? null,
+            transcriptPath: $data['transcriptPath'] ?? '',
+            agentName: $data['agentName'] ?? '',
+            agentType: $data['agentType'] ?? '',
+            stopReason: $data['stopReason'] ?? 'end_turn',
+            response: $data['response'] ?? '',
+            agentId: $data['agentId'] ?? null,
+            agentDisplayName: $data['agentDisplayName'] ?? null,
+            agentDescription: $data['agentDescription'] ?? null,
+            sessionId: $data['sessionId'] ?? null,
+            workingDirectory: $data['workingDirectory'] ?? null,
+        );
+    }
+}
+
+/**
+ * Output for the "subagentStop" hook: "block" (with a reason) or "allow", optionally
+ * rewriting the subagent's response.
+ */
+class SubagentStopHookOutput
+{
+    public function __construct(
+        public readonly ?string $decision = null,
+        public readonly ?string $reason = null,
+        public readonly ?string $modifiedResponse = null,
+    ) {}
+
+    public function toArray(): array
+    {
+        $result = [];
+        if ($this->decision !== null) {
+            $result['decision'] = $this->decision;
+        }
+        if ($this->reason !== null) {
+            $result['reason'] = $this->reason;
+        }
+        if ($this->modifiedResponse !== null) {
+            $result['modifiedResponse'] = $this->modifiedResponse;
+        }
+        return $result;
     }
 }
 
@@ -1843,6 +2482,7 @@ class ModelLimits
         public readonly ?int $maxPromptTokens = null,
         public readonly ?int $maxContextWindowTokens = null,
         public readonly ?ModelVisionLimits $vision = null,
+        public readonly ?int $maxOutputTokens = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -1852,6 +2492,7 @@ class ModelLimits
             maxPromptTokens: $data['max_prompt_tokens'] ?? null,
             maxContextWindowTokens: $data['max_context_window_tokens'] ?? null,
             vision: $vision,
+            maxOutputTokens: $data['max_output_tokens'] ?? null,
         );
     }
 }
@@ -2136,6 +2777,9 @@ class CopilotClientOptions
      * @param bool|null $useLoggedInUser Use logged-in user auth
      * @param int|null $sessionIdleTimeoutSeconds Server-wide idle timeout for sessions in seconds
      * @param SessionFsConfig|null $sessionFs Custom session filesystem configuration
+     * @param ClientInfo|array|null $clientInfo Identity of the integrating application, declared on
+     *        the `connect` handshake when any field is set (array keys: applicationName,
+     *        applicationVersion, integrationName, integrationVersion)
      */
     public function __construct(
         public readonly ?string $cliPath = null,
@@ -2158,5 +2802,6 @@ class CopilotClientOptions
         public readonly ?CopilotRequestHandler $requestHandler = null,
         /** @var callable|null $bearerTokenProvider BYOK bearer-token provider fn(ProviderTokenArgs): string */
         public /* readonly */ $bearerTokenProvider = null,
+        public readonly ClientInfo|array|null $clientInfo = null,
     ) {}
 }

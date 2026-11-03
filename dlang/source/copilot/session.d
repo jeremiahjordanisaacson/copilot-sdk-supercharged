@@ -9,11 +9,13 @@ import std.json;
 import std.typecons : Nullable;
 import std.algorithm : filter, map;
 import std.array : array;
+import std.exception : enforce;
+import std.string : strip;
 import core.sync.mutex : Mutex;
 import core.sync.condition : Condition;
 
 import copilot.types;
-import copilot.jsonrpc : JsonRpcClient;
+import copilot.jsonrpc : JsonRpcClient, JsonRpcError, methodNotFoundCode;
 import copilot.tools : ToolBinding, ToolHandler;
 
 /// Callback signature for session event listeners.
@@ -36,6 +38,9 @@ final class CopilotSession
         bool _idle = true;
         bool _stopped = false;
         ExitPlanModeHandler _exitPlanModeHandler;
+        SubagentStartHandler _onSubagentStart;
+        SubagentStopHandler _onSubagentStop;
+        void delegate(string sessionId) _onRelease;
     }
 
     /// Construct a session (called internally by CopilotClient).
@@ -128,6 +133,20 @@ final class CopilotSession
                 hdrObj[key] = val;
             params["requestHeaders"] = hdrObj;
         }
+        if (!opts.source.isNull)
+            params["source"] = opts.source.get;
+        if (opts.responseSchema.type != JSONType.null_)
+        {
+            // Structured output replaces any legacy string responseFormat.
+            auto jsonSchema = JSONValue(string[string].init);
+            jsonSchema["name"] = "response";
+            jsonSchema["strict"] = true;
+            jsonSchema["schema"] = opts.responseSchema;
+            auto structured = JSONValue(string[string].init);
+            structured["type"] = "json_schema";
+            structured["jsonSchema"] = jsonSchema;
+            params["responseFormat"] = structured;
+        }
 
         _rpc.notify("session/send", params);
     }
@@ -159,6 +178,83 @@ final class CopilotSession
         auto params = JSONValue(string[string].init);
         params["sessionId"] = _sessionId;
         _rpc.notify("session/abort", params);
+    }
+
+    /// Send a message requesting structured output that matches `schema`,
+    /// block until the session is idle, and return the final assistant
+    /// content parsed as JSON. Throws if no structured content was produced.
+    JSONValue sendAndWaitStructured(string message, JSONValue schema,
+        MessageOptions opts = MessageOptions.init) @trusted
+    {
+        opts.responseSchema = schema;
+        auto events = sendAndWait(message, opts);
+
+        string content;
+        foreach (ref ev; events)
+        {
+            if (ev.type != SessionEventType.assistantMessage) continue;
+            auto c = assistantContent(ev);
+            if (c.length > 0) content = c;
+        }
+        enforce(content.strip.length > 0,
+            "The requested run completed without a structured assistant response.");
+        return parseJSON(content);
+    }
+
+    /// Release this session via `session.detach`, falling back to
+    /// `session.destroy` on runtimes without detach support. Session state
+    /// on disk is preserved, so the session can be resumed later.
+    void disconnect() @trusted
+    {
+        auto params = JSONValue(string[string].init);
+        params["sessionId"] = _sessionId;
+        try
+        {
+            _rpc.request("session.detach", params);
+        }
+        catch (JsonRpcError e)
+        {
+            if (e.code != methodNotFoundCode) throw e;
+            _rpc.request("session.destroy", params);
+        }
+        if (_onRelease !is null)
+            _onRelease(_sessionId);
+        markStopped();
+    }
+
+    /// Change the Auto routing preference (experimental) without changing the
+    /// model (`session.model.switchAutoTier`). A null tier returns to the
+    /// provider's default routing. Returns the runtime's acknowledgement.
+    JSONValue setAutoTier(Nullable!string autoTier) @safe
+    {
+        auto params = JSONValue(string[string].init);
+        params["sessionId"] = _sessionId;
+        params["autoTier"] = autoTier.isNull ? JSONValue(null) : JSONValue(autoTier.get);
+        return _rpc.request("session.model.switchAutoTier", params);
+    }
+
+    /// ditto
+    JSONValue setAutoTier(string autoTier) @safe
+    {
+        return setAutoTier(autoTier is null ? Nullable!string.init : Nullable!string(autoTier));
+    }
+
+    /// Get the managed settings in effect for this session
+    /// (`session.managedSettings.get`).
+    JSONValue getManagedSettings() @safe
+    {
+        auto params = JSONValue(string[string].init);
+        params["sessionId"] = _sessionId;
+        return _rpc.request("session.managedSettings.get", params);
+    }
+
+    /// Re-run the managed-settings policy helper for this session
+    /// (`session.managedSettings.recheckPolicyHelper`).
+    JSONValue recheckPolicyHelper() @safe
+    {
+        auto params = JSONValue(string[string].init);
+        params["sessionId"] = _sessionId;
+        return _rpc.request("session.managedSettings.recheckPolicyHelper", params);
     }
 
     // ------------------------------------------------------------------
@@ -236,4 +332,45 @@ final class CopilotSession
         _idle = true;
         _idleCond.notifyAll();
     }
+
+    /// Install the sub-agent lifecycle hooks (called by CopilotClient).
+    package void configureHooks(SubagentStartHandler onStart, SubagentStopHandler onStop) @safe
+    {
+        _onSubagentStart = onStart;
+        _onSubagentStop = onStop;
+    }
+
+    /// Install the callback run when the session is released (called by CopilotClient).
+    package void setReleaseHandler(void delegate(string sessionId) handler) @safe
+    {
+        _onRelease = handler;
+    }
+
+    /// Dispatch a `hooks.invoke` callback. Returns the hook output, or JSON
+    /// null when no handler is registered for the hook type or it throws.
+    package JSONValue handleHooksInvoke(string hookType, JSONValue input) @trusted
+    {
+        try
+        {
+            if (hookType == HookType.subagentStart && _onSubagentStart !is null)
+                return _onSubagentStart(SubagentStartHookInput.fromJson(input)).toJson();
+            if (hookType == HookType.subagentStop && _onSubagentStop !is null)
+                return _onSubagentStop(SubagentStopHookInput.fromJson(input)).toJson();
+        }
+        catch (Exception) {}
+        return JSONValue(null);
+    }
+}
+
+/// Extract the content of an `assistant.message` event, whether it is carried
+/// at the top level of the payload or under `data`.
+private string assistantContent(const ref SessionEvent ev) @safe
+{
+    auto direct = ev.stringField("content");
+    if (!direct.isNull) return direct.get;
+    if (ev.payload.type != JSONType.object) return null;
+    auto pData = "data" in ev.payload;
+    if (pData is null || (*pData).type != JSONType.object) return null;
+    auto pContent = "content" in *pData;
+    return (pContent !is null && (*pContent).type == JSONType.string) ? (*pContent).str : null;
 }

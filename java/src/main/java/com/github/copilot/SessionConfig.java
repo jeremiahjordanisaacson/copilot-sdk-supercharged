@@ -84,6 +84,42 @@ public class SessionConfig {
     private Boolean experimentalMode;
     /** Respect repository content-exclusion rules. */
     private Boolean contentExclusion;
+    /** Auto-model routing preference ({@code "efficiency"}, {@code "balance"}, {@code "intelligence"}, {@code "fast"}); sent under {@code capi}. Experimental. */
+    private String autoTier;
+    /** Model-facing shape of the built-in ask_user tool ({@code "legacy"} or {@code "elicitation"}). */
+    private String askUserVariant;
+    /** Acquires short-lived GitHub tokens for this session on demand. Mutually exclusive with gitHubToken. */
+    private GitHubTokenProvider gitHubTokenProvider;
+    /** Sandbox configuration applied before MCP servers or session tools start. */
+    private SandboxConfig sandboxConfig;
+    /** Host-resolved feature-flag values; sent whenever provided, even if empty. */
+    private Map<String, Boolean> featureFlags;
+    /** Exact model IDs allowed by the host. */
+    private List<String> allowedModels;
+    /** OAuth Client ID Metadata Document URL identifying the host for MCP authorization. */
+    private String authClientIdMetadataUrl;
+    /** Session name applied at creation (create only). */
+    private String name;
+    /** Explicit discovery-only custom-agent roots. */
+    private List<String> agentDirectories;
+    /** Explicit discovery-only file-hook roots. */
+    private List<String> hookDirectories;
+    /** Declares that a human drives this session's conversation. */
+    private Boolean interactiveUser;
+    /** Managed-setting paths this host handles externally or does not support. */
+    private List<String> excludedManagedSettings;
+    /** Enforce locked managed model controls for this session. */
+    private Boolean enforceManagedModelDefaults;
+    /** Grants trust to the working directory at creation: {@code "session"} or {@code "user"} (create only). */
+    private String trustWorkingDirectory;
+    /** Invalidate the custom-instruction discovery cache before creating the session (create only). */
+    private Boolean refreshCustomInstructions;
+    /** Allow the runtime to recover a damaged transcript during resume (resume only). */
+    private Boolean allowTranscriptRecovery;
+    /** Session-level image generation opt-in. */
+    private ImageGenerationConfig imageGeneration;
+    /** Autopilot continuation policy. */
+    private AutopilotOptions autopilot;
 
     public SessionConfig() {}
 
@@ -134,6 +170,24 @@ public class SessionConfig {
     public SessionConfig toolSearch(Map<String, Object> toolSearch) { this.toolSearch = toolSearch; return this; }
     public SessionConfig experimentalMode(boolean enable) { this.experimentalMode = enable; return this; }
     public SessionConfig contentExclusion(boolean enable) { this.contentExclusion = enable; return this; }
+    public SessionConfig autoTier(String autoTier) { this.autoTier = autoTier; return this; }
+    public SessionConfig askUserVariant(String variant) { this.askUserVariant = variant; return this; }
+    public SessionConfig gitHubTokenProvider(GitHubTokenProvider provider) { this.gitHubTokenProvider = provider; return this; }
+    public SessionConfig sandboxConfig(SandboxConfig sandboxConfig) { this.sandboxConfig = sandboxConfig; return this; }
+    public SessionConfig featureFlags(Map<String, Boolean> flags) { this.featureFlags = flags; return this; }
+    public SessionConfig allowedModels(List<String> models) { this.allowedModels = models; return this; }
+    public SessionConfig authClientIdMetadataUrl(String url) { this.authClientIdMetadataUrl = url; return this; }
+    public SessionConfig name(String name) { this.name = name; return this; }
+    public SessionConfig agentDirectories(List<String> dirs) { this.agentDirectories = dirs; return this; }
+    public SessionConfig hookDirectories(List<String> dirs) { this.hookDirectories = dirs; return this; }
+    public SessionConfig interactiveUser(boolean interactive) { this.interactiveUser = interactive; return this; }
+    public SessionConfig excludedManagedSettings(List<String> paths) { this.excludedManagedSettings = paths; return this; }
+    public SessionConfig enforceManagedModelDefaults(boolean enforce) { this.enforceManagedModelDefaults = enforce; return this; }
+    public SessionConfig trustWorkingDirectory(String trust) { this.trustWorkingDirectory = trust; return this; }
+    public SessionConfig refreshCustomInstructions(boolean refresh) { this.refreshCustomInstructions = refresh; return this; }
+    public SessionConfig allowTranscriptRecovery(boolean allow) { this.allowTranscriptRecovery = allow; return this; }
+    public SessionConfig imageGeneration(ImageGenerationConfig config) { this.imageGeneration = config; return this; }
+    public SessionConfig autopilot(AutopilotOptions options) { this.autopilot = options; return this; }
 
     // Getters
     public String getSessionId() { return sessionId; }
@@ -182,4 +236,22 @@ public class SessionConfig {
     public Map<String, Object> getToolSearch() { return toolSearch; }
     public Boolean getExperimentalMode() { return experimentalMode; }
     public Boolean getContentExclusion() { return contentExclusion; }
+    public String getAutoTier() { return autoTier; }
+    public String getAskUserVariant() { return askUserVariant; }
+    public GitHubTokenProvider getGitHubTokenProvider() { return gitHubTokenProvider; }
+    public SandboxConfig getSandboxConfig() { return sandboxConfig; }
+    public Map<String, Boolean> getFeatureFlags() { return featureFlags; }
+    public List<String> getAllowedModels() { return allowedModels; }
+    public String getAuthClientIdMetadataUrl() { return authClientIdMetadataUrl; }
+    public String getName() { return name; }
+    public List<String> getAgentDirectories() { return agentDirectories; }
+    public List<String> getHookDirectories() { return hookDirectories; }
+    public Boolean getInteractiveUser() { return interactiveUser; }
+    public List<String> getExcludedManagedSettings() { return excludedManagedSettings; }
+    public Boolean getEnforceManagedModelDefaults() { return enforceManagedModelDefaults; }
+    public String getTrustWorkingDirectory() { return trustWorkingDirectory; }
+    public Boolean getRefreshCustomInstructions() { return refreshCustomInstructions; }
+    public Boolean getAllowTranscriptRecovery() { return allowTranscriptRecovery; }
+    public ImageGenerationConfig getImageGeneration() { return imageGeneration; }
+    public AutopilotOptions getAutopilot() { return autopilot; }
 }

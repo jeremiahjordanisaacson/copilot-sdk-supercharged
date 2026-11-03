@@ -33,7 +33,7 @@
     },
     "type": "module",
     "scripts": {
-        "clean": "rimraf --glob dist *.tgz",
+        "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});for(const f of fs.readdirSync('.'))if(f.endsWith('.tgz'))fs.rmSync(f)\"",
         "build": "tsx esbuild-copilotsdk-nodejs.ts",
         "typecheck": "tsc --noEmit",
         "prepublishOnly": "npm run build"
@@ -70,8 +70,6 @@
     "devDependencies": {
         "@types/node": "^25.6.0",
         "esbuild": "^0.28.1",
-        "glob": "^13.0.1",
-        "rimraf": "^6.1.2",
         "tsx": "^4.20.6",
         "typescript": "^6.0.3"
     },

@@ -1,8 +1,17 @@
 import * as esbuild from "esbuild";
-import { globSync } from "glob";
 import { execSync } from "child_process";
+import { readdirSync, writeFileSync } from "fs";
+import { join } from "path";
 
-const entryPoints = globSync("src/**/*.ts");
+function listTypeScriptFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) return listTypeScriptFiles(path);
+        return entry.name.endsWith(".ts") ? [path] : [];
+    });
+}
+
+const entryPoints = listTypeScriptFiles("src");
 
 // ESM build
 await esbuild.build({
@@ -30,7 +39,6 @@ await esbuild.build({
 });
 
 // Mark the CJS directory so Node treats .js files as CommonJS
-import { writeFileSync } from "fs";
 writeFileSync("dist/cjs/package.json", JSON.stringify({ type: "commonjs" }) + "\n");
 
 // Generate .d.ts files

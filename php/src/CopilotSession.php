@@ -56,6 +56,9 @@ class CopilotSession
     /** @var callable|null Trace context provider */
     private $traceContextProvider = null;
 
+    /** @var callable[] Callbacks run once after destroy() releases the session */
+    private array $destroyCallbacks = [];
+
     /**
      * Creates a new CopilotSession instance.
      *
@@ -169,6 +172,47 @@ class CopilotSession
         } finally {
             $unsubscribe();
         }
+    }
+
+    /**
+     * Sends a message requesting structured output and waits until the session is idle.
+     *
+     * Sets the message's responseSchema, waits via sendAndWait(), and returns the final
+     * assistant content decoded as JSON (objects become associative arrays).
+     *
+     * @param MessageOptions|string $options The message options or prompt text
+     * @param array<string,mixed>|object $schema JSON Schema the response must satisfy
+     * @param float $timeout Timeout in seconds (default: 60)
+     * @return mixed The decoded JSON value
+     * @throws \RuntimeException If the run completes without assistant content
+     * @throws \JsonException If the content is not valid JSON
+     */
+    public function sendAndWaitStructured(MessageOptions|string $options, array|object $schema, float $timeout = 60.0): mixed
+    {
+        if (is_string($options)) {
+            $options = new MessageOptions(prompt: $options);
+        }
+
+        $structured = new MessageOptions(
+            prompt: $options->prompt,
+            attachments: $options->attachments,
+            mode: $options->mode,
+            responseFormat: $options->responseFormat,
+            imageOptions: $options->imageOptions,
+            requestHeaders: $options->requestHeaders,
+            agentMode: $options->agentMode,
+            displayPrompt: $options->displayPrompt,
+            source: $options->source,
+            responseSchema: $schema,
+        );
+
+        $event = $this->sendAndWait($structured, $timeout);
+        $content = $event?->data['content'] ?? null;
+        if (!is_string($content) || trim($content) === '') {
+            throw new \RuntimeException('The requested run completed without a structured assistant response');
+        }
+
+        return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
     }
 
     /**
@@ -338,6 +382,15 @@ class CopilotSession
     }
 
     /**
+     * Registers a callback run once after destroy() releases this session.
+     * @internal
+     */
+    public function registerDestroyCallback(callable $callback): void
+    {
+        $this->destroyCallbacks[] = $callback;
+    }
+
+    /**
      * Handle a permission request from the server.
      *
      * @internal
@@ -399,6 +452,8 @@ class CopilotSession
             'sessionStart' => $this->hooks->onSessionStart,
             'sessionEnd' => $this->hooks->onSessionEnd,
             'errorOccurred' => $this->hooks->onErrorOccurred,
+            'subagentStart' => $this->hooks->onSubagentStart,
+            'subagentStop' => $this->hooks->onSubagentStop,
         ];
 
         $handler = $handlerMap[$hookType] ?? null;
@@ -453,13 +508,69 @@ class CopilotSession
     }
 
     /**
+     * Changes the Auto routing preference without changing the selected model (experimental).
+     *
+     * The runtime records the request and commits it on a later turn that uses the "auto" model.
+     *
+     * @param string|null $autoTier "efficiency", "balance", "intelligence" or "fast" (see AutoTier);
+     *        null returns to the provider's default Auto routing
+     * @return array Result with status, effectiveAutoTier, pendingAutoTier, activatingAutoTier, supersededAutoTier
+     */
+    public function setAutoTier(?string $autoTier): array
+    {
+        $result = $this->connection->request('session.model.switchAutoTier', [
+            'sessionId' => $this->sessionId,
+            'autoTier' => $autoTier,
+        ]);
+        return is_array($result) ? $result : [];
+    }
+
+    /**
+     * Retrieves the managed (enterprise policy) settings in effect for this session.
+     *
+     * @return array The managed settings
+     */
+    public function getManagedSettings(): array
+    {
+        $result = $this->connection->request('session.managedSettings.get', [
+            'sessionId' => $this->sessionId,
+        ]);
+        return is_array($result) ? $result : [];
+    }
+
+    /**
+     * Asks the runtime to re-run the managed-settings policy helper for this session.
+     *
+     * @return array The raw result
+     */
+    public function recheckPolicyHelper(): array
+    {
+        $result = $this->connection->request('session.managedSettings.recheckPolicyHelper', [
+            'sessionId' => $this->sessionId,
+        ]);
+        return is_array($result) ? $result : [];
+    }
+
+    /**
      * Destroys this session and releases all associated resources.
+     *
+     * Sends `session.detach` (falling back to `session.destroy` on older CLIs), so
+     * on-disk session state is preserved and the session can be resumed later.
      */
     public function destroy(): void
     {
-        $this->connection->request('session.destroy', [
-            'sessionId' => $this->sessionId,
-        ]);
+        try {
+            $this->connection->request('session.detach', [
+                'sessionId' => $this->sessionId,
+            ]);
+        } catch (JsonRpcException $e) {
+            if ($e->getCode() !== -32601) {
+                throw $e;
+            }
+            $this->connection->request('session.destroy', [
+                'sessionId' => $this->sessionId,
+            ]);
+        }
         $this->eventHandlers = [];
         $this->typedEventHandlers = [];
         $this->toolHandlers = [];
@@ -468,6 +579,16 @@ class CopilotSession
         $this->hooks = null;
         $this->exitPlanModeHandler = null;
         $this->traceContextProvider = null;
+
+        $callbacks = $this->destroyCallbacks;
+        $this->destroyCallbacks = [];
+        foreach ($callbacks as $callback) {
+            try {
+                $callback();
+            } catch (\Throwable) {
+                // Ignore cleanup errors
+            }
+        }
     }
 
     /**

@@ -53,8 +53,10 @@ COPILOT_MODEL_PICKER_PRICE_CATEGORY_VERY_HIGH="very_high"
 
 # --- Model Capabilities Override ---
 # Set these variables to override model capabilities for session creation.
-# Example:
-#   COPILOT_MODEL_CAPABILITIES='{"supports":{"vision":true},"limits":{"maxPromptTokens":4096}}'
+# Limits use snake_case wire keys (max_prompt_tokens, max_context_window_tokens,
+# max_output_tokens). Example:
+#   COPILOT_MODEL_CAPABILITIES='{"supports":{"vision":true},"limits":{"max_prompt_tokens":4096}}'
+#   COPILOT_MODEL_CAPABILITIES=$(copilot_model_capabilities_limits "" "" 4096)
 # Already defined in client.sh: COPILOT_MODEL_CAPABILITIES
 
 # --- Exit Plan Mode Handler ---
@@ -80,6 +82,173 @@ COPILOT_REMOTE_SESSION_MODE_ON="on"
 # --- Session Telemetry ---
 # When set to "true", enables session telemetry in create/resume payload
 COPILOT_ENABLE_SESSION_TELEMETRY=""
+
+# --- JSON Helpers ---
+
+# Echo the JSON boolean literal for a boolean string: "true" → true, anything else → false.
+_copilot_json_bool() {
+    if [[ "${1:-}" == "true" ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+# --- v2.6.0 Config Builders (parity with @github/copilot-sdk) ---
+
+# Build a model capabilities override with a "limits" object (snake_case wire keys).
+# Arguments:
+#   $1 - Optional max_prompt_tokens
+#   $2 - Optional max_context_window_tokens
+#   $3 - Optional max_output_tokens
+# Example:
+#   COPILOT_MODEL_CAPABILITIES=$(copilot_model_capabilities_limits "" "" 4096)
+copilot_model_capabilities_limits() {
+    local max_prompt_tokens="${1:-}"
+    local max_context_window_tokens="${2:-}"
+    local max_output_tokens="${3:-}"
+
+    local limits
+    limits=$(jq -c -n '{}')
+    if [[ -n "$max_prompt_tokens" ]]; then
+        limits=$(echo "$limits" | jq -c --argjson v "$max_prompt_tokens" '. + {"max_prompt_tokens":$v}')
+    fi
+    if [[ -n "$max_context_window_tokens" ]]; then
+        limits=$(echo "$limits" | jq -c --argjson v "$max_context_window_tokens" '. + {"max_context_window_tokens":$v}')
+    fi
+    if [[ -n "$max_output_tokens" ]]; then
+        limits=$(echo "$limits" | jq -c --argjson v "$max_output_tokens" '. + {"max_output_tokens":$v}')
+    fi
+    jq -c -n --argjson limits "$limits" '{"limits":$limits}'
+}
+
+# Build a SandboxConfig JSON object (wire: sandboxConfig).
+# Arguments:
+#   $1 - enabled: "true"/"false" (default: "true")
+#   $2 - Optional allowBypass: "true"/"false". Opt-in that lets the agent request an
+#        individual command outside the sandbox through the normal permission flow.
+# Optional env vars to set before calling:
+#   SANDBOX_USER_POLICY  - JSON object (userPolicy)
+#   SANDBOX_ADD_CWD      - "true"/"false" (addCurrentWorkingDirectory)
+#   SANDBOX_MCP_SERVERS  - "true"/"false" (sandboxMcpServers)
+#   SANDBOX_LSP_SERVERS  - "true"/"false" (sandboxLspServers)
+#   SANDBOX_EXTENSIONS   - "true"/"false" (sandboxExtensions)
+# Example:
+#   COPILOT_SANDBOX_CONFIG=$(copilot_sandbox_config true true)
+copilot_sandbox_config() {
+    local enabled="${1:-true}"
+    local allow_bypass="${2:-}"
+
+    local json
+    json=$(jq -c -n --argjson enabled "$(_copilot_json_bool "$enabled")" '{"enabled":$enabled}')
+    if [[ -n "${SANDBOX_USER_POLICY:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson up "$SANDBOX_USER_POLICY" '. + {"userPolicy":$up}')
+    fi
+    if [[ -n "${SANDBOX_ADD_CWD:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$(_copilot_json_bool "$SANDBOX_ADD_CWD")" '. + {"addCurrentWorkingDirectory":$v}')
+    fi
+    if [[ -n "${SANDBOX_MCP_SERVERS:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$(_copilot_json_bool "$SANDBOX_MCP_SERVERS")" '. + {"sandboxMcpServers":$v}')
+    fi
+    if [[ -n "${SANDBOX_LSP_SERVERS:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$(_copilot_json_bool "$SANDBOX_LSP_SERVERS")" '. + {"sandboxLspServers":$v}')
+    fi
+    if [[ -n "${SANDBOX_EXTENSIONS:-}" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$(_copilot_json_bool "$SANDBOX_EXTENSIONS")" '. + {"sandboxExtensions":$v}')
+    fi
+    if [[ -n "$allow_bypass" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$(_copilot_json_bool "$allow_bypass")" '. + {"allowBypass":$v}')
+    fi
+    echo "$json"
+}
+
+# Build an image generation config JSON object (wire: imageGeneration).
+# Arguments (each optional, "true"/"false"; empty = omitted):
+#   $1 - enabled
+#   $2 - watermark
+#   $3 - saveToDisk
+# Example:
+#   COPILOT_IMAGE_GENERATION=$(copilot_image_generation_config true "" false)
+copilot_image_generation_config() {
+    local enabled="${1:-}"
+    local watermark="${2:-}"
+    local save_to_disk="${3:-}"
+
+    local json
+    json=$(jq -c -n '{}')
+    if [[ -n "$enabled" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$(_copilot_json_bool "$enabled")" '. + {"enabled":$v}')
+    fi
+    if [[ -n "$watermark" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$(_copilot_json_bool "$watermark")" '. + {"watermark":$v}')
+    fi
+    if [[ -n "$save_to_disk" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$(_copilot_json_bool "$save_to_disk")" '. + {"saveToDisk":$v}')
+    fi
+    echo "$json"
+}
+
+# Build autopilot options JSON (wire: autopilot).
+# Arguments:
+#   $1 - Optional continuationEnabled ("true"/"false")
+#   $2 - Optional maxContinues (integer)
+# Example:
+#   COPILOT_AUTOPILOT=$(copilot_autopilot_options true 5)
+copilot_autopilot_options() {
+    local continuation_enabled="${1:-}"
+    local max_continues="${2:-}"
+
+    local json
+    json=$(jq -c -n '{}')
+    if [[ -n "$continuation_enabled" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$(_copilot_json_bool "$continuation_enabled")" '. + {"continuationEnabled":$v}')
+    fi
+    if [[ -n "$max_continues" ]]; then
+        json=$(echo "$json" | jq -c --argjson v "$max_continues" '. + {"maxContinues":$v}')
+    fi
+    echo "$json"
+}
+
+# Build a BYOK provider config JSON object (wire: provider).
+# Arguments:
+#   $1 - Provider type (e.g. "openai", "azure", "anthropic")
+#   $2 - Optional base URL
+#   $3 - Optional API key
+# Optional env vars to set before calling:
+#   PROVIDER_MODEL_PROVIDER  - openai|anthropic|azure_openai|ollama|lm_studio|foundry_local|llama_cpp (modelProvider)
+#   PROVIDER_API_KEY_COMMAND - command whose stdout is the API key (apiKeyCommand)
+#   PROVIDER_WIRE_API        - wire API ("completions" or "responses") (wireApi)
+#   PROVIDER_BEARER_TOKEN    - static bearer token (bearerToken)
+# Example:
+#   PROVIDER_MODEL_PROVIDER="ollama"
+#   COPILOT_PROVIDER=$(copilot_provider_config "openai" "http://localhost:11434/v1")
+copilot_provider_config() {
+    local provider_type="$1"
+    local base_url="${2:-}"
+    local api_key="${3:-}"
+
+    local json
+    json=$(jq -c -n --arg type "$provider_type" '{"type":$type}')
+    if [[ -n "$base_url" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$base_url" '. + {"baseUrl":$v}')
+    fi
+    if [[ -n "$api_key" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$api_key" '. + {"apiKey":$v}')
+    fi
+    if [[ -n "${PROVIDER_MODEL_PROVIDER:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$PROVIDER_MODEL_PROVIDER" '. + {"modelProvider":$v}')
+    fi
+    if [[ -n "${PROVIDER_API_KEY_COMMAND:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$PROVIDER_API_KEY_COMMAND" '. + {"apiKeyCommand":$v}')
+    fi
+    if [[ -n "${PROVIDER_WIRE_API:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$PROVIDER_WIRE_API" '. + {"wireApi":$v}')
+    fi
+    if [[ -n "${PROVIDER_BEARER_TOKEN:-}" ]]; then
+        json=$(echo "$json" | jq -c --arg v "$PROVIDER_BEARER_TOKEN" '. + {"bearerToken":$v}')
+    fi
+    echo "$json"
+}
 
 # --- UserInput Types ---
 

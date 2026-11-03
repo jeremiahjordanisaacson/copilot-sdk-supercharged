@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <exception>
 #include <functional>
 #include <future>
 #include <map>
@@ -25,6 +26,18 @@ struct JsonRpcError {
     std::string message;
     nlohmann::json data;
 };
+
+/// JSON-RPC "method not found" error code.
+inline constexpr int kJsonRpcMethodNotFound = -32601;
+
+/// Returns true when an exception thrown by JsonRpcClient::request() reports a
+/// JSON-RPC "method not found" error (-32601) or an "Unhandled method" message,
+/// i.e. the connected CLI does not implement the requested method.
+inline bool isMethodNotFoundError(const std::exception& e) {
+    const std::string message = e.what();
+    return message.find("JSON-RPC Error " + std::to_string(kJsonRpcMethodNotFound)) != std::string::npos ||
+           message.find("Unhandled method") != std::string::npos;
+}
 
 /// Handler for incoming server requests.
 /// Returns (result_json, error_or_null). If error is non-null, it is sent as an error response.

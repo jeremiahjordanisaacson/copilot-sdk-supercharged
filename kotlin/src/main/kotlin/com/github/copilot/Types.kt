@@ -167,7 +167,11 @@ data class ProviderConfig(
     val baseUrl: String,
     val apiKey: String? = null,
     val bearerToken: String? = null,
-    val azure: AzureConfig? = null
+    val azure: AzureConfig? = null,
+    /** Product serving the model, reported as `model_provider` (see [ModelProvider]). */
+    val modelProvider: String? = null,
+    /** Command run before each provider request; its stdout is used as the API key. */
+    val apiKeyCommand: String? = null
 ) {
     @Serializable
     data class AzureConfig(
@@ -371,6 +375,40 @@ data class SessionConfig(
     val contentExclusion: Boolean? = null,
     /** Handler invoked when an MCP server requests an OAuth host token. */
     val onMcpAuthRequest: McpAuthHandler? = null,
+    /** Auto-model routing preference (see [AutoTier]); sent under `capi`. Experimental. */
+    val autoTier: String? = null,
+    /** Model-facing shape of the built-in ask_user tool (see [AskUserVariant]). */
+    val askUserVariant: String? = null,
+    /** Acquires short-lived GitHub tokens on demand. Mutually exclusive with [gitHubToken]. */
+    val gitHubTokenProvider: GitHubTokenProvider? = null,
+    /** Sandbox configuration applied before MCP servers or session tools start. */
+    val sandboxConfig: SandboxConfig? = null,
+    /** Host-resolved feature-flag values; sent whenever provided, even if empty. */
+    val featureFlags: Map<String, Boolean>? = null,
+    /** Exact model IDs allowed by the host. */
+    val allowedModels: List<String>? = null,
+    /** OAuth Client ID Metadata Document URL identifying the host for MCP authorization. */
+    val authClientIdMetadataUrl: String? = null,
+    /** Session name applied at creation. */
+    val name: String? = null,
+    /** Explicit discovery-only custom-agent roots. */
+    val agentDirectories: List<String>? = null,
+    /** Explicit discovery-only file-hook roots. */
+    val hookDirectories: List<String>? = null,
+    /** Declares that a human drives this session's conversation. */
+    val interactiveUser: Boolean? = null,
+    /** Managed-setting paths this host handles externally or does not support. */
+    val excludedManagedSettings: List<String>? = null,
+    /** Enforce locked managed model controls for this session. */
+    val enforceManagedModelDefaults: Boolean? = null,
+    /** Grants trust to the working directory at creation (see [WorkingDirectoryTrust]). */
+    val trustWorkingDirectory: String? = null,
+    /** Invalidate the custom-instruction discovery cache before creating the session. */
+    val refreshCustomInstructions: Boolean? = null,
+    /** Session-level image generation opt-in. */
+    val imageGeneration: ImageGenerationConfig? = null,
+    /** Autopilot continuation policy. */
+    val autopilot: AutopilotOptions? = null,
 )
 
 /**
@@ -426,6 +464,38 @@ data class ResumeSessionConfig(
     val disableResume: Boolean? = null,
     /** Custom instruction directory paths. */
     val instructionDirectories: List<String>? = null,
+    /** Stream model responses over a WebSocket transport when true; sent under `capi`. */
+    val enableWebSocketResponses: Boolean? = null,
+    /** Auto-model routing preference (see [AutoTier]); sent under `capi`. Experimental. */
+    val autoTier: String? = null,
+    /** Model-facing shape of the built-in ask_user tool (see [AskUserVariant]). */
+    val askUserVariant: String? = null,
+    /** Acquires short-lived GitHub tokens on demand. Mutually exclusive with [gitHubToken]. */
+    val gitHubTokenProvider: GitHubTokenProvider? = null,
+    /** Sandbox configuration applied before MCP servers or session tools start. */
+    val sandboxConfig: SandboxConfig? = null,
+    /** Host-resolved feature-flag values; sent whenever provided, even if empty. */
+    val featureFlags: Map<String, Boolean>? = null,
+    /** Exact model IDs allowed by the host. */
+    val allowedModels: List<String>? = null,
+    /** OAuth Client ID Metadata Document URL identifying the host for MCP authorization. */
+    val authClientIdMetadataUrl: String? = null,
+    /** Explicit discovery-only custom-agent roots. */
+    val agentDirectories: List<String>? = null,
+    /** Explicit discovery-only file-hook roots. */
+    val hookDirectories: List<String>? = null,
+    /** Declares that a human drives this session's conversation. */
+    val interactiveUser: Boolean? = null,
+    /** Managed-setting paths this host handles externally or does not support. */
+    val excludedManagedSettings: List<String>? = null,
+    /** Enforce locked managed model controls for this session. */
+    val enforceManagedModelDefaults: Boolean? = null,
+    /** Allow the runtime to recover a damaged transcript during resume. */
+    val allowTranscriptRecovery: Boolean? = null,
+    /** Session-level image generation opt-in. */
+    val imageGeneration: ImageGenerationConfig? = null,
+    /** Autopilot continuation policy. */
+    val autopilot: AutopilotOptions? = null,
 )
 
 // ============================================================================
@@ -556,7 +626,18 @@ data class SessionHooks(
     val onUserPromptTransformed: HookHandler? = null,
     val onSessionStart: HookHandler? = null,
     val onSessionEnd: HookHandler? = null,
-    val onErrorOccurred: HookHandler? = null
+    val onErrorOccurred: HookHandler? = null,
+    /**
+     * Called before a sub-agent's first turn (`subagentStart`). Input carries `transcriptPath`,
+     * `agentName`, `agentDisplayName`, `agentDescription` plus the base hook fields; return
+     * `additionalContext` to prepend to the child's prompt.
+     */
+    val onSubagentStart: HookHandler? = null,
+    /**
+     * Called after a sub-agent completes a turn (`subagentStop`). Input adds `agentId`, `agentType`,
+     * `stopReason` and `response`; return `decision` ("block"/"allow"), `reason`, or `modifiedResponse`.
+     */
+    val onSubagentStop: HookHandler? = null
 ) {
     /**
      * Returns true if any hook handler is registered.
@@ -564,7 +645,8 @@ data class SessionHooks(
     fun hasAnyHook(): Boolean =
         onPreToolUse != null || onPostToolUse != null || onPreMcpToolCall != null || onUserPromptSubmitted != null ||
             onUserPromptTransformed != null ||
-            onSessionStart != null || onSessionEnd != null || onErrorOccurred != null
+            onSessionStart != null || onSessionEnd != null || onErrorOccurred != null ||
+            onSubagentStart != null || onSubagentStop != null
 
     /**
      * Gets a handler by hook type name.
@@ -578,6 +660,8 @@ data class SessionHooks(
         "sessionStart" -> onSessionStart
         "sessionEnd" -> onSessionEnd
         "errorOccurred" -> onErrorOccurred
+        "subagentStart" -> onSubagentStart
+        "subagentStop" -> onSubagentStop
         else -> null
     }
 }
@@ -677,7 +761,13 @@ data class MessageOptions(
     val agentMode: String? = null,
 
     /** Prompt text to display in the UI, when it differs from the model prompt. */
-    val displayPrompt: String? = null
+    val displayPrompt: String? = null,
+
+    /** Message provenance: "user", "system", or "agent-<id>" (see [MessageSource]). */
+    val source: String? = null,
+
+    /** JSON Schema for structured output; sent as a `json_schema` response format when set. */
+    val responseSchema: Map<String, Any?>? = null
 )
 
 // ============================================================================
@@ -736,7 +826,9 @@ data class ModelLimits(
     @SerialName("max_prompt_tokens")
     val maxPromptTokens: Int? = null,
     @SerialName("max_context_window_tokens")
-    val maxContextWindowTokens: Int = 0
+    val maxContextWindowTokens: Int = 0,
+    @SerialName("max_output_tokens")
+    val maxOutputTokens: Int? = null
 )
 
 /**
@@ -975,7 +1067,12 @@ data class CopilotClientOptions(
     /**
      * Use the in-process (FFI) transport instead of a subprocess.
      */
-    val inProcess: Boolean? = null
+    val inProcess: Boolean? = null,
+
+    /**
+     * Identity of the integrating application, sent on the `connect` handshake.
+     */
+    val clientInfo: ClientInfo? = null
 )
 
 // ============================================================================
@@ -1008,3 +1105,133 @@ typealias CopilotRequestHandler = suspend (request: Map<String, Any?>, context: 
 
 /** Handler invoked when an MCP server requests an OAuth host token. */
 typealias McpAuthHandler = suspend (request: Map<String, Any?>, sessionId: String) -> String
+
+// ============================================================================
+// v2.6.0 upstream-sync feature types
+// ============================================================================
+
+/**
+ * Identity of the integrating application, declared once on the `connect` handshake so runtime
+ * telemetry is attributed to a consistent surface. Empty fields are dropped and an all-empty
+ * identity skips the handshake entirely.
+ */
+data class ClientInfo(
+    /** Name of the application using the SDK, e.g. "acme-developer-portal". */
+    val applicationName: String? = null,
+    /** Version of the application using the SDK, e.g. "2.4.0". */
+    val applicationVersion: String? = null,
+    /** Name of a specific integration within the application, such as an extension or plugin. */
+    val integrationName: String? = null,
+    /** Version of the integration identified by [integrationName]. */
+    val integrationVersion: String? = null
+)
+
+/** Auto-model routing preferences for [SessionConfig.autoTier] and [CopilotSession.setAutoTier] (experimental). */
+object AutoTier {
+    const val EFFICIENCY = "efficiency"
+    const val BALANCE = "balance"
+    const val INTELLIGENCE = "intelligence"
+    const val FAST = "fast"
+}
+
+/** Model-facing shapes of the built-in `ask_user` tool. */
+object AskUserVariant {
+    const val LEGACY = "legacy"
+    const val ELICITATION = "elicitation"
+}
+
+/** Working-directory trust scopes for [SessionConfig.trustWorkingDirectory]. */
+object WorkingDirectoryTrust {
+    /** Trust applies only to this session. */
+    const val SESSION = "session"
+    /** Trust is persisted for later sessions. */
+    const val USER = "user"
+}
+
+/** Message provenance values for [MessageOptions.source]. */
+object MessageSource {
+    const val USER = "user"
+    const val SYSTEM = "system"
+
+    /** Builds the source value for a message originating from an identified agent. */
+    fun agent(agentId: String): String = "agent-$agentId"
+}
+
+/** Products serving a BYOK model, for [ProviderConfig.modelProvider]. */
+object ModelProvider {
+    const val OPENAI = "openai"
+    const val ANTHROPIC = "anthropic"
+    const val AZURE_OPENAI = "azure_openai"
+    const val OLLAMA = "ollama"
+    const val LM_STUDIO = "lm_studio"
+    const val FOUNDRY_LOCAL = "foundry_local"
+    const val LLAMA_CPP = "llama_cpp"
+}
+
+/** Sandbox configuration applied before MCP servers or session tools start (experimental). */
+data class SandboxConfig(
+    /** Whether sandboxing is enabled for the session. */
+    val enabled: Boolean,
+    /** User-managed sandbox policy fragment merged into the auto-discovered base policy. */
+    val userPolicy: Map<String, Any?>? = null,
+    /** Whether to auto-add the current working directory to the read-write paths (runtime default: true). */
+    val addCurrentWorkingDirectory: Boolean? = null,
+    /** Whether MCP servers the session launches are confined by the sandbox (runtime default: true). */
+    val sandboxMcpServers: Boolean? = null,
+    /** Whether language servers the session launches are confined by the sandbox (runtime default: true). */
+    val sandboxLspServers: Boolean? = null,
+    /** Whether extension processes the session launches are confined by the sandbox (runtime default: true). */
+    val sandboxExtensions: Boolean? = null,
+    /**
+     * Opt-in: lets the agent request that an individual command run outside the sandbox, which the
+     * host approves or denies through the normal permission flow (default: false).
+     */
+    val allowBypass: Boolean? = null
+)
+
+/** Non-persisted session-level opt-in to image generation (experimental). */
+@Serializable
+data class ImageGenerationConfig(
+    /** Opt in to image generation through an authorized Copilot image model. */
+    val enabled: Boolean? = null,
+    /** Request a visible "Made with AI" label on generated and edited images. */
+    val watermark: Boolean? = null,
+    /** Save generated images under the session-state `images` folder (runtime default: true). */
+    val saveToDisk: Boolean? = null
+)
+
+/** Autopilot continuation policy (experimental). */
+@Serializable
+data class AutopilotOptions(
+    /** Enable runtime-owned automatic continuation while in Autopilot mode (runtime default: true). */
+    val continuationEnabled: Boolean? = null,
+    /** Maximum automatic continuations outside an active objective (runtime default: 5; 0 allows none). */
+    val maxContinues: Int? = null
+)
+
+/** Arguments passed to a [GitHubTokenProvider]. */
+data class GitHubTokenProviderArgs(
+    /** Effective GitHub host for which a token is required. */
+    val host: String,
+    /** Session receiving the token, or null before a session id is assigned. */
+    val sessionId: String?,
+    /** Why a token is requested: "initial" or "refresh". */
+    val reason: String
+)
+
+/** Tagged token or cancellation returned by a [GitHubTokenProvider]. */
+sealed class GitHubTokenProviderResult {
+    /** A GitHub access token with its remaining lifetime in seconds. */
+    data class Token(
+        val accessToken: String,
+        val expiresIn: Long,
+        /** OAuth token type; defaults to bearer when omitted. */
+        val tokenType: String? = null
+    ) : GitHubTokenProviderResult()
+
+    /** The host declined to supply a token. */
+    object Cancelled : GitHubTokenProviderResult()
+}
+
+/** Acquires short-lived GitHub credentials for one session on demand. */
+typealias GitHubTokenProvider = suspend (args: GitHubTokenProviderArgs) -> GitHubTokenProviderResult

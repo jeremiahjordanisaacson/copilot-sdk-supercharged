@@ -166,6 +166,7 @@ function M.ClientOptions(fields)
         tcpConnectionToken         = fields.tcpConnectionToken,         -- optional string, TCP connection token
         requestHandler             = fields.requestHandler,            -- optional CopilotRequestHandler, intercepts outbound LLM requests
         bearerTokenProvider        = fields.bearerTokenProvider,       -- optional function(ProviderTokenArgs) -> string, BYOK bearer token
+        clientInfo                 = fields.clientInfo,                -- optional ClientInfo, application identity sent on the connect handshake
     }
 end
 
@@ -355,6 +356,24 @@ function M.SessionConfig(fields)
         experimentalMode                = fields.experimentalMode,                 -- boolean, enable experimental mode
         contentExclusion                = fields.contentExclusion,                 -- boolean, enable content exclusion
         onMcpAuthRequest                = fields.onMcpAuthRequest,                -- function(ProviderTokenArgs) -> string, MCP OAuth host token handler
+        -- v2.6.0 upstream-sync options (parity with @github/copilot-sdk)
+        autoTier                        = fields.autoTier,                        -- string (AutoTier), sent inside capi with enableWebSocketResponses
+        askUserVariant                  = fields.askUserVariant,                  -- string (AskUserVariant), "legacy" or "elicitation"
+        gitHubTokenProvider             = fields.gitHubTokenProvider,             -- function(GitHubTokenProviderArgs) -> GitHubTokenResult; exclusive with gitHubToken
+        sandboxConfig                   = fields.sandboxConfig,                   -- SandboxConfig table
+        featureFlags                    = fields.featureFlags,                    -- table of name -> boolean, sent even when empty
+        allowedModels                   = fields.allowedModels,                   -- array of strings, model allowlist
+        authClientIdMetadataUrl         = fields.authClientIdMetadataUrl,         -- string, OAuth client ID metadata document URL
+        name                            = fields.name,                            -- string, session name (create only)
+        agentDirectories                = fields.agentDirectories,                -- array of strings, custom agent directories
+        hookDirectories                 = fields.hookDirectories,                 -- array of strings, hook directories
+        interactiveUser                 = fields.interactiveUser,                 -- boolean, an interactive user is present
+        excludedManagedSettings         = fields.excludedManagedSettings,         -- array of strings, managed settings to ignore
+        enforceManagedModelDefaults     = fields.enforceManagedModelDefaults,     -- boolean, enforce managed model defaults
+        trustWorkingDirectory           = fields.trustWorkingDirectory,           -- string (WorkingDirectoryTrust), "session" or "user" (create only)
+        refreshCustomInstructions       = fields.refreshCustomInstructions,       -- boolean, refresh custom instructions (create only)
+        imageGeneration                 = fields.imageGeneration,                 -- ImageGenerationConfig table
+        autopilot                       = fields.autopilot,                       -- AutopilotOptions table
     }
 end
 
@@ -391,11 +410,28 @@ function M.ResumeSessionConfig(fields)
         commands                        = fields.commands,                        -- array of CommandDefinition
         onElicitationRequest            = fields.onElicitationRequest,            -- function(ElicitationContext) -> ElicitationResult
         instructionDirectories          = fields.instructionDirectories,          -- array of strings, instruction directories
+        -- v2.6.0 upstream-sync options (parity with @github/copilot-sdk)
+        enableWebSocketResponses        = fields.enableWebSocketResponses,        -- boolean, sent inside capi
+        autoTier                        = fields.autoTier,                        -- string (AutoTier), sent inside capi
+        askUserVariant                  = fields.askUserVariant,                  -- string (AskUserVariant)
+        gitHubTokenProvider             = fields.gitHubTokenProvider,             -- function(GitHubTokenProviderArgs) -> GitHubTokenResult; exclusive with gitHubToken
+        sandboxConfig                   = fields.sandboxConfig,                   -- SandboxConfig table
+        featureFlags                    = fields.featureFlags,                    -- table of name -> boolean, sent even when empty
+        allowedModels                   = fields.allowedModels,                   -- array of strings, model allowlist
+        authClientIdMetadataUrl         = fields.authClientIdMetadataUrl,         -- string, OAuth client ID metadata document URL
+        agentDirectories                = fields.agentDirectories,                -- array of strings, custom agent directories
+        hookDirectories                 = fields.hookDirectories,                 -- array of strings, hook directories
+        interactiveUser                 = fields.interactiveUser,                 -- boolean
+        excludedManagedSettings         = fields.excludedManagedSettings,         -- array of strings
+        enforceManagedModelDefaults     = fields.enforceManagedModelDefaults,     -- boolean
+        allowTranscriptRecovery         = fields.allowTranscriptRecovery,         -- boolean, recover from the transcript (resume only)
+        imageGeneration                 = fields.imageGeneration,                 -- ImageGenerationConfig table
+        autopilot                       = fields.autopilot,                       -- AutopilotOptions table
     }
 end
 
 --- Create a MessageOptions table.
--- @param fields table with keys: prompt, attachments, mode, agentMode, displayPrompt, responseFormat, imageOptions, requestHeaders
+-- @param fields table with keys: prompt, attachments, mode, agentMode, displayPrompt, responseFormat, imageOptions, requestHeaders, source, responseSchema
 -- @return table MessageOptions
 function M.MessageOptions(fields)
     fields = fields or {}
@@ -408,6 +444,8 @@ function M.MessageOptions(fields)
         responseFormat = fields.responseFormat,    -- optional string (ResponseFormat constant)
         imageOptions   = fields.imageOptions,     -- optional table (from image_options())
         requestHeaders = fields.requestHeaders,   -- optional table of string->string, custom HTTP headers
+        source         = fields.source,           -- optional string (MessageSource), "user", "system" or "agent-<id>"
+        responseSchema = fields.responseSchema,   -- optional table, JSON Schema for structured output (overrides responseFormat)
     }
 end
 
@@ -525,6 +563,10 @@ function M.UserInputResponse(fields)
 end
 
 --- Create a SessionHooks table.
+-- onSubagentStart ("subagentStart") receives the base hook fields plus transcriptPath,
+-- agentName, agentDisplayName, agentDescription and may return { additionalContext = ... }.
+-- onSubagentStop ("subagentStop") also receives agentId, agentType, stopReason ("end_turn")
+-- and response, and may return { decision = "block"|"allow", reason = ..., modifiedResponse = ... }.
 -- @param fields table with optional function keys
 -- @return table SessionHooks
 function M.SessionHooks(fields)
@@ -538,6 +580,8 @@ function M.SessionHooks(fields)
         onSessionEnd          = fields.onSessionEnd,
         onErrorOccurred       = fields.onErrorOccurred,
         onPreMcpToolCall      = fields.onPreMcpToolCall,  -- function, pre-MCP-tool-call hook
+        onSubagentStart       = fields.onSubagentStart,   -- function, subagent start hook
+        onSubagentStop        = fields.onSubagentStop,    -- function, subagent stop hook
     }
 end
 
@@ -595,17 +639,19 @@ function M.PostToolUseHookOutput(fields)
 end
 
 --- Create a ProviderConfig table.
--- @param fields table with keys: type, wireApi, baseUrl, apiKey, bearerToken, azure
+-- @param fields table with keys: type, wireApi, baseUrl, apiKey, bearerToken, azure, modelProvider, apiKeyCommand
 -- @return table ProviderConfig
 function M.ProviderConfig(fields)
     fields = fields or {}
     return {
-        type        = fields.type,
-        wireApi     = fields.wireApi,
-        baseUrl     = fields.baseUrl or "",
-        apiKey      = fields.apiKey,
-        bearerToken = fields.bearerToken,
-        azure       = fields.azure,
+        type          = fields.type,
+        wireApi       = fields.wireApi,
+        baseUrl       = fields.baseUrl or "",
+        apiKey        = fields.apiKey,
+        bearerToken   = fields.bearerToken,
+        azure         = fields.azure,
+        modelProvider = fields.modelProvider,   -- optional string (ModelProvider), e.g. "ollama"
+        apiKeyCommand = fields.apiKeyCommand,   -- optional string, command whose stdout is the API key
     }
 end
 

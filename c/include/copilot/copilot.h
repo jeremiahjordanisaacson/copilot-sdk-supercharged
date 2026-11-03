@@ -304,7 +304,18 @@ typedef struct {
     const char *api_key;       /**< API key (optional) */
     const char *bearer_token;  /**< Bearer token (optional, overrides api_key) */
     const char *azure_api_version; /**< Azure API version (optional) */
+    const char *model_provider;    /**< Product serving the model (modelProvider): one of COPILOT_MODEL_PROVIDER_*, or NULL */
+    const char *api_key_command;   /**< Command whose stdout is the API key (apiKeyCommand), run before each request, or NULL */
 } copilot_provider_config_t;
+
+/** Products serving a BYOK model (copilot_provider_config_t.model_provider). */
+#define COPILOT_MODEL_PROVIDER_OPENAI        "openai"
+#define COPILOT_MODEL_PROVIDER_ANTHROPIC     "anthropic"
+#define COPILOT_MODEL_PROVIDER_AZURE_OPENAI  "azure_openai"
+#define COPILOT_MODEL_PROVIDER_OLLAMA        "ollama"
+#define COPILOT_MODEL_PROVIDER_LM_STUDIO     "lm_studio"
+#define COPILOT_MODEL_PROVIDER_FOUNDRY_LOCAL "foundry_local"
+#define COPILOT_MODEL_PROVIDER_LLAMA_CPP     "llama_cpp"
 
 /* ============================================================================
  * Infinite session configuration
@@ -332,6 +343,13 @@ typedef struct {
 #define COPILOT_HOOK_SESSION_END           "sessionEnd"
 #define COPILOT_HOOK_ERROR_OCCURRED        "errorOccurred"
 #define COPILOT_HOOK_PRE_MCP_TOOL_CALL     "preMcpToolCall"
+/** Fired before a sub-agent's first turn. input_json: {transcriptPath, agentName,
+ *  agentDisplayName?, agentDescription?, timestamp, cwd}; output: {additionalContext?}. */
+#define COPILOT_HOOK_SUBAGENT_START        "subagentStart"
+/** Fired after a sub-agent completes a turn. input_json: subagentStart fields plus
+ *  {agentId?, agentType, stopReason: "end_turn", response}; output:
+ *  {decision?: "block"|"allow", reason?, modifiedResponse?}. */
+#define COPILOT_HOOK_SUBAGENT_STOP         "subagentStop"
 
 /** System-message section identifiers. "preamble" targets the identity preamble;
  *  "preserve" protects an individually-addressable section from a group-level remove. */
@@ -621,6 +639,109 @@ typedef struct {
 typedef copilot_trace_context_t (*copilot_trace_context_provider_fn)(void *user_data);
 
 /* ============================================================================
+ * v2.6.0 upstream-sync feature types (parity with @github/copilot-sdk)
+ * ============================================================================ */
+
+/**
+ * Identity of the integrating application, sent on the `connect` handshake as
+ * clientInfo {editorName, editorVersion, extensionName, extensionVersion}.
+ * NULL/empty fields are dropped; an all-empty identity skips `connect` entirely.
+ * The SDK copies these strings in copilot_client_create().
+ */
+typedef struct {
+    const char *application_name;     /**< editorName, or NULL */
+    const char *application_version;  /**< editorVersion, or NULL */
+    const char *integration_name;     /**< extensionName, or NULL */
+    const char *integration_version;  /**< extensionVersion, or NULL */
+} copilot_client_info_t;
+
+/** Auto routing preferences for the `auto` model (session config auto_tier; experimental). */
+#define COPILOT_AUTO_TIER_EFFICIENCY   "efficiency"
+#define COPILOT_AUTO_TIER_BALANCE      "balance"
+#define COPILOT_AUTO_TIER_INTELLIGENCE "intelligence"
+#define COPILOT_AUTO_TIER_FAST         "fast"
+
+/** Ask-user tool variants (session config ask_user_variant). */
+#define COPILOT_ASK_USER_VARIANT_LEGACY      "legacy"
+#define COPILOT_ASK_USER_VARIANT_ELICITATION "elicitation"
+
+/** Working-directory trust scopes (session config trust_working_directory). */
+#define COPILOT_TRUST_WORKING_DIRECTORY_SESSION "session"
+#define COPILOT_TRUST_WORKING_DIRECTORY_USER    "user"
+
+/** Message provenance values (copilot_message_options_t.source).
+ *  Use copilot_message_source_agent() to build "agent-<id>". */
+#define COPILOT_MESSAGE_SOURCE_USER         "user"
+#define COPILOT_MESSAGE_SOURCE_SYSTEM       "system"
+#define COPILOT_MESSAGE_SOURCE_AGENT_PREFIX "agent-"
+
+/** Arguments passed to a GitHub token provider (gitHubToken.getToken). */
+typedef struct {
+    const char *host;        /**< Effective GitHub host the token is requested for */
+    const char *session_id;  /**< Session receiving the token, or NULL before it has an ID */
+    const char *reason;      /**< "initial" or "refresh" */
+} copilot_github_token_provider_args_t;
+
+/** Result kinds for a GitHub token provider. */
+typedef enum {
+    COPILOT_GITHUB_TOKEN_RESULT_TOKEN = 0,   /**< A token was acquired */
+    COPILOT_GITHUB_TOKEN_RESULT_CANCELLED,   /**< The request was cancelled */
+} copilot_github_token_result_kind_t;
+
+/** Result filled by a GitHub token provider. */
+typedef struct {
+    copilot_github_token_result_kind_t kind;
+    char *access_token;   /**< Heap-allocated token (kind TOKEN); the SDK frees it */
+    char *token_type;     /**< Optional heap-allocated OAuth token type (NULL = bearer); the SDK frees it */
+    int64_t expires_in;   /**< Remaining token lifetime in seconds (kind TOKEN) */
+} copilot_github_token_result_t;
+
+/**
+ * GitHub token provider callback. Fill *out_result and return COPILOT_OK.
+ * Called on the SDK's reader thread; do not call blocking SDK RPCs from it.
+ */
+typedef copilot_error_t (*copilot_github_token_provider_fn)(
+    const copilot_github_token_provider_args_t *args,
+    void *user_data,
+    copilot_github_token_result_t *out_result
+);
+
+/** Sandbox configuration (sandboxConfig; experimental). */
+typedef struct {
+    bool enabled;                          /**< Whether sandboxing is enabled */
+    const char *user_policy_json;          /**< User policy fragment (userPolicy) as JSON, or NULL */
+    bool add_current_working_directory;    /**< addCurrentWorkingDirectory (default: true) */
+    bool has_add_current_working_directory;
+    bool sandbox_mcp_servers;              /**< sandboxMcpServers (default: true) */
+    bool has_sandbox_mcp_servers;
+    bool sandbox_lsp_servers;              /**< sandboxLspServers (default: true) */
+    bool has_sandbox_lsp_servers;
+    bool sandbox_extensions;               /**< sandboxExtensions (default: true) */
+    bool has_sandbox_extensions;
+    bool allow_bypass;                     /**< allowBypass: let the agent request an individual command
+                                                outside the sandbox via the permission flow (default: false) */
+    bool has_allow_bypass;
+} copilot_sandbox_config_t;
+
+/** Session-level image generation configuration (imageGeneration). */
+typedef struct {
+    bool enabled;
+    bool has_enabled;
+    bool watermark;
+    bool has_watermark;
+    bool save_to_disk;
+    bool has_save_to_disk;
+} copilot_image_generation_config_t;
+
+/** Autopilot continuation options (autopilot). */
+typedef struct {
+    bool continuation_enabled;      /**< Enable runtime-owned automatic continuation */
+    bool has_continuation_enabled;
+    int max_continues;              /**< Max automatic continuations outside an objective (0 = none) */
+    bool has_max_continues;
+} copilot_autopilot_options_t;
+
+/* ============================================================================
  * Client options
  * ============================================================================ */
 
@@ -646,6 +767,7 @@ typedef struct {
     bool in_process;                            /**< Use the in-process FFI transport (inProcess) instead of spawning a CLI */
     copilot_trace_context_provider_fn on_get_trace_context; /**< Trace-context provider for outbound requests, or NULL */
     void *trace_context_user_data;              /**< User data passed to on_get_trace_context */
+    const copilot_client_info_t *client_info;   /**< Application identity for the connect handshake (clientInfo), or NULL */
 } copilot_client_options_t;
 
 /**
@@ -752,6 +874,33 @@ typedef struct {
     const char *args_schema_json;           /**< Agent-factory authoring args schema (argsSchema) as JSON, or NULL */
     copilot_exit_plan_mode_handler_fn on_exit_plan_mode; /**< Handler for exit-plan-mode requests, or NULL */
     void *exit_plan_mode_user_data;         /**< User data passed to on_exit_plan_mode */
+
+    /* --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) --- */
+    const char *name;                       /**< Session name (name), or NULL. session.create only. */
+    const char *auto_tier;                  /**< Auto routing preference (capi.autoTier): COPILOT_AUTO_TIER_*, or NULL. Experimental. */
+    const char *ask_user_variant;           /**< Ask-user variant (askUserVariant): "legacy" or "elicitation", or NULL */
+    copilot_github_token_provider_fn github_token_provider; /**< GitHub token provider (gitHubToken.getToken), or NULL. Mutually exclusive with github_token. */
+    void *github_token_provider_user_data;  /**< User data passed to github_token_provider */
+    const copilot_sandbox_config_t *sandbox_config; /**< Sandbox configuration (sandboxConfig), or NULL */
+    const char *feature_flags_json;         /**< Feature-flag overrides (featureFlags) as a JSON object of booleans, or NULL. Sent whenever set, even if "{}". */
+    const char **allowed_models;            /**< Model allowlist (allowedModels), NULL-terminated, or NULL */
+    const char *auth_client_id_metadata_url; /**< OAuth client ID metadata document URL (authClientIdMetadataUrl), or NULL */
+    const char **agent_directories;         /**< Custom agent directories (agentDirectories), NULL-terminated, or NULL */
+    const char **hook_directories;          /**< Hook directories (hookDirectories), NULL-terminated, or NULL */
+    bool interactive_user;                  /**< Whether an interactive user is present (interactiveUser) */
+    bool has_interactive_user;              /**< Whether interactive_user was explicitly set */
+    const char **excluded_managed_settings; /**< Managed settings to exclude (excludedManagedSettings), NULL-terminated, or NULL */
+    bool enforce_managed_model_defaults;    /**< Enforce managed model defaults (enforceManagedModelDefaults) */
+    bool has_enforce_managed_model_defaults; /**< Whether enforce_managed_model_defaults was explicitly set */
+    const char *trust_working_directory;    /**< Working-directory trust (trustWorkingDirectory): "session" or "user", or NULL. session.create only. */
+    bool refresh_custom_instructions;       /**< Re-read custom instructions (refreshCustomInstructions). session.create only. */
+    bool has_refresh_custom_instructions;   /**< Whether refresh_custom_instructions was explicitly set */
+    bool allow_transcript_recovery;         /**< Allow transcript recovery (allowTranscriptRecovery). session.resume only. */
+    bool has_allow_transcript_recovery;     /**< Whether allow_transcript_recovery was explicitly set */
+    const copilot_image_generation_config_t *image_generation; /**< Image generation config (imageGeneration), or NULL */
+    const copilot_autopilot_options_t *autopilot; /**< Autopilot options (autopilot), or NULL */
+    int max_output_tokens;                  /**< Model capabilities override modelCapabilities.limits.max_output_tokens */
+    bool has_max_output_tokens;             /**< Whether max_output_tokens was explicitly set */
 } copilot_session_config_t;
 
 /**
@@ -809,6 +958,8 @@ typedef struct {
     const copilot_image_options_t *image_options;      /**< Image generation options, or NULL */
     const char **request_headers_keys;   /**< Keys for custom HTTP headers (NULL-terminated), or NULL */
     const char **request_headers_values; /**< Values for custom HTTP headers (parallel to keys), or NULL */
+    const char *source;                  /**< Message provenance (source): COPILOT_MESSAGE_SOURCE_* or "agent-<id>", or NULL */
+    const char *response_schema_json;    /**< JSON Schema for structured output (responseSchema), or NULL. Supersedes response_format. */
 } copilot_message_options_t;
 
 /* ============================================================================
@@ -821,6 +972,7 @@ typedef struct {
     bool supports_vision;
     bool supports_reasoning_effort;
     int max_context_window_tokens;
+    int max_output_tokens;      /**< capabilities.limits.max_output_tokens (0 if not reported) */
 } copilot_model_info_t;
 
 typedef struct {
@@ -881,8 +1033,9 @@ copilot_client_t *copilot_client_create(const copilot_client_options_t *options)
 
 /**
  * Starts the CLI server and establishes a connection.
- * Spawns the CLI process (unless connecting to external server) and verifies
- * protocol compatibility via ping.
+ * Spawns the CLI process (unless connecting to external server), sends the
+ * `connect` handshake when client_info is set (ignored by older CLIs), and
+ * verifies protocol compatibility via ping.
  *
  * @return COPILOT_OK on success.
  */
@@ -1030,6 +1183,14 @@ copilot_error_t copilot_client_set_foreground_session_id(
     const char *session_id
 );
 
+/**
+ * Clears the runtime's managed-settings cache (managedSettings.clearCache).
+ *
+ * @param client  The client.
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_client_clear_managed_settings_cache(copilot_client_t *client);
+
 /* ============================================================================
  * Session API
  * ============================================================================ */
@@ -1121,6 +1282,33 @@ copilot_error_t copilot_session_send_and_wait(
 );
 
 /**
+ * Sends a message requesting structured output (responseSchema) and blocks until
+ * the session becomes idle, then returns the final assistant content as JSON.
+ *
+ * @param session               The session.
+ * @param options               Message options (response_schema_json is overridden).
+ * @param response_schema_json  JSON Schema the response must conform to.
+ * @param timeout_ms            Timeout in milliseconds (0 = 60000ms default).
+ * @param out_json              Output: the parsed response re-serialized as JSON (caller must free).
+ * @return COPILOT_OK on success, COPILOT_ERROR_SESSION_ERROR if the run produced no
+ *         assistant content, COPILOT_ERROR_JSON_PARSE if the content is not valid JSON.
+ */
+copilot_error_t copilot_session_send_and_wait_structured(
+    copilot_session_t *session,
+    const copilot_message_options_t *options,
+    const char *response_schema_json,
+    int timeout_ms,
+    char **out_json
+);
+
+/**
+ * Builds the message source value "agent-<agent_id>" for copilot_message_options_t.source.
+ *
+ * @return Newly-allocated string (caller must free), or NULL on invalid input/allocation failure.
+ */
+char *copilot_message_source_agent(const char *agent_id);
+
+/**
  * Registers an event handler for this session. Multiple handlers can be registered.
  *
  * @param session    The session.
@@ -1160,6 +1348,8 @@ void copilot_session_off(copilot_session_t *session, int handler_id);
 
 /**
  * Destroys the session and releases server-side resources.
+ * Sends session.detach (falling back to session.destroy on older CLIs); on-disk
+ * session state is preserved so the session can be resumed later.
  * The session handle remains valid until copilot_session_free() is called.
  *
  * @return COPILOT_OK on success.
@@ -1187,6 +1377,46 @@ copilot_error_t copilot_session_abort(copilot_session_t *session);
  * @return COPILOT_OK on success.
  */
 copilot_error_t copilot_session_get_metadata(
+    copilot_session_t *session,
+    char **out_json
+);
+
+/**
+ * Changes the Auto routing preference without changing the selected model
+ * (session.model.switchAutoTier). Experimental.
+ *
+ * @param session    The session.
+ * @param auto_tier  COPILOT_AUTO_TIER_* value, or NULL to return to default Auto routing.
+ * @param out_json   Output: JSON result (status, effectiveAutoTier, pendingAutoTier, ...)
+ *                   (caller must free), or NULL to ignore.
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_session_set_auto_tier(
+    copilot_session_t *session,
+    const char *auto_tier,
+    char **out_json
+);
+
+/**
+ * Retrieves the effective managed settings for this session (session.managedSettings.get).
+ *
+ * @param session   The session.
+ * @param out_json  Output: JSON string (caller must free), or NULL to ignore.
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_session_get_managed_settings(
+    copilot_session_t *session,
+    char **out_json
+);
+
+/**
+ * Re-runs the managed-settings policy helper (session.managedSettings.recheckPolicyHelper).
+ *
+ * @param session   The session.
+ * @param out_json  Output: JSON string (caller must free), or NULL to ignore.
+ * @return COPILOT_OK on success.
+ */
+copilot_error_t copilot_session_recheck_policy_helper(
     copilot_session_t *session,
     char **out_json
 );

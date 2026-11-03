@@ -66,6 +66,23 @@ COPILOT_GITHUB_SNIPPET="GitHubSnippet"
 COPILOT_AGENT_MODE=""
 # Display prompt shown to the user instead of the real prompt (wire: displayPrompt)
 COPILOT_DISPLAY_PROMPT=""
+# Message source (wire: source): "user", "system", or "agent-<id>"
+# (use the COPILOT_MESSAGE_SOURCE_* constants or copilot_message_source_agent)
+COPILOT_MESSAGE_SOURCE=""
+# JSON Schema for a structured response (JSON object string). When set, the send
+# payload carries responseFormat {"type":"json_schema","jsonSchema":{"name":"response",
+# "strict":true,"schema":<schema>}} in place of the legacy string response format.
+COPILOT_RESPONSE_SCHEMA=""
+
+# --- Message Source Constants (MessageSource) ---
+COPILOT_MESSAGE_SOURCE_USER="user"
+COPILOT_MESSAGE_SOURCE_SYSTEM="system"
+
+# Build an agent message source ("agent-<id>").
+# Usage: COPILOT_MESSAGE_SOURCE=$(copilot_message_source_agent "build-bot")
+copilot_message_source_agent() {
+    echo "agent-$1"
+}
 
 # --- Additional Handler Conventions (parity with @github/copilot-sdk) ---
 # Like COPILOT_ELICITATION_HANDLER, set each of these to a shell function name.
@@ -86,6 +103,18 @@ COPILOT_REQUEST_HANDLER=""
 #   copilot_on_mcp_auth_request  <context_json>
 COPILOT_ON_POST_TOOL_USE=""
 COPILOT_ON_PRE_MCP_TOOL_CALL=""
+# Sub-agent lifecycle hooks (subagentStart / subagentStop). Setting either one makes
+# create/resume send "hooks": true; hooks.invoke requests are then answered by
+# _copilot_session_handle_hooks_invoke, which also dispatches COPILOT_ON_POST_TOOL_USE
+# and COPILOT_ON_PRE_MCP_TOOL_CALL. Conventions (echo a JSON output object, or nothing):
+#   copilot_on_subagent_start <input_json>
+#       input: {transcriptPath, agentName, agentDisplayName?, agentDescription?, ...}
+#       output: {"additionalContext":"..."}
+#   copilot_on_subagent_stop  <input_json>
+#       input: start fields + {agentId?, agentType, stopReason:"end_turn", response}
+#       output: {"decision":"block"|"allow","reason":"...","modifiedResponse":"..."}
+COPILOT_ON_SUBAGENT_START=""
+COPILOT_ON_SUBAGENT_STOP=""
 
 # --- Command Handler Support ---
 # Command contexts are passed as JSON strings with these fields:
@@ -134,6 +163,8 @@ COPILOT_SESSION_ID=""
 COPILOT_SESSION_LAST_RESPONSE=""
 # Last session events JSON array from get_messages
 COPILOT_SESSION_MESSAGES=""
+# Parsed structured result (compact JSON) from send_and_wait_structured
+COPILOT_SESSION_STRUCTURED_RESPONSE=""
 
 # --- Session Functions ---
 
@@ -200,6 +231,9 @@ copilot_session_send() {
     if [[ -n "$COPILOT_DISPLAY_PROMPT" ]]; then
         params=$(echo "$params" | jq -c --arg dp "$COPILOT_DISPLAY_PROMPT" '. + {"displayPrompt":$dp}')
     fi
+
+    # Add message source and structured-output schema if set
+    params=$(_copilot_session_add_message_options "$params") || return 1
 
     if ! copilot_jsonrpc_request "session.send" "$params"; then
         echo "ERROR: Failed to send message" >&2
@@ -278,6 +312,9 @@ copilot_session_send_and_wait() {
     if [[ -n "$COPILOT_DISPLAY_PROMPT" ]]; then
         params=$(echo "$params" | jq -c --arg dp "$COPILOT_DISPLAY_PROMPT" '. + {"displayPrompt":$dp}')
     fi
+
+    # Add message source and structured-output schema if set
+    params=$(_copilot_session_add_message_options "$params") || return 1
 
     if ! copilot_jsonrpc_request "session.send" "$params"; then
         echo "ERROR: Failed to send message" >&2
@@ -367,6 +404,10 @@ copilot_session_send_and_wait() {
                         '{"jsonrpc":"2.0","id":$id,"result":$res}')
                     copilot_jsonrpc_send_message "$response"
                 fi
+
+            # Answer server -> client requests (gitHubToken.getToken, hooks.invoke)
+            elif [[ "$method" == "gitHubToken.getToken" ]] || [[ "$method" == "hooks.invoke" ]]; then
+                _copilot_handle_server_request "$msg" || true
             fi
         fi
 
@@ -470,6 +511,9 @@ copilot_session_abort() {
 
 # Destroy the current session and release resources.
 #
+# Sends session.detach (keeping on-disk state so the session can be resumed);
+# falls back to session.destroy when the CLI does not implement session.detach.
+#
 # Arguments:
 #   $1 - Optional session ID (defaults to COPILOT_SESSION_ID)
 #
@@ -485,9 +529,19 @@ copilot_session_destroy() {
     local params
     params=$(jq -c -n --arg sid "$session_id" '{"sessionId":$sid}')
 
-    if ! copilot_jsonrpc_request "session.destroy" "$params"; then
-        echo "ERROR: Failed to destroy session" >&2
-        return 1
+    if ! copilot_jsonrpc_request "session.detach" "$params"; then
+        local error_code
+        error_code=$(echo "$COPILOT_JSONRPC_LAST_ERROR" | jq -r '.code // empty' 2>/dev/null) || error_code=""
+        # -32601 (method not found): older CLI without session.detach
+        if [[ "$error_code" != "-32601" ]] || ! copilot_jsonrpc_request "session.destroy" "$params"; then
+            echo "ERROR: Failed to destroy session" >&2
+            return 1
+        fi
+    fi
+
+    # Drop GitHub token provider registrations bound to this session
+    if declare -f _copilot_github_token_provider_unregister_session > /dev/null 2>&1; then
+        _copilot_github_token_provider_unregister_session "$session_id"
     fi
 
     # Clear session state if this was the active session
@@ -497,5 +551,276 @@ copilot_session_destroy() {
         COPILOT_SESSION_MESSAGES=""
     fi
 
+    return 0
+}
+
+# Send a message with a JSON Schema and parse the structured result.
+#
+# Sets COPILOT_RESPONSE_SCHEMA for this call only, waits via
+# copilot_session_send_and_wait, and parses the final assistant content as JSON.
+#
+# Arguments:
+#   $1 - The prompt text (required)
+#   $2 - JSON Schema (JSON object string, required)
+#   $3 - Optional session ID (defaults to COPILOT_SESSION_ID)
+#   $4 - Timeout in seconds (default: 60)
+#
+# Sets:
+#   COPILOT_SESSION_STRUCTURED_RESPONSE - The parsed result (compact JSON)
+#   COPILOT_SESSION_LAST_RESPONSE       - The raw assistant message content
+#
+# Usage:
+#   copilot_session_send_and_wait_structured "What is 2+2?" \
+#       '{"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"],"additionalProperties":false}'
+#   echo "$COPILOT_SESSION_STRUCTURED_RESPONSE" | jq '.answer'
+#
+# Returns 0 on success, 1 on failure (including a missing or non-JSON result).
+copilot_session_send_and_wait_structured() {
+    local prompt="$1"
+    local response_schema="${2:-}"
+    local session_id="${3:-$COPILOT_SESSION_ID}"
+    local timeout="${4:-60}"
+
+    COPILOT_SESSION_STRUCTURED_RESPONSE=""
+
+    if [[ -z "$response_schema" ]]; then
+        echo "ERROR: response_schema is required" >&2
+        return 1
+    fi
+
+    local COPILOT_RESPONSE_SCHEMA="$response_schema"
+    if ! copilot_session_send_and_wait "$prompt" "$session_id" "$timeout"; then
+        return 1
+    fi
+
+    if [[ -z "$COPILOT_SESSION_LAST_RESPONSE" ]]; then
+        echo "ERROR: The requested run completed without a structured assistant response" >&2
+        return 1
+    fi
+
+    local parsed
+    if ! parsed=$(echo "$COPILOT_SESSION_LAST_RESPONSE" | jq -c . 2>/dev/null); then
+        echo "ERROR: The structured assistant response is not valid JSON" >&2
+        return 1
+    fi
+    COPILOT_SESSION_STRUCTURED_RESPONSE="$parsed"
+    return 0
+}
+
+# Change the Auto routing preference (experimental) without changing the model.
+#
+# Arguments:
+#   $1 - Tier: efficiency|balance|intelligence|fast; "" or "null" returns to
+#        default Auto routing (sends JSON null)
+#   $2 - Optional session ID (defaults to COPILOT_SESSION_ID)
+#
+# Sets:
+#   COPILOT_JSONRPC_LAST_RESPONSE - The response (status, effectiveAutoTier,
+#     pendingAutoTier, activatingAutoTier, supersededAutoTier)
+#
+# Usage:
+#   copilot_session_set_auto_tier "intelligence"
+#   copilot_jsonrpc_get_result_field '.status'
+#
+# Returns 0 on success, 1 on failure.
+copilot_session_set_auto_tier() {
+    local auto_tier="${1:-}"
+    local session_id="${2:-$COPILOT_SESSION_ID}"
+
+    if [[ -z "$session_id" ]]; then
+        echo "ERROR: No active session. Create or resume a session first." >&2
+        return 1
+    fi
+
+    local params
+    if [[ -z "$auto_tier" ]] || [[ "$auto_tier" == "null" ]]; then
+        params=$(jq -c -n --arg sid "$session_id" '{"sessionId":$sid,"autoTier":null}')
+    else
+        params=$(jq -c -n --arg sid "$session_id" --arg tier "$auto_tier" '{"sessionId":$sid,"autoTier":$tier}')
+    fi
+
+    if ! copilot_jsonrpc_request "session.model.switchAutoTier" "$params"; then
+        echo "ERROR: Failed to switch auto tier" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Get the managed (enterprise) settings resolved for a session.
+#
+# Arguments:
+#   $1 - Optional session ID (defaults to COPILOT_SESSION_ID)
+#
+# Sets:
+#   COPILOT_JSONRPC_LAST_RESPONSE - The session.managedSettings.get response
+#
+# Returns 0 on success, 1 on failure.
+copilot_session_get_managed_settings() {
+    local session_id="${1:-$COPILOT_SESSION_ID}"
+
+    if [[ -z "$session_id" ]]; then
+        echo "ERROR: No active session. Create or resume a session first." >&2
+        return 1
+    fi
+
+    local params
+    params=$(jq -c -n --arg sid "$session_id" '{"sessionId":$sid}')
+
+    if ! copilot_jsonrpc_request "session.managedSettings.get" "$params"; then
+        echo "ERROR: Failed to get managed settings" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Re-run the managed-settings policy helper for a session.
+#
+# Arguments:
+#   $1 - Optional session ID (defaults to COPILOT_SESSION_ID)
+#
+# Sets:
+#   COPILOT_JSONRPC_LAST_RESPONSE - The session.managedSettings.recheckPolicyHelper response
+#
+# Returns 0 on success, 1 on failure.
+copilot_session_recheck_policy_helper() {
+    local session_id="${1:-$COPILOT_SESSION_ID}"
+
+    if [[ -z "$session_id" ]]; then
+        echo "ERROR: No active session. Create or resume a session first." >&2
+        return 1
+    fi
+
+    local params
+    params=$(jq -c -n --arg sid "$session_id" '{"sessionId":$sid}')
+
+    if ! copilot_jsonrpc_request "session.managedSettings.recheckPolicyHelper" "$params"; then
+        echo "ERROR: Failed to recheck policy helper" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# --- Internal Functions ---
+
+# Append the message source and structured-output schema (if set) to send params.
+# Outputs the updated params JSON object.
+_copilot_session_add_message_options() {
+    local params="$1"
+
+    if [[ -n "${COPILOT_MESSAGE_SOURCE:-}" ]]; then
+        params=$(echo "$params" | jq -c --arg src "$COPILOT_MESSAGE_SOURCE" '. + {"source":$src}') || return 1
+    fi
+    if [[ -n "${COPILOT_RESPONSE_SCHEMA:-}" ]]; then
+        params=$(echo "$params" | jq -c --argjson rs "$COPILOT_RESPONSE_SCHEMA" \
+            '. + {"responseFormat":{"type":"json_schema","jsonSchema":{"name":"response","strict":true,"schema":$rs}}}') || return 1
+    fi
+
+    echo "$params"
+}
+
+# Answer a server -> client JSON-RPC request the SDK handles inline.
+# Called from copilot_jsonrpc_request and copilot_session_send_and_wait.
+#
+# Arguments:
+#   $1 - The raw JSON-RPC message
+#
+# Returns 0 if the request was handled, 1 otherwise.
+_copilot_handle_server_request() {
+    local msg="$1"
+    local method req_id
+    method=$(echo "$msg" | jq -r '.method // empty' 2>/dev/null) || method=""
+    req_id=$(echo "$msg" | jq -c '.id // empty' 2>/dev/null) || req_id=""
+
+    if [[ -z "$req_id" ]]; then
+        return 1
+    fi
+
+    case "$method" in
+        "gitHubToken.getToken")
+            _copilot_session_handle_github_token_request "$msg" "$req_id"
+            return 0
+            ;;
+        "hooks.invoke")
+            _copilot_session_handle_hooks_invoke "$msg" "$req_id"
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
+# Answer gitHubToken.getToken by calling the registered COPILOT_GITHUB_TOKEN_PROVIDER.
+_copilot_session_handle_github_token_request() {
+    local msg="$1"
+    local req_id="$2"
+    local reg_id host session_id reason
+    reg_id=$(echo "$msg" | jq -r '.params.registrationId // empty' 2>/dev/null) || reg_id=""
+    host=$(echo "$msg" | jq -r '.params.host // empty' 2>/dev/null) || host=""
+    session_id=$(echo "$msg" | jq -r '.params.sessionId // empty' 2>/dev/null) || session_id=""
+    reason=$(echo "$msg" | jq -r '.params.reason // empty' 2>/dev/null) || reason=""
+
+    local response
+    if ! _copilot_github_token_provider_lookup "$reg_id" || \
+        ! declare -f "$_COPILOT_GITHUB_TOKEN_PROVIDER_FN" > /dev/null 2>&1; then
+        response=$(jq -c -n --argjson id "$req_id" \
+            --arg msg "No GitHub token provider registered for registration ID \"$reg_id\"" \
+            '{"jsonrpc":"2.0","id":$id,"error":{"code":-32603,"message":$msg}}')
+        copilot_jsonrpc_send_message "$response"
+        return 0
+    fi
+
+    if [[ -z "$session_id" ]]; then
+        session_id="$_COPILOT_GITHUB_TOKEN_PROVIDER_SESSION"
+    fi
+
+    local args_json result=""
+    args_json=$(jq -c -n --arg host "$host" --arg sid "$session_id" --arg reason "$reason" \
+        '{"host":$host,"sessionId":(if $sid == "" then null else $sid end),"reason":$reason}')
+
+    if ! result=$("$_COPILOT_GITHUB_TOKEN_PROVIDER_FN" "$args_json") || \
+        ! echo "$result" | jq -e 'type == "object"' > /dev/null 2>&1; then
+        response=$(jq -c -n --argjson id "$req_id" \
+            '{"jsonrpc":"2.0","id":$id,"error":{"code":-32603,"message":"GitHub token provider failed or returned invalid JSON"}}')
+        copilot_jsonrpc_send_message "$response"
+        return 0
+    fi
+
+    response=$(jq -c -n --argjson id "$req_id" --argjson res "$result" \
+        '{"jsonrpc":"2.0","id":$id,"result":$res}')
+    copilot_jsonrpc_send_message "$response"
+    return 0
+}
+
+# Answer hooks.invoke by dispatching to the configured hook function (if any).
+# Unconfigured hook types are answered with a null output (default behavior).
+_copilot_session_handle_hooks_invoke() {
+    local msg="$1"
+    local req_id="$2"
+    local hook_type input handler="" output="null"
+    hook_type=$(echo "$msg" | jq -r '.params.hookType // empty' 2>/dev/null) || hook_type=""
+    input=$(echo "$msg" | jq -c '.params.input // {}' 2>/dev/null) || input="{}"
+
+    case "$hook_type" in
+        "subagentStart")  handler="${COPILOT_ON_SUBAGENT_START:-}" ;;
+        "subagentStop")   handler="${COPILOT_ON_SUBAGENT_STOP:-}" ;;
+        "postToolUse")    handler="${COPILOT_ON_POST_TOOL_USE:-}" ;;
+        "preMcpToolCall") handler="${COPILOT_ON_PRE_MCP_TOOL_CALL:-}" ;;
+    esac
+
+    if [[ -n "$handler" ]] && declare -f "$handler" > /dev/null 2>&1; then
+        local hook_result=""
+        hook_result=$("$handler" "$input" 2>/dev/null) || hook_result=""
+        if [[ -n "$hook_result" ]] && echo "$hook_result" | jq -e 'type == "object"' > /dev/null 2>&1; then
+            output=$(echo "$hook_result" | jq -c .)
+        fi
+    fi
+
+    local response
+    response=$(jq -c -n --argjson id "$req_id" --argjson out "$output" \
+        '{"jsonrpc":"2.0","id":$id,"result":{"output":$out}}')
+    copilot_jsonrpc_send_message "$response"
     return 0
 }

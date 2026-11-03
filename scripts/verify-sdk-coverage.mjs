@@ -91,6 +91,28 @@ const REQUIRED_FEATURES = [
   ['In-process FFI transport',      ['inProcess', 'in_process', 'InProcess', 'InProcessTransport', 'ffiTransport', 'ffi_transport']],
   ['Experimental mode',             ['experimentalMode', 'experimental_mode', 'ExperimentalMode', 'enableExperimental', 'enable_experimental']],
   ['Content exclusion',             ['contentExclusion', 'content_exclusion', 'ContentExclusion']],
+  // --- Upstream-sync features (parity with @github/copilot-sdk, 2026-11 / v2.6.0) ---
+  ['Client info handshake',         ['clientInfo', 'client_info', 'ClientInfo']],
+  ['Auto routing tier',             ['switchAutoTier']],
+  ['Ask-user variant',              ['askUserVariant', 'ask_user_variant', 'AskUserVariant']],
+  ['GitHub token provider',         ['gitHubToken.getToken']],
+  ['Sandbox bypass',                ['allowBypass', 'allow_bypass', 'AllowBypass']],
+  ['Feature flag overrides',        ['featureFlags', 'feature_flags', 'FeatureFlags']],
+  ['Session detach',                ['session.detach']],
+  ['Message source',                ['MessageSource', 'message_source', 'messageSource']],
+  ['Managed settings cache clear',  ['managedSettings.clearCache']],
+  ['Policy helper recheck',         ['recheckPolicyHelper']],
+  ['Model allowlist',               ['allowedModels', 'allowed_models', 'AllowedModels']],
+  ['OAuth client metadata URL',     ['authClientIdMetadataUrl', 'auth_client_id_metadata_url', 'AuthClientIdMetadataUrl']],
+  ['Max output tokens override',    ['max_output_tokens', 'maxOutputTokens', 'MaxOutputTokens']],
+  ['Structured output',             ['responseSchema', 'response_schema', 'ResponseSchema']],
+  ['Agent/hook directories',        ['hookDirectories', 'hook_directories', 'HookDirectories']],
+  ['Working directory trust',       ['trustWorkingDirectory', 'trust_working_directory', 'TrustWorkingDirectory']],
+  ['Transcript recovery',           ['allowTranscriptRecovery', 'allow_transcript_recovery', 'AllowTranscriptRecovery']],
+  ['Image generation config',       ['saveToDisk', 'save_to_disk', 'SaveToDisk']],
+  ['Autopilot options',             ['maxContinues', 'max_continues', 'MaxContinues']],
+  ['Subagent lifecycle hooks',      ['subagentStart', 'subagent_start', 'SubagentStart']],
+  ['BYOK API key command',          ['apiKeyCommand', 'api_key_command', 'ApiKeyCommand']],
 ];
 
 // SDK directories and their client file glob patterns

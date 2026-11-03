@@ -8,6 +8,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -181,6 +182,17 @@ inline void to_json(nlohmann::json& j, const AzureProviderOptions& o) {
     if (o.apiVersion) j["apiVersion"] = *o.apiVersion;
 }
 
+/// Product serving a BYOK model (`ProviderConfig::modelProvider`), reported in telemetry.
+namespace ModelProvider {
+    inline constexpr const char* OpenAI = "openai";
+    inline constexpr const char* Anthropic = "anthropic";
+    inline constexpr const char* AzureOpenAI = "azure_openai";
+    inline constexpr const char* Ollama = "ollama";
+    inline constexpr const char* LmStudio = "lm_studio";
+    inline constexpr const char* FoundryLocal = "foundry_local";
+    inline constexpr const char* LlamaCpp = "llama_cpp";
+}
+
 struct ProviderConfig {
     std::optional<std::string> type;       // "openai", "azure", "anthropic"
     std::optional<std::string> wireApi;    // "completions", "responses"
@@ -188,6 +200,10 @@ struct ProviderConfig {
     std::optional<std::string> apiKey;
     std::optional<std::string> bearerToken;
     std::optional<AzureProviderOptions> azure;
+    /// Product serving the model (see ModelProvider), e.g. "ollama" or "azure_openai".
+    std::optional<std::string> modelProvider;
+    /// Command whose stdout is used as the API key; run by the runtime before each request.
+    std::optional<std::string> apiKeyCommand;
 };
 
 inline void to_json(nlohmann::json& j, const ProviderConfig& c) {
@@ -197,6 +213,8 @@ inline void to_json(nlohmann::json& j, const ProviderConfig& c) {
     if (c.apiKey) j["apiKey"] = *c.apiKey;
     if (c.bearerToken) j["bearerToken"] = *c.bearerToken;
     if (c.azure) j["azure"] = *c.azure;
+    if (c.modelProvider) j["modelProvider"] = *c.modelProvider;
+    if (c.apiKeyCommand) j["apiKeyCommand"] = *c.apiKeyCommand;
 }
 
 // ============================================================================
@@ -614,6 +632,89 @@ inline void from_json(const nlohmann::json& j, PreMcpToolCallHookInput& i) {
 using PreMcpToolCallHandler = std::function<void(
     const PreMcpToolCallHookInput& input, const std::string& sessionId)>;
 
+/// Input for the hook fired before a sub-agent's first turn ("subagentStart").
+/// The session metadata belongs to the parent session, not the child.
+struct SubagentStartHookInput {
+    int64_t timestamp = 0;
+    std::string cwd;
+    std::string transcriptPath;
+    std::string agentName;
+    std::optional<std::string> agentDisplayName;
+    std::optional<std::string> agentDescription;
+};
+
+inline void from_json(const nlohmann::json& j, SubagentStartHookInput& i) {
+    if (j.contains("timestamp") && j["timestamp"].is_number()) j["timestamp"].get_to(i.timestamp);
+    if (j.contains("cwd") && j["cwd"].is_string()) j["cwd"].get_to(i.cwd);
+    else if (j.contains("workingDirectory") && j["workingDirectory"].is_string()) j["workingDirectory"].get_to(i.cwd);
+    if (j.contains("transcriptPath") && j["transcriptPath"].is_string()) j["transcriptPath"].get_to(i.transcriptPath);
+    if (j.contains("agentName") && j["agentName"].is_string()) j["agentName"].get_to(i.agentName);
+    if (j.contains("agentDisplayName") && j["agentDisplayName"].is_string())
+        i.agentDisplayName = j["agentDisplayName"].get<std::string>();
+    if (j.contains("agentDescription") && j["agentDescription"].is_string())
+        i.agentDescription = j["agentDescription"].get<std::string>();
+}
+
+/// Output for the sub-agent start hook. Context is prepended to the child's initial prompt.
+struct SubagentStartHookOutput {
+    std::optional<std::string> additionalContext;
+};
+
+inline void to_json(nlohmann::json& j, const SubagentStartHookOutput& o) {
+    j = nlohmann::json::object();
+    if (o.additionalContext) j["additionalContext"] = *o.additionalContext;
+}
+
+using SubagentStartHandler = std::function<std::optional<SubagentStartHookOutput>(
+    const SubagentStartHookInput& input, const std::string& sessionId)>;
+
+/// Input for the hook fired after a sub-agent completes a turn ("subagentStop").
+/// `response` is the child's last assistant message before any hook rewrite.
+struct SubagentStopHookInput {
+    int64_t timestamp = 0;
+    std::string cwd;
+    std::string transcriptPath;
+    std::string agentName;
+    std::optional<std::string> agentDisplayName;
+    std::optional<std::string> agentDescription;
+    std::optional<std::string> agentId;
+    std::string agentType;
+    std::string stopReason; // "end_turn"
+    std::string response;
+};
+
+inline void from_json(const nlohmann::json& j, SubagentStopHookInput& i) {
+    SubagentStartHookInput start = j.get<SubagentStartHookInput>();
+    i.timestamp = start.timestamp;
+    i.cwd = start.cwd;
+    i.transcriptPath = start.transcriptPath;
+    i.agentName = start.agentName;
+    i.agentDisplayName = start.agentDisplayName;
+    i.agentDescription = start.agentDescription;
+    if (j.contains("agentId") && j["agentId"].is_string()) i.agentId = j["agentId"].get<std::string>();
+    if (j.contains("agentType") && j["agentType"].is_string()) j["agentType"].get_to(i.agentType);
+    if (j.contains("stopReason") && j["stopReason"].is_string()) j["stopReason"].get_to(i.stopReason);
+    if (j.contains("response") && j["response"].is_string()) j["response"].get_to(i.response);
+}
+
+/// Output for the sub-agent stop hook. decision "block" with a non-empty reason
+/// continues the child; otherwise modifiedResponse replaces the reported response.
+struct SubagentStopHookOutput {
+    std::optional<std::string> decision; // "block" or "allow"
+    std::optional<std::string> reason;
+    std::optional<std::string> modifiedResponse;
+};
+
+inline void to_json(nlohmann::json& j, const SubagentStopHookOutput& o) {
+    j = nlohmann::json::object();
+    if (o.decision) j["decision"] = *o.decision;
+    if (o.reason) j["reason"] = *o.reason;
+    if (o.modifiedResponse) j["modifiedResponse"] = *o.modifiedResponse;
+}
+
+using SubagentStopHandler = std::function<std::optional<SubagentStopHookOutput>(
+    const SubagentStopHookInput& input, const std::string& sessionId)>;
+
 /// Hook handlers for intercepting session lifecycle events.
 struct SessionHooks {
     PreToolUseHandler onPreToolUse;
@@ -626,12 +727,17 @@ struct SessionHooks {
     ErrorOccurredHandler onErrorOccurred;
     /// Invoked before an MCP-server tool call is executed.
     PreMcpToolCallHandler onPreMcpToolCall;
+    /// Invoked before a sub-agent's first turn ("subagentStart").
+    SubagentStartHandler onSubagentStart;
+    /// Invoked after a sub-agent completes a turn ("subagentStop").
+    SubagentStopHandler onSubagentStop;
 
     /// Returns true if any hook handler is registered.
     bool hasAny() const {
         return onPreToolUse || onPostToolUse || onUserPromptSubmitted ||
                onUserPromptTransformed || onSessionStart || onSessionEnd ||
-               onErrorOccurred || onPreMcpToolCall;
+               onErrorOccurred || onPreMcpToolCall || onSubagentStart ||
+               onSubagentStop;
     }
 };
 
@@ -813,6 +919,164 @@ namespace GitHubAttachment {
 }
 
 // ============================================================================
+// v2.6.0 upstream-sync feature types (parity with @github/copilot-sdk)
+// ============================================================================
+
+/// Auto routing preference for the `auto` model (`autoTier`; experimental).
+namespace AutoTier {
+    inline constexpr const char* Efficiency = "efficiency";
+    inline constexpr const char* Balance = "balance";
+    inline constexpr const char* Intelligence = "intelligence";
+    inline constexpr const char* Fast = "fast";
+}
+
+/// Ask-user tool variant (`askUserVariant`).
+namespace AskUserVariant {
+    inline constexpr const char* Legacy = "legacy";
+    inline constexpr const char* Elicitation = "elicitation";
+}
+
+/// Working-directory trust scope (`trustWorkingDirectory`, session.create only).
+namespace TrustWorkingDirectory {
+    inline constexpr const char* Session = "session";
+    inline constexpr const char* User = "user";
+}
+
+/// Arguments passed to a GitHubTokenProvider.
+struct GitHubTokenProviderArgs {
+    /// Effective GitHub host the token is requested for.
+    std::string host;
+    /// Session receiving the token (absent only before a cloud session has an ID).
+    std::optional<std::string> sessionId;
+    /// Why the runtime is requesting a credential: "initial" or "refresh".
+    std::string reason;
+};
+
+/// Result of a GitHubTokenProvider: a token (kind "token") or a cancellation (kind "cancelled").
+struct GitHubTokenProviderResult {
+    std::string kind = "token";
+    std::string accessToken;
+    /// OAuth token type; defaults to bearer when omitted.
+    std::optional<std::string> tokenType;
+    /// Remaining token lifetime in seconds when the callback completes.
+    int64_t expiresIn = 0;
+
+    static GitHubTokenProviderResult token(std::string accessToken, int64_t expiresIn,
+                                           std::optional<std::string> tokenType = std::nullopt) {
+        GitHubTokenProviderResult r;
+        r.kind = "token";
+        r.accessToken = std::move(accessToken);
+        r.expiresIn = expiresIn;
+        r.tokenType = std::move(tokenType);
+        return r;
+    }
+
+    static GitHubTokenProviderResult cancelled() {
+        GitHubTokenProviderResult r;
+        r.kind = "cancelled";
+        return r;
+    }
+};
+
+inline void to_json(nlohmann::json& j, const GitHubTokenProviderResult& r) {
+    if (r.kind == "cancelled") {
+        j = {{"kind", "cancelled"}};
+        return;
+    }
+    j = {{"kind", "token"}, {"accessToken", r.accessToken}, {"expiresIn", r.expiresIn}};
+    if (r.tokenType) j["tokenType"] = *r.tokenType;
+}
+
+/// Acquires a GitHub token for one session (answers `gitHubToken.getToken`).
+/// Mutually exclusive with the per-session `gitHubToken` option.
+using GitHubTokenProvider = std::function<GitHubTokenProviderResult(const GitHubTokenProviderArgs&)>;
+
+/// Sandbox configuration for a session (`sandboxConfig`; experimental).
+struct SandboxConfig {
+    /// Whether sandboxing is enabled for the session.
+    bool enabled = false;
+    /// User-managed sandbox policy fragment merged into the auto-discovered base policy.
+    std::optional<nlohmann::json> userPolicy;
+    /// Auto-add the current working directory to readwritePaths (default: true).
+    std::optional<bool> addCurrentWorkingDirectory;
+    /// Confine MCP servers the session launches (default: true).
+    std::optional<bool> sandboxMcpServers;
+    /// Confine language servers the session launches (default: true).
+    std::optional<bool> sandboxLspServers;
+    /// Confine extension processes the session launches (default: true).
+    std::optional<bool> sandboxExtensions;
+    /// Opt-in: let the agent request that an individual command run outside the
+    /// sandbox, approved or denied through the normal permission flow (default: false).
+    std::optional<bool> allowBypass;
+};
+
+inline void to_json(nlohmann::json& j, const SandboxConfig& c) {
+    j = {{"enabled", c.enabled}};
+    if (c.userPolicy) j["userPolicy"] = *c.userPolicy;
+    if (c.addCurrentWorkingDirectory) j["addCurrentWorkingDirectory"] = *c.addCurrentWorkingDirectory;
+    if (c.sandboxMcpServers) j["sandboxMcpServers"] = *c.sandboxMcpServers;
+    if (c.sandboxLspServers) j["sandboxLspServers"] = *c.sandboxLspServers;
+    if (c.sandboxExtensions) j["sandboxExtensions"] = *c.sandboxExtensions;
+    if (c.allowBypass) j["allowBypass"] = *c.allowBypass;
+}
+
+/// Session-level image generation configuration (`imageGeneration`).
+struct ImageGenerationConfig {
+    std::optional<bool> enabled;
+    std::optional<bool> watermark;
+    std::optional<bool> saveToDisk;
+};
+
+inline void to_json(nlohmann::json& j, const ImageGenerationConfig& c) {
+    j = nlohmann::json::object();
+    if (c.enabled) j["enabled"] = *c.enabled;
+    if (c.watermark) j["watermark"] = *c.watermark;
+    if (c.saveToDisk) j["saveToDisk"] = *c.saveToDisk;
+}
+
+/// Autopilot continuation options (`autopilot`).
+struct AutopilotOptions {
+    /// Enable runtime-owned automatic continuation while in Autopilot mode.
+    std::optional<bool> continuationEnabled;
+    /// Maximum automatic continuations outside an active objective (0 allows none).
+    std::optional<int> maxContinues;
+};
+
+inline void to_json(nlohmann::json& j, const AutopilotOptions& o) {
+    j = nlohmann::json::object();
+    if (o.continuationEnabled) j["continuationEnabled"] = *o.continuationEnabled;
+    if (o.maxContinues) j["maxContinues"] = *o.maxContinues;
+}
+
+/// Limits section of a model capabilities override (snake_case wire keys).
+struct ModelLimitsOverride {
+    std::optional<int> maxPromptTokens;
+    std::optional<int> maxOutputTokens;
+    std::optional<int> maxContextWindowTokens;
+};
+
+inline void to_json(nlohmann::json& j, const ModelLimitsOverride& l) {
+    j = nlohmann::json::object();
+    if (l.maxPromptTokens) j["max_prompt_tokens"] = *l.maxPromptTokens;
+    if (l.maxOutputTokens) j["max_output_tokens"] = *l.maxOutputTokens;
+    if (l.maxContextWindowTokens) j["max_context_window_tokens"] = *l.maxContextWindowTokens;
+}
+
+/// Typed builder for `SessionConfig::modelCapabilities` (deep-merged over runtime defaults).
+/// Example: config.modelCapabilities = nlohmann::json(ModelCapabilitiesOverride{...});
+struct ModelCapabilitiesOverride {
+    /// Free-form `supports` overrides (e.g. {"vision": true}).
+    std::optional<nlohmann::json> supports;
+    std::optional<ModelLimitsOverride> limits;
+};
+
+inline void to_json(nlohmann::json& j, const ModelCapabilitiesOverride& c) {
+    j = nlohmann::json::object();
+    if (c.supports) j["supports"] = *c.supports;
+    if (c.limits) j["limits"] = *c.limits;
+}
+
+// ============================================================================
 // Session Configuration
 // ============================================================================
 
@@ -897,6 +1161,42 @@ struct SessionConfig {
     std::optional<bool> experimentalMode;
     /// Enable content-exclusion enforcement.
     std::optional<bool> contentExclusion;
+
+    // --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
+    /// Session name (session.create only).
+    std::optional<std::string> name;
+    /// Auto routing preference for the `auto` model (see AutoTier); sent under `capi`. Experimental.
+    std::optional<std::string> autoTier;
+    /// Ask-user tool variant (see AskUserVariant): "legacy" or "elicitation".
+    std::optional<std::string> askUserVariant;
+    /// GitHub token provider answering `gitHubToken.getToken`. Mutually exclusive with gitHubToken.
+    GitHubTokenProvider gitHubTokenProvider;
+    /// Sandbox configuration (experimental).
+    std::optional<SandboxConfig> sandboxConfig;
+    /// Runtime feature-flag overrides (sent whenever set, even if empty).
+    std::optional<std::map<std::string, bool>> featureFlags;
+    /// Model allowlist for this session.
+    std::optional<std::vector<std::string>> allowedModels;
+    /// OAuth client ID metadata document URL used for MCP OAuth.
+    std::optional<std::string> authClientIdMetadataUrl;
+    /// Directories containing custom agent definitions.
+    std::optional<std::vector<std::string>> agentDirectories;
+    /// Directories containing hook definitions.
+    std::optional<std::vector<std::string>> hookDirectories;
+    /// Whether an interactive user is present.
+    std::optional<bool> interactiveUser;
+    /// Managed settings to exclude from enforcement.
+    std::optional<std::vector<std::string>> excludedManagedSettings;
+    /// Enforce managed model defaults.
+    std::optional<bool> enforceManagedModelDefaults;
+    /// Trust the working directory for "session" or "user" (see TrustWorkingDirectory).
+    std::optional<std::string> trustWorkingDirectory;
+    /// Re-read custom instructions when the session is created.
+    std::optional<bool> refreshCustomInstructions;
+    /// Session-level image generation configuration.
+    std::optional<ImageGenerationConfig> imageGeneration;
+    /// Autopilot continuation options.
+    std::optional<AutopilotOptions> autopilot;
 };
 
 struct ResumeSessionConfig {
@@ -940,6 +1240,40 @@ struct ResumeSessionConfig {
     std::vector<CommandDefinition> commands;
     /// Handler for elicitation requests from the server.
     ElicitationHandler onElicitationRequest;
+
+    // --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) ---
+    /// Enable the WebSocket transport for streamed responses (sent under `capi`).
+    std::optional<bool> enableWebSocketResponses;
+    /// Auto routing preference for the `auto` model (see AutoTier); sent under `capi`. Experimental.
+    std::optional<std::string> autoTier;
+    /// Ask-user tool variant (see AskUserVariant): "legacy" or "elicitation".
+    std::optional<std::string> askUserVariant;
+    /// GitHub token provider answering `gitHubToken.getToken`. Mutually exclusive with gitHubToken.
+    GitHubTokenProvider gitHubTokenProvider;
+    /// Sandbox configuration (experimental).
+    std::optional<SandboxConfig> sandboxConfig;
+    /// Runtime feature-flag overrides (sent whenever set, even if empty).
+    std::optional<std::map<std::string, bool>> featureFlags;
+    /// Model allowlist for this session.
+    std::optional<std::vector<std::string>> allowedModels;
+    /// OAuth client ID metadata document URL used for MCP OAuth.
+    std::optional<std::string> authClientIdMetadataUrl;
+    /// Directories containing custom agent definitions.
+    std::optional<std::vector<std::string>> agentDirectories;
+    /// Directories containing hook definitions.
+    std::optional<std::vector<std::string>> hookDirectories;
+    /// Whether an interactive user is present.
+    std::optional<bool> interactiveUser;
+    /// Managed settings to exclude from enforcement.
+    std::optional<std::vector<std::string>> excludedManagedSettings;
+    /// Enforce managed model defaults.
+    std::optional<bool> enforceManagedModelDefaults;
+    /// Allow recovering the conversation from the transcript (session.resume only).
+    std::optional<bool> allowTranscriptRecovery;
+    /// Session-level image generation configuration.
+    std::optional<ImageGenerationConfig> imageGeneration;
+    /// Autopilot continuation options.
+    std::optional<AutopilotOptions> autopilot;
 };
 
 // ============================================================================
@@ -1035,6 +1369,17 @@ inline void from_json(const nlohmann::json& j, ContentBlock& b) {
 // Message Options
 // ============================================================================
 
+/// Message provenance for MessageOptions::source: "user", "system", or "agent-<id>".
+namespace MessageSource {
+    inline constexpr const char* User = "user";
+    inline constexpr const char* System = "system";
+
+    /// Builds the source value for a message originating from an identified agent.
+    inline std::string agent(const std::string& agentId) {
+        return "agent-" + agentId;
+    }
+}
+
 struct MessageOptions {
     std::string prompt;
     std::vector<Attachment> attachments;
@@ -1049,6 +1394,12 @@ struct MessageOptions {
     std::optional<std::string> agentMode;
     /// Alternate prompt text to show in the transcript in place of `prompt`.
     std::optional<std::string> displayPrompt;
+
+    /// Message provenance (see MessageSource). Omitted by default.
+    std::optional<std::string> source;
+    /// JSON Schema for structured output. When set, the request carries
+    /// responseFormat {"type": "json_schema", ...} instead of the legacy responseFormat.
+    std::optional<nlohmann::json> responseSchema;
 };
 
 // ============================================================================
@@ -1128,6 +1479,7 @@ struct ModelLimits {
     std::optional<int> maxPromptTokens;
     int maxContextWindowTokens = 0;
     std::optional<ModelVisionLimits> vision;
+    std::optional<int> maxOutputTokens;
 };
 
 inline void from_json(const nlohmann::json& j, ModelLimits& l) {
@@ -1137,6 +1489,8 @@ inline void from_json(const nlohmann::json& j, ModelLimits& l) {
         j["max_context_window_tokens"].get_to(l.maxContextWindowTokens);
     if (j.contains("vision") && !j["vision"].is_null())
         l.vision = j["vision"].get<ModelVisionLimits>();
+    if (j.contains("max_output_tokens") && !j["max_output_tokens"].is_null())
+        l.maxOutputTokens = j["max_output_tokens"].get<int>();
 }
 
 struct ModelCapabilities {
@@ -1295,6 +1649,16 @@ public:
 // Client Options
 // ============================================================================
 
+/// Identity of the integrating application, sent on the `connect` handshake as
+/// clientInfo {editorName, editorVersion, extensionName, extensionVersion}.
+/// Empty fields are dropped; an all-empty identity skips `connect` entirely.
+struct CopilotClientInfo {
+    std::optional<std::string> applicationName;     // editorName
+    std::optional<std::string> applicationVersion;  // editorVersion
+    std::optional<std::string> integrationName;     // extensionName
+    std::optional<std::string> integrationVersion;  // extensionVersion
+};
+
 struct CopilotClientOptions {
     /// Path to the CLI executable (default: "copilot").
     std::string cliPath = "copilot";
@@ -1352,6 +1716,9 @@ struct CopilotClientOptions {
 
     /// Use the in-process FFI transport instead of spawning a CLI.
     bool inProcess = false;
+
+    /// Integrating application identity sent on the `connect` handshake (clientInfo).
+    std::optional<CopilotClientInfo> clientInfo;
 };
 
 } // namespace copilot

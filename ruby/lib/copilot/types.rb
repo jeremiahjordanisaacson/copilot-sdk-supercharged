@@ -182,8 +182,12 @@ module Copilot
   end
 
   # Custom API provider configuration (BYOK).
+  #
+  # +model_provider+ selects the provider family (see {ModelProvider}) and
+  # +api_key_command+ is a command whose stdout is used as the API key.
   ProviderConfig = Struct.new(
     :type, :wire_api, :base_url, :api_key, :bearer_token, :azure,
+    :model_provider, :api_key_command,
     keyword_init: true
   ) do
     def to_wire
@@ -193,6 +197,8 @@ module Copilot
       h[:baseUrl] = base_url if base_url
       h[:apiKey] = api_key if api_key
       h[:bearerToken] = bearer_token if bearer_token
+      h[:modelProvider] = model_provider if model_provider
+      h[:apiKeyCommand] = api_key_command if api_key_command
       if azure
         az = {}
         az[:apiVersion] = azure[:api_version] if azure[:api_version]
@@ -290,10 +296,18 @@ module Copilot
     :github_token,
     :commands, :on_elicitation_request,
     :instruction_directories,
+    # v2.6.0 upstream-sync options
+    :name, :auto_tier, :ask_user_variant, :github_token_provider,
+    :sandbox_config, :feature_flags, :allowed_models, :auth_client_id_metadata_url,
+    :agent_directories, :hook_directories,
+    :interactive_user, :excluded_managed_settings, :enforce_managed_model_defaults,
+    :trust_working_directory, :refresh_custom_instructions,
+    :image_generation, :autopilot,
     keyword_init: true
   )
 
-  # Configuration for resuming a session. Same fields as SessionConfig plus disable_resume.
+  # Configuration for resuming a session. Same fields as SessionConfig plus disable_resume
+  # (create-only fields such as +name+ are omitted; +allow_transcript_recovery+ is resume-only).
   ResumeSessionConfig = Struct.new(
     :model, :reasoning_effort, :config_dir,
     :tools, :system_message, :available_tools, :excluded_tools,
@@ -306,6 +320,13 @@ module Copilot
     :commands, :on_elicitation_request,
     :instruction_directories,
     :disable_resume,
+    # v2.6.0 upstream-sync options
+    :auto_tier, :ask_user_variant, :github_token_provider,
+    :sandbox_config, :feature_flags, :allowed_models, :auth_client_id_metadata_url,
+    :agent_directories, :hook_directories,
+    :interactive_user, :excluded_managed_settings, :enforce_managed_model_defaults,
+    :allow_transcript_recovery,
+    :image_generation, :autopilot,
     keyword_init: true
   )
 
@@ -326,7 +347,14 @@ module Copilot
   ContentBlock = Struct.new(:type, :text, :image, keyword_init: true)
 
   # Options for sending a message.
-  MessageOptions = Struct.new(:prompt, :attachments, :mode, :response_format, :image_options, :request_headers, keyword_init: true)
+  #
+  # +source+ is the message provenance (see {MessageSource}); +response_schema+ is a
+  # JSON Schema Hash requesting structured output for this run.
+  MessageOptions = Struct.new(
+    :prompt, :attachments, :mode, :response_format, :image_options, :request_headers,
+    :agent_mode, :display_prompt, :source, :response_schema,
+    keyword_init: true
+  )
 
   # Ping response from the server.
   PingResponse = Struct.new(:message, :timestamp, :protocol_version, keyword_init: true) do
@@ -385,14 +413,15 @@ module Copilot
 
   # Model limits.
   ModelLimits = Struct.new(
-    :max_prompt_tokens, :max_context_window_tokens, :vision,
+    :max_prompt_tokens, :max_context_window_tokens, :vision, :max_output_tokens,
     keyword_init: true
   ) do
     def self.from_hash(h)
       new(
         max_prompt_tokens: h["max_prompt_tokens"],
         max_context_window_tokens: h["max_context_window_tokens"],
-        vision: h["vision"] ? ModelVisionLimits.from_hash(h["vision"]) : nil
+        vision: h["vision"] ? ModelVisionLimits.from_hash(h["vision"]) : nil,
+        max_output_tokens: h["max_output_tokens"]
       )
     end
   end
@@ -551,16 +580,24 @@ module Copilot
   StopError = Struct.new(:message, keyword_init: true)
 
   # Hook configuration for a session. Each value is a callable or nil.
+  #
+  # +on_subagent_start+ (hook type "subagentStart") receives the base hook fields plus
+  # transcriptPath, agentName, agentDisplayName, agentDescription and may return
+  # { additionalContext: }. +on_subagent_stop+ (hook type "subagentStop") also receives
+  # agentId, agentType, stopReason ("end_turn") and response, and may return
+  # { decision: "block" | "allow", reason:, modifiedResponse: }.
   SessionHooks = Struct.new(
     :on_pre_tool_use, :on_post_tool_use, :on_user_prompt_submitted,
     :on_user_prompt_transformed,
     :on_session_start, :on_session_end, :on_error_occurred,
+    :on_subagent_start, :on_subagent_stop,
     keyword_init: true
   ) do
     def any_handler?
       [on_pre_tool_use, on_post_tool_use, on_user_prompt_submitted,
        on_user_prompt_transformed,
-       on_session_start, on_session_end, on_error_occurred].any?
+       on_session_start, on_session_end, on_error_occurred,
+       on_subagent_start, on_subagent_stop].any?
     end
   end
 
@@ -600,6 +637,7 @@ module Copilot
     :copilot_home, :tcp_connection_token,
     :request_handler,
     :on_get_trace_context,
+    :client_info,
     keyword_init: true
   )
 
@@ -661,5 +699,156 @@ module Copilot
     GITHUB_URL             = "GitHubUrl"
     GITHUB_FILE            = "GitHubFile"
     GITHUB_SNIPPET         = "GitHubSnippet"
+  end
+
+  # --- v2.6.0 upstream-sync feature types (parity with @github/copilot-sdk) ---
+
+  # Identity of the integrating application. When any field is set, the client sends it
+  # on the +connect+ handshake (as editorName/editorVersion/extensionName/extensionVersion)
+  # so the runtime attributes its telemetry to your application.
+  ClientInfo = Struct.new(
+    :application_name, :application_version, :integration_name, :integration_version,
+    keyword_init: true
+  ) do
+    # @return [Hash, nil] wire shape with only non-empty fields, or nil when all are empty
+    def to_wire
+      h = {}
+      h[:editorName] = application_name unless application_name.to_s.empty?
+      h[:editorVersion] = application_version unless application_version.to_s.empty?
+      h[:extensionName] = integration_name unless integration_name.to_s.empty?
+      h[:extensionVersion] = integration_version unless integration_version.to_s.empty?
+      h.empty? ? nil : h
+    end
+  end
+
+  # Auto routing preference used when the session model is "auto" (experimental).
+  module AutoTier
+    EFFICIENCY   = "efficiency"
+    BALANCE      = "balance"
+    INTELLIGENCE = "intelligence"
+    FAST         = "fast"
+  end
+
+  # Wire shape used for ask-user prompts.
+  module AskUserVariant
+    LEGACY      = "legacy"
+    ELICITATION = "elicitation"
+  end
+
+  # Scope of the working-directory trust granted at session creation.
+  module WorkingDirectoryTrust
+    SESSION = "session"
+    USER    = "user"
+  end
+
+  # BYOK provider families accepted by +ProviderConfig#model_provider+.
+  module ModelProvider
+    OPENAI        = "openai"
+    ANTHROPIC     = "anthropic"
+    AZURE_OPENAI  = "azure_openai"
+    OLLAMA        = "ollama"
+    LM_STUDIO     = "lm_studio"
+    FOUNDRY_LOCAL = "foundry_local"
+    LLAMA_CPP     = "llama_cpp"
+  end
+
+  # Message provenance for +CopilotSession#send+ (+source:+).
+  module MessageSource
+    USER   = "user"
+    SYSTEM = "system"
+
+    # @param agent_id [String] opaque agent identifier
+    # @return [String] the "agent-<id>" source value
+    def self.agent(agent_id)
+      "agent-#{agent_id}"
+    end
+  end
+
+  # Arguments passed to a session's +github_token_provider+ callable.
+  # +reason+ is "initial" or "refresh"; +session_id+ may be nil before a cloud
+  # session has been assigned its id.
+  GitHubTokenProviderArgs = Struct.new(:host, :session_id, :reason, keyword_init: true)
+
+  # Result returned by a +github_token_provider+: either a token
+  # (+kind+ "token" with +access_token+, optional +token_type+ and +expires_in+ seconds)
+  # or a cancellation (+kind+ "cancelled"). Providers may also return a plain Hash.
+  GitHubTokenResult = Struct.new(:kind, :access_token, :token_type, :expires_in, keyword_init: true) do
+    def self.token(access_token:, expires_in:, token_type: nil)
+      new(kind: "token", access_token: access_token, token_type: token_type, expires_in: expires_in)
+    end
+
+    def self.cancelled
+      new(kind: "cancelled")
+    end
+
+    def to_wire
+      return { kind: "cancelled" } if kind.to_s == "cancelled"
+
+      h = { kind: "token", accessToken: access_token, expiresIn: expires_in }
+      h[:tokenType] = token_type if token_type
+      h
+    end
+  end
+
+  # Session sandbox configuration. +allow_bypass+ opts in to letting the agent request
+  # that an individual command run outside the sandbox through the normal permission flow.
+  SandboxConfig = Struct.new(
+    :enabled, :user_policy, :add_current_working_directory,
+    :sandbox_mcp_servers, :sandbox_lsp_servers, :sandbox_extensions, :allow_bypass,
+    keyword_init: true
+  ) do
+    def to_wire
+      h = { enabled: enabled ? true : false }
+      h[:userPolicy] = user_policy if user_policy
+      h[:addCurrentWorkingDirectory] = add_current_working_directory unless add_current_working_directory.nil?
+      h[:sandboxMcpServers] = sandbox_mcp_servers unless sandbox_mcp_servers.nil?
+      h[:sandboxLspServers] = sandbox_lsp_servers unless sandbox_lsp_servers.nil?
+      h[:sandboxExtensions] = sandbox_extensions unless sandbox_extensions.nil?
+      h[:allowBypass] = allow_bypass unless allow_bypass.nil?
+      h
+    end
+  end
+
+  # Session-level image generation configuration.
+  ImageGenerationConfig = Struct.new(:enabled, :watermark, :save_to_disk, keyword_init: true) do
+    def to_wire
+      h = {}
+      h[:enabled] = enabled unless enabled.nil?
+      h[:watermark] = watermark unless watermark.nil?
+      h[:saveToDisk] = save_to_disk unless save_to_disk.nil?
+      h
+    end
+  end
+
+  # Runtime-owned Autopilot continuation options.
+  AutopilotOptions = Struct.new(:continuation_enabled, :max_continues, keyword_init: true) do
+    def to_wire
+      h = {}
+      h[:continuationEnabled] = continuation_enabled unless continuation_enabled.nil?
+      h[:maxContinues] = max_continues unless max_continues.nil?
+      h
+    end
+  end
+
+  # Per-property model capability overrides (+model_capabilities:+ session option).
+  # +limits+ uses snake_case wire keys, e.g.
+  # { max_prompt_tokens:, max_output_tokens:, max_context_window_tokens: }.
+  ModelCapabilitiesOverride = Struct.new(:supports, :limits, keyword_init: true) do
+    def to_wire
+      h = {}
+      h[:supports] = supports if supports
+      h[:limits] = (limits.respond_to?(:to_wire) ? limits.to_wire : limits) if limits
+      h
+    end
+  end
+
+  # Limit overrides for {ModelCapabilitiesOverride}.
+  ModelLimitsOverride = Struct.new(
+    :max_prompt_tokens, :max_output_tokens, :max_context_window_tokens,
+    keyword_init: true
+  ) do
+    def to_wire
+      to_h.compact
+    end
   end
 end

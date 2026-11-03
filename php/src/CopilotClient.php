@@ -65,6 +65,9 @@ class CopilotClient
     /** @var array<string, callable[]> Typed session lifecycle handlers */
     private array $typedLifecycleHandlers = [];
 
+    /** @var array<string, array{provider: callable, sessionId: ?string}> gitHubTokenProvider registrations keyed by registration ID */
+    private array $gitHubTokenProviders = [];
+
     /**
      * Creates a new CopilotClient instance.
      *
@@ -166,6 +169,9 @@ class CopilotClient
         // Clear models cache
         $this->modelsCache = null;
 
+        // Drop all GitHub token provider registrations
+        $this->gitHubTokenProviders = [];
+
         // Close TCP socket
         if ($this->socket !== null) {
             try {
@@ -210,6 +216,7 @@ class CopilotClient
     public function forceStop(): void
     {
         $this->sessions = [];
+        $this->gitHubTokenProviders = [];
 
         if ($this->connection !== null) {
             try {
@@ -266,8 +273,23 @@ class CopilotClient
             }
         }
 
+        $registrationId = $this->registerGitHubTokenProvider(
+            $config->gitHubTokenProvider,
+            $config->gitHubToken,
+            $config->sessionId,
+        );
         $params = $config->toServerParams();
-        $response = $this->connection->request('session.create', $params);
+        if ($registrationId !== null) {
+            $params['gitHubTokenProviderRegistrationId'] = $registrationId;
+        }
+        try {
+            $response = $this->connection->request('session.create', $params);
+        } catch (\Throwable $e) {
+            if ($registrationId !== null) {
+                unset($this->gitHubTokenProviders[$registrationId]);
+            }
+            throw $e;
+        }
 
         $sessionId = $response['sessionId'] ?? '';
         $workspacePath = $response['workspacePath'] ?? null;
@@ -289,6 +311,7 @@ class CopilotClient
         if ($this->options->onGetTraceContext !== null) {
             $session->registerTraceContextProvider($this->options->onGetTraceContext);
         }
+        $this->attachGitHubTokenProvider($session, $registrationId);
         $this->sessions[$sessionId] = $session;
 
         return $session;
@@ -314,8 +337,23 @@ class CopilotClient
             }
         }
 
+        $registrationId = $this->registerGitHubTokenProvider(
+            $config->gitHubTokenProvider,
+            $config->gitHubToken,
+            $sessionId,
+        );
         $params = $config->toServerParams($sessionId);
-        $response = $this->connection->request('session.resume', $params);
+        if ($registrationId !== null) {
+            $params['gitHubTokenProviderRegistrationId'] = $registrationId;
+        }
+        try {
+            $response = $this->connection->request('session.resume', $params);
+        } catch (\Throwable $e) {
+            if ($registrationId !== null) {
+                unset($this->gitHubTokenProviders[$registrationId]);
+            }
+            throw $e;
+        }
 
         $resumedSessionId = $response['sessionId'] ?? $sessionId;
         $workspacePath = $response['workspacePath'] ?? null;
@@ -337,6 +375,7 @@ class CopilotClient
         if ($this->options->onGetTraceContext !== null) {
             $session->registerTraceContextProvider($this->options->onGetTraceContext);
         }
+        $this->attachGitHubTokenProvider($session, $registrationId);
         $this->sessions[$resumedSessionId] = $session;
 
         return $session;
@@ -544,6 +583,18 @@ class CopilotClient
     }
 
     /**
+     * Clears the runtime's cached managed (enterprise policy) settings so they are re-read.
+     *
+     * @return mixed The raw result
+     * @throws \RuntimeException If not connected
+     */
+    public function clearManagedSettingsCache(): mixed
+    {
+        $this->ensureConnected();
+        return $this->connection->request('managedSettings.clearCache', []);
+    }
+
+    /**
      * Subscribe to session lifecycle events (typed).
      *
      * @param string $eventType e.g. "session.created", "session.deleted"
@@ -653,6 +704,16 @@ class CopilotClient
             $connectParams = [];
             if ($this->options->tcpConnectionToken !== null) {
                 $connectParams['token'] = $this->options->tcpConnectionToken;
+            }
+            // Declare the integrating application's identity so the runtime attributes
+            // its telemetry to it. Omitted when no clientInfo field is set.
+            $clientInfo = $this->options->clientInfo;
+            if (is_array($clientInfo)) {
+                $clientInfo = ClientInfo::fromArray($clientInfo);
+            }
+            $clientInfoWire = $clientInfo?->toWire();
+            if ($clientInfoWire !== null) {
+                $connectParams['clientInfo'] = $clientInfoWire;
             }
             $result = $this->connection->request('connect', $connectParams);
             if (is_array($result) && array_key_exists('protocolVersion', $result)) {
@@ -881,6 +942,11 @@ class CopilotClient
 
         $this->connection->setRequestHandler('exitPlanMode.request', function (array $params): array {
             return $this->handleExitPlanModeRequest($params);
+        });
+
+        // GitHub token provider callbacks for sessions created with a gitHubTokenProvider.
+        $this->connection->setRequestHandler('gitHubToken.getToken', function (array $params): array {
+            return $this->handleGitHubTokenRequest($params);
         });
 
         // Session filesystem provider callbacks. When a provider is registered via
@@ -1267,6 +1333,80 @@ class CopilotClient
         } catch (\Throwable) {
             return ['approved' => true];
         }
+    }
+
+    // ---- GitHub token provider (gitHubToken.getToken) ----
+
+    /**
+     * Validate a session's gitHubTokenProvider and store it in the client-level
+     * registry. Returns the opaque registration ID sent on the wire, or null.
+     */
+    private function registerGitHubTokenProvider(mixed $provider, ?string $gitHubToken, ?string $sessionId): ?string
+    {
+        if ($provider === null) {
+            return null;
+        }
+        if ($gitHubToken !== null) {
+            throw new \InvalidArgumentException('gitHubToken and gitHubTokenProvider are mutually exclusive');
+        }
+        if (!is_callable($provider)) {
+            throw new \InvalidArgumentException('gitHubTokenProvider must be callable');
+        }
+
+        $registrationId = self::generateUuid();
+        $this->gitHubTokenProviders[$registrationId] = ['provider' => $provider, 'sessionId' => $sessionId];
+        return $registrationId;
+    }
+
+    /**
+     * Bind a registration to its session and release it when the session is destroyed.
+     */
+    private function attachGitHubTokenProvider(CopilotSession $session, ?string $registrationId): void
+    {
+        if ($registrationId === null) {
+            return;
+        }
+        if (isset($this->gitHubTokenProviders[$registrationId])) {
+            $this->gitHubTokenProviders[$registrationId]['sessionId'] = $session->sessionId;
+        }
+        $session->registerDestroyCallback(function () use ($registrationId): void {
+            unset($this->gitHubTokenProviders[$registrationId]);
+        });
+    }
+
+    private function handleGitHubTokenRequest(array $params): array
+    {
+        $registrationId = (string) ($params['registrationId'] ?? '');
+        $registration = $this->gitHubTokenProviders[$registrationId] ?? null;
+        if ($registration === null) {
+            throw new \RuntimeException("No GitHub token provider registered for registration ID \"{$registrationId}\"");
+        }
+
+        $sessionId = $params['sessionId'] ?? $registration['sessionId'];
+        $args = new GitHubTokenProviderArgs(
+            host: (string) ($params['host'] ?? ''),
+            sessionId: $sessionId === null ? null : (string) $sessionId,
+            reason: (string) ($params['reason'] ?? 'initial'),
+        );
+        $result = ($registration['provider'])($args);
+        if ($result instanceof GitHubTokenResult) {
+            return $result->toArray();
+        }
+        if (!is_array($result)) {
+            throw new \RuntimeException('gitHubTokenProvider must return a GitHubTokenResult or an array');
+        }
+        return $result;
+    }
+
+    /**
+     * Generate a random RFC 4122 version-4 UUID.
+     */
+    private static function generateUuid(): string
+    {
+        $bytes = random_bytes(16);
+        $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+        $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+        return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
     }
 
     /**

@@ -23,11 +23,19 @@ private struct PendingRequest
     bool fulfilled = false;
     Nullable!JSONValue result;
     Nullable!string errorMsg;
+    int errorCode;
     Condition cond;
 }
 
 /// Callback type for notifications.
 alias NotificationHandler = void delegate(string method, JSONValue params) @safe;
+
+/// Callback type for server-to-client requests; the return value becomes the
+/// JSON-RPC result and a thrown exception becomes a JSON-RPC error.
+alias RequestHandler = JSONValue delegate(JSONValue params);
+
+/// JSON-RPC "method not found" error code.
+enum int methodNotFoundCode = -32601;
 
 // ---------------------------------------------------------------------------
 // JsonRpcClient
@@ -49,6 +57,7 @@ final class JsonRpcClient
         int _nextId = 1;
         PendingRequest*[int] _pending;
         NotificationHandler _onNotification;
+        RequestHandler[string] _requestHandlers;
         Thread _readerThread;
         bool _running = false;
     }
@@ -66,6 +75,12 @@ final class JsonRpcClient
     void onNotification(NotificationHandler handler) @safe
     {
         _onNotification = handler;
+    }
+
+    /// Register a handler for an incoming (server-to-client) request method.
+    void onRequest(string method, RequestHandler handler) @safe
+    {
+        _requestHandlers[method] = handler;
     }
 
     /// Start the background reader thread.
@@ -130,7 +145,7 @@ final class JsonRpcClient
         }
 
         if (!pr.errorMsg.isNull)
-            throw new JsonRpcError(pr.errorMsg.get);
+            throw new JsonRpcError(pr.errorMsg.get, pr.errorCode);
 
         return pr.result.isNull ? JSONValue(null) : pr.result.get;
     }
@@ -244,8 +259,19 @@ final class JsonRpcClient
     /// Route an incoming message to the appropriate handler.
     private void _dispatch(JSONValue msg) @trusted
     {
-        // Response (has `id` and either `result` or `error`).
         auto pId = "id" in msg;
+
+        // Server-to-client request (has both `id` and `method`).
+        auto pReqMethod = "method" in msg;
+        if (pId !is null && pReqMethod !is null && (*pReqMethod).type == JSONType.string)
+        {
+            auto pReqParams = "params" in msg;
+            _handleRequest(*pId, (*pReqMethod).str,
+                pReqParams !is null ? *pReqParams : JSONValue(null));
+            return;
+        }
+
+        // Response (has `id` and either `result` or `error`).
         if (pId !is null && (*pId).type == JSONType.integer)
         {
             int id = cast(int) (*pId).integer;
@@ -263,6 +289,9 @@ final class JsonRpcClient
                 pr.errorMsg = (pErrMsg !is null && (*pErrMsg).type == JSONType.string)
                     ? (*pErrMsg).str
                     : "unknown RPC error";
+                auto pCode = "code" in *pErr;
+                if (pCode !is null && (*pCode).type == JSONType.integer)
+                    pr.errorCode = cast(int) (*pCode).integer;
             }
             else
             {
@@ -287,6 +316,42 @@ final class JsonRpcClient
             }
         }
     }
+
+    /// Invoke the registered handler for a server-to-client request and reply.
+    private void _handleRequest(JSONValue id, string method, JSONValue params) @trusted
+    {
+        auto reply = JSONValue(string[string].init);
+        reply["jsonrpc"] = "2.0";
+        reply["id"] = id;
+
+        auto pHandler = method in _requestHandlers;
+        if (pHandler is null)
+        {
+            reply["error"] = _errorObject(methodNotFoundCode, "Method not found: " ~ method);
+        }
+        else
+        {
+            try
+            {
+                reply["result"] = (*pHandler)(params);
+            }
+            catch (Exception e)
+            {
+                reply["error"] = _errorObject(-32603, e.msg);
+            }
+        }
+
+        _writeMessage(reply);
+    }
+
+    /// Build a JSON-RPC error object.
+    private static JSONValue _errorObject(int code, string message) @safe
+    {
+        auto err = JSONValue(string[string].init);
+        err["code"] = code;
+        err["message"] = message;
+        return err;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -296,8 +361,17 @@ final class JsonRpcClient
 /// Exception raised when a JSON-RPC request returns an error.
 class JsonRpcError : Exception
 {
+    /// JSON-RPC error code reported by the server (0 when unknown).
+    int code;
+
     this(string msg, string file = __FILE__, size_t line = __LINE__) @safe pure nothrow
     {
         super(msg, file, line);
+    }
+
+    this(string msg, int code, string file = __FILE__, size_t line = __LINE__) @safe pure nothrow
+    {
+        super(msg, file, line);
+        this.code = code;
     }
 }

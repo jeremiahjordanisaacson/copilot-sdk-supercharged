@@ -26,6 +26,13 @@ class JsonRpcException(
 typealias RequestHandler = suspend (params: JsonObject) -> JsonElement
 
 /**
+ * Returns whether [error] means the server does not implement [method]
+ * (JSON-RPC error -32601 or an "Unhandled method" message), e.g. an older CLI.
+ */
+internal fun isMethodNotFound(error: Throwable, method: String): Boolean =
+    error is JsonRpcException && (error.code == -32601 || error.message.contains("Unhandled method $method"))
+
+/**
  * Minimal JSON-RPC 2.0 client for stdio/TCP transport.
  *
  * Uses a background coroutine for reading and provides a suspend-based interface.

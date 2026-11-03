@@ -62,6 +62,13 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
   private val typedLifecycleHandlers = new ConcurrentHashMap[String, mutable.Set[SessionLifecycleHandler]]()
   @volatile private var modelsCache: Option[List[ModelInfo]] = None
 
+  /** A session's GitHub token provider registration. */
+  private final class GitHubTokenRegistration(val provider: GitHubTokenProvider, @volatile var sessionId: Option[String]):
+    @volatile var committed: Boolean = false
+
+  /** Session GitHub token providers keyed by opaque registration ID (served via `gitHubToken.getToken`). */
+  private val gitHubTokenProviders = new ConcurrentHashMap[String, GitHubTokenRegistration]()
+
   private val isExternalServer: Boolean = options.cliUrl.isDefined
   private val resolvedCliPath: String = options.cliPath.getOrElse("copilot")
   private val resolvedUseLoggedInUser: Boolean =
@@ -113,6 +120,9 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
       // Set up connection handlers
       attachConnectionHandlers()
 
+      // Declare the integrating application's identity (if configured) before the ping handshake.
+      sendConnectHandshake(rpcClient.get)
+
       // Verify protocol version compatibility. Call rpcClient directly rather than the public
       // ping(), which routes through ensureConnected() and would re-enter start() (state is still
       // Connecting here, not Connected), deadlocking until the Await times out.
@@ -162,6 +172,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
           )
     }
     sessions.clear()
+    gitHubTokenProviders.clear()
 
     // Stop RPC client
     rpcClient.foreach { client =>
@@ -197,6 +208,7 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
    */
   def forceStop(): Unit =
     sessions.clear()
+    gitHubTokenProviders.clear()
     rpcClient.foreach(c => Try(c.stop()))
     rpcClient = None
     tcpSocket.foreach(s => Try(s.close()))
@@ -214,7 +226,8 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
    * @return A Future that resolves with the created session
    */
   def createSession(config: SessionConfig = SessionConfig()): Future[CopilotSession] =
-    ensureConnected().flatMap { client =>
+    checkGitHubTokenOptions(config.gitHubToken, config.gitHubTokenProvider).flatMap(_ => ensureConnected()).flatMap { client =>
+      val registrationId = registerGitHubTokenProvider(config.gitHubTokenProvider, config.sessionId)
       val toolDefs = config.tools.map(t => Json.obj(
         "name" -> t.name.asJson,
         "description" -> t.description.asJson,
@@ -231,7 +244,9 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
           Option.when(h.onUserPromptTransformed.isDefined)("userPromptTransformed"),
           Option.when(h.onSessionStart.isDefined)("sessionStart"),
           Option.when(h.onSessionEnd.isDefined)("sessionEnd"),
-          Option.when(h.onErrorOccurred.isDefined)("errorOccurred")
+          Option.when(h.onErrorOccurred.isDefined)("errorOccurred"),
+          Option.when(h.onSubagentStart.isDefined)("subagentStart"),
+          Option.when(h.onSubagentStop.isDefined)("subagentStop")
         ).flatten
       }
 
@@ -273,7 +288,6 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
           Json.obj("enabled" -> m.enabled.asJson)
         }.asJson,
         "otlpProtocol" -> config.otlpProtocol.asJson,
-        "enableWebSocketResponses" -> config.enableWebSocketResponses.asJson,
         "expAssignments" -> config.expAssignments.asJson,
         "rewindEnabled" -> config.rewindEnabled.asJson,
         "additionalDirectories" -> config.additionalDirectories.asJson,
@@ -285,6 +299,25 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "experimentalMode" -> config.experimentalMode.asJson,
         "contentExclusion" -> config.contentExclusion.asJson,
         "mcpAuthHandler" -> config.onMcpAuthRequest.isDefined.asJson,
+        // v2.6.0 upstream-sync session options. The runtime only accepts
+        // autoTier/enableWebSocketResponses under "capi".
+        "capi" -> capiOptions(config.autoTier, config.enableWebSocketResponses).asJson,
+        "askUserVariant" -> config.askUserVariant.asJson,
+        "gitHubTokenProviderRegistrationId" -> registrationId.asJson,
+        "sandboxConfig" -> config.sandboxConfig.asJson,
+        "featureFlags" -> config.featureFlags.asJson,
+        "allowedModels" -> config.allowedModels.asJson,
+        "authClientIdMetadataUrl" -> config.authClientIdMetadataUrl.asJson,
+        "name" -> config.name.asJson,
+        "agentDirectories" -> config.agentDirectories.asJson,
+        "hookDirectories" -> config.hookDirectories.asJson,
+        "interactiveUser" -> config.interactiveUser.asJson,
+        "excludedManagedSettings" -> config.excludedManagedSettings.asJson,
+        "enforceManagedModelDefaults" -> config.enforceManagedModelDefaults.asJson,
+        "trustWorkingDirectory" -> config.trustWorkingDirectory.asJson,
+        "refreshCustomInstructions" -> config.refreshCustomInstructions.asJson,
+        "imageGeneration" -> config.imageGeneration.asJson,
+        "autopilot" -> config.autopilot.asJson,
       ).dropNullValues
 
       client.sendRequest("session.create", injectTraceContext(params)).map { result =>
@@ -298,8 +331,12 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         config.onUserInputRequest.foreach(session.registerUserInputHandler)
         config.hooks.foreach(session.registerHooks)
         config.onExitPlanMode.foreach(session.registerExitPlanModeHandler)
+        commitGitHubTokenProvider(session, registrationId)
         sessions.put(sessionId, session)
         session
+      }.recoverWith { case ex =>
+        registrationId.foreach(id => gitHubTokenProviders.remove(id))
+        Future.failed(ex)
       }
     }
 
@@ -311,7 +348,8 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
    * @return A Future that resolves with the resumed session
    */
   def resumeSession(sessionId: String, config: ResumeSessionConfig = ResumeSessionConfig()): Future[CopilotSession] =
-    ensureConnected().flatMap { client =>
+    checkGitHubTokenOptions(config.gitHubToken, config.gitHubTokenProvider).flatMap(_ => ensureConnected()).flatMap { client =>
+      val registrationId = registerGitHubTokenProvider(config.gitHubTokenProvider, Some(sessionId))
       val toolDefs = config.tools.map(t => Json.obj(
         "name" -> t.name.asJson,
         "description" -> t.description.asJson,
@@ -343,6 +381,22 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         "enableConfigDiscovery" -> config.enableConfigDiscovery.asJson,
         "gitHubToken" -> config.gitHubToken.asJson,
         "disableResume" -> config.disableResume.asJson,
+        // v2.6.0 upstream-sync session options.
+        "capi" -> capiOptions(config.autoTier, config.enableWebSocketResponses).asJson,
+        "askUserVariant" -> config.askUserVariant.asJson,
+        "gitHubTokenProviderRegistrationId" -> registrationId.asJson,
+        "sandboxConfig" -> config.sandboxConfig.asJson,
+        "featureFlags" -> config.featureFlags.asJson,
+        "allowedModels" -> config.allowedModels.asJson,
+        "authClientIdMetadataUrl" -> config.authClientIdMetadataUrl.asJson,
+        "agentDirectories" -> config.agentDirectories.asJson,
+        "hookDirectories" -> config.hookDirectories.asJson,
+        "interactiveUser" -> config.interactiveUser.asJson,
+        "excludedManagedSettings" -> config.excludedManagedSettings.asJson,
+        "enforceManagedModelDefaults" -> config.enforceManagedModelDefaults.asJson,
+        "allowTranscriptRecovery" -> config.allowTranscriptRecovery.asJson,
+        "imageGeneration" -> config.imageGeneration.asJson,
+        "autopilot" -> config.autopilot.asJson,
       ).dropNullValues
 
       client.sendRequest("session.resume", injectTraceContext(params)).map { result =>
@@ -354,8 +408,12 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
         config.onUserInputRequest.foreach(session.registerUserInputHandler)
         config.hooks.foreach(session.registerHooks)
         config.onExitPlanMode.foreach(session.registerExitPlanModeHandler)
+        commitGitHubTokenProvider(session, registrationId)
         sessions.put(resumedId, session)
         session
+      }.recoverWith { case ex =>
+        registrationId.foreach(id => gitHubTokenProviders.remove(id))
+        Future.failed(ex)
       }
     }
 
@@ -470,6 +528,15 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
           val error = result.hcursor.get[String]("error").getOrElse("Failed to set foreground session")
           Future.failed(new RuntimeException(error))
       }
+    }
+
+  /**
+   * Clears the runtime's cached enterprise managed settings for every account so the next
+   * session resolution re-fetches server policy.
+   */
+  def clearManagedSettingsCache(): Future[Unit] =
+    ensureConnected().flatMap { client =>
+      client.sendRequest("managedSettings.clearCache", Json.obj()).map(_ => ())
     }
 
   /**
@@ -659,6 +726,9 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     // exitPlanMode.request (server asks client to approve exiting plan mode)
     client.onRequest("exitPlanMode.request", handleExitPlanModeRequest)
 
+    // gitHubToken.getToken (server asks a session's GitHub token provider for a credential)
+    client.onRequest("gitHubToken.getToken", handleGitHubTokenRequest)
+
     // sessionFs.* (server drives filesystem access through the client)
     client.onRequest("sessionFs.readFile", handleSessionFsReadFile)
     client.onRequest("sessionFs.writeFile", handleSessionFsWriteFile)
@@ -805,6 +875,96 @@ class CopilotClient(options: CopilotClientOptions = CopilotClientOptions())(usin
     val request = ExitPlanModeRequest(sessionId)
     session.handleExitPlanModeRequest(request).map { result =>
       Json.obj("approved" -> result.approved.asJson)
+    }
+
+  /** Serves `gitHubToken.getToken` by invoking the provider registered under `registrationId`. */
+  private def handleGitHubTokenRequest(params: Json): Future[Json] =
+    val cursor = params.hcursor
+    val registrationId = cursor.get[String]("registrationId").toOption
+    registrationId.flatMap(id => Option(gitHubTokenProviders.get(id))) match
+      case None =>
+        Future.failed(new RuntimeException(
+          s"No GitHub token provider registered for registration ID '${registrationId.getOrElse("")}'"
+        ))
+      case Some(registration) =>
+        val args = GitHubTokenProviderArgs(
+          host = cursor.get[String]("host").getOrElse(""),
+          sessionId = cursor.get[String]("sessionId").toOption.orElse(registration.sessionId),
+          reason = cursor.get[String]("reason").getOrElse("initial")
+        )
+        registration.provider(args).map(_.asJson)
+
+  // -------------------------------------------------------------------------
+  // v2.6.0 helpers: client info handshake, CAPI options, GitHub token providers
+  // -------------------------------------------------------------------------
+
+  /**
+   * Declares the integrating application's identity via `connect` before the ping handshake.
+   * Skipped when no [[ClientInfo]] field is set; ignored by older CLIs without `connect`.
+   */
+  private def sendConnectHandshake(client: JsonRpcClient): Unit =
+    options.clientInfo.flatMap(clientInfoToWire).foreach { wire =>
+      try
+        concurrent.Await.result(
+          client.sendRequest("connect", Json.obj("clientInfo" -> wire)),
+          scala.concurrent.duration.Duration(10, "s")
+        )
+      catch
+        case ex: JsonRpcException if isMethodNotFound(ex, "connect") => () // older CLI
+    }
+
+  /** Maps [[ClientInfo]] onto the `connect` wire shape, dropping empty fields. */
+  private def clientInfoToWire(info: ClientInfo): Option[Json] =
+    val fields = List(
+      info.applicationName.filter(_.nonEmpty).map(v => "editorName" -> v.asJson),
+      info.applicationVersion.filter(_.nonEmpty).map(v => "editorVersion" -> v.asJson),
+      info.integrationName.filter(_.nonEmpty).map(v => "extensionName" -> v.asJson),
+      info.integrationVersion.filter(_.nonEmpty).map(v => "extensionVersion" -> v.asJson)
+    ).flatten
+    if fields.isEmpty then None else Some(Json.obj(fields*))
+
+  /** Builds the `capi` provider options object, or None when neither field is set. */
+  private def capiOptions(autoTier: Option[String], enableWebSocketResponses: Option[Boolean]): Option[Json] =
+    if autoTier.isEmpty && enableWebSocketResponses.isEmpty then None
+    else
+      Some(Json.obj(
+        "autoTier" -> autoTier.asJson,
+        "enableWebSocketResponses" -> enableWebSocketResponses.asJson
+      ).dropNullValues)
+
+  private def checkGitHubTokenOptions(
+    gitHubToken: Option[String],
+    provider: Option[GitHubTokenProvider]
+  ): Future[Unit] =
+    if gitHubToken.isDefined && provider.isDefined then
+      Future.failed(new IllegalArgumentException("gitHubToken and gitHubTokenProvider are mutually exclusive"))
+    else Future.unit
+
+  private def registerGitHubTokenProvider(
+    provider: Option[GitHubTokenProvider],
+    sessionId: Option[String]
+  ): Option[String] =
+    provider.map { p =>
+      val registrationId = java.util.UUID.randomUUID().toString
+      gitHubTokenProviders.put(registrationId, new GitHubTokenRegistration(p, sessionId))
+      registrationId
+    }
+
+  /**
+   * Binds a successful create/resume to its provider registration: drops registrations committed by
+   * an earlier open of the same session and removes the new one when the session is destroyed.
+   */
+  private def commitGitHubTokenProvider(session: CopilotSession, registrationId: Option[String]): Unit =
+    val sessionId = session.sessionId
+    gitHubTokenProviders.entrySet().removeIf((entry: java.util.Map.Entry[String, GitHubTokenRegistration]) =>
+      entry.getValue.committed && entry.getValue.sessionId.contains(sessionId) && !registrationId.contains(entry.getKey)
+    )
+    registrationId.foreach { id =>
+      Option(gitHubTokenProviders.get(id)).foreach { registration =>
+        registration.sessionId = Some(sessionId)
+        registration.committed = true
+        session.registerOnDestroyed(() => gitHubTokenProviders.remove(id))
+      }
     }
 
   // -------------------------------------------------------------------------
@@ -1031,14 +1191,28 @@ private[copilot] def buildSendPayload(sessionId: String, options: MessageOptions
   Json.obj(
     "sessionId" -> sessionId.asJson,
     "prompt" -> options.prompt.asJson,
+    "source" -> options.source.asJson,
     "attachments" -> options.attachments.asJson,
     "mode" -> options.mode.asJson,
-    "responseFormat" -> options.responseFormat.asJson,
+    // Structured output takes the responseFormat slot over the legacy string format.
+    "responseFormat" -> options.responseSchema.map(structuredResponseFormat)
+      .orElse(options.responseFormat.map(_.asJson)).asJson,
     "imageOptions" -> options.imageOptions.asJson,
     "requestHeaders" -> options.requestHeaders.asJson,
     "agentMode" -> options.agentMode.asJson,
     "displayPrompt" -> options.displayPrompt.asJson,
   ).dropNullValues
+
+/** Wraps a JSON Schema as the structured-output `responseFormat` object. */
+private[copilot] def structuredResponseFormat(schema: JsonObject): Json =
+  Json.obj(
+    "type" -> "json_schema".asJson,
+    "jsonSchema" -> Json.obj(
+      "name" -> "response".asJson,
+      "strict" -> true.asJson,
+      "schema" -> Json.fromJsonObject(schema)
+    )
+  )
 
 /** Tool deferral policies for [[Tool.defer]]. */
 object ToolDefer:

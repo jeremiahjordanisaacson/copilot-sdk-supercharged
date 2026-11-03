@@ -42,7 +42,7 @@ async {
 
     // Send a message and wait for the response
     let! reply =
-        session.SendAndWaitAsync({ Prompt = "What is 2 + 2?"; Attachments = None; Mode = None })
+        session.SendAndWaitAsync(MessageOptions.create "What is 2 + 2?")
 
     reply |> Option.iter (fun data -> printfn "Final answer: %s" data.Content)
 
@@ -93,6 +93,7 @@ use client =
 | `UseLoggedInUser` | `bool option` | `None` | Use stored OAuth/gh CLI tokens |
 | `Telemetry` | `TelemetryConfig option` | `None` | OpenTelemetry configuration |
 | `SessionIdleTimeoutSeconds` | `int option` | `None` | Idle timeout in seconds |
+| `ClientInfo` | `CopilotClientInfo option` | `None` | Embedding application identity (sent with `connect`) |
 
 #### Client Methods
 
@@ -121,12 +122,12 @@ Represents a single conversation session.
 
 ```fsharp
 // Fire and forget (returns message ID)
-let! messageId = session.SendAsync({ Prompt = "Hello"; Attachments = None; Mode = None })
+let! messageId = session.SendAsync(MessageOptions.create "Hello")
 
 // Send and wait for the response (blocks until session.idle)
 let! reply =
     session.SendAndWaitAsync(
-        { Prompt = "Hello"; Attachments = None; Mode = None },
+        MessageOptions.create "Hello",
         timeout = TimeSpan.FromSeconds(120.0))
 ```
 
@@ -241,6 +242,122 @@ let myHandler : PermissionRequestHandler =
             return { Kind = ApproveOnce; UpdraftMessage = None }
     }
 ```
+
+## What's New in v2.6.0
+
+Parity with upstream `@github/copilot-sdk` v2.6.0. Every new option defaults to `None` and is
+omitted from the JSON-RPC request unless set (`FeatureFlags` is sent whenever it is `Some`, even
+when empty).
+
+| Feature | F# API |
+|---------|--------|
+| Client info | `CopilotClientOptions.ClientInfo` (`CopilotClientInfo`) — sent with `connect` before the handshake; older CLIs without `connect` are tolerated |
+| Auto routing tier (experimental) | `AutoTier = Some AutoTier.Intelligence` on `SessionConfig`/`ResumeSessionConfig` (sent under `capi`); `session.SetAutoTierAsync(Some AutoTier.Fast)` / `SetAutoTierAsync None` |
+| WebSocket responses | `EnableWebSocketResponses` is now sent as `capi.enableWebSocketResponses` |
+| Ask-user variant | `AskUserVariant = Some AskUserVariant.Elicitation` (create + resume) |
+| GitHub token provider | `GitHubTokenProvider = Some (fun args -> async { ... })` returning `GitHubTokenGranted` / `GitHubTokenCancelled`; mutually exclusive with `GitHubToken` |
+| Sandbox | `SandboxConfig = Some { SandboxConfig.create true with AllowBypass = Some true }` |
+| Feature flags | `FeatureFlags = Some (dict [ "flag", true ])` |
+| Session detach | `session.DisconnectAsync()` sends `session.detach` (falls back to `session.destroy` on older CLIs) |
+| Message source | `MessageOptions.Source = Some MessageSource.User` / `MessageSource.System` / `MessageSource.agent "id"` |
+| Managed settings | `client.ClearManagedSettingsCacheAsync()`, `session.GetManagedSettingsAsync()`, `session.RecheckPolicyHelperAsync()` |
+| Model allowlist | `AllowedModels = Some [ ... ]` |
+| OAuth client metadata | `AuthClientIdMetadataUrl = Some "https://..."` |
+| Max output tokens | `ModelCapabilities = Some (ModelLimitsOverride.toCapabilities { ... MaxOutputTokens = Some 16384 ... })` (`max_output_tokens`) |
+| Structured output | `MessageOptions.ResponseSchema = Some schema`; `session.SendAndWaitStructuredAsync(options, schema)` |
+| Name & directories | `Name` (create only), `AgentDirectories`, `HookDirectories` |
+| Runtime toggles | `InteractiveUser`, `ExcludedManagedSettings`, `EnforceManagedModelDefaults`; create-only `TrustWorkingDirectory`, `RefreshCustomInstructions`; resume-only `AllowTranscriptRecovery` |
+| Image generation | `ImageGeneration = Some { Enabled = Some true; Watermark = Some false; SaveToDisk = Some true }` |
+| Autopilot | `Autopilot = Some { ContinuationEnabled = Some true; MaxContinues = Some 5 }` |
+| Sub-agent hooks | `OnSubagentStart` / `OnSubagentStop` (dispatched from `hooks.invoke`; setting either sends `hooks: true`) |
+| BYOK provider | `Provider = Some { ProviderConfig.create url with ModelProvider = Some ModelProvider.Ollama; ApiKeyCommand = Some "..." }` |
+
+```fsharp
+open System.Text.Json
+open CopilotSDK.Supercharged.FSharp
+
+// Identify the embedding application (sent with `connect` at startup)
+use client =
+    CopilotClient.create
+        { CopilotClientOptions.defaults with
+            ClientInfo =
+                Some { CopilotClientInfo.empty with
+                        ApplicationName = Some "my-ide"
+                        ApplicationVersion = Some "1.4.0"
+                        IntegrationName = Some "copilot-fsharp" } }
+
+let config =
+    { SessionConfig.defaults with
+        Name = Some "release-triage"
+        AutoTier = Some AutoTier.Intelligence            // experimental; sent as capi.autoTier
+        AskUserVariant = Some AskUserVariant.Elicitation
+        SandboxConfig = Some { SandboxConfig.create true with AllowBypass = Some true }
+        FeatureFlags = Some (dict [ "my-flag", true ])
+        AllowedModels = Some [ "gpt-5"; "claude-sonnet-4.5" ]
+        AuthClientIdMetadataUrl = Some "https://example.com/oauth/client.json"
+        AgentDirectories = Some [ "./agents" ]
+        HookDirectories = Some [ "./hooks" ]
+        InteractiveUser = Some false
+        ExcludedManagedSettings = Some [ "model" ]
+        EnforceManagedModelDefaults = Some true
+        TrustWorkingDirectory = Some TrustWorkingDirectory.Session
+        RefreshCustomInstructions = Some true
+        ImageGeneration = Some { Enabled = Some true; Watermark = Some false; SaveToDisk = Some true }
+        Autopilot = Some { ContinuationEnabled = Some true; MaxContinues = Some 5 }
+        ModelCapabilities =
+            Some (ModelLimitsOverride.toCapabilities
+                    { MaxPromptTokens = None; MaxOutputTokens = Some 16384; MaxContextWindowTokens = None })
+        // Per-session GitHub tokens (do not combine with GitHubToken)
+        GitHubTokenProvider =
+            Some (fun args -> async {
+                // args.Host, args.SessionId, args.Reason ("initial" | "refresh")
+                return GitHubTokenGranted { AccessToken = loadToken args.Host; TokenType = None; ExpiresIn = 28800 } })
+        // Sub-agent lifecycle hooks
+        OnSubagentStart =
+            Some (fun input -> async {
+                return Some { AdditionalContext = Some (sprintf "You are %s; be concise." input.AgentName) } })
+        OnSubagentStop =
+            Some (fun input -> async {
+                return Some { Decision = None; Reason = None; ModifiedResponse = Some (input.Response.Trim()) } })
+        // BYOK provider with a key fetched by a command before each request
+        Provider =
+            Some { ProviderConfig.create "http://localhost:11434/v1" with
+                    ProviderType = Some "openai"
+                    ModelProvider = Some ModelProvider.Ollama
+                    ApiKeyCommand = Some "op read op://dev/ollama/key" } }
+
+let! session = client.CreateSessionAsync(config)
+
+// Message source and structured output
+let! _ = session.SendAsync({ MessageOptions.create "Summarize the diff" with Source = Some (MessageSource.agent "reviewer") })
+let schema =
+    JsonDocument.Parse("""{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}""").RootElement
+let! result = session.SendAndWaitStructuredAsync(MessageOptions.create "What is 2 + 2?", schema)
+printfn "%s" (result.GetProperty("answer").GetString())
+
+// Auto tier and managed settings
+let! ack = session.SetAutoTierAsync(Some AutoTier.Fast)   // None returns to default Auto routing
+let! settings = session.GetManagedSettingsAsync()
+let! policy = session.RecheckPolicyHelperAsync()
+let! _ = client.ClearManagedSettingsCacheAsync()
+
+// Detach (state on disk is kept) and resume later
+do! session.DisconnectAsync()
+let! resumed =
+    client.ResumeSessionAsync(
+        { ResumeSessionConfig.create session.SessionId with
+            AllowTranscriptRecovery = Some true
+            AutoTier = Some AutoTier.Balance })
+```
+
+### Parity notes
+
+- Host-owned external tool cancellation (`external_tool.requested` / `external_tool.completed`) is
+  N/A for this SDK: tool invocations arrive on the SDK's tool-call request path.
+- Experimental host-integration callbacks — skill provider, installation confirmation, extension
+  launch provider, and Entra/Kerberos auth callbacks — are not yet available in this SDK.
+- This SDK has no `SetModel` method, so the optional `autoTier` argument of
+  `session.model.switchTo` is not exposed; use `SetAutoTierAsync` instead.
 
 ## Recent Features (v2.4–v2.5)
 

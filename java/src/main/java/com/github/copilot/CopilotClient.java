@@ -82,6 +82,10 @@ public class CopilotClient {
     private Types.CopilotRequestHandler requestHandler;
     /** BYOK provider that supplies per-session bearer tokens, when configured. */
     private Types.BearerTokenProvider bearerTokenProvider;
+    /** Integrating application identity sent on the {@code connect} handshake, when configured. */
+    private Types.ClientInfo clientInfo;
+    /** Session GitHub token providers keyed by opaque registration ID (served via {@code gitHubToken.getToken}). */
+    private final ConcurrentHashMap<String, GitHubTokenRegistration> githubTokenProviders = new ConcurrentHashMap<>();
 
     /**
      * Creates a new CopilotClient with default options.
@@ -133,6 +137,7 @@ public class CopilotClient {
             // Upstream-sync client-side interceptors: consulted by the runtime transport when present.
             if (options.getRequestHandler() != null) this.requestHandler = options.getRequestHandler();
             if (options.getBearerTokenProvider() != null) this.bearerTokenProvider = options.getBearerTokenProvider();
+            if (options.getClientInfo() != null) this.clientInfo = options.getClientInfo();
         }
 
         this.isExternalServer = external;
@@ -171,6 +176,7 @@ public class CopilotClient {
                 startCLIServer();
             }
             connectToServer();
+            sendConnectHandshake();
             verifyProtocolVersion();
 
             // If a session filesystem provider was configured, register it
@@ -205,6 +211,7 @@ public class CopilotClient {
             }
         }
         sessions.clear();
+        githubTokenProviders.clear();
 
         if (rpcClient != null) {
             rpcClient.stop();
@@ -235,6 +242,7 @@ public class CopilotClient {
     /** Forcefully stops the CLI server without graceful cleanup. */
     public void forceStop() {
         sessions.clear();
+        githubTokenProviders.clear();
         if (rpcClient != null) { rpcClient.stop(); rpcClient = null; }
         synchronized (modelsCacheLock) { modelsCache = null; }
         if (tcpSocket != null) { try { tcpSocket.close(); } catch (IOException ignored) {} tcpSocket = null; }
@@ -248,11 +256,20 @@ public class CopilotClient {
      */
     @SuppressWarnings("unchecked")
     public CopilotSession createSession(SessionConfig config) throws Exception {
-        ensureConnected();
         if (config == null) config = new SessionConfig();
+        validateGitHubTokenOptions(config);
+        ensureConnected();
 
-        Map<String, Object> payload = buildCreateSessionPayload(config);
-        Map<String, Object> response = rpcClient.request("session.create", payload);
+        String registrationId = registerGitHubTokenProvider(config.getGitHubTokenProvider(), config.getSessionId());
+        Map<String, Object> payload = buildCreateSessionPayload(config, false);
+        if (registrationId != null) payload.put("gitHubTokenProviderRegistrationId", registrationId);
+        Map<String, Object> response;
+        try {
+            response = rpcClient.request("session.create", payload);
+        } catch (Exception e) {
+            if (registrationId != null) githubTokenProviders.remove(registrationId);
+            throw e;
+        }
 
         String sessionId = (String) response.get("sessionId");
         String workspacePath = (String) response.get("workspacePath");
@@ -261,6 +278,7 @@ public class CopilotClient {
         if (config.getOnPermissionRequest() != null) session.registerPermissionHandler(config.getOnPermissionRequest());
         if (config.getOnUserInputRequest() != null) session.registerUserInputHandler(config.getOnUserInputRequest());
         if (config.getHooks() != null) session.registerHooks(config.getHooks());
+        commitGitHubTokenProvider(session, registrationId);
         sessions.put(sessionId, session);
         return session;
     }
@@ -275,12 +293,21 @@ public class CopilotClient {
      */
     @SuppressWarnings("unchecked")
     public CopilotSession resumeSession(String sessionId, SessionConfig config) throws Exception {
-        ensureConnected();
         if (config == null) config = new SessionConfig();
+        validateGitHubTokenOptions(config);
+        ensureConnected();
 
-        Map<String, Object> payload = buildCreateSessionPayload(config);
+        String registrationId = registerGitHubTokenProvider(config.getGitHubTokenProvider(), sessionId);
+        Map<String, Object> payload = buildCreateSessionPayload(config, true);
         payload.put("sessionId", sessionId);
-        Map<String, Object> response = rpcClient.request("session.resume", payload);
+        if (registrationId != null) payload.put("gitHubTokenProviderRegistrationId", registrationId);
+        Map<String, Object> response;
+        try {
+            response = rpcClient.request("session.resume", payload);
+        } catch (Exception e) {
+            if (registrationId != null) githubTokenProviders.remove(registrationId);
+            throw e;
+        }
 
         String resumedId = (String) response.get("sessionId");
         String workspacePath = (String) response.get("workspacePath");
@@ -289,6 +316,7 @@ public class CopilotClient {
         if (config.getOnPermissionRequest() != null) session.registerPermissionHandler(config.getOnPermissionRequest());
         if (config.getOnUserInputRequest() != null) session.registerUserInputHandler(config.getOnUserInputRequest());
         if (config.getHooks() != null) session.registerHooks(config.getHooks());
+        commitGitHubTokenProvider(session, registrationId);
         sessions.put(resumedId, session);
         return session;
     }
@@ -405,6 +433,15 @@ public class CopilotClient {
         }
     }
 
+    /**
+     * Clears the runtime's cached enterprise managed settings for every account so the next
+     * session resolution re-fetches server policy.
+     */
+    public void clearManagedSettingsCache() throws Exception {
+        ensureConnected();
+        rpcClient.request("managedSettings.clearCache", new HashMap<String, Object>());
+    }
+
     /** Subscribes to all session lifecycle events. */
     public Runnable on(SessionLifecycleHandler handler) {
         lifecycleHandlers.add(handler);
@@ -428,7 +465,86 @@ public class CopilotClient {
         throw new IllegalStateException("Client not connected. Call start() first.");
     }
 
-    private Map<String, Object> buildCreateSessionPayload(SessionConfig config) {
+    /**
+     * Declares the integrating application's identity via {@code connect} before the ping
+     * handshake. Skipped when no client info field is set; ignored by older CLIs.
+     */
+    private void sendConnectHandshake() throws Exception {
+        Map<String, Object> wire = clientInfo != null ? clientInfo.toWire() : null;
+        if (wire == null) return;
+        Map<String, Object> params = new HashMap<>();
+        params.put("clientInfo", wire);
+        try {
+            rpcClient.request("connect", params);
+        } catch (Exception e) {
+            if (!JsonRpcClient.isMethodNotFound(e, "connect")) throw e;
+        }
+    }
+
+    private static void validateGitHubTokenOptions(SessionConfig config) {
+        if (config.getGitHubTokenProvider() != null && (config.getGitHubToken() != null || config.getAuthToken() != null)) {
+            throw new IllegalArgumentException("gitHubToken and gitHubTokenProvider are mutually exclusive");
+        }
+    }
+
+    private String registerGitHubTokenProvider(GitHubTokenProvider provider, String sessionId) {
+        if (provider == null) return null;
+        String registrationId = UUID.randomUUID().toString();
+        githubTokenProviders.put(registrationId, new GitHubTokenRegistration(provider, sessionId));
+        return registrationId;
+    }
+
+    /**
+     * Binds a successful create/resume to its provider registration: drops registrations committed
+     * by an earlier open of the same session and removes the new one when the session is destroyed.
+     */
+    private void commitGitHubTokenProvider(CopilotSession session, String registrationId) {
+        String sessionId = session.getSessionId();
+        if (sessionId != null) {
+            githubTokenProviders.entrySet().removeIf(entry -> entry.getValue().committed
+                && sessionId.equals(entry.getValue().sessionId)
+                && !entry.getKey().equals(registrationId));
+        }
+        if (registrationId == null) return;
+        GitHubTokenRegistration registration = githubTokenProviders.get(registrationId);
+        if (registration == null) return;
+        registration.sessionId = sessionId;
+        registration.committed = true;
+        session.registerOnDestroyed(() -> githubTokenProviders.remove(registrationId));
+    }
+
+    private Map<String, Object> handleGitHubTokenRequest(Map<String, Object> params) throws Exception {
+        Object registrationId = params.get("registrationId");
+        GitHubTokenRegistration registration = registrationId instanceof String
+            ? githubTokenProviders.get((String) registrationId) : null;
+        if (registration == null) {
+            throw new IllegalStateException("No GitHub token provider registered for registration ID \"" + registrationId + "\"");
+        }
+        Object requestedSessionId = params.get("sessionId");
+        GitHubTokenProviderArgs args = new GitHubTokenProviderArgs(
+            (String) params.get("host"),
+            requestedSessionId instanceof String ? (String) requestedSessionId : registration.sessionId,
+            (String) params.get("reason"));
+        GitHubTokenProviderResult result = registration.provider.getToken(args);
+        if (result == null) {
+            throw new IllegalStateException("GitHub token provider returned no result");
+        }
+        return result.toMap();
+    }
+
+    /** A session's GitHub token provider registration. */
+    private static final class GitHubTokenRegistration {
+        final GitHubTokenProvider provider;
+        volatile String sessionId;
+        volatile boolean committed;
+
+        GitHubTokenRegistration(GitHubTokenProvider provider, String sessionId) {
+            this.provider = provider;
+            this.sessionId = sessionId;
+        }
+    }
+
+    private Map<String, Object> buildCreateSessionPayload(SessionConfig config, boolean resume) {
         Map<String, Object> payload = new HashMap<>();
         if (config.getModel() != null) payload.put("model", config.getModel());
         if (config.getSessionId() != null) payload.put("sessionId", config.getSessionId());
@@ -465,6 +581,8 @@ public class CopilotClient {
             if (hooks.getOnSessionStart() != null) hookTypes.add("sessionStart");
             if (hooks.getOnSessionEnd() != null) hookTypes.add("sessionEnd");
             if (hooks.getOnErrorOccurred() != null) hookTypes.add("errorOccurred");
+            if (hooks.getOnSubagentStart() != null) hookTypes.add("subagentStart");
+            if (hooks.getOnSubagentStop() != null) hookTypes.add("subagentStop");
             payload.put("hookTypes", hookTypes);
         }
         if (config.getWorkingDirectory() != null) payload.put("workingDirectory", config.getWorkingDirectory());
@@ -511,7 +629,6 @@ public class CopilotClient {
             payload.put("memory", memWire);
         }
         if (config.getOtlpProtocol() != null) payload.put("otlpProtocol", config.getOtlpProtocol());
-        if (config.getEnableWebSocketResponses() != null) payload.put("enableWebSocketResponses", config.getEnableWebSocketResponses());
         if (config.getExpAssignments() != null) payload.put("expAssignments", config.getExpAssignments());
         if (config.getRewindEnabled() != null) payload.put("rewindEnabled", config.getRewindEnabled());
         if (config.getAdditionalDirectories() != null) payload.put("additionalDirectories", config.getAdditionalDirectories());
@@ -524,23 +641,62 @@ public class CopilotClient {
         if (config.getContentExclusion() != null) payload.put("contentExclusion", config.getContentExclusion());
         // MCP OAuth host token handler: signal to the runtime that a handler is registered.
         if (config.getOnMcpAuthRequest() != null) payload.put("mcpAuthHandler", true);
+
+        // --- v2.6.0 upstream-sync session options ---
+        // CAPI provider options: the runtime only accepts autoTier/enableWebSocketResponses under "capi".
+        Map<String, Object> capi = new HashMap<>();
+        if (config.getAutoTier() != null) capi.put("autoTier", config.getAutoTier());
+        if (config.getEnableWebSocketResponses() != null) capi.put("enableWebSocketResponses", config.getEnableWebSocketResponses());
+        if (!capi.isEmpty()) payload.put("capi", capi);
+        if (config.getAskUserVariant() != null) payload.put("askUserVariant", config.getAskUserVariant());
+        if (config.getSandboxConfig() != null) payload.put("sandboxConfig", config.getSandboxConfig().toMap());
+        if (config.getFeatureFlags() != null) payload.put("featureFlags", config.getFeatureFlags());
+        if (config.getAllowedModels() != null) payload.put("allowedModels", config.getAllowedModels());
+        if (config.getAuthClientIdMetadataUrl() != null) payload.put("authClientIdMetadataUrl", config.getAuthClientIdMetadataUrl());
+        if (config.getAgentDirectories() != null) payload.put("agentDirectories", config.getAgentDirectories());
+        if (config.getHookDirectories() != null) payload.put("hookDirectories", config.getHookDirectories());
+        if (config.getInteractiveUser() != null) payload.put("interactiveUser", config.getInteractiveUser());
+        if (config.getExcludedManagedSettings() != null) payload.put("excludedManagedSettings", config.getExcludedManagedSettings());
+        if (config.getEnforceManagedModelDefaults() != null) payload.put("enforceManagedModelDefaults", config.getEnforceManagedModelDefaults());
+        if (config.getImageGeneration() != null) payload.put("imageGeneration", config.getImageGeneration().toMap());
+        if (config.getAutopilot() != null) payload.put("autopilot", config.getAutopilot().toMap());
+        if (resume) {
+            if (config.getAllowTranscriptRecovery() != null) payload.put("allowTranscriptRecovery", config.getAllowTranscriptRecovery());
+        } else {
+            if (config.getName() != null) payload.put("name", config.getName());
+            if (config.getTrustWorkingDirectory() != null) payload.put("trustWorkingDirectory", config.getTrustWorkingDirectory());
+            if (config.getRefreshCustomInstructions() != null) payload.put("refreshCustomInstructions", config.getRefreshCustomInstructions());
+        }
         return payload;
     }
 
     /**
      * Builds the {@code session.send} JSON-RPC payload, including the upstream-sync
-     * message options (agentMode, displayPrompt, requestHeaders).
+     * message options (agentMode, displayPrompt, requestHeaders, source, responseSchema).
      */
     static Map<String, Object> buildSendPayload(String sessionId, MessageOptions options) {
         Map<String, Object> params = new HashMap<>();
         params.put("sessionId", sessionId);
         params.put("prompt", options.getPrompt());
+        if (options.getSource() != null) params.put("source", options.getSource());
         if (options.getAttachments() != null) params.put("attachments", options.getAttachments());
         if (options.getMode() != null) params.put("mode", options.getMode());
         if (options.getAgentMode() != null) params.put("agentMode", options.getAgentMode());
         if (options.getDisplayPrompt() != null) params.put("displayPrompt", options.getDisplayPrompt());
         if (options.getRequestHeaders() != null) params.put("requestHeaders", options.getRequestHeaders());
-        if (options.getResponseFormat() != null) params.put("responseFormat", options.getResponseFormat());
+        if (options.getResponseSchema() != null) {
+            // Structured output takes the responseFormat slot over the legacy string format.
+            Map<String, Object> jsonSchema = new HashMap<>();
+            jsonSchema.put("name", "response");
+            jsonSchema.put("strict", true);
+            jsonSchema.put("schema", options.getResponseSchema());
+            Map<String, Object> responseFormat = new HashMap<>();
+            responseFormat.put("type", "json_schema");
+            responseFormat.put("jsonSchema", jsonSchema);
+            params.put("responseFormat", responseFormat);
+        } else if (options.getResponseFormat() != null) {
+            params.put("responseFormat", options.getResponseFormat());
+        }
         if (options.getImageOptions() != null) params.put("imageOptions", options.getImageOptions());
         return params;
     }
@@ -713,6 +869,7 @@ public class CopilotClient {
         rpcClient.setRequestHandler("permission.request", params -> handlePermissionRequest(params));
         rpcClient.setRequestHandler("userInput.request", params -> handleUserInputRequest(params));
         rpcClient.setRequestHandler("hooks.invoke", params -> handleHooksInvoke(params));
+        rpcClient.setRequestHandler("gitHubToken.getToken", params -> handleGitHubTokenRequest(params));
     }
 
     @SuppressWarnings("unchecked")

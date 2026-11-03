@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 #include "cJSON.h"
 
 #ifdef _WIN32
@@ -76,6 +77,9 @@ struct copilot_session {
     copilot_exit_plan_mode_handler_fn exit_plan_mode_handler;
     void *exit_plan_mode_user_data;
 
+    /* GitHub token provider registration (removed on destroy) */
+    char *github_token_registration_id;
+
     /* SendAndWait synchronization */
     pthread_mutex_t idle_mutex;
     pthread_cond_t idle_cond;
@@ -92,6 +96,15 @@ struct copilot_session {
  * Internal client structure
  * ============================================================================ */
 
+/* GitHub token provider registration (gitHubToken.getToken) */
+typedef struct github_token_registration {
+    char *registration_id;
+    char *session_id;  /* NULL until the session ID is known */
+    copilot_github_token_provider_fn provider;
+    void *user_data;
+    struct github_token_registration *next;
+} github_token_registration_t;
+
 struct copilot_client {
     /* Options (owned copies) */
     char *cli_path;
@@ -105,9 +118,20 @@ struct copilot_client {
     char **extra_args;
     int extra_args_count;
 
+    /* Client info for the connect handshake (owned copies) */
+    char *client_info_application_name;
+    char *client_info_application_version;
+    char *client_info_integration_name;
+    char *client_info_integration_version;
+
     /* Trace context */
     copilot_trace_context_provider_fn trace_context_provider;
     void *trace_context_user_data;
+
+    /* GitHub token providers */
+    github_token_registration_t *github_token_providers;
+    unsigned long github_token_seq;
+    pthread_mutex_t github_token_mutex;
 
     /* State */
     copilot_connection_state_t state;
@@ -223,6 +247,165 @@ static void remove_session(copilot_client_t *client, copilot_session_t *session)
         pp = &(*pp)->next;
     }
     pthread_mutex_unlock(&client->sessions_mutex);
+}
+
+/* ============================================================================
+ * Internal: JSON-RPC helpers
+ * ============================================================================ */
+
+/* JSON-RPC "method not found" error code. */
+#define COPILOT_JSONRPC_METHOD_NOT_FOUND (-32601)
+
+/* True when an RPC failed because the connected CLI does not implement the method. */
+static bool is_method_not_found_error(int err_code, const char *err_msg)
+{
+    return err_code == COPILOT_JSONRPC_METHOD_NOT_FOUND ||
+           (err_msg && strstr(err_msg, "Unhandled method") != NULL);
+}
+
+/*
+ * Releases a session on the server with session.detach, falling back to
+ * session.destroy on CLIs that predate session.detach. Best-effort.
+ */
+static void release_session_on_server(json_rpc_client_t *rpc, const char *session_id,
+                                      int timeout_ms)
+{
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "sessionId", session_id);
+
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(rpc, "session.detach", params, timeout_ms,
+                                            &err_code, &err_msg);
+    if (!result && is_method_not_found_error(err_code, err_msg)) {
+        free(err_msg);
+        err_msg = NULL;
+        err_code = 0;
+        result = json_rpc_client_request(rpc, "session.destroy", params, timeout_ms,
+                                         &err_code, &err_msg);
+    }
+    cJSON_Delete(params);
+
+    if (result) cJSON_Delete(result);
+    free(err_msg);
+}
+
+/* Adds a NULL-terminated string list as a JSON array (no-op when list is NULL). */
+static void add_string_array(cJSON *obj, const char *key, const char **list)
+{
+    if (!list) return;
+    cJSON *arr = cJSON_CreateArray();
+    for (const char **p = list; *p; p++) {
+        cJSON_AddItemToArray(arr, cJSON_CreateString(*p));
+    }
+    cJSON_AddItemToObject(obj, key, arr);
+}
+
+/* ============================================================================
+ * Internal: GitHub token provider registry (gitHubToken.getToken)
+ * ============================================================================ */
+
+static void free_github_token_registration(github_token_registration_t *reg)
+{
+    if (!reg) return;
+    free(reg->registration_id);
+    free(reg->session_id);
+    free(reg);
+}
+
+/*
+ * Registers a session's GitHub token provider under a fresh UUID-like ID.
+ * Returns a heap copy of the registration ID (caller frees), or NULL on OOM.
+ */
+static char *register_github_token_provider(copilot_client_t *client,
+                                            copilot_github_token_provider_fn provider,
+                                            void *user_data,
+                                            const char *session_id)
+{
+    github_token_registration_t *reg = calloc(1, sizeof(github_token_registration_t));
+    if (!reg) return NULL;
+
+    pthread_mutex_lock(&client->github_token_mutex);
+    unsigned long seq = ++client->github_token_seq;
+    pthread_mutex_unlock(&client->github_token_mutex);
+
+    char id_buf[64];
+    snprintf(id_buf, sizeof(id_buf), "%08lx-%04x-4%03x-%04x-%04x%08lx",
+             (unsigned long)time(NULL) & 0xffffffffUL,
+             (unsigned)rand() & 0xffffu,
+             (unsigned)rand() & 0x0fffu,
+             ((unsigned)rand() & 0x3fffu) | 0x8000u,
+             (unsigned)((uintptr_t)client & 0xffffu),
+             seq & 0xffffffffUL);
+
+    reg->registration_id = strdup(id_buf);
+    reg->session_id = session_id ? strdup(session_id) : NULL;
+    reg->provider = provider;
+    reg->user_data = user_data;
+
+    char *id_copy = strdup(id_buf);
+    if (!reg->registration_id || (session_id && !reg->session_id) || !id_copy) {
+        free(id_copy);
+        free_github_token_registration(reg);
+        return NULL;
+    }
+
+    pthread_mutex_lock(&client->github_token_mutex);
+    reg->next = client->github_token_providers;
+    client->github_token_providers = reg;
+    pthread_mutex_unlock(&client->github_token_mutex);
+
+    return id_copy;
+}
+
+/* Records the session ID a registration belongs to once it is known. */
+static void assign_github_token_provider_session(copilot_client_t *client,
+                                                 const char *registration_id,
+                                                 const char *session_id)
+{
+    if (!session_id) return;
+
+    pthread_mutex_lock(&client->github_token_mutex);
+    for (github_token_registration_t *r = client->github_token_providers; r; r = r->next) {
+        if (strcmp(r->registration_id, registration_id) == 0) {
+            char *copy = strdup(session_id);
+            if (copy) {
+                free(r->session_id);
+                r->session_id = copy;
+            }
+            break;
+        }
+    }
+    pthread_mutex_unlock(&client->github_token_mutex);
+}
+
+static void unregister_github_token_provider(copilot_client_t *client, const char *registration_id)
+{
+    pthread_mutex_lock(&client->github_token_mutex);
+    github_token_registration_t **pp = &client->github_token_providers;
+    while (*pp) {
+        if (strcmp((*pp)->registration_id, registration_id) == 0) {
+            github_token_registration_t *reg = *pp;
+            *pp = reg->next;
+            free_github_token_registration(reg);
+            break;
+        }
+        pp = &(*pp)->next;
+    }
+    pthread_mutex_unlock(&client->github_token_mutex);
+}
+
+static void clear_github_token_providers(copilot_client_t *client)
+{
+    pthread_mutex_lock(&client->github_token_mutex);
+    github_token_registration_t *reg = client->github_token_providers;
+    while (reg) {
+        github_token_registration_t *next = reg->next;
+        free_github_token_registration(reg);
+        reg = next;
+    }
+    client->github_token_providers = NULL;
+    pthread_mutex_unlock(&client->github_token_mutex);
 }
 
 /* ============================================================================
@@ -681,6 +864,91 @@ static cJSON *on_exit_plan_mode_request(const char *method, cJSON *params, void 
 }
 
 /* ============================================================================
+ * Internal: GitHub token request handler (gitHubToken.getToken)
+ * ============================================================================ */
+
+static cJSON *on_github_token_get_token(const char *method, cJSON *params, void *user_data,
+                                        int *out_error_code, char **out_error_message)
+{
+    (void)method;
+    copilot_client_t *client = (copilot_client_t *)user_data;
+
+    cJSON *reg_item = cJSON_GetObjectItem(params, "registrationId");
+    cJSON *host_item = cJSON_GetObjectItem(params, "host");
+    cJSON *sid_item = cJSON_GetObjectItem(params, "sessionId");
+    cJSON *reason_item = cJSON_GetObjectItem(params, "reason");
+
+    if (!reg_item || !cJSON_IsString(reg_item)) {
+        *out_error_code = -32602;
+        *out_error_message = strdup("Invalid gitHubToken.getToken params");
+        return NULL;
+    }
+
+    copilot_github_token_provider_fn provider = NULL;
+    void *provider_user_data = NULL;
+    char *registered_session_id = NULL;
+
+    pthread_mutex_lock(&client->github_token_mutex);
+    for (github_token_registration_t *r = client->github_token_providers; r; r = r->next) {
+        if (strcmp(r->registration_id, reg_item->valuestring) == 0) {
+            provider = r->provider;
+            provider_user_data = r->user_data;
+            registered_session_id = r->session_id ? strdup(r->session_id) : NULL;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&client->github_token_mutex);
+
+    if (!provider) {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "No GitHub token provider registered for registration ID \"%s\"",
+                 reg_item->valuestring);
+        *out_error_code = -32603;
+        *out_error_message = strdup(msg);
+        return NULL;
+    }
+
+    copilot_github_token_provider_args_t args;
+    memset(&args, 0, sizeof(args));
+    args.host = (host_item && cJSON_IsString(host_item)) ? host_item->valuestring : "";
+    args.session_id = (sid_item && cJSON_IsString(sid_item)) ? sid_item->valuestring
+                                                              : registered_session_id;
+    args.reason = (reason_item && cJSON_IsString(reason_item)) ? reason_item->valuestring
+                                                                : "initial";
+
+    copilot_github_token_result_t token_result;
+    memset(&token_result, 0, sizeof(token_result));
+
+    copilot_error_t err = provider(&args, provider_user_data, &token_result);
+    free(registered_session_id);
+
+    cJSON *result = NULL;
+    if (err != COPILOT_OK) {
+        *out_error_code = -32603;
+        *out_error_message = strdup("GitHub token provider failed");
+    } else if (token_result.kind == COPILOT_GITHUB_TOKEN_RESULT_CANCELLED) {
+        result = cJSON_CreateObject();
+        cJSON_AddStringToObject(result, "kind", "cancelled");
+    } else if (!token_result.access_token) {
+        *out_error_code = -32603;
+        *out_error_message = strdup("GitHub token provider returned no access token");
+    } else {
+        result = cJSON_CreateObject();
+        cJSON_AddStringToObject(result, "kind", "token");
+        cJSON_AddStringToObject(result, "accessToken", token_result.access_token);
+        if (token_result.token_type) {
+            cJSON_AddStringToObject(result, "tokenType", token_result.token_type);
+        }
+        cJSON_AddNumberToObject(result, "expiresIn", (double)token_result.expires_in);
+    }
+
+    free(token_result.access_token);
+    free(token_result.token_type);
+    return result;
+}
+
+/* ============================================================================
  * Internal: spawn CLI process
  * ============================================================================ */
 
@@ -915,6 +1183,54 @@ static copilot_error_t verify_protocol_version(copilot_client_t *client)
 }
 
 /* ============================================================================
+ * Internal: connect handshake (clientInfo)
+ * ============================================================================ */
+
+static void add_non_empty_string(cJSON *obj, const char *key, const char *value)
+{
+    if (value && value[0] != '\0') {
+        cJSON_AddStringToObject(obj, key, value);
+    }
+}
+
+/*
+ * Declares the integrating application's identity via `connect` before the
+ * ping handshake. Skipped when no client_info field is set; ignored by older
+ * CLIs that do not implement `connect`.
+ */
+static copilot_error_t send_connect_handshake(copilot_client_t *client)
+{
+    cJSON *info = cJSON_CreateObject();
+    add_non_empty_string(info, "editorName", client->client_info_application_name);
+    add_non_empty_string(info, "editorVersion", client->client_info_application_version);
+    add_non_empty_string(info, "extensionName", client->client_info_integration_name);
+    add_non_empty_string(info, "extensionVersion", client->client_info_integration_version);
+
+    if (cJSON_GetArraySize(info) == 0) {
+        cJSON_Delete(info);
+        return COPILOT_OK;
+    }
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddItemToObject(params, "clientInfo", info);
+
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(client->rpc, "connect", params, 10000,
+                                            &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        bool legacy = is_method_not_found_error(err_code, err_msg);
+        free(err_msg);
+        return legacy ? COPILOT_OK : COPILOT_ERROR_RPC;
+    }
+
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
+/* ============================================================================
  * Internal: inject trace context into RPC params
  * ============================================================================ */
 
@@ -935,7 +1251,7 @@ static void inject_trace_context(copilot_client_t *client, cJSON *params)
  * Internal: build session create/resume params
  * ============================================================================ */
 
-static cJSON *build_session_params(const copilot_session_config_t *config)
+static cJSON *build_session_params(const copilot_session_config_t *config, bool is_resume)
 {
     cJSON *params = cJSON_CreateObject();
 
@@ -1032,6 +1348,12 @@ static cJSON *build_session_params(const copilot_session_config_t *config)
             cJSON_AddStringToObject(azure, "apiVersion", config->provider->azure_api_version);
             cJSON_AddItemToObject(prov, "azure", azure);
         }
+        if (config->provider->model_provider) {
+            cJSON_AddStringToObject(prov, "modelProvider", config->provider->model_provider);
+        }
+        if (config->provider->api_key_command) {
+            cJSON_AddStringToObject(prov, "apiKeyCommand", config->provider->api_key_command);
+        }
         cJSON_AddItemToObject(params, "provider", prov);
     }
 
@@ -1094,9 +1416,6 @@ static cJSON *build_session_params(const copilot_session_config_t *config)
     if (config->otlp_protocol) {
         cJSON_AddStringToObject(params, "otlpProtocol", config->otlp_protocol);
     }
-    if (config->has_enable_web_socket_responses) {
-        cJSON_AddBoolToObject(params, "enableWebSocketResponses", config->enable_web_socket_responses);
-    }
     if (config->exp_assignments_json) {
         cJSON *exp = cJSON_Parse(config->exp_assignments_json);
         if (exp) {
@@ -1156,6 +1475,131 @@ static cJSON *build_session_params(const copilot_session_config_t *config)
         cJSON *as = cJSON_Parse(config->args_schema_json);
         if (as) {
             cJSON_AddItemToObject(params, "argsSchema", as);
+        }
+    }
+
+    /* --- v2.6.0 upstream-sync session options (parity with @github/copilot-sdk) --- */
+
+    /* Model capabilities override (modelCapabilities), with optional limits.max_output_tokens */
+    {
+        cJSON *caps = config->model_capabilities_json ? cJSON_Parse(config->model_capabilities_json) : NULL;
+        if (config->has_max_output_tokens) {
+            if (!caps || !cJSON_IsObject(caps)) {
+                cJSON_Delete(caps);
+                caps = cJSON_CreateObject();
+            }
+            cJSON *limits = cJSON_GetObjectItem(caps, "limits");
+            if (!limits || !cJSON_IsObject(limits)) {
+                cJSON_DeleteItemFromObject(caps, "limits");
+                limits = cJSON_AddObjectToObject(caps, "limits");
+            }
+            cJSON_DeleteItemFromObject(limits, "max_output_tokens");
+            cJSON_AddNumberToObject(limits, "max_output_tokens", config->max_output_tokens);
+        }
+        if (caps) {
+            cJSON_AddItemToObject(params, "modelCapabilities", caps);
+        }
+    }
+
+    /* CAPI options: the runtime only accepts enableWebSocketResponses under `capi` */
+    if (config->auto_tier || config->has_enable_web_socket_responses) {
+        cJSON *capi = cJSON_CreateObject();
+        if (config->auto_tier) {
+            cJSON_AddStringToObject(capi, "autoTier", config->auto_tier);
+        }
+        if (config->has_enable_web_socket_responses) {
+            cJSON_AddBoolToObject(capi, "enableWebSocketResponses", config->enable_web_socket_responses);
+        }
+        cJSON_AddItemToObject(params, "capi", capi);
+    }
+    if (config->ask_user_variant) {
+        cJSON_AddStringToObject(params, "askUserVariant", config->ask_user_variant);
+    }
+    if (config->sandbox_config) {
+        const copilot_sandbox_config_t *sc = config->sandbox_config;
+        cJSON *sb = cJSON_CreateObject();
+        cJSON_AddBoolToObject(sb, "enabled", sc->enabled);
+        if (sc->user_policy_json) {
+            cJSON *policy = cJSON_Parse(sc->user_policy_json);
+            if (policy) {
+                cJSON_AddItemToObject(sb, "userPolicy", policy);
+            }
+        }
+        if (sc->has_add_current_working_directory) {
+            cJSON_AddBoolToObject(sb, "addCurrentWorkingDirectory", sc->add_current_working_directory);
+        }
+        if (sc->has_sandbox_mcp_servers) {
+            cJSON_AddBoolToObject(sb, "sandboxMcpServers", sc->sandbox_mcp_servers);
+        }
+        if (sc->has_sandbox_lsp_servers) {
+            cJSON_AddBoolToObject(sb, "sandboxLspServers", sc->sandbox_lsp_servers);
+        }
+        if (sc->has_sandbox_extensions) {
+            cJSON_AddBoolToObject(sb, "sandboxExtensions", sc->sandbox_extensions);
+        }
+        if (sc->has_allow_bypass) {
+            cJSON_AddBoolToObject(sb, "allowBypass", sc->allow_bypass);
+        }
+        cJSON_AddItemToObject(params, "sandboxConfig", sb);
+    }
+    if (config->feature_flags_json) {
+        cJSON *ff = cJSON_Parse(config->feature_flags_json);
+        if (ff) {
+            cJSON_AddItemToObject(params, "featureFlags", ff);
+        }
+    }
+    add_string_array(params, "allowedModels", config->allowed_models);
+    if (config->auth_client_id_metadata_url) {
+        cJSON_AddStringToObject(params, "authClientIdMetadataUrl", config->auth_client_id_metadata_url);
+    }
+    add_string_array(params, "agentDirectories", config->agent_directories);
+    add_string_array(params, "hookDirectories", config->hook_directories);
+    if (config->has_interactive_user) {
+        cJSON_AddBoolToObject(params, "interactiveUser", config->interactive_user);
+    }
+    add_string_array(params, "excludedManagedSettings", config->excluded_managed_settings);
+    if (config->has_enforce_managed_model_defaults) {
+        cJSON_AddBoolToObject(params, "enforceManagedModelDefaults", config->enforce_managed_model_defaults);
+    }
+    if (config->image_generation) {
+        const copilot_image_generation_config_t *ig = config->image_generation;
+        cJSON *img = cJSON_CreateObject();
+        if (ig->has_enabled) {
+            cJSON_AddBoolToObject(img, "enabled", ig->enabled);
+        }
+        if (ig->has_watermark) {
+            cJSON_AddBoolToObject(img, "watermark", ig->watermark);
+        }
+        if (ig->has_save_to_disk) {
+            cJSON_AddBoolToObject(img, "saveToDisk", ig->save_to_disk);
+        }
+        cJSON_AddItemToObject(params, "imageGeneration", img);
+    }
+    if (config->autopilot) {
+        const copilot_autopilot_options_t *ap = config->autopilot;
+        cJSON *auto_obj = cJSON_CreateObject();
+        if (ap->has_continuation_enabled) {
+            cJSON_AddBoolToObject(auto_obj, "continuationEnabled", ap->continuation_enabled);
+        }
+        if (ap->has_max_continues) {
+            cJSON_AddNumberToObject(auto_obj, "maxContinues", ap->max_continues);
+        }
+        cJSON_AddItemToObject(params, "autopilot", auto_obj);
+    }
+
+    if (is_resume) {
+        if (config->has_allow_transcript_recovery) {
+            cJSON_AddBoolToObject(params, "allowTranscriptRecovery", config->allow_transcript_recovery);
+        }
+    } else {
+        if (config->name) {
+            cJSON_AddStringToObject(params, "name", config->name);
+        }
+        if (config->trust_working_directory) {
+            cJSON_AddStringToObject(params, "trustWorkingDirectory", config->trust_working_directory);
+        }
+        if (config->has_refresh_custom_instructions) {
+            cJSON_AddBoolToObject(params, "refreshCustomInstructions", config->refresh_custom_instructions);
         }
     }
 
@@ -1263,6 +1707,24 @@ copilot_client_t *copilot_client_create(const copilot_client_options_t *options)
     client->trace_context_provider = opts.on_get_trace_context;
     client->trace_context_user_data = opts.trace_context_user_data;
 
+    /* Client info for the connect handshake */
+    if (opts.client_info) {
+        const copilot_client_info_t *ci = opts.client_info;
+        client->client_info_application_name =
+            ci->application_name ? strdup(ci->application_name) : NULL;
+        client->client_info_application_version =
+            ci->application_version ? strdup(ci->application_version) : NULL;
+        client->client_info_integration_name =
+            ci->integration_name ? strdup(ci->integration_name) : NULL;
+        client->client_info_integration_version =
+            ci->integration_version ? strdup(ci->integration_version) : NULL;
+    }
+
+    /* GitHub token provider registry */
+    client->github_token_providers = NULL;
+    client->github_token_seq = 0;
+    pthread_mutex_init(&client->github_token_mutex, NULL);
+
 #ifdef _WIN32
     client->process_handle = NULL;
     client->stdin_write = NULL;
@@ -1317,6 +1779,8 @@ copilot_error_t copilot_client_start(copilot_client_t *client)
                                         on_hooks_invoke, client);
     json_rpc_client_set_request_handler(client->rpc, "exitPlanMode.request",
                                         on_exit_plan_mode_request, client);
+    json_rpc_client_set_request_handler(client->rpc, "gitHubToken.getToken",
+                                        on_github_token_get_token, client);
 
     /* Start reader thread */
     if (json_rpc_client_start(client->rpc) != 0) {
@@ -1324,6 +1788,16 @@ copilot_error_t copilot_client_start(copilot_client_t *client)
         client->rpc = NULL;
         client->state = COPILOT_STATE_ERROR;
         return COPILOT_ERROR_IO;
+    }
+
+    /* Declare the integrating application's identity (no-op without client_info) */
+    err = send_connect_handshake(client);
+    if (err != COPILOT_OK) {
+        json_rpc_client_stop(client->rpc);
+        json_rpc_client_free(client->rpc);
+        client->rpc = NULL;
+        client->state = COPILOT_STATE_ERROR;
+        return err;
     }
 
     /* Verify protocol version */
@@ -1349,16 +1823,9 @@ copilot_error_t copilot_client_stop(copilot_client_t *client)
     copilot_session_t *s = client->sessions;
     while (s) {
         copilot_session_t *next = s->next;
-        /* Best-effort destroy */
+        /* Best-effort release (session.detach, falling back to session.destroy) */
         if (client->rpc) {
-            cJSON *params = cJSON_CreateObject();
-            cJSON_AddStringToObject(params, "sessionId", s->session_id);
-            int ec = 0; char *em = NULL;
-            cJSON *r = json_rpc_client_request(client->rpc, "session.destroy",
-                                               params, 5000, &ec, &em);
-            cJSON_Delete(params);
-            if (r) cJSON_Delete(r);
-            free(em);
+            release_session_on_server(client->rpc, s->session_id, 5000);
         }
         s = next;
     }
@@ -1370,6 +1837,8 @@ copilot_error_t copilot_client_stop(copilot_client_t *client)
         json_rpc_client_free(client->rpc);
         client->rpc = NULL;
     }
+
+    clear_github_token_providers(client);
 
     /* Kill CLI process */
 #ifdef _WIN32
@@ -1416,6 +1885,10 @@ void copilot_client_free(copilot_client_t *client)
     free(client->cwd);
     free(client->log_level);
     free(client->github_token);
+    free(client->client_info_application_name);
+    free(client->client_info_application_version);
+    free(client->client_info_integration_name);
+    free(client->client_info_integration_version);
 
     if (client->extra_args) {
         for (int i = 0; i < client->extra_args_count; i++) {
@@ -1424,6 +1897,8 @@ void copilot_client_free(copilot_client_t *client)
         free(client->extra_args);
     }
 
+    clear_github_token_providers(client);
+    pthread_mutex_destroy(&client->github_token_mutex);
     pthread_mutex_destroy(&client->sessions_mutex);
     free(client);
 }
@@ -1530,6 +2005,9 @@ copilot_error_t copilot_client_list_models(
                     cJSON *mctw = cJSON_GetObjectItem(limits, "max_context_window_tokens");
                     out->models[i].max_context_window_tokens =
                         mctw && cJSON_IsNumber(mctw) ? mctw->valueint : 0;
+                    cJSON *mot = cJSON_GetObjectItem(limits, "max_output_tokens");
+                    out->models[i].max_output_tokens =
+                        mot && cJSON_IsNumber(mot) ? mot->valueint : 0;
                 }
             }
         }
@@ -1815,6 +2293,27 @@ copilot_error_t copilot_client_set_foreground_session_id(
     return COPILOT_OK;
 }
 
+copilot_error_t copilot_client_clear_managed_settings_cache(copilot_client_t *client)
+{
+    if (!client) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!client->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(client->rpc, "managedSettings.clearCache", params, 10000,
+                                            &err_code, &err_msg);
+    cJSON_Delete(params);
+
+    if (!result) {
+        free(err_msg);
+        return COPILOT_ERROR_RPC;
+    }
+
+    cJSON_Delete(result);
+    return COPILOT_OK;
+}
+
 /* ============================================================================
  * Public API: Session creation
  * ============================================================================ */
@@ -1825,6 +2324,10 @@ copilot_error_t copilot_client_create_session(
     copilot_session_t **out)
 {
     if (!client || !out) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (config && config->github_token && config->github_token_provider) {
+        /* github_token and github_token_provider are mutually exclusive */
+        return COPILOT_ERROR_INVALID_ARGUMENT;
+    }
 
     /* Auto-start if needed */
     if (client->state != COPILOT_STATE_CONNECTED && client->auto_start) {
@@ -1836,8 +2339,20 @@ copilot_error_t copilot_client_create_session(
     copilot_session_config_t default_config = copilot_session_config_default();
     if (!config) config = &default_config;
 
-    cJSON *params = build_session_params(config);
+    cJSON *params = build_session_params(config, false);
     inject_trace_context(client, params);
+
+    char *gh_registration_id = NULL;
+    if (config->github_token_provider) {
+        gh_registration_id = register_github_token_provider(
+            client, config->github_token_provider,
+            config->github_token_provider_user_data, config->session_id);
+        if (!gh_registration_id) {
+            cJSON_Delete(params);
+            return COPILOT_ERROR_OUT_OF_MEMORY;
+        }
+        cJSON_AddStringToObject(params, "gitHubTokenProviderRegistrationId", gh_registration_id);
+    }
 
     int err_code = 0;
     char *err_msg = NULL;
@@ -1847,13 +2362,28 @@ copilot_error_t copilot_client_create_session(
 
     if (!result) {
         free(err_msg);
+        if (gh_registration_id) {
+            unregister_github_token_provider(client, gh_registration_id);
+            free(gh_registration_id);
+        }
         return COPILOT_ERROR_RPC;
     }
 
     copilot_session_t *session = create_session_from_response(client, result, config);
     cJSON_Delete(result);
 
-    if (!session) return COPILOT_ERROR_OUT_OF_MEMORY;
+    if (!session) {
+        if (gh_registration_id) {
+            unregister_github_token_provider(client, gh_registration_id);
+            free(gh_registration_id);
+        }
+        return COPILOT_ERROR_OUT_OF_MEMORY;
+    }
+
+    if (gh_registration_id) {
+        assign_github_token_provider_session(client, gh_registration_id, session->session_id);
+        session->github_token_registration_id = gh_registration_id;
+    }
 
     add_session(client, session);
     *out = session;
@@ -1867,6 +2397,10 @@ copilot_error_t copilot_client_resume_session(
     copilot_session_t **out)
 {
     if (!client || !session_id || !out) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (config && config->github_token && config->github_token_provider) {
+        /* github_token and github_token_provider are mutually exclusive */
+        return COPILOT_ERROR_INVALID_ARGUMENT;
+    }
 
     /* Auto-start if needed */
     if (client->state != COPILOT_STATE_CONNECTED && client->auto_start) {
@@ -1878,9 +2412,21 @@ copilot_error_t copilot_client_resume_session(
     copilot_session_config_t default_config = copilot_session_config_default();
     if (!config) config = &default_config;
 
-    cJSON *params = build_session_params(config);
+    cJSON *params = build_session_params(config, true);
     cJSON_AddStringToObject(params, "sessionId", session_id);
     inject_trace_context(client, params);
+
+    char *gh_registration_id = NULL;
+    if (config->github_token_provider) {
+        gh_registration_id = register_github_token_provider(
+            client, config->github_token_provider,
+            config->github_token_provider_user_data, session_id);
+        if (!gh_registration_id) {
+            cJSON_Delete(params);
+            return COPILOT_ERROR_OUT_OF_MEMORY;
+        }
+        cJSON_AddStringToObject(params, "gitHubTokenProviderRegistrationId", gh_registration_id);
+    }
 
     int err_code = 0;
     char *err_msg = NULL;
@@ -1890,13 +2436,28 @@ copilot_error_t copilot_client_resume_session(
 
     if (!result) {
         free(err_msg);
+        if (gh_registration_id) {
+            unregister_github_token_provider(client, gh_registration_id);
+            free(gh_registration_id);
+        }
         return COPILOT_ERROR_RPC;
     }
 
     copilot_session_t *session = create_session_from_response(client, result, config);
     cJSON_Delete(result);
 
-    if (!session) return COPILOT_ERROR_OUT_OF_MEMORY;
+    if (!session) {
+        if (gh_registration_id) {
+            unregister_github_token_provider(client, gh_registration_id);
+            free(gh_registration_id);
+        }
+        return COPILOT_ERROR_OUT_OF_MEMORY;
+    }
+
+    if (gh_registration_id) {
+        assign_github_token_provider_session(client, gh_registration_id, session->session_id);
+        session->github_token_registration_id = gh_registration_id;
+    }
 
     add_session(client, session);
     *out = session;
@@ -1979,6 +2540,9 @@ copilot_error_t copilot_session_send(
     if (options->display_prompt) {
         cJSON_AddStringToObject(params, "displayPrompt", options->display_prompt);
     }
+    if (options->source) {
+        cJSON_AddStringToObject(params, "source", options->source);
+    }
     if (options->request_headers_keys && options->request_headers_values) {
         cJSON *headers = cJSON_CreateObject();
         for (size_t i = 0; options->request_headers_keys[i] && options->request_headers_values[i]; i++) {
@@ -1988,8 +2552,21 @@ copilot_error_t copilot_session_send(
         cJSON_AddItemToObject(params, "requestHeaders", headers);
     }
 
-    /* Response format */
-    if (options->response_format != COPILOT_RESPONSE_FORMAT_TEXT) {
+    /* Response format: structured output (responseSchema) supersedes the legacy string */
+    if (options->response_schema_json) {
+        cJSON *schema = cJSON_Parse(options->response_schema_json);
+        if (!schema) {
+            cJSON_Delete(params);
+            return COPILOT_ERROR_JSON_PARSE;
+        }
+        cJSON *response_format = cJSON_CreateObject();
+        cJSON_AddStringToObject(response_format, "type", "json_schema");
+        cJSON *json_schema = cJSON_AddObjectToObject(response_format, "jsonSchema");
+        cJSON_AddStringToObject(json_schema, "name", "response");
+        cJSON_AddBoolToObject(json_schema, "strict", true);
+        cJSON_AddItemToObject(json_schema, "schema", schema);
+        cJSON_AddItemToObject(params, "responseFormat", response_format);
+    } else if (options->response_format != COPILOT_RESPONSE_FORMAT_TEXT) {
         switch (options->response_format) {
         case COPILOT_RESPONSE_FORMAT_IMAGE:
             cJSON_AddStringToObject(params, "responseFormat", "image");
@@ -2132,6 +2709,43 @@ copilot_error_t copilot_session_send_and_wait(
     return COPILOT_OK;
 }
 
+copilot_error_t copilot_session_send_and_wait_structured(
+    copilot_session_t *session,
+    const copilot_message_options_t *options,
+    const char *response_schema_json,
+    int timeout_ms,
+    char **out_json)
+{
+    if (!session || !options || !response_schema_json || !out_json) {
+        return COPILOT_ERROR_INVALID_ARGUMENT;
+    }
+    *out_json = NULL;
+
+    copilot_message_options_t structured = *options;
+    structured.response_schema_json = response_schema_json;
+
+    char *content = NULL;
+    copilot_error_t err = copilot_session_send_and_wait(session, &structured, timeout_ms, &content);
+    if (err != COPILOT_OK) {
+        free(content);
+        return err;
+    }
+
+    /* The run must complete with non-blank assistant content */
+    if (!content || content[strspn(content, " \t\r\n")] == '\0') {
+        free(content);
+        return COPILOT_ERROR_SESSION_ERROR;
+    }
+
+    cJSON *parsed = cJSON_Parse(content);
+    free(content);
+    if (!parsed) return COPILOT_ERROR_JSON_PARSE;
+
+    *out_json = cJSON_PrintUnformatted(parsed);
+    cJSON_Delete(parsed);
+    return *out_json ? COPILOT_OK : COPILOT_ERROR_OUT_OF_MEMORY;
+}
+
 int copilot_session_on(
     copilot_session_t *session,
     copilot_session_event_handler_fn handler,
@@ -2187,21 +2801,21 @@ copilot_error_t copilot_session_destroy(copilot_session_t *session)
     if (!session) return COPILOT_ERROR_INVALID_ARGUMENT;
     if (!session->rpc) return COPILOT_ERROR_NOT_CONNECTED;
 
-    cJSON *params = cJSON_CreateObject();
-    cJSON_AddStringToObject(params, "sessionId", session->session_id);
-
-    int err_code = 0;
-    char *err_msg = NULL;
-    cJSON *result = json_rpc_client_request(session->rpc, "session.destroy", params, 10000,
-                                            &err_code, &err_msg);
-    cJSON_Delete(params);
-
-    if (result) cJSON_Delete(result);
-    free(err_msg);
+    /* session.detach, falling back to session.destroy on older CLIs */
+    release_session_on_server(session->rpc, session->session_id, 10000);
 
     /* Remove from client tracking */
     if (session->owner) {
         remove_session(session->owner, session);
+    }
+
+    /* Drop the GitHub token provider registration */
+    if (session->github_token_registration_id) {
+        if (session->owner) {
+            unregister_github_token_provider(session->owner, session->github_token_registration_id);
+        }
+        free(session->github_token_registration_id);
+        session->github_token_registration_id = NULL;
     }
 
     /* Clear handlers */
@@ -2227,6 +2841,7 @@ void copilot_session_free(copilot_session_t *session)
     free(session->tools);
     free(session->last_assistant_content);
     free(session->error_message);
+    free(session->github_token_registration_id);
 
     /* Free remaining handlers */
     session_handler_entry_t *h = session->handlers;
@@ -2293,4 +2908,82 @@ copilot_error_t copilot_session_get_metadata(
     free(err_msg);
 
     return COPILOT_OK;
+}
+
+/* Sends a session-scoped request and returns its result as a JSON string. */
+static copilot_error_t session_request_json(copilot_session_t *session, const char *method,
+                                            cJSON *params, char **out_json)
+{
+    if (out_json) *out_json = NULL;
+
+    int err_code = 0;
+    char *err_msg = NULL;
+    cJSON *result = json_rpc_client_request(session->rpc, method, params, 30000,
+                                            &err_code, &err_msg);
+    if (!result) {
+        copilot_error_t err = err_code ? COPILOT_ERROR_RPC : COPILOT_ERROR_IO;
+        free(err_msg);
+        return err;
+    }
+
+    if (out_json) {
+        *out_json = cJSON_PrintUnformatted(result);
+    }
+
+    cJSON_Delete(result);
+    free(err_msg);
+    return COPILOT_OK;
+}
+
+copilot_error_t copilot_session_set_auto_tier(
+    copilot_session_t *session,
+    const char *auto_tier,
+    char **out_json)
+{
+    if (!session) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!session->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "sessionId", session->session_id);
+    if (auto_tier) {
+        cJSON_AddStringToObject(params, "autoTier", auto_tier);
+    } else {
+        /* null returns to the provider's default Auto routing */
+        cJSON_AddNullToObject(params, "autoTier");
+    }
+
+    copilot_error_t err = session_request_json(session, "session.model.switchAutoTier", params, out_json);
+    cJSON_Delete(params);
+    return err;
+}
+
+copilot_error_t copilot_session_get_managed_settings(
+    copilot_session_t *session,
+    char **out_json)
+{
+    if (!session) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!session->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "sessionId", session->session_id);
+
+    copilot_error_t err = session_request_json(session, "session.managedSettings.get", params, out_json);
+    cJSON_Delete(params);
+    return err;
+}
+
+copilot_error_t copilot_session_recheck_policy_helper(
+    copilot_session_t *session,
+    char **out_json)
+{
+    if (!session) return COPILOT_ERROR_INVALID_ARGUMENT;
+    if (!session->rpc) return COPILOT_ERROR_NOT_CONNECTED;
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "sessionId", session->session_id);
+
+    copilot_error_t err = session_request_json(session, "session.managedSettings.recheckPolicyHelper",
+                                               params, out_json);
+    cJSON_Delete(params);
+    return err;
 }

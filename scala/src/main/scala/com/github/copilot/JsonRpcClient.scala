@@ -40,6 +40,16 @@ object JsonRpcError:
 class JsonRpcException(val error: JsonRpcError)
   extends RuntimeException(s"JSON-RPC Error ${error.code}: ${error.message}")
 
+/**
+ * Returns whether `error` means the server does not implement `method` (JSON-RPC error -32601 or an
+ * "Unhandled method" message), e.g. an older CLI.
+ */
+private[copilot] def isMethodNotFound(error: Throwable, method: String): Boolean =
+  error match
+    case ex: JsonRpcException =>
+      ex.error.code == -32601 || ex.error.message.contains(s"Unhandled method $method")
+    case _ => false
+
 /** JSON-RPC 2.0 request (or notification when id is None). */
 private[copilot] case class JsonRpcRequest(
   jsonrpc: String = "2.0",

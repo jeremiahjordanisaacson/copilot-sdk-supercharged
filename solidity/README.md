@@ -167,6 +167,113 @@ Available tools:
 
 All base `CopilotClientOptions` from the core SDK are also accepted.
 
+## What's New in v2.6.0
+
+Parity with upstream `@github/copilot-sdk` (Copilot CLI 1.0.106). Session
+options go to `client.createSession(...)` and, unless noted, also to
+`client.resumeSession(id, config)` (`SoliditySessionOptions`). New options are
+only sent when set.
+
+```typescript
+import { CopilotSolidityClient, MessageSource } from "copilot-sdk-supercharged-solidity";
+
+// Client info: sent on the `connect` handshake before `ping`
+const client = new CopilotSolidityClient({
+    clientInfo: {
+        applicationName: "vault-auditor",
+        applicationVersion: "1.2.0",
+        integrationName: "hardhat-plugin",
+        integrationVersion: "0.4.0",
+    },
+});
+await client.start();
+
+const session = await client.createSession({
+    name: "vault-audit",                               // create only
+    autoTier: "balance",                               // sent as capi.autoTier (experimental)
+    askUserVariant: "elicitation",
+    allowedModels: ["gpt-5", "claude-sonnet-4.6"],
+    authClientIdMetadataUrl: "https://example.com/oauth/client.json",
+    agentDirectories: ["./.github/agents"],
+    hookDirectories: ["./.github/hooks"],
+    featureFlags: { someRuntimeFlag: true },           // sent even when {}
+    sandboxConfig: { enabled: true, addCurrentWorkingDirectory: true, allowBypass: true },
+    imageGeneration: { enabled: true, watermark: true, saveToDisk: false },
+    autopilot: { continuationEnabled: true, maxContinues: 5 },
+    interactiveUser: false,
+    excludedManagedSettings: ["model"],
+    enforceManagedModelDefaults: true,
+    trustWorkingDirectory: "session",                  // create only
+    refreshCustomInstructions: true,                   // create only
+    modelCapabilities: { limits: { max_output_tokens: 8192 } },
+    provider: {
+        type: "openai",
+        baseUrl: "http://localhost:11434/v1",
+        modelProvider: "ollama",
+        apiKeyCommand: "op read op://dev/llm/api-key",
+    },
+    hooks: {
+        onSubagentStart: (input) => ({ additionalContext: `Audit focus for ${input.agentName}` }),
+        onSubagentStop: (input) => ({ modifiedResponse: input.response.trim() }),
+    },
+});
+```
+
+- **Client info** — `clientInfo` (`applicationName`, `applicationVersion`, `integrationName`,
+  `integrationVersion`) is declared on `connect`; older CLIs without `connect` are tolerated.
+- **Auto routing tier** — `autoTier` (`"efficiency" | "balance" | "intelligence" | "fast"`) is sent under
+  `capi`, together with `enableWebSocketResponses` (which now also travels under `capi`). Change it on a live
+  session with `client.setAutoTier(session, "intelligence")`, or pass `null` to return to default routing.
+- **GitHub token provider** — `gitHubTokenProvider` answers the runtime's `gitHubToken.getToken` requests
+  (mutually exclusive with `gitHubToken`):
+
+  ```typescript
+  const session = await client.createSession({
+      gitHubTokenProvider: async ({ host, sessionId, reason }) => ({
+          kind: "token",
+          accessToken: await mintToken(host, sessionId, reason),
+          expiresIn: 7200,
+      }),
+  });
+  ```
+
+- **Resume options** — `client.resumeSession(id, { autoTier: "fast", allowTranscriptRecovery: false })`
+  resumes through the base SDK with the Solidity tools (`allowTranscriptRecovery` is resume only).
+  `client.resumeSession(id)` without options keeps the raw `session.resume` call.
+- **Session detach** — the one-shot helpers (`auditContract`, `optimizeGas`, ...) release sessions with
+  `session.disconnect()` (`session.detach`). `client.detachSession(id)` sends `session.detach` and falls
+  back to `session.destroy` on runtimes that report `-32601`.
+- **Message source** — `source` on `client.sendMessage(...)`: `MessageSource.user`, `MessageSource.system`,
+  or `MessageSource.agent("auditor")` (`"agent-auditor"`).
+- **Structured output** — `responseSchema` on `client.sendMessage(...)` is sent as a strict
+  `json_schema` `responseFormat` (it replaces the legacy string `responseFormat`), and
+  `client.sendAndWaitStructured(...)` returns the parsed JSON:
+
+  ```typescript
+  const summary = await client.sendAndWaitStructured<{ critical: number; high: number }>(
+      session,
+      { prompt: "Count findings by severity", source: MessageSource.system },
+      {
+          type: "object",
+          properties: { critical: { type: "integer" }, high: { type: "integer" } },
+          required: ["critical", "high"],
+      },
+  );
+  ```
+
+- **Managed settings** — `client.clearManagedSettingsCache()`, `client.getManagedSettings(session)`,
+  `client.recheckPolicyHelper(session)`.
+- **Sub-agent hooks** — `hooks.onSubagentStart` (`{ additionalContext }`) and `hooks.onSubagentStop`
+  (`{ decision: "block", reason }` or `{ modifiedResponse }`).
+- **BYOK provider** — `provider.modelProvider` and `provider.apiKeyCommand`.
+- **Model limits** — `modelCapabilities.limits.max_output_tokens` (`ModelLimitsOverride`).
+
+### Parity notes
+
+- Host-owned external tool cancellation is N/A: this SDK runs tools on the `tool.call` request path.
+- Experimental host-integration callbacks (skill provider, installation confirmation, extension launch
+  provider, Entra/Kerberos auth callbacks) are not yet available in this SDK.
+
 ## Recent Features (v2.4–v2.5)
 
 The Solidity client forwards the upstream `@github/copilot-sdk` session options

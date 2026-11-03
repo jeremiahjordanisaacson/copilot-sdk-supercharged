@@ -17,6 +17,9 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
     let handlersLock = obj()
     let toolHandlers = Dictionary<string, ToolHandler>()
     let mutable workspacePath = initialWorkspacePath
+    let mutable subagentStartHook : SubagentStartHandler option = None
+    let mutable subagentStopHook : SubagentStopHandler option = None
+    let mutable disconnectCallbacks : (unit -> unit) list = []
 
     let dispatchEvent (evt: SessionEvent) =
         let handlers =
@@ -134,13 +137,19 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
     /// Send a message to the session. Returns the response message ID.
     member _.SendAsync(options: MessageOptions, ?cancellationToken: CancellationToken) : Async<string> = async {
         let request =
-            {| sessionId = sessionId
-               prompt = options.Prompt
-               attachments = options.Attachments |> Option.defaultValue []
-               mode = options.Mode
-               agentMode = options.AgentMode
-               displayPrompt = options.DisplayPrompt
-               requestHeaders = options.RequestHeaders |}
+            WireJson.toObject (
+                box
+                    {| sessionId = sessionId
+                       prompt = options.Prompt
+                       attachments = options.Attachments |> Option.defaultValue []
+                       mode = options.Mode
+                       agentMode = options.AgentMode
+                       displayPrompt = options.DisplayPrompt
+                       requestHeaders = options.RequestHeaders |})
+        WireJson.setOpt request "source" options.Source
+        match options.ResponseSchema with
+        | Some schema -> WireJson.set request "responseFormat" (box (MessageOptions.responseFormatFor schema))
+        | None -> ()
         let! response = rpc.SendRequestAsync<{| messageId: string |}>("session.send", request)
         return response.messageId
     }
@@ -172,6 +181,27 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
         return! tcs.Task |> Async.AwaitTask
     }
 
+    /// Send a message with a JSON Schema for structured output and wait until
+    /// the session becomes idle. Returns the final assistant content parsed as JSON.
+    /// Fails when the run produced no assistant content.
+    member this.SendAndWaitStructuredAsync(
+            options: MessageOptions,
+            responseSchema: JsonElement,
+            ?timeout: TimeSpan,
+            ?cancellationToken: CancellationToken) : Async<JsonElement> = async {
+        let effectiveTimeout = defaultArg timeout (TimeSpan.FromSeconds(60.0))
+        let! reply =
+            this.SendAndWaitAsync(
+                { options with ResponseSchema = Some responseSchema },
+                timeout = effectiveTimeout)
+        match reply with
+        | Some data when not (String.IsNullOrWhiteSpace data.Content) ->
+            use doc = JsonDocument.Parse(data.Content)
+            return doc.RootElement.Clone()
+        | _ ->
+            return failwith "The requested run completed without a structured assistant response."
+    }
+
     /// Retrieve the conversation history for this session.
     member _.GetHistoryAsync(?cancellationToken: CancellationToken) : Async<JsonElement> = async {
         return! rpc.SendRequestAsync<JsonElement>("session.getHistory", {| sessionId = sessionId |})
@@ -180,4 +210,76 @@ type CopilotSession internal (sessionId: string, rpc: JsonRpcTransport, initialW
     /// Stop the session (notifies the server).
     member _.StopAsync(?cancellationToken: CancellationToken) : Async<unit> = async {
         do! rpc.SendNotificationAsync("session.stop", {| sessionId = sessionId |})
+    }
+
+    /// Change the Auto routing preference without changing the selected model
+    /// (experimental). Pass None to return to the default Auto routing (sent as
+    /// JSON null). Returns the runtime's acknowledgement.
+    member _.SetAutoTierAsync(autoTier: string option, ?cancellationToken: CancellationToken) : Async<JsonElement> = async {
+        return!
+            rpc.SendRequestAsync<JsonElement>(
+                "session.model.switchAutoTier",
+                {| sessionId = sessionId; autoTier = autoTier |})
+    }
+
+    /// Get the managed settings in effect for this session.
+    member _.GetManagedSettingsAsync(?cancellationToken: CancellationToken) : Async<JsonElement> = async {
+        return! rpc.SendRequestAsync<JsonElement>("session.managedSettings.get", {| sessionId = sessionId |})
+    }
+
+    /// Re-run the managed-settings policy helper for this session.
+    member _.RecheckPolicyHelperAsync(?cancellationToken: CancellationToken) : Async<JsonElement> = async {
+        return!
+            rpc.SendRequestAsync<JsonElement>(
+                "session.managedSettings.recheckPolicyHelper",
+                {| sessionId = sessionId |})
+    }
+
+    /// Disconnect this session and release its in-memory resources. Session
+    /// state on disk is preserved so it can be resumed later. Sends
+    /// `session.detach`, falling back to `session.destroy` on older CLIs.
+    member _.DisconnectAsync(?cancellationToken: CancellationToken) : Async<unit> = async {
+        let request = {| sessionId = sessionId |}
+        try
+            do! rpc.SendRequestAsync<JsonElement>("session.detach", request) |> Async.Ignore
+        with
+        | :? JsonRpcException as ex when ex.Code = -32601 ->
+            do! rpc.SendRequestAsync<JsonElement>("session.destroy", request) |> Async.Ignore
+        lock handlersLock (fun () -> eventHandlers.Clear())
+        toolHandlers.Clear()
+        subagentStartHook <- None
+        subagentStopHook <- None
+        let callbacks = disconnectCallbacks
+        disconnectCallbacks <- []
+        for callback in callbacks do
+            try callback ()
+            with _ -> ()
+    }
+
+    /// Register the sub-agent lifecycle hooks for this session.
+    member internal _.SetSubagentHooks(onStart: SubagentStartHandler option, onStop: SubagentStopHandler option) =
+        subagentStartHook <- onStart
+        subagentStopHook <- onStop
+
+    /// Register a callback invoked once the session is disconnected.
+    member internal _.AddDisconnectCallback(callback: unit -> unit) =
+        disconnectCallbacks <- callback :: disconnectCallbacks
+
+    /// Dispatch a `hooks.invoke` request to the matching hook. Returns the hook
+    /// output wire payload, or None when no hook handled the request.
+    member internal _.HandleHooksInvokeAsync(hookType: string, input: JsonElement option) : Async<IDictionary<string, obj> option> = async {
+        match hookType, input with
+        | "subagentStart", Some elem ->
+            match subagentStartHook with
+            | Some handler ->
+                let! output = handler (SubagentHooks.parseStartInput elem)
+                return output |> Option.map SubagentHooks.startOutputToWire
+            | None -> return None
+        | "subagentStop", Some elem ->
+            match subagentStopHook with
+            | Some handler ->
+                let! output = handler (SubagentHooks.parseStopInput elem)
+                return output |> Option.map SubagentHooks.stopOutputToWire
+            | None -> return None
+        | _ -> return None
     }
